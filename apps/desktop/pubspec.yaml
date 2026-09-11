@@ -1,0 +1,30 @@
+name: watch_together
+description: Watch-together desktop app (working title, repo sync_relay_project). One binary.
+publish_to: none
+version: 0.1.0
+environment:
+  sdk: '>=3.14.0-0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  signals: ^7.0.0
+  media_kit: ^1.1.0
+  media_kit_video: ^2.0.1
+  media_kit_libs_video: ^1.0.0
+  path_provider: ^2.1.0
+  web_socket_channel: ^3.0.0
+  sync_relay_core:
+    path: ../../packages/core
+  sync_relay_server:
+    path: ../../packages/server
+  file_picker: ^12.3.0
+  hive_ce: ^2.19.3
+  hive_ce_flutter: ^2.3.4
+  image: ^4.9.2
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+flutter:
+  uses-material-design: true

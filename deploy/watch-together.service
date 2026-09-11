@@ -1,0 +1,11 @@
+[Unit]
+Description=watch-together headless server
+After=network.target
+
+[Service]
+ExecStart=/opt/watch-together/server --port 8080
+Restart=on-failure
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

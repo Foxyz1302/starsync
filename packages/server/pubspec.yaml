@@ -1,0 +1,17 @@
+name: sync_relay_server
+description: Pure-Dart room + media server. Embeddable, no Flutter.
+publish_to: none
+version: 0.1.0
+environment:
+  sdk: ^3.0.0
+dependencies:
+  sync_relay_core:
+    path: ../core
+  logging: ^1.2.0
+  args: ^2.4.0
+  relic: ^1.2.0
+  web_socket: ^1.0.0
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0
+  web_socket_channel: ^3.0.0

@@ -1,0 +1,14 @@
+name: sync_relay_core
+description: Pure-Dart protocol, sync engine, media-source abstractions. No Flutter.
+version: 0.1.0
+environment:
+  sdk: ^3.0.0
+dependencies:
+  logging: ^1.2.0
+  yaml: ^3.1.0
+  path: ^1.9.0
+  crypto: ^3.0.0
+  web_socket_channel: ^3.0.0
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0

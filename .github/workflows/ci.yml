@@ -1,0 +1,33 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+        working-directory: packages/core
+      - run: dart analyze
+        working-directory: packages/core
+      - run: dart test
+        working-directory: packages/core
+
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+        working-directory: packages/server
+      - run: dart analyze
+        working-directory: packages/server
+      - run: dart test
+        working-directory: packages/server

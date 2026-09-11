@@ -1,0 +1,39 @@
+# Dart / Flutter generated — applies at every level of this monorepo
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+coverage/
+**/doc/api/
+
+# Flutter ephemeral build outputs
+**/flutter/ephemeral/
+**/Flutter/GeneratedPluginRegistrant.*
+**/ios/Flutter/.last_build_id
+
+# Build artifacts that should never be committed
+*.tar.gz
+*.zip
+app.*.symbols
+app.*.map.json
+
+# Logs
+*.log
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.swp
+*.pyc
