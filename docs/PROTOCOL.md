@@ -90,7 +90,8 @@ gate passes. No authority check in v1 (same trust basis as force).
 
 proto must equal server proto; secret is the room password; avatar
 ≤64 KiB; failures get `err` + close. `sid="default"`, map keyed for
-later multi-session. mediaUrl only when the server holds bytes.
+later multi-session. `mediaUrl` carries the playable URL: a built
+`/m/…` URL when the server holds bytes, otherwise the shared link.
 
 ## Media endpoint (Phase 1, unchanged)
 

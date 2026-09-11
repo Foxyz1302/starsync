@@ -54,10 +54,16 @@ Follow-ups landed: NaN guards, name/chat caps, stale vs leave feed,
 Shipped: SyncClient framing, RoomDiff (eventId diff, 0.95× latch),
 media_kit wiring, Space=ready, avatars, toasts+sheet, health display,
 reconnect loop. Counts at last green: core 42, server 40, desktop 17.
+Late 09-12 session: internet test PASSED (WAN, port 6969, 2-client);
+server logging wired into app (`initLogging` in `main.dart` + hello
+join/reject logs in `room_hub.dart`); Cancel aborts a pending
+connect (`SyncClient.disconnect` completes the welcome future);
+first-join failure shows the dialog and stops (auto-reconnect only
+after an established session drops).
 Open exits (manual, user-driven): remove bisect flags in
 `apps/desktop/lib/app.dart`; 2-client LAN soak; 1.4 GB real-file test
 (user resupplies URL, never paste api_key into files);
-cache-exhaustion long outage; internet test (forwarded port/Tailscale).
+cache-exhaustion long outage.
 
 ## Phase 5 — Resilience (PARTIAL)
 

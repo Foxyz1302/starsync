@@ -1,11 +1,16 @@
 # HANDOFF — sync_relay_project (watch-together app)
 
-Date: 2026-09-12. Phases 0–4 + presence hardening + UI redesigns done,
-all green (core 42, server 40, desktop 17). Black screen (§8)
-DIAGNOSED + FIXED (avatar-texture teardown race; Visibility keep-
-mounted). Bisect flags (legacy/minimal/nosheet) still in app.dart —
-remove once stable. Prior chat may be unreliable; this file plus
-`docs/` is the full state.
+Date: 2026-09-12 (updated late session). Phases 0–4 + presence hardening
++ UI redesigns done, all green (core 42, server 40, desktop 17).
+Black screen (§8) DIAGNOSED + FIXED (avatar-texture teardown race;
+Visibility keep-mounted) + VERIFIED, incl. over internet. Bisect
+flags (legacy/minimal/nosheet) still in app.dart — remove once
+stable. Internet test PASSED (WAN port 6969, 09-12). Tonight's
+fixes: server logging wired into app (`initLogging` + hello logs),
+Cancel aborts pending connect, first-join failure no longer
+retry-loops. Git repo INITIALIZED (commit 427d851, root
+.gitignore). Prior chat may be unreliable; this file plus `docs/`
+is the full state (`docs/ROADMAP.md` is now the phase tracker).
 
 ## 1. What this is
 
@@ -89,9 +94,9 @@ kick kills sync+video, no relay memory growth.
   post-quorum).
 - `docs/`: PROTOCOL.md (v4 + quorum + 15/30 s timeouts + isClosed note,
   normative), ARCHITECTURE.md (+health rule), mpv-http-contract.md.
-- `deploy/`: systemd unit. No git repo anywhere (recommending `git
-  init` was never approved — ask before creating one; bisection is
-  currently impossible, which hurt on §8).
+- `deploy/`: systemd unit. Git repo initialized 09-12 (`git init`,
+  root `.gitignore`, initial commit 427d851 covering phases 0–4 +
+  tonight's connect/logging fixes). Bisection is possible again.
 
 ## 4. Protocol v4 + policy (see PROTOCOL.md for normative detail)
 
@@ -215,24 +220,31 @@ the shared GL context fails silently ⇒ black. Legacy chips never
 unmounted and minimal never mounted, which is why they survived.
 Fix: center overlay is Visibility(visible + maintainState +
 maintainAnimation + maintainSize) — avatars stay mounted, paint
-skipped when hidden. Verified by user with full tree.
+skipped when hidden. Verified by user with full tree, and holds
+over internet (WAN 2-client test, port 6969, late 09-12) — CLOSED.
 RULE: never unmount GPU-textured widgets on a transport-gated
 branch; keep mounted + skip paint. Bisect screens
 (legacy/minimal/nosheet + SYNC_RELAY_UI switch in app.dart)
 still wired — delete on approval. session_screen.dart may still
 hold the user's commented bisect lines — restore or drop.
 
-## 9. Next (ordered)
+## 9. Next (ordered, updated 09-12 late session)
 
-1. §8 black screen — diagnose with user, then fix.
-2. 2-client LAN soak (manual, user-driven).
-3. 1.4 GB real-file media test (user resupplies Jellyfin URL;
-  contains api_key — NEVER paste into files).
-4. Cache-exhaustion long outage via shaper --kill-after (Phase 5
-  chaos assertion, never run).
-5. Internet test: plain TCP works in theory; needs forwarded port
-  or Tailscale; expect more slowdown engagement on latency.
+1. §8 black screen — CLOSED (fix verified incl. over internet).
+2. Remove bisect flags (legacy/minimal/nosheet) in app.dart.
+3. 2-client LAN soak (manual, user-driven; WAN test passed, LAN
+   still untested).
+4. 1.4 GB real-file media test (user resupplies Jellyfin URL;
+   contains api_key — NEVER paste into files).
+5. Cache-exhaustion long outage via shaper --kill-after (Phase 5
+   chaos assertion, never run).
 6. Sounds swap-in (§7) after audition.
+7. File-join wart: welcome mediaUrl uses advertiseHost 127.0.0.1,
+   remote file joiners fail-open then self-heal on first room
+   broadcast — fix via Host header, or leave (cosmetic).
+8. `/health` is unauthenticated and broadcasts the full media URL
+   (incl. api_key when the link carries one) — acceptable on LAN,
+   noted now that 6969 faces the internet.
 Environment: dart 3.14 beta, flutter 3.48 beta, mpv+ffmpeg present,
 ~/Videos/chiyo.mp4 sample. Never kill the user's Syncplay mpv
 instance. No git repo — ask before creating one.

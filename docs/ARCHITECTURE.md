@@ -2,7 +2,9 @@
 
 One binary, three modes. `packages/server` (Relic) is embedded, not a separate product.
 
-- **Client**: GUI Join, sync WS client (`web_socket_channel` in `packages/core`) + mpv. No server code runs.
+- **Client**: GUI Join, sync WS client (`web_socket_channel` in
+  `apps/desktop`, NOT `packages/core` — core stays Flutter-free)
+  + mpv. No server code runs.
 - **Server+Client (Host)**: GUI Host starts `packages/server` in-process, binds port, self-connects via loopback. Host opens ports, runs traffic. Clients open nothing outbound-only.
 - **Headless**: `--headless`, same server package, no window/player init.
 
@@ -18,7 +20,9 @@ Two ways to watch, same sync engine, same Range endpoint:
 
 1. **Links (primary, shipped):** host shares an http(s) media URL
    (e.g. a Jellyfin Download URL). Viewers stream it directly; the
-   server is sync-authority only (`media.url`, no `mediaUrl`). This
+   server is sync-authority only. The URL travels as `media.url`
+   in room broadcasts and as welcome `mediaUrl` (set to the shared
+   URL when the server holds no file). This
    covers most sessions — proxying is usually unnecessary.
 2. **File relay (secondary, local-file half shipped):** host serves
    bytes from their own machine through the server's token-gated
@@ -30,9 +34,11 @@ Two ways to watch, same sync engine, same Range endpoint:
    logs only, never to disk.
 
 Backends behind `MediaSource` (`packages/core/lib/src/media_source.dart`):
-`FileMediaSource` (local file — SHIPPED, wired into
-`mountSessionMediaRoute`); `HttpSource` (server fetches a remote URL
-and re-serves it — DEFERRED, Phase 8). `resolveMediaRequest` stays
+`FileMediaSource` (local file — SHIPPED as an abstraction, but the
+live route serves `SessionMedia.file` directly via `file.openRead`;
+nothing in `packages/` references `FileMediaSource` today);
+`HttpSource` (server fetches a remote URL and re-serves it —
+DEFERRED, Phase 8). `resolveMediaRequest` stays
 framework-agnostic so both ride the same tested Range table.
 
 ## Deferred: remote-host upload tunnel (NOT active protocol)
@@ -48,9 +54,10 @@ chunk 256 KiB, credit window 8 (≈2 MiB in flight), max 16 concurrent
 are reserved for this. No code exists; direct-serve covers v1
 (host IS the server, opens ports itself).
 
-Host playback goes through loopback like everyone else's
-(`http://127.0.0.1:<port>/…`) — same code path as remote viewers, so
-server bugs surface on the host screen first. Deployment ladder,
+On file relay, host playback goes through loopback like everyone
+else's (`http://127.0.0.1:<port>/…`) — same code path as remote
+viewers, so server bugs surface on the host screen first. (On
+links the host plays the direct URL.) Deployment ladder,
 cheapest first: host's own PC (LAN, or internet with port-forward) →
 same binary `--headless` on a friend's always-on box → cheap VPS
 (CGNAT escape; TLS/Caddy deferred with this tier).
