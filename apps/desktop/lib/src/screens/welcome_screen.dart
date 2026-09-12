@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../state/session_state.dart';
+import '../update/updater.dart';
 import '../widgets/window_chrome_bar.dart';
 
 class WelcomeScreen extends StatelessWidget {
@@ -32,6 +33,7 @@ class _WelcomeBody extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text('Watch Together', style: TextStyle(fontSize: 24)),
+              Text('v$appVersion', style: const TextStyle(fontSize: 12, color: Colors.grey)),
               const SizedBox(height: 8),
               const Text(
                 'Set your name + avatar on the next screen.',

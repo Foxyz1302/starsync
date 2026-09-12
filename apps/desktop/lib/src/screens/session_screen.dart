@@ -6,6 +6,7 @@ import 'package:sync_relay_core/core.dart';
 
 import '../session/health.dart';
 import '../state/session_state.dart';
+import '../update/updater.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/member_avatar.dart';
 import '../widgets/window_buttons.dart';
@@ -680,6 +681,10 @@ class _SheetPanel extends StatelessWidget {
                     label: const Text('Leave room'),
                     onPressed: onLeave,
                   ),
+                ),
+                const SizedBox(height: 8),
+                const Center(
+                  child: Text('v$appVersion', style: TextStyle(fontSize: 11, color: Colors.grey)),
                 ),
               ],
             );
