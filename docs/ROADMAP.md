@@ -24,26 +24,47 @@ desktop 17 + 7 updater.
 
 ## Backlog (priority order, each one sitting-sized)
 
-1. Update endpoint live: publish `updates/manifest.json` + first
-   release tarball on Forgejo (user-owned step; schema in
-   `updates/manifest.example.json`). Until then `--upgrade` reports
-   up-to-date against a missing manifest.
+1. First real release: release commit bumps desktop pubspec, tag
+   `v0.2.0`, CI (`release.yml`) builds the tarball, publishes the
+   Forgejo release, and commits the manifest back. Verifies the
+   whole `--upgrade` chain end to end. Manual fallback is
+   `tool/package_linux.sh` + `tool/release_publish.sh <tag>`.
 2. Jumpy seek: live repro with timeline log first, then fix the
    seek-land retry vs deadband/debounce fight.
-3. Sounds swap-in: replace `NoopSfxService` (flutter_soloud preload,
+3. EOF stall (bug, dogfood 09-12): playback stops just before the
+   end and gates HELD ("waiting for X (3.9s)"). Suspect the
+   buffered≥4s readiness gate is unsatisfiable near end of media.
+4. Tiny buffer (bug, dogfood 09-12): 1–3 s observed; want ~2 min
+   for a 1.4 GB / 24 min file (intro skip + surviving short
+   drops). Investigate demuxer forward-queue props + 64 MB
+   `bufferSize`, then raise.
+5. Recovery controls: reload-current-media button + restart-player
+   button for when playback wedges.
+6. Link conveniences: Ctrl+V pastes clipboard into the media
+   field; session link swaps update the remembered media (today
+   only the connect screen persists); session shows the open link
+   with an open-in-browser button.
+7. Time UI: remaining time until end + scrubber preview (target
+   time while scrubbing).
+8. Shortcut parity pass with mpv / mpv.net.
+9. Sounds swap-in: replace `NoopSfxService` (flutter_soloud preload,
    Kenney/ObsydianX/akx sources in HANDOFF §7); keep seek/pause/
    resume cues muted or near-silent.
-4. `/health` auth + stop broadcasting the full media URL (api_key
-   leaks onto the wire).
-5. File-join wart: welcome mediaUrl advertises 127.0.0.1, remote file
-   joiners fail-open then self-heal on first room broadcast.
-6. Cache-exhaustion long outage via `tool/shaper.dart --kill-after`.
-7. Phase 5 chaos suite (host drop 5 s / 30 s, viewer stall, 20-seek
-   storm) + OOM / stuck-room / drift-recovery assertions.
-8. Windows zip in `tool/package_linux.sh`'s sibling + Discord card.
-9. TLS/Caddy doc.
-10. Chat history pane (schema exists, Activity log only for now).
-11. Backfill LAN soak + 1.4 GB test details (record-only, user ran
+10. `/health` auth + stop broadcasting the full media URL (api_key
+    leaks onto the wire).
+11. File-join wart: welcome mediaUrl advertises 127.0.0.1, remote file
+    joiners fail-open then self-heal on first room broadcast.
+12. Cache-exhaustion long outage via `tool/shaper.dart --kill-after`.
+13. Phase 5 chaos suite (host drop 5 s / 30 s, viewer stall, 20-seek
+    storm) + OOM / stuck-room / drift-recovery assertions.
+14. Windows zip in packaging + Discord card.
+15. TLS/Caddy doc.
+16. Chat history pane (schema exists, Activity log only for now).
+17. Shaders: anime4k upscaling via mpv glsl-shaders + UI toggle.
+18. Avatar caching + static serving (worth-it decision open):
+    serve avatar bytes once over HTTP by hash instead of
+    base64-in-every-room-broadcast.
+19. Backfill LAN soak + 1.4 GB test details (record-only, user ran
     both 09-12).
 
 ## Epics (multi-sitting, scheduled whole — not before the backlog

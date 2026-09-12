@@ -287,10 +287,12 @@ remain in session_screen.dart.
     ETXTBSY forbids writing the running exe, delete+rename is
     fine). Version stamped via `--dart-define=APP_VERSION`
     (wired in `tool/package_linux.sh`; dev runs report
-    `0.0.0-dev`). USER-OWNED PENDING: publish
-    `updates/manifest.json` + release tarball on Forgejo (schema
-    in `updates/manifest.example.json`); until then --upgrade
-    reports failure against the missing manifest. No silent
+    `0.0.0-dev`). Publishing is CI-driven: tag `vX.Y.Z` →
+    `.gitea/workflows/release.yml` builds, creates the Forgejo
+    release, uploads the tarball, commits the manifest back
+    (`tool/release_publish.sh` does the same by hand).
+    Manual trigger only: bump desktop pubspec in a release commit
+    first (script enforces tag == pubspec). No silent
     proto jumps: updater warns when manifest protocol != local.
 Environment: dart 3.14 beta, flutter 3.48 beta, mpv+ffmpeg present,
 ~/Videos/chiyo.mp4 sample. Never kill the user's Syncplay mpv
