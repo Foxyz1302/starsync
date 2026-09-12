@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
+import 'package:sync_relay_core/core.dart';
 
 Future<String> encodeAvatar(String path) async {
   final trimmed = path.trim();
@@ -24,22 +25,18 @@ Future<String> encodeAvatar(String path) async {
   if (decoded == null) {
     throw const FormatException('could not read that image — pick a PNG, JPG or WebP photo');
   }
-  // final side = decoded.width < decoded.height ? decoded.width : decoded.height;
-  // final x = (decoded.width - side) ~/ 2;
-  // final y = (decoded.height - side) ~/ 2;
-  // final cropped = img.copyCrop(decoded, x: x, y: y, width: side, height: side);
   final resized = img.copyResize(
     decoded,
     width: 128,
     height: 128,
     maintainAspect: true,
-    // backgroundColor: img.ColorFloat16.rgba(0, 0, 0, 0),
     backgroundColor: img.PixelUndefined(),
     interpolation: img.Interpolation.cubic,
   );
   final png = img.encodePng(resized);
-  if (resized.length > 512 * 1024) {
+  final b64 = base64Encode(png);
+  if (b64.length > RelayConstants.maxAvatarBytes) {
     throw const FormatException('that photo is still too large after shrinking — pick a smaller one');
   }
-  return base64Encode(png);
+  return b64;
 }

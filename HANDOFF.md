@@ -64,7 +64,8 @@ kick kills sync+video, no relay memory growth.
 
 - `packages/core/lib/src/`: constants.dart (tuning: seek 300 ms,
   drift 5 s, slow 1.5 s @0.95, min_buffer 4 s, heartbeat 1 s, ping 5 s,
-  avatar 64 KiB, name 32, chat 500; dropAfter lives as RoomEngine ctor
+  avatar 128 KiB (base64 chars; any 128x128 PNG fits — raised 09-12
+  from 64 KiB, which rejected normal PNGs), name 32, chat 500; dropAfter lives as RoomEngine ctor
   default, now 30 s), errors.dart, logging.dart, config.dart,
   protocol.dart (v4 schemas), media_source.dart, sync_engine.dart
   (RoomEngine + quorum in evaluate's HELD branch; PLAYING branch
@@ -149,10 +150,9 @@ Client: 5 s room-silence ⇒ dead (clear room, warn, reconnect loop
    asks-leave, global focus-proof keys (Space/Tab/arrows/ESC/F,
    350 ms throttle, ignored while typing; Tab traversal disabled on
    the session screen 09-12 — game-style, Tab toggles the sheet), single media field
-   (parseMediaInput + tests), avatar pipeline (128 px PNG as of
-   09-12 uncommitted change, was JPEG — NOTE: server still
-   enforces 64 KiB in session.dart vs pipeline's 512 KiB check,
-   mismatch open, see commit), tap to
+   (parseMediaInput + tests), avatar pipeline (128 px PNG, keeps
+   transparency — JPEG did not; self-check measures encoded base64
+   against RelayConstants, single source of truth), tap to
    pick, no path fields), Discord-like corner profile (connect only;
   welcome is title+Host/Join; edits apply next join — no rename
   intent on the wire), dialogs for terminal states.

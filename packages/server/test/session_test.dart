@@ -43,6 +43,13 @@ void main() {
       expect(() => s.issueToken('alice', big), throwsA(isA<AuthException>()));
     });
 
+    test('64 KiB avatar accepted under raised cap', () {
+      final s = Session(id: 'default', secret: 'shh');
+      final png = 'x' * (64 * 1024);
+      expect(s.issueToken('alice', png), isNotEmpty);
+      expect(s.tokens.values.single.avatar, hasLength(64 * 1024));
+    });
+
     test('names truncated to cap, blank becomes ?', () {
       final s = Session(id: 'default', secret: 'shh');
       final long = s.issueToken('a' * 100, '');

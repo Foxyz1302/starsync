@@ -15,7 +15,13 @@ abstract class RelayConstants {
   static const int stateHeartbeatSecs = 1;
   static const int pingIntervalSecs = 5;
 
-  static const int maxAvatarBytes = 64 * 1024;
+  // Base64-char count of the avatar string, enforced at hello. Sized so
+  // ANY 128x128 pipeline PNG always fits (raw bitmap <= 64 KiB, worst-case
+  // PNG ~70 KiB raw ~= 95 KiB base64). PNG keeps transparency; JPEG did not.
+  // Trade: avatars ride in the 1 Hz room broadcast, so worst-case host
+  // uplink scales with this cap. Follow-up (not now): send avatar bytes
+  // once, reference by hash afterwards.
+  static const int maxAvatarBytes = 128 * 1024;
   static const int maxNameLength = 32;
   static const int maxChatLength = 500;
 }
