@@ -121,7 +121,12 @@ class SyncClient {
         } catch (_) {}
       case 'feed':
         try {
-          _feeds.add(FeedMessage.fromJson(decoded));
+          final f = FeedMessage.fromJson(decoded);
+          // Server delivers every chat twice: a ChatMessage carrying the
+          // text (converted to a feed entry in `case 'chat'` below) and a
+          // textless feed entry. Keep only the former: one send, one row,
+          // one toast, one sfx.
+          if (f.action != 'chat') _feeds.add(f);
         } catch (_) {}
       case 'kicked':
         try {

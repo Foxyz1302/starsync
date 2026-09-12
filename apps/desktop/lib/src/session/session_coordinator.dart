@@ -386,24 +386,29 @@ class SessionCoordinator {
       }
     }
     final idleSecs = now.difference(_lastInput).inSeconds;
-    if (idleSecs >= 8 * 60 && !_warnedIdle) {
-      _warnedIdle = true;
-      _toastId++;
-      toasts.value = [
-        ...toasts.peek(),
-        ToastItem(
-            id: _toastId,
-            text: 'idle — auto-unready in 2 min unless you press Space',
-            at: now)
-      ];
-      unawaited(sfx.play(const SfxCue(SfxKind.warn)));
-    }
-    if (idleSecs >= 10 * 60) {
-      final self = selfMember.peek();
-      if (self != null && self.ready) {
-        _lastReady = false;
-        sync.sendReady(false, source: 'auto');
-        markInput();
+    // Steady playback counts as activity: only warn/unready when HELD.
+    // While the room is PLAYING the ready flag gates nothing, so an
+    // idle viewer must never lose it mid-watch.
+    if (room.peek()?.transport != 'playing') {
+      if (idleSecs >= 8 * 60 && !_warnedIdle) {
+        _warnedIdle = true;
+        _toastId++;
+        toasts.value = [
+          ...toasts.peek(),
+          ToastItem(
+              id: _toastId,
+              text: 'idle — auto-unready in 2 min unless you press Space',
+              at: now)
+        ];
+        unawaited(sfx.play(const SfxCue(SfxKind.warn)));
+      }
+      if (idleSecs >= 10 * 60) {
+        final self = selfMember.peek();
+        if (self != null && self.ready) {
+          _lastReady = false;
+          sync.sendReady(false, source: 'auto');
+          markInput();
+        }
       }
     }
   }
@@ -482,6 +487,10 @@ class SessionCoordinator {
   }
 
   void sendChat(String text) {
+    // Enter in the chat field can fire both onSubmitted and the focused
+    // send button's onPressed; the first send clears the field, so the
+    // second arrives empty. Drop blanks so at most one message ships.
+    if (text.trim().isEmpty) return;
     markInput();
     sync.sendChat(text);
   }

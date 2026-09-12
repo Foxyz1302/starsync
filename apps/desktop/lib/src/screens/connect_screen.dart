@@ -3,12 +3,14 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../session/session_coordinator.dart';
 import '../state/session_state.dart';
 import '../widgets/avatar_pipeline.dart';
 import '../widgets/media_input.dart';
 import '../widgets/user_section.dart';
+import '../widgets/window_buttons.dart';
 
 class ConnectScreen extends StatefulWidget {
   const ConnectScreen({super.key});
@@ -226,9 +228,15 @@ class _ConnectScreenState extends State<ConnectScreen> {
   Widget build(BuildContext context) {
     final session = SessionState.instance;
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => session.route.value = AppRoute.welcome),
-        title: SignalBuilder(builder: (context) => Text(session.connectMode.value == ConnectMode.host ? 'Host room' : 'Join room')),
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: DragToMoveArea(
+          child: AppBar(
+            leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => session.route.value = AppRoute.welcome),
+            title: SignalBuilder(builder: (context) => Text(session.connectMode.value == ConnectMode.host ? 'Host room' : 'Join room')),
+            actions: const [WindowButtons()],
+          ),
+        ),
       ),
       body: Stack(
         alignment: AlignmentGeometry.center,

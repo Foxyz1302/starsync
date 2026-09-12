@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
 import 'src/state/session_state.dart';
@@ -32,6 +33,19 @@ Future<void> main(List<String> args) async {
         ),
       );
   WidgetsFlutterBinding.ensureInitialized();
+  await windowManager.ensureInitialized();
+  const windowOptions = WindowOptions(
+    size: Size(1280, 720),
+    minimumSize: Size(160, 90),
+    center: true,
+    backgroundColor: Color(0xFF000000),
+    titleBarStyle: TitleBarStyle.hidden,
+    title: 'Watch Together',
+  );
+  windowManager.waitUntilReadyToShow(windowOptions, () async {
+    await windowManager.show();
+    await windowManager.focus();
+  });
   await Hive.initFlutter();
   try {
     await SessionState.instance.loadForm();

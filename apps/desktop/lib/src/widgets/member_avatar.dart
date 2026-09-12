@@ -9,12 +9,7 @@ class MemberAvatar extends StatelessWidget {
 
   static final Map<String, MemoryImage> _images = {};
 
-  const MemberAvatar({
-    super.key,
-    required this.avatarBase64,
-    required this.name,
-    this.size = 40,
-  });
+  const MemberAvatar({super.key, required this.avatarBase64, required this.name, this.size = 40});
 
   static MemoryImage? _providerFor(String raw) {
     if (raw.isEmpty) return null;
@@ -33,15 +28,13 @@ class MemberAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final image = _providerFor(avatarBase64);
-    final decoration = BoxDecoration(
-      shape: BoxShape.circle,
-    );
+    final decoration = BoxDecoration(shape: BoxShape.circle);
     if (image != null) {
       return Container(
         decoration: decoration,
         child: ClipOval(
           child: Image(
-            image: ResizeImage(height: (size * MediaQuery.of(context).devicePixelRatio).round(), image),
+            image: image,
             width: size,
             height: size,
             fit: BoxFit.cover,
@@ -55,11 +48,11 @@ class MemberAvatar extends StatelessWidget {
   }
 
   Widget _fallback() => CircleAvatar(
-        radius: size / 2,
-        backgroundColor: Colors.grey.shade800,
-        child: Text(
-          name.isEmpty ? '?' : name[0].toUpperCase(),
-          style: TextStyle(fontSize: size * 0.4, color: Colors.white),
-        ),
-      );
+    radius: size / 2,
+    backgroundColor: Colors.grey.shade800,
+    child: Text(
+      name.isEmpty ? '?' : name[0].toUpperCase(),
+      style: TextStyle(fontSize: size * 0.4, color: Colors.white),
+    ),
+  );
 }

@@ -45,6 +45,10 @@ force-hold, kick, join, leave, stale, swap, seek, pause, resume, chat —
 every one carries actor + server timestamp.
 Force-play-all is `force` with `target:"all",ready:true`; anyone not
 ready Spaces back. Sounds key off feed actions.
+Chat dual delivery: the server emits both `{"t":"chat","text","from"}`
+(render this one — it carries the text) and a textless `feed` chat
+entry (housekeeping echo). Clients must render exactly one row per
+send; the reference client drops the textless feed entry.
 
 ## Membership set (kills join-cascade + ghost-quorum)
 

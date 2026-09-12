@@ -86,8 +86,7 @@ class _ConnectProfileCardState extends State<ConnectProfileCard> {
         return;
       } catch (_) {
         if (!mounted) return;
-        setState(() => _error =
-            'could not read that image — pick a PNG, JPG or WebP photo');
+        setState(() => _error = 'could not read that image — pick a PNG, JPG or WebP photo');
         return;
       }
       _avatarPath = path;
@@ -102,25 +101,25 @@ class _ConnectProfileCardState extends State<ConnectProfileCard> {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
+      crossAxisAlignment: .center,
       mainAxisSize: MainAxisSize.min,
+      spacing: 12,
       children: [
-        GestureDetector(
-          onTap: _pickAvatar,
+        ClipOval(
+          clipBehavior: .antiAlias,
           child: Tooltip(
             message: 'Change avatar',
-            child: CircleAvatar(
-              radius: 22,
-              backgroundColor: Colors.grey.shade800,
-              backgroundImage: _preview != null ? MemoryImage(_preview!) : null,
-              child: _preview != null
-                  ? null
-                  : _picking
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
+            child: Stack(
+              children: [
+                CircleAvatar(
+                  radius: 64,
+                  backgroundColor: Colors.transparent,
+                  backgroundImage: _preview != null ? MemoryImage(_preview!) : null,
+                  child: _preview != null
+                      ? null
+                      : _picking
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                       : ListenableBuilder(
                           listenable: widget.name,
                           builder: (context, _) {
@@ -128,10 +127,17 @@ class _ConnectProfileCardState extends State<ConnectProfileCard> {
                             return Text(t.isEmpty ? '?' : t[0].toUpperCase());
                           },
                         ),
+                ),
+                Positioned.fill(
+                  child: Material(
+                    type: .transparency,
+                    child: InkWell(onTap: _pickAvatar),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
-        const SizedBox(width: 12),
         SizedBox(
           width: 180,
           child: Column(
@@ -140,10 +146,7 @@ class _ConnectProfileCardState extends State<ConnectProfileCard> {
             children: [
               TextField(
                 controller: widget.name,
-                decoration: const InputDecoration(
-                  labelText: 'Display name',
-                  isDense: true,
-                ),
+                decoration: const InputDecoration(labelText: 'Display name', isDense: true),
                 onChanged: (_) {
                   SessionState.instance.lastForm.name = widget.name.text.trim();
                 },

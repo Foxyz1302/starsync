@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:sync_relay_core/core.dart';
 
 import '../session/health.dart';
 import '../state/session_state.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/member_avatar.dart';
+import '../widgets/window_buttons.dart';
+import '../widgets/window_drag_layer.dart';
 
 class SessionScreen extends StatefulWidget {
   const SessionScreen({super.key});
@@ -17,12 +20,16 @@ class SessionScreen extends StatefulWidget {
 
 class _SessionScreenState extends State<SessionScreen> {
   VideoController? _video;
-  bool _sheetOpen = false;
-  bool _confirmLeave = false;
+  final _videoKey = GlobalKey<VideoState>();
+  final _sheetOpen = signal(false);
+  final _confirmLeave = signal(false);
+  final _isFullscreen = signal(false);
   DateTime? _lastKeyAt;
   final _chat = TextEditingController();
+  final _chatFocus = FocusNode();
   final _swapLink = TextEditingController();
   late final void Function() _stopKickWatch;
+  late final void Function() _stopSheetWatch;
   late final FocusNode _noFocus;
 
   @override
@@ -37,13 +44,30 @@ class _SessionScreenState extends State<SessionScreen> {
         session.route.value = AppRoute.connect;
       }
     });
+    _stopSheetWatch = effect(() {
+      if (!_sheetOpen.value) {
+        FocusManager.instance.primaryFocus?.unfocus();
+      }
+    });
+  }
+
+  void _toggleFullscreen() {
+    if (_isFullscreen.peek()) {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).maybePop();
+      }
+    } else {
+      _videoKey.currentState?.enterFullscreen();
+    }
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_globalKey);
     _stopKickWatch();
+    _stopSheetWatch();
     _chat.dispose();
+    _chatFocus.dispose();
     _swapLink.dispose();
     _noFocus.dispose();
     super.dispose();
@@ -74,9 +98,8 @@ class _SessionScreenState extends State<SessionScreen> {
       return true;
     }
     if (event.logicalKey == LogicalKeyboardKey.tab) {
-      if (!mounted) return false;
       _lastKeyAt = now;
-      setState(() => _sheetOpen = !_sheetOpen);
+      _sheetOpen.value = !_sheetOpen.peek();
       coord.markInput();
       return true;
     }
@@ -91,13 +114,33 @@ class _SessionScreenState extends State<SessionScreen> {
       return true;
     }
     if (event.logicalKey == LogicalKeyboardKey.escape) {
-      if (!mounted) return false;
-      if (_sheetOpen) {
-        setState(() => _sheetOpen = false);
+      if (_sheetOpen.peek()) {
+        _sheetOpen.value = false;
+        return true;
+      }
+      if (_confirmLeave.peek()) {
+        _confirmLeave.value = false;
+        return true;
+      }
+      if (_isFullscreen.peek()) {
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).maybePop();
+        }
         return true;
       }
       _lastKeyAt = now;
-      setState(() => _confirmLeave = true);
+      _confirmLeave.value = true;
+      return true;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.keyF) {
+      _lastKeyAt = now;
+      if (_isFullscreen.peek()) {
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).maybePop();
+        }
+      } else {
+        _videoKey.currentState?.enterFullscreen();
+      }
       return true;
     }
     return false;
@@ -105,14 +148,27 @@ class _SessionScreenState extends State<SessionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final session = SessionState.instance;
-    final coord = session.coordinator;
+    final coord = SessionState.instance.coordinator;
     final controlsTheme = MaterialDesktopVideoControlsThemeData(
       playAndPauseOnTap: false,
+      modifyVolumeOnScroll: false,
       keyboardShortcuts: {},
       visibleOnMount: true,
-      hideMouseOnControlsRemoval: false,
-      controlsHoverDuration: const Duration(hours: 24),
+      hideMouseOnControlsRemoval: true,
+      controlsHoverDuration: const Duration(seconds: 3),
+      topButtonBar: [
+        const Spacer(),
+        MaterialDesktopCustomButton(
+          icon: const Icon(Icons.group),
+          onPressed: () {
+            _sheetOpen.value = true;
+            coord.markInput();
+          },
+        ),
+        SignalBuilder(
+          builder: (context) => WindowButtons(focusNode: _noFocus, fullscreen: _isFullscreen.value, onToggleFullscreen: _toggleFullscreen),
+        ),
+      ],
       bottomButtonBar: [
         const MaterialDesktopVolumeButton(),
         _ReadyControlButton(focusNode: _noFocus),
@@ -122,232 +178,299 @@ class _SessionScreenState extends State<SessionScreen> {
         const MaterialDesktopFullscreenButton(),
       ],
     );
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: _video == null
-                ? const Center(
-                    child: Text('player starting…', style: TextStyle(color: Colors.white)),
-                  )
-                : MaterialDesktopVideoControlsTheme(
-                    normal: controlsTheme,
-                    fullscreen: controlsTheme,
-                    child: Video(controller: _video!),
-                  ),
+    return FocusTraversalGroup(
+      descendantsAreTraversable: false,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: _video == null
+          ? const Center(
+              child: Text('player starting…', style: TextStyle(color: Colors.white)),
+            )
+          : MaterialDesktopVideoControlsTheme(
+              normal: controlsTheme,
+              fullscreen: controlsTheme,
+              child: Video(
+                key: _videoKey,
+                controller: _video!,
+                subtitleViewConfiguration: const SubtitleViewConfiguration(visible: false),
+                controls: _sessionControls,
+                onEnterFullscreen: () async {
+                  _isFullscreen.value = true;
+                  await defaultEnterNativeFullscreen();
+                },
+                onExitFullscreen: () async {
+                  _isFullscreen.value = false;
+                  await defaultExitNativeFullscreen();
+                },
+              ),
+            ),
+      ),
+    );
+  }
+
+  Widget _sessionControls(VideoState state) {
+    return Stack(
+      children: [
+        MaterialDesktopVideoControls(state),
+        _healthOverlay(),
+        _waitingOverlay(),
+        _toastsOverlay(),
+        _sheetOverlay(),
+        _leaveOverlay(),
+        Positioned.fill(
+          child: SignalBuilder(
+            builder: (context) {
+              final sheetOpen = _sheetOpen.value;
+              final confirm = _confirmLeave.value;
+              return WindowDragLayer(
+                enabled: !confirm,
+                exclusions: [
+                  (s) => Rect.fromLTWH(0, s.height - 120, s.width, 120),
+                  if (sheetOpen) (s) => Rect.fromLTWH(s.width - 380, 0, 380, s.height),
+                ],
+              );
+            },
           ),
-          Positioned(
-            top: 0,
-            right: 0,
-            child: Container(
-              color: Colors.black.withValues(alpha: 0.6),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.group, color: Colors.white),
-                    onPressed: () {
-                      setState(() => _sheetOpen = !_sheetOpen);
-                      coord.markInput();
-                    },
+        ),
+      ],
+    );
+  }
+
+  Widget _healthOverlay() {
+    final coord = SessionState.instance.coordinator;
+    return Positioned(
+      top: 12,
+      left: 12,
+      child: SignalBuilder(
+        builder: (context) {
+          final h = coord.health.value;
+          final starve = coord.starving.value;
+          final retrying = coord.reconnecting.value;
+          final kicked = coord.kickReason.value;
+          final unwell = h.severity == HealthSeverity.warn || h.severity == HealthSeverity.error || retrying || starve != null;
+          if (!unwell) return const SizedBox.shrink();
+          final color = switch (h.severity) {
+            HealthSeverity.ok => Colors.green,
+            HealthSeverity.info => Colors.grey,
+            HealthSeverity.warn => Colors.orange,
+            HealthSeverity.error => Colors.red,
+          };
+          final IconData icon;
+          if (retrying) {
+            icon = Icons.sync;
+          } else if (h.severity == HealthSeverity.error) {
+            icon = Icons.error_outline;
+          } else if (h.severity == HealthSeverity.warn) {
+            icon = Icons.warning_amber_outlined;
+          } else {
+            icon = Icons.hourglass_empty;
+          }
+          final text = [h.message, if (starve != null) starve, if (retrying) 'reconnecting…'].join(' · ');
+          final canRetry = !retrying && kicked == null && (h.severity == HealthSeverity.error || h.severity == HealthSeverity.warn);
+          return Container(
+            decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.65), borderRadius: BorderRadius.circular(999)),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, color: color, size: 16),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 12)),
+                ),
+                if (retrying)
+                  TextButton(
+                    style: TextButton.styleFrom(foregroundColor: Colors.white, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    onPressed: () => coord.cancelReconnect(),
+                    child: const Text('Cancel', style: TextStyle(fontSize: 12)),
                   ),
+                if (canRetry)
+                  TextButton(
+                    style: TextButton.styleFrom(foregroundColor: Colors.white, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    onPressed: () => coord.retry(),
+                    child: const Text('Retry', style: TextStyle(fontSize: 12)),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _waitingOverlay() {
+    final coord = SessionState.instance.coordinator;
+    return SignalBuilder(
+      builder: (context) {
+        final r = coord.room.value;
+        final waiting = [
+          for (final m in r?.members ?? [])
+            if (!m.ready) m,
+        ];
+        final show = r != null && r.transport == 'held' && waiting.isNotEmpty;
+        final selfReady = coord.selfMember.value?.ready ?? false;
+        return Positioned.fill(
+          child: Center(
+            child: Visibility(
+              visible: show,
+              maintainState: true,
+              maintainAnimation: true,
+              maintainSize: true,
+              child: Column(
+                mainAxisSize: .min,
+                spacing: 12,
+                children: [
+                  IgnorePointer(
+                    child: Container(
+                      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.7), borderRadius: BorderRadiusGeometry.circular(20)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Column(
+                          mainAxisSize: .min,
+                          spacing: 10,
+                          crossAxisAlignment: .center,
+                          children: [
+                            Text("Waiting for", style: TextTheme.of(context).labelLarge),
+                            Wrap(
+                              alignment: WrapAlignment.center,
+                              spacing: -20,
+                              runSpacing: 8,
+                              children: [
+                                for (final m in waiting)
+                                  Opacity(
+                                    opacity: m.stale ? 0.5 : 1.0,
+                                    child: MemberAvatar(avatarBase64: m.avatar, name: m.name, size: 96),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (!selfReady)
+                    FilledButton(
+                      focusNode: _noFocus,
+                      onPressed: () => coord.toggleReady(),
+                      child: const Text("I'm Ready"),
+                    ),
                 ],
               ),
             ),
           ),
-          Positioned(
-            top: 12,
-            left: 12,
-            child: SignalBuilder(
-              builder: (context) {
-                final h = coord.health.value;
-                final starve = coord.starving.value;
-                final retrying = coord.reconnecting.value;
-                final kicked = coord.kickReason.value;
-                final unwell = h.severity == HealthSeverity.warn || h.severity == HealthSeverity.error || retrying || starve != null;
-                if (!unwell) return const SizedBox.shrink();
-                final color = switch (h.severity) {
-                  HealthSeverity.ok => Colors.green,
-                  HealthSeverity.info => Colors.grey,
-                  HealthSeverity.warn => Colors.orange,
-                  HealthSeverity.error => Colors.red,
-                };
-                final IconData icon;
-                if (retrying) {
-                  icon = Icons.sync;
-                } else if (h.severity == HealthSeverity.error) {
-                  icon = Icons.error_outline;
-                } else if (h.severity == HealthSeverity.warn) {
-                  icon = Icons.warning_amber_outlined;
-                } else {
-                  icon = Icons.hourglass_empty;
-                }
-                final text = [h.message, if (starve != null) starve, if (retrying) 'reconnecting…'].join(' · ');
-                final canRetry = !retrying && kicked == null && (h.severity == HealthSeverity.error || h.severity == HealthSeverity.warn);
-                return Container(
-                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.65), borderRadius: BorderRadius.circular(999)),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(icon, color: color, size: 16),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 12)),
+        );
+      },
+    );
+  }
+
+  Widget _toastsOverlay() {
+    final coord = SessionState.instance.coordinator;
+    return Positioned(
+      right: 12,
+      top: 56,
+      child: IgnorePointer(
+        child: SignalBuilder(
+          builder: (context) {
+            final items = coord.toasts.value;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [for (final t in items.reversed.take(5)) _ToastCard(key: ValueKey(t.id), text: t.text)],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _sheetOverlay() {
+    return SignalBuilder(
+      builder: (context) {
+        final open = _sheetOpen.value;
+        return ExcludeFocus(
+          excluding: !open,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(
+                child: IgnorePointer(
+                  ignoring: !open,
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 200),
+                    opacity: open ? 1 : 0,
+                    child: GestureDetector(
+                      onTap: () => _sheetOpen.value = false,
+                      child: Container(color: Colors.black54),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 20,
+                bottom: 20,
+                right: 0,
+                child: IgnorePointer(
+                  ignoring: !open,
+                  child: AnimatedSlide(
+                    duration: const Duration(milliseconds: 250),
+                    curve: Curves.easeOut,
+                    offset: open ? Offset.zero : const Offset(1, 0),
+                    child: SizedBox(
+                      width: 380,
+                      height: double.infinity,
+                      child: _SheetPanel(
+                        chat: _chat,
+                        chatFocus: _chatFocus,
+                        swapLink: _swapLink,
+                        onClose: () => _sheetOpen.value = false,
+                        onLeave: () {
+                          _sheetOpen.value = false;
+                          _confirmLeave.value = true;
+                        },
                       ),
-                      if (retrying)
-                        TextButton(
-                          style: TextButton.styleFrom(foregroundColor: Colors.white, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                          onPressed: () => coord.cancelReconnect(),
-                          child: const Text('Cancel', style: TextStyle(fontSize: 12)),
-                        ),
-                      if (canRetry)
-                        TextButton(
-                          style: TextButton.styleFrom(foregroundColor: Colors.white, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                          onPressed: () => coord.retry(),
-                          child: const Text('Retry', style: TextStyle(fontSize: 12)),
-                        ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _leaveOverlay() {
+    final session = SessionState.instance;
+    return SignalBuilder(
+      builder: (context) {
+        if (!_confirmLeave.value) return const SizedBox.shrink();
+        return Positioned.fill(
+          child: GestureDetector(
+            onTap: () => _confirmLeave.value = false,
+            child: Container(
+              color: Colors.black54,
+              child: Center(
+                child: GestureDetector(
+                  onTap: () {},
+                  child: AlertDialog(
+                    title: const Text('Leave room?'),
+                    content: const Text('You can rejoin right away.'),
+                    actions: [
+                      TextButton(onPressed: () => _confirmLeave.value = false, child: const Text('Cancel')),
+                      TextButton(
+                        onPressed: () {
+                          _confirmLeave.value = false;
+                          session.leave();
+                        },
+                        child: const Text('Leave'),
+                      ),
                     ],
                   ),
-                );
-              },
-            ),
-          ),
-          SignalBuilder(
-            builder: (context) {
-              final r = coord.room.value;
-              final waiting = [
-                for (final m in r?.members ?? [])
-                  if (!m.ready) m,
-              ];
-              final show = r != null && r.transport == 'held' && waiting.isNotEmpty;
-              return Positioned.fill(
-                child: IgnorePointer(
-                  child: Center(
-                    child: Visibility(
-                      visible: show,
-                      maintainState: true,
-                      maintainAnimation: true,
-                      maintainSize: true,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.7),
-                          borderRadius: BorderRadiusGeometry.circular(20),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(8.0),
-                          child: Column(
-                            mainAxisSize: .min,
-                            spacing: 10,
-                            crossAxisAlignment: .center,
-                            children: [
-                              Text("Waiting for", style: TextTheme.of(context).labelLarge),
-                              Wrap(
-                                alignment: WrapAlignment.center,
-                                spacing: -20,
-                                runSpacing: 8,
-                                children: [
-                                  for (final m in waiting)
-                                    Opacity(
-                                      opacity: m.stale ? 0.5 : 1.0,
-                                      child: MemberAvatar(avatarBase64: m.avatar, name: m.name, size: 96),
-                                    ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-          Positioned(
-            right: 12,
-            top: 56,
-            child: SignalBuilder(
-              builder: (context) {
-                final items = coord.toasts.value;
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [for (final t in items.reversed.take(5)) _ToastCard(key: ValueKey(t.id), text: t.text)],
-                );
-              },
-            ),
-          ),
-          Positioned.fill(
-            child: IgnorePointer(
-              ignoring: !_sheetOpen,
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 200),
-                opacity: _sheetOpen ? 1 : 0,
-                child: GestureDetector(
-                  onTap: () => setState(() => _sheetOpen = false),
-                  child: Container(color: Colors.black54),
                 ),
               ),
             ),
           ),
-          Positioned(
-            top: 0,
-            bottom: 0,
-            right: 0,
-            child: IgnorePointer(
-              ignoring: !_sheetOpen,
-              child: AnimatedSlide(
-                duration: const Duration(milliseconds: 250),
-                curve: Curves.easeOut,
-                offset: _sheetOpen ? Offset.zero : const Offset(1, 0),
-                child: SizedBox(
-                  width: 380,
-                  height: double.infinity,
-                  child: _SheetPanel(
-                    chat: _chat,
-                    swapLink: _swapLink,
-                    onClose: () => setState(() => _sheetOpen = false),
-                    onLeave: () => setState(() {
-                      _sheetOpen = false;
-                      _confirmLeave = true;
-                    }),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          if (_confirmLeave)
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: () => setState(() => _confirmLeave = false),
-                child: Container(
-                  color: Colors.black54,
-                  child: Center(
-                    child: GestureDetector(
-                      onTap: () {},
-                      child: AlertDialog(
-                        title: const Text('Leave room?'),
-                        content: const Text('You can rejoin right away.'),
-                        actions: [
-                          TextButton(onPressed: () => setState(() => _confirmLeave = false), child: const Text('Cancel')),
-                          TextButton(
-                            onPressed: () {
-                              setState(() => _confirmLeave = false);
-                              session.leave();
-                            },
-                            child: const Text('Leave'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -433,16 +556,17 @@ class _ToastCardState extends State<_ToastCard> {
 
 class _SheetPanel extends StatelessWidget {
   final TextEditingController chat;
+  final FocusNode chatFocus;
   final TextEditingController swapLink;
   final VoidCallback onClose;
   final VoidCallback onLeave;
-  const _SheetPanel({required this.chat, required this.swapLink, required this.onClose, required this.onLeave});
+  const _SheetPanel({required this.chat, required this.chatFocus, required this.swapLink, required this.onClose, required this.onLeave});
 
   @override
   Widget build(BuildContext context) {
-    final session = SessionState.instance;
-    final coord = session.coordinator;
+    final coord = SessionState.instance.coordinator;
     return Material(
+      borderRadius: BorderRadius.horizontal(left: .circular(20)),
       elevation: 8,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -452,19 +576,29 @@ class _SheetPanel extends StatelessWidget {
             final log = coord.feedLog.value;
             final theme = Theme.of(context);
             final sectionStyle = theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold);
-            return ListView(
+            final members = r?.members ?? const <MemberView>[];
+            final readyCount = members.where((m) => m.ready).length;
+            final playing = r?.transport == 'playing';
+            return Column(
               children: [
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Room', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('Room', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                              const SizedBox(width: 8),
+                              _StatusChip(playing: playing, hasRoom: r != null),
+                            ],
+                          ),
                           const SizedBox(height: 2),
                           Text(
-                            'transport ${r?.transport ?? '…'} · event ${r?.eventId ?? 0} · media ${r?.mediaId ?? 0}',
+                            r == null ? 'connecting…' : '${members.length} member${members.length == 1 ? '' : 's'} · $readyCount ready',
                             style: theme.textTheme.bodySmall,
                           ),
                         ],
@@ -474,57 +608,33 @@ class _SheetPanel extends StatelessWidget {
                   ],
                 ),
                 const Divider(height: 20),
-                Text('Users (${r?.members.length ?? 0})', style: sectionStyle),
-                const SizedBox(height: 6),
-                if (r != null)
-                  for (final m in r.members)
-                    Card(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      child: ListTile(
-                        dense: true,
-                        leading: MemberAvatar(avatarBase64: m.avatar, name: m.name, size: 36),
-                        title: Text(m.id == coord.sync.memberId ? '${m.name} (you)' : m.name),
-                        subtitle: Text('ready=${m.ready} inSet=${m.inSet} buf=${m.buffered.toStringAsFixed(1)} stale=${m.stale}'),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            TextButton(
-                              onPressed: () => coord.forceTarget(m.id, !m.ready),
-                              child: Text(m.ready ? 'Force unready' : 'Force ready'),
-                            ),
-                            TextButton(
-                              onPressed: () async {
-                                final ok = await showKickConfirmDialog(context, m.name);
-                                if (ok == true) coord.kick(m.id);
-                              },
-                              child: const Text('Kick'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+                Text('Users (${members.length})', style: sectionStyle),
+                const SizedBox(height: 2),
+                for (final m in members) _MemberRow(member: m, isSelf: m.id == coord.sync.memberId),
                 const Divider(height: 20),
-                Text('Log', style: sectionStyle),
+                Text('Activity', style: sectionStyle),
                 const SizedBox(height: 6),
                 if (log.isEmpty) Text('No events yet', style: theme.textTheme.bodySmall),
-                for (final f in log.reversed.take(30))
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Text('${f.actor} ${f.action} ${f.target ?? ''}', style: theme.textTheme.bodySmall),
+                Expanded(
+                  child: ListView.builder(
+                    reverse: true,
+                    itemBuilder: (context, index) => _ActivityRow(item: log.reversed.toList()[index]),
+                    itemCount: log.length,
                   ),
-                const Divider(height: 20),
-                Text('Chat', style: sectionStyle),
-                const SizedBox(height: 8),
+                ),
+                const SizedBox(height: 12),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       child: TextField(
                         controller: chat,
+                        focusNode: chatFocus,
                         decoration: const InputDecoration(labelText: 'Chat message', border: OutlineInputBorder(), isDense: true),
                         onSubmitted: (v) {
                           coord.sendChat(v);
                           chat.clear();
+                          chatFocus.requestFocus();
                         },
                       ),
                     ),
@@ -534,6 +644,7 @@ class _SheetPanel extends StatelessWidget {
                       onPressed: () {
                         coord.sendChat(chat.text);
                         chat.clear();
+                        chatFocus.requestFocus();
                       },
                     ),
                   ],
@@ -577,4 +688,249 @@ class _SheetPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+class _StatusChip extends StatelessWidget {
+  final bool playing;
+  final bool hasRoom;
+  const _StatusChip({required this.playing, required this.hasRoom});
+
+  @override
+  Widget build(BuildContext context) {
+    final Color dot;
+    final String label;
+    if (!hasRoom) {
+      dot = Colors.grey;
+      label = '…';
+    } else if (playing) {
+      dot = Colors.green;
+      label = 'Playing';
+    } else {
+      dot = Colors.orange;
+      label = 'Waiting';
+    }
+    return Container(
+      decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(999)),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: dot),
+          ),
+          const SizedBox(width: 6),
+          Text(label, style: Theme.of(context).textTheme.labelSmall),
+        ],
+      ),
+    );
+  }
+}
+
+class _MemberRow extends StatelessWidget {
+  final MemberView member;
+  final bool isSelf;
+  const _MemberRow({required this.member, required this.isSelf});
+
+  @override
+  Widget build(BuildContext context) {
+    final coord = SessionState.instance.coordinator;
+    final theme = Theme.of(context);
+    final status = _memberStatus(member);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          MemberAvatar(avatarBase64: member.avatar, name: member.name, size: 32),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isSelf ? '${member.name} (you)' : member.name,
+                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(shape: BoxShape.circle, color: status.$2),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      status.$1,
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.75)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, size: 18),
+            padding: EdgeInsets.zero,
+            onSelected: (v) async {
+              if (v == 'force') {
+                coord.forceTarget(member.id, !member.ready);
+              } else if (v == 'kick') {
+                final ok = await showKickConfirmDialog(context, member.name);
+                if (ok == true) coord.kick(member.id);
+              }
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'force', child: Text(member.ready ? 'Force unready' : 'Force ready')),
+              PopupMenuItem(
+                value: 'kick',
+                child: Text('Kick', style: TextStyle(color: theme.colorScheme.error)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+(String, Color) _memberStatus(MemberView m) {
+  if (m.stale) return ('Stale', Colors.orange);
+  if (!m.ready) return ('Not ready', Colors.grey);
+  if (m.buffered < RelayConstants.minBufferSecs) return ('Buffering ${m.buffered.toStringAsFixed(0)}s', Colors.orange);
+  return ('Ready', Colors.green);
+}
+
+class _ActivityRow extends StatelessWidget {
+  final FeedMessage item;
+  const _ActivityRow({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final time = _clock(item.at);
+    final subtle = theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6) ?? Colors.grey;
+    if (item.action == 'chat') {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.chat_bubble_outline, size: 15, color: Colors.grey),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: '${item.actor}  ',
+                      style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    TextSpan(text: item.reason, style: theme.textTheme.bodySmall),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(time, style: theme.textTheme.labelSmall?.copyWith(color: subtle)),
+          ],
+        ),
+      );
+    }
+    if (item.actor == 'server') {
+      final style = _serverFeedStyle(item);
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(style.$1, size: 15, color: style.$2),
+            const SizedBox(width: 8),
+            Expanded(child: Text(style.$3, style: theme.textTheme.bodySmall)),
+            const SizedBox(width: 8),
+            Text(time, style: theme.textTheme.labelSmall?.copyWith(color: subtle)),
+          ],
+        ),
+      );
+    }
+    final style = _feedStyle(item, theme);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(style.$1, size: 15, color: style.$2),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: item.actor,
+                    style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  TextSpan(text: ' ${style.$3}', style: theme.textTheme.bodySmall),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(time, style: theme.textTheme.labelSmall?.copyWith(color: subtle)),
+        ],
+      ),
+    );
+  }
+}
+
+(IconData, Color, String) _feedStyle(FeedMessage f, ThemeData theme) {
+  switch (f.action) {
+    case 'join':
+      return (Icons.person_add, Colors.green, 'joined');
+    case 'leave':
+      final reason = f.reason == 'silent too long' ? ' · timed out' : (f.reason.isEmpty ? '' : ' · ${f.reason}');
+      return (Icons.logout, Colors.grey, 'left$reason');
+    case 'ready':
+      return (Icons.check_circle, Colors.green, 'is ready');
+    case 'unready':
+      return (Icons.radio_button_unchecked, Colors.grey, "isn't ready");
+    case 'force-ready':
+      return (Icons.how_to_reg, Colors.orange, 'marked ${f.target ?? ''} ready');
+    case 'force-unready':
+      return (Icons.how_to_reg, Colors.orange, 'marked ${f.target ?? ''} not ready');
+    case 'force-play':
+      return (Icons.play_arrow, Colors.green, 'started playback for everyone');
+    case 'force-hold':
+      return (Icons.pause, Colors.orange, 'held playback for everyone');
+    case 'seek':
+      return (Icons.fast_forward, theme.colorScheme.primary, 'seeked');
+    case 'swap':
+      return (Icons.movie, theme.colorScheme.primary, 'changed the media');
+    case 'stale':
+      return (Icons.cloud_off, Colors.orange, 'lost signal');
+    case 'kick':
+      final reason = f.reason.isEmpty ? '' : ' · ${f.reason}';
+      return (Icons.gavel, Colors.red, 'kicked ${f.target ?? ''}$reason');
+    default:
+      final target = f.target == null || f.target!.isEmpty ? '' : ' ${f.target}';
+      return (Icons.info_outline, Colors.grey, '${f.action}$target');
+  }
+}
+
+(IconData, Color, String) _serverFeedStyle(FeedMessage f) {
+  switch (f.action) {
+    case 'resume':
+      return (Icons.play_arrow, Colors.green, 'Playback resumed');
+    default:
+      return (Icons.pause, Colors.orange, 'Playback paused · waiting for readiness');
+  }
+}
+
+String _clock(DateTime at) {
+  final l = at.toLocal();
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${two(l.hour)}:${two(l.minute)}';
 }

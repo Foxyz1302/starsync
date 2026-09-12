@@ -13,6 +13,7 @@ class PlaybackController {
     player = Player(
         configuration: PlayerConfiguration(
       bufferSize: 64 * 1024 * 1024,
+      libass: true,
       vo: Platform.environment['SYNC_RELAY_VO'],
     ));
     _ready = true;

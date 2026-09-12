@@ -60,10 +60,9 @@ join/reject logs in `room_hub.dart`); Cancel aborts a pending
 connect (`SyncClient.disconnect` completes the welcome future);
 first-join failure shows the dialog and stops (auto-reconnect only
 after an established session drops).
-Open exits (manual, user-driven): remove bisect flags in
-`apps/desktop/lib/app.dart`; 2-client LAN soak; 1.4 GB real-file test
-(user resupplies URL, never paste api_key into files);
-cache-exhaustion long outage.
+Open exits (manual, user-driven): bisect flags REMOVED 09-12;
+2-client LAN soak + 1.4 GB real-file test user-reports-done 09-12
+(details pending). Still open: cache-exhaustion long outage.
 
 ## Phase 5 — Resilience (PARTIAL)
 

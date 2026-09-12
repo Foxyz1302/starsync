@@ -4,8 +4,10 @@ Date: 2026-09-12 (updated late session). Phases 0–4 + presence hardening
 + UI redesigns done, all green (core 42, server 40, desktop 17).
 Black screen (§8) DIAGNOSED + FIXED (avatar-texture teardown race;
 Visibility keep-mounted) + VERIFIED, incl. over internet. Bisect
-flags (legacy/minimal/nosheet) still in app.dart — remove once
-stable. Internet test PASSED (WAN port 6969, 09-12). Tonight's
+screens (legacy/minimal/nosheet) REMOVED 09-12 — app.dart routes
+session straight to SessionScreen. Internet test PASSED (WAN port
+6969, 09-12); user reports 2-client LAN soak + 1.4 GB real-file
+test also done 09-12 (outcomes not yet recorded below). Tonight's
 fixes: server logging wired into app (`initLogging` + hello logs),
 Cancel aborts pending connect, first-join failure no longer
 retry-loops. Git repo INITIALIZED (commit 427d851, root
@@ -144,10 +146,14 @@ Client: 5 s room-silence ⇒ dead (clear room, warn, reconnect loop
   (intents only, zero local transport buttons), center avatars-only
   64 px, slide-in toasts, animated right sheet (users/log/chat/swap/
   Leave w/ confirm), health pill only-when-unwell, ESC closes/
-  asks-leave, global focus-proof keys (Space/Tab/arrows/ESC,
-  350 ms throttle, ignored while typing), single media field
-  (parseMediaInput + tests), avatar pipeline (128 px JPEG, tap to
-  pick, no path fields), Discord-like corner profile (connect only;
+   asks-leave, global focus-proof keys (Space/Tab/arrows/ESC/F,
+   350 ms throttle, ignored while typing; Tab traversal disabled on
+   the session screen 09-12 — game-style, Tab toggles the sheet), single media field
+   (parseMediaInput + tests), avatar pipeline (128 px PNG as of
+   09-12 uncommitted change, was JPEG — NOTE: server still
+   enforces 64 KiB in session.dart vs pipeline's 512 KiB check,
+   mismatch open, see commit), tap to
+   pick, no path fields), Discord-like corner profile (connect only;
   welcome is title+Host/Join; edits apply next join — no rename
   intent on the wire), dialogs for terminal states.
 - UX decisions locked along the way: Space flips self-ready only;
@@ -199,7 +205,12 @@ Client: 5 s room-silence ⇒ dead (clear room, warn, reconnect loop
 14. New `MediaDesktopVideoControlsThemeData` per build is fine
   (stock guards subscriptions) but wasteful; leave it.
 15. Env overrides for mpv experiments (no rebuild to switch):
-  SYNC_RELAY_VO (e.g. xv, gpu, gpu-next), SYNC_RELAY_HWDEC (e.g. no).
+   SYNC_RELAY_VO (e.g. xv, gpu, gpu-next), SYNC_RELAY_HWDEC (e.g. no).
+16. Hidden-but-mounted overlays keep focus: closing the sheet left
+   focus on an offstage button, so Space fell through (350 ms
+   throttle hole) into the hidden control. Fix pattern: ExcludeFocus
+   on the closed subtree + unfocus-on-close effect. Same reason new
+   overlay buttons reuse the shared no-focus node.
 
 ## 7. Sounds (deferred, wiring ready)
 
@@ -225,17 +236,17 @@ over internet (WAN 2-client test, port 6969, late 09-12) — CLOSED.
 RULE: never unmount GPU-textured widgets on a transport-gated
 branch; keep mounted + skip paint. Bisect screens
 (legacy/minimal/nosheet + SYNC_RELAY_UI switch in app.dart)
-still wired — delete on approval. session_screen.dart may still
-hold the user's commented bisect lines — restore or drop.
+DELETED 09-12 (commit tracks this); no commented bisect lines
+remain in session_screen.dart.
 
 ## 9. Next (ordered, updated 09-12 late session)
 
 1. §8 black screen — CLOSED (fix verified incl. over internet).
-2. Remove bisect flags (legacy/minimal/nosheet) in app.dart.
-3. 2-client LAN soak (manual, user-driven; WAN test passed, LAN
-   still untested).
-4. 1.4 GB real-file media test (user resupplies Jellyfin URL;
-   contains api_key — NEVER paste into files).
+2. Remove bisect flags — DONE 09-12 (files deleted, app.dart
+   routes session directly; tree analyzes clean).
+3. 2-client LAN soak — user reports DONE 09-12 (details pending).
+4. 1.4 GB real-file media test — user reports DONE 09-12
+   (details pending; api_key must never land in files).
 5. Cache-exhaustion long outage via shaper --kill-after (Phase 5
    chaos assertion, never run).
 6. Sounds swap-in (§7) after audition.
@@ -245,6 +256,51 @@ hold the user's commented bisect lines — restore or drop.
 8. `/health` is unauthenticated and broadcasts the full media URL
    (incl. api_key when the link carries one) — acceptable on LAN,
    noted now that 6969 faces the internet.
+9. FIXED 09-12: auto-unready fired while passively watching —
+   the 10-min check keyed off `_lastInput`, refreshed only by
+   explicit actions. Steady playback now counts as activity:
+   warn + auto-unready are skipped while room transport is
+   PLAYING (`session_coordinator.dart` idle block). HELD-and-idle
+   still unreadies after 10 min.
+10. FIXED 09-12 (second attempt — first theory was wrong): one chat
+    send rendered as TWO log rows. Root cause is server dual
+    delivery, not double-send: `broadcastChat`
+    (`room_hub.dart:69`) emits both a `ChatMessage` (with text,
+    converted to a feed entry client-side) and a textless `feed`
+    entry, and the client logged both. The blank-guard in
+    `sendChat` was defense against a phantom. Real fix: client
+    drops textless `chat` feed entries (`sync_client.dart` feed
+    case) — one send, one row, one toast, one sfx. No wire
+    change, still v4. Chat field also keeps focus after send
+    (dedicated FocusNode, re-requested on submit/button).
+11. KNOWN (non-breaking, fix later): seeks feel jumpy
+    (forward-back-forward) — suspect the seek-land retry
+    (`_checkSeekLanded`, `session_coordinator.dart:429`)
+    re-applying SeekAction against the 0.5 s deadband / 2 s
+    debounce and the 1 Hz room echo. Needs a live repro with a
+    timeline log before touching.
 Environment: dart 3.14 beta, flutter 3.48 beta, mpv+ffmpeg present,
 ~/Videos/chiyo.mp4 sample. Never kill the user's Syncplay mpv
-instance. No git repo — ask before creating one.
+instance. Git repo at project root (init 09-12); commit code + docs
+together; prefer FEW commits (one per topic/session, not per fix)
+over bisect-granularity — user decision 09-12.
+
+## 10. Window chrome — frameless, mpv-style (09-12, VERIFIED by user)
+
+Native title bar gone everywhere (`window_manager ^0.5.2`,
+`TitleBarStyle.hidden` in main.dart GUI path only, headless
+untouched). New screens MUST bring their own drag + min/max/close
+or they ship immovable — reuse `widgets/window_buttons.dart` +
+`widgets/window_chrome_bar.dart` (welcome/connect pattern).
+Session: drag is `widgets/window_drag_layer.dart`, topmost raw-
+pointer observer inside the controls stack (a GestureDetector
+below media_kit's overlay LOSES the arena — do not revert to
+that); dead zones: bottom 120 px (seek stays exact), open sheet,
+leave dialog. `modifyVolumeOnScroll: false` is load-bearing for
+drag — side effect: volume is speaker-button-only, no scroll-
+volume. Maximize button = media_kit fullscreen toggle in
+session (no OS maximize there); NO aspect-ratio lock by user
+decision (custom UI lives outside the video frame). Close =
+graceful leave + stopServer, then window close. Min size
+160x90, no max. Verified on KDE Wayland (Arch): bar-drag,
+video-drag, fullscreen, free resize all good.

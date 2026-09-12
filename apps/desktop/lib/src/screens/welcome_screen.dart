@@ -1,16 +1,32 @@
 import 'package:flutter/material.dart';
 
 import '../state/session_state.dart';
+import '../widgets/window_chrome_bar.dart';
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Column(
+        children: [
+          WindowChromeBar(title: 'Watch Together'),
+          Expanded(child: _WelcomeBody()),
+        ],
+      ),
+    );
+  }
+}
+
+class _WelcomeBody extends StatelessWidget {
+  const _WelcomeBody();
+
+  @override
+  Widget build(BuildContext context) {
     final session = SessionState.instance;
-    return Scaffold(
-      body: Center(
-        child: ConstrainedBox(
+    return Center(
+      child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -44,7 +60,6 @@ class WelcomeScreen extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
+      );
   }
 }
