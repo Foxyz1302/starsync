@@ -73,7 +73,7 @@ silence-timeout + reconnect loop. Never run: shaper chaos suite
 
 ## Phase 6 — Identity & social (PARTIAL)
 
-Shipped: names (32 cap), avatars (128 KiB cap, 128 px PNG picker, transparency kept), kick nudge
+Shipped: names (32 cap), avatars (256 KiB cap, 128 px PNG picker, transparency kept), kick nudge
 + reason, feed attribution. Open: real chat pane/history (schema
 only), sounds swap-in (wiring + NoopSfxService ready; pick
 flutter_soloud or equivalent, Kenney/ObsydianX/akx sources in

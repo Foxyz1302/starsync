@@ -390,7 +390,11 @@ class SessionCoordinator {
     // While the room is PLAYING the ready flag gates nothing, so an
     // idle viewer must never lose it mid-watch.
     if (room.peek()?.transport != 'playing') {
-      if (idleSecs >= 8 * 60 && !_warnedIdle) {
+      // No warning when there is nothing to lose: the 10-min unready
+      // only fires while self is ready, so the 8-min warning must not
+      // fire while unready either.
+      final selfReady = selfMember.peek()?.ready ?? false;
+      if (selfReady && idleSecs >= 8 * 60 && !_warnedIdle) {
         _warnedIdle = true;
         _toastId++;
         toasts.value = [

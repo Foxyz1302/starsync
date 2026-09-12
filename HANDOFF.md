@@ -64,8 +64,8 @@ kick kills sync+video, no relay memory growth.
 
 - `packages/core/lib/src/`: constants.dart (tuning: seek 300 ms,
   drift 5 s, slow 1.5 s @0.95, min_buffer 4 s, heartbeat 1 s, ping 5 s,
-  avatar 128 KiB (base64 chars; any 128x128 PNG fits — raised 09-12
-  from 64 KiB, which rejected normal PNGs), name 32, chat 500; dropAfter lives as RoomEngine ctor
+  avatar 256 KiB (base64 chars; wide headroom over any 128x128 PNG
+  — raised 09-12 from 64 KiB, which rejected normal PNGs), name 32, chat 500; dropAfter lives as RoomEngine ctor
   default, now 30 s), errors.dart, logging.dart, config.dart,
   protocol.dart (v4 schemas), media_source.dart, sync_engine.dart
   (RoomEngine + quorum in evaluate's HELD branch; PLAYING branch
