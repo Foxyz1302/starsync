@@ -23,6 +23,11 @@ app.*.map.json
 # Logs
 *.log
 
+# Local-only agent draft lists (raw wishlists; translated into docs by an
+# agent, never committed) — see AGENTS.md
+docs/Wishlist.md
+docs/drafts/
+
 # IDE
 .idea/
 *.iml
