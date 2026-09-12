@@ -52,5 +52,5 @@ if git -C "$ROOT" diff --cached --quiet; then
 else
   git -C "$ROOT" commit -m "Release v$VER" -- $PUBSPECS
 fi
-git -C "$ROOT" tag "v$VER"
+git -C "$ROOT" tag -a -m "Release v$VER" "v$VER"
 echo "review with: git show v$VER — then: git push --follow-tags"
