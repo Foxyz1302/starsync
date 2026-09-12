@@ -8,8 +8,13 @@ import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
 import 'src/state/session_state.dart';
+import 'src/update/updater.dart';
 
 Future<void> main(List<String> args) async {
+  if (args.contains('--upgrade')) {
+    exitCode = await runUpgrade();
+    exit(exitCode);
+  }
   initLogging();
   if (args.contains('--headless')) {
     await runHeadless(args);

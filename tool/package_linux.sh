@@ -30,7 +30,7 @@ VERSION="$(sed -n 's/^version: \([0-9.]*\).*/\1/p' "$APP/pubspec.yaml")"
 if [[ -z "$VERSION" ]]; then echo "error: version not found in $APP/pubspec.yaml" >&2; exit 1; fi
 
 if [[ "$SKIP_BUILD" != "1" ]]; then
-  (cd "$APP" && flutter build linux --release)
+  (cd "$APP" && flutter build linux --release --dart-define=APP_VERSION="$VERSION")
 fi
 
 BUNDLE="$APP/build/linux/$ARCH/release/bundle"

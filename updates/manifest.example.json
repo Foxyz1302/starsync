@@ -1,0 +1,7 @@
+{
+  "version": "0.2.0",
+  "protocol": 4,
+  "url": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v0.2.0/watch-together-0.2.0-linux-x64.tar.gz",
+  "sha256": "<sha256 of the tarball, filled in at release time>",
+  "notes": "One-line highlight of what changed."
+}

@@ -1,7 +1,10 @@
 # HANDOFF — sync_relay_project (watch-together app)
 
 Date: 2026-09-12 (updated late session). Phases 0–4 + presence hardening
-+ UI redesigns done, all green (core 42, server 40, desktop 17).
++ UI redesigns done, all green (core 42, server 41, desktop 24).
+Phases retired as a tracker 09-12 — `docs/ROADMAP.md` is now a flat
+backlog (Built / Backlog / Epics / Deferred); phase text lives in
+git history.
 Black screen (§8) DIAGNOSED + FIXED (avatar-texture teardown race;
 Visibility keep-mounted) + VERIFIED, incl. over internet. Bisect
 screens (legacy/minimal/nosheet) REMOVED 09-12 — app.dart routes
@@ -53,8 +56,9 @@ kick kills sync+video, no relay memory growth.
   box — accepted). No op roles (deferred: op flag + second hello
   secret). Kick = transient nudge: revoke + close + `kicked` reason,
   instant rejoin with fresh token.
-- Deferred, do not build: TLS/Caddy, Jellyfin native, auto-updater,
-  playlist (extension shape reserved in PROTOCOL.md), op roles, sounds
+- Deferred, do not build: TLS/Caddy, Jellyfin native, updater
+  expansion (v1 `--upgrade` SHIPPED 09-12 — see §9.12; in-app
+  prompt + Windows helper still deferred), playlist (extension shape reserved in PROTOCOL.md), op roles, sounds
   (researched, wired, no assets — see §7).
 - Standing rules: health reporting (every failure displays, nothing
   stalls silently); proto bump + PROTOCOL.md same-commit on ANY
@@ -89,12 +93,14 @@ kick kills sync+video, no relay memory growth.
   THE avatar — memoized, no bg on images, dark ring+fallback;
   dialogs.dart: kick confirm; media_input.dart: parseMediaInput).
 - `apps/desktop/test/`: room_diff_test (9), media_input_test (6),
+  updater_test (7: version/manifest/layout + stub-server flows),
   sync_playback_e2e_test (quorum: solo Space holds, both ready plays;
   needs mpv + ~/Videos/chiyo.mp4), coord_presence_test (dead server
   clears + reconnects; needs mpv).
 - `tool/`: range_logger, shaper (chaos: KB/s cap, latency,
   --kill-after), fake_viewer, e2e_check (sim timeline, still ALL PASS
-  post-quorum).
+  post-quorum), package_linux.sh (release tarball + Discord card,
+  stamps APP_VERSION).
 - `docs/`: PROTOCOL.md (v4 + quorum + 15/30 s timeouts + isClosed note,
   normative), ARCHITECTURE.md (+health rule), mpv-http-contract.md.
 - `deploy/`: systemd unit. Git repo initialized 09-12 (`git init`,
@@ -247,15 +253,10 @@ remain in session_screen.dart.
 3. 2-client LAN soak — user reports DONE 09-12 (details pending).
 4. 1.4 GB real-file media test — user reports DONE 09-12
    (details pending; api_key must never land in files).
-5. Cache-exhaustion long outage via shaper --kill-after (Phase 5
-   chaos assertion, never run).
-6. Sounds swap-in (§7) after audition.
-7. File-join wart: welcome mediaUrl uses advertiseHost 127.0.0.1,
-   remote file joiners fail-open then self-heal on first room
-   broadcast — fix via Host header, or leave (cosmetic).
-8. `/health` is unauthenticated and broadcasts the full media URL
-   (incl. api_key when the link carries one) — acceptable on LAN,
-   noted now that 6969 faces the internet.
+5.–8. MIGRATED 09-12 to `docs/ROADMAP.md` backlog (cache-exhaustion,
+   sounds, file-join wart, /health) — the roadmap is now the single
+   backlog; this section keeps session history + user-owned pendings
+   only.
 9. FIXED 09-12: auto-unready fired while passively watching —
    the 10-min check keyed off `_lastInput`, refreshed only by
    explicit actions. Steady playback now counts as activity:
@@ -273,12 +274,24 @@ remain in session_screen.dart.
     case) — one send, one row, one toast, one sfx. No wire
     change, still v4. Chat field also keeps focus after send
     (dedicated FocusNode, re-requested on submit/button).
-11. KNOWN (non-breaking, fix later): seeks feel jumpy
-    (forward-back-forward) — suspect the seek-land retry
+11. KNOWN (non-breaking, fix later — roadmap backlog #2): seeks feel
+    jumpy (forward-back-forward) — suspect the seek-land retry
     (`_checkSeekLanded`, `session_coordinator.dart:429`)
     re-applying SeekAction against the 0.5 s deadband / 2 s
     debounce and the 1 Hz room echo. Needs a live repro with a
     timeline log before touching.
+12. Updater v1 SHIPPED 09-12: `watch-together --upgrade`
+    (`apps/desktop/lib/src/update/updater.dart`, zero Flutter
+    imports, 7 tests) — manifest check, download, sha256, apply
+    over live install (extract-temp + delete-first move-over;
+    ETXTBSY forbids writing the running exe, delete+rename is
+    fine). Version stamped via `--dart-define=APP_VERSION`
+    (wired in `tool/package_linux.sh`; dev runs report
+    `0.0.0-dev`). USER-OWNED PENDING: publish
+    `updates/manifest.json` + release tarball on Forgejo (schema
+    in `updates/manifest.example.json`); until then --upgrade
+    reports failure against the missing manifest. No silent
+    proto jumps: updater warns when manifest protocol != local.
 Environment: dart 3.14 beta, flutter 3.48 beta, mpv+ffmpeg present,
 ~/Videos/chiyo.mp4 sample. Never kill the user's Syncplay mpv
 instance. Git repo at project root (init 09-12); commit code + docs
