@@ -24,8 +24,9 @@ pre-commit check. Tests run only when the code under test changed.
 
 ## Releases (user pushes tags, CI does the rest)
 
-Release flow: release commit bumps `apps/desktop/pubspec.yaml` →
-`git tag vX.Y.Z` → push tag → `.gitea/workflows/release.yml`
+Release flow: `tool/release.sh [patch|minor|major]` derives the
+version (no typing), bumps all pubspecs, commits, tags → review →
+`git push --follow-tags` → `.gitea/workflows/release.yml`
 builds, publishes the Forgejo release, commits
 `updates/manifest.json` back. `tool/release_publish.sh` is the same
 flow by hand. Workflows live in `.gitea/workflows` (this forge reads

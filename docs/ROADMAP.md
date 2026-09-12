@@ -24,10 +24,11 @@ desktop 17 + 7 updater.
 
 ## Backlog (priority order, each one sitting-sized)
 
-1. First real release: release commit bumps desktop pubspec, tag
-   `v0.2.0`, CI (`release.yml`) builds the tarball, publishes the
-   Forgejo release, and commits the manifest back. Verifies the
-   whole `--upgrade` chain end to end. Manual fallback is
+1. First real release: `tool/release.sh` (derives the version,
+   no typing) → review → `git push --follow-tags` → CI
+   (`release.yml`) builds the tarball, publishes the Forgejo
+   release, and commits the manifest back. Verifies the whole
+   `--upgrade` chain end to end. Manual fallback is
    `tool/package_linux.sh` + `tool/release_publish.sh <tag>`.
 2. Jumpy seek: live repro with timeline log first, then fix the
    seek-land retry vs deadband/debounce fight.
