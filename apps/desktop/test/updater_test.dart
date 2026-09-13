@@ -16,15 +16,20 @@ void main() {
     expect(isNewerVersion('0.2.0', '0.1.9'), isFalse);
   });
 
-  test('manifest rejects missing fields', () {
+  test('manifest rejects missing fields, sha256 is optional', () {
     expect(() => UpdateManifest.fromJson({}), throwsFormatException);
     expect(
         () => UpdateManifest.fromJson({
               'version': '0.2.0',
               'protocol': 4,
-              'url': 'https://x/y.tar.gz',
             }),
         throwsFormatException);
+    final noSha = UpdateManifest.fromJson({
+      'version': '0.2.0',
+      'protocol': 4,
+      'url': 'https://x/y.tar.gz',
+    });
+    expect(noSha.sha256, isNull);
   });
 
   test('findInstallRoot honors bundle layout', () async {
@@ -160,6 +165,37 @@ void main() {
       expect(rc, 1);
       expect(await File('${root.path}/watch_together').readAsString(),
           'binary-v1');
+    });
+
+    test('manifest without sha256 still applies', () async {
+      await server.close(force: true);
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        if (req.uri.path == '/manifest.json') {
+          req.response
+            ..statusCode = 200
+            ..write(jsonEncode({
+              'version': '0.2.0',
+              'protocol': 4,
+              'url':
+                  'http://127.0.0.1:${server.port}/watch-together-0.2.0.tar.gz',
+              'notes': '',
+            }));
+        } else {
+          req.response
+            ..statusCode = 200
+            ..add(tarball);
+        }
+        await req.response.close();
+      });
+      final root = await fakeRoot();
+      final rc = await runUpgrade(
+          currentVersion: '0.1.0',
+          manifestUrl: manifestUrl(),
+          installRoot: root);
+      expect(rc, 0);
+      expect(await File('${root.path}/watch_together').readAsString(),
+          'binary-v2');
     });
 
     test('unknown layout asks for manual update', () async {

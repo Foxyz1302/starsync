@@ -24,34 +24,32 @@ class UpdateManifest {
   final String version;
   final int protocol;
   final String url;
-  final String sha256;
+  final String? sha256;
   final String notes;
   const UpdateManifest(
       {required this.version,
       required this.protocol,
       required this.url,
-      required this.sha256,
+      this.sha256,
       required this.notes});
 
   factory UpdateManifest.fromJson(Map<String, Object?> json) {
     final version = json['version'];
     final protocol = json['protocol'];
     final url = json['url'];
-    final sha = json['sha256'];
     if (version is! String ||
         version.isEmpty ||
         protocol is! int ||
         url is! String ||
-        url.isEmpty ||
-        sha is! String ||
-        sha.isEmpty) {
-      throw const FormatException('update manifest missing version/protocol/url/sha256');
+        url.isEmpty) {
+      throw const FormatException('update manifest missing version/protocol/url');
     }
+    final sha = json['sha256'];
     return UpdateManifest(
         version: version,
         protocol: protocol,
         url: url,
-        sha256: sha,
+        sha256: sha is String && sha.isNotEmpty ? sha : null,
         notes: (json['notes'] as String?) ?? '');
   }
 }
@@ -220,7 +218,12 @@ Future<int> runUpgrade(
     final file = File('${tmp.path}/update.tar.gz');
     stdout.writeln('downloading ${manifest.url} ...');
     await downloadFile(manifest.url, file, http: http);
-    await verifySha256(file, manifest.sha256);
+    if (manifest.sha256 != null) {
+      await verifySha256(file, manifest.sha256!);
+    } else {
+      stdout.writeln('no checksum in manifest — skipping verification '
+          '(HTTPS transit + gzip CRC still apply).');
+    }
     stdout.writeln('verified, applying over ${root.path} ...');
     await applyTarball(file, root);
   } catch (e) {

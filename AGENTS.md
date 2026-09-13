@@ -27,8 +27,8 @@ pre-commit check. Tests run only when the code under test changed.
 Release flow: `tool/release.sh [patch|minor|major]` derives the
 version (no typing), bumps all pubspecs, commits, tags → review →
 `git push --follow-tags` → `.gitea/workflows/release.yml`
-builds, publishes the Forgejo release, commits
-`updates/manifest.json` back. `tool/release_publish.sh` is the same
+builds and publishes the Forgejo release (manifest already written
+by release.sh — predictable asset URL, no CI roundtrip). `tool/release_publish.sh` is the same
 flow by hand. Workflows live in `.gitea/workflows` (this forge reads
 `.gitea` first, `.github` is ignored when it exists).
 Never commit secrets: tokens arrive via env (`DISCORD_WEBHOOK_URL`,

@@ -289,8 +289,10 @@ remain in session_screen.dart.
     (wired in `tool/package_linux.sh`; dev runs report
     `0.0.0-dev`). Publishing is CI-driven: tag `vX.Y.Z` →
     `.gitea/workflows/release.yml` builds, creates the Forgejo
-    release, uploads the tarball, commits the manifest back
-    (`tool/release_publish.sh` does the same by hand).
+    release, uploads the tarball. Manifest is written locally by
+    `release.sh` (predictable asset URL, no CI roundtrip);
+    sha256 is optional — skipped with a note when absent
+    (HTTPS + gzip CRC cover the realistic cases).
     Manual trigger only: bump desktop pubspec in a release commit
     first (script enforces tag == pubspec). No silent
     proto jumps: updater warns when manifest protocol != local.
