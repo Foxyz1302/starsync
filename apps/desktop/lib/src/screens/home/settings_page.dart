@@ -1,6 +1,9 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 
+import '../../playback/playback_controller.dart';
+import '../../shaders/shader_presets.dart';
 import '../../state/settings.dart';
 import '../../update/update_controller.dart';
 import 'profile.dart';
@@ -14,6 +17,8 @@ const sessionShortcuts = [
   ('F', 'Toggle fullscreen'),
   ('Tab', 'Open / close the people & chat panel'),
   ('Ctrl+R', 'Reload the video'),
+  ('Ctrl+1…6', 'Shaders: Anime4K mode A, B, C, A+A, B+B, C+A'),
+  ('Ctrl+0', 'Shaders off'),
   ('Esc', 'Close panel or fullscreen, else ask to leave'),
 ];
 
@@ -31,13 +36,7 @@ class SettingsPage extends StatelessWidget {
         const _Section(title: 'Player', child: _HwdecSetting()),
         _Section(title: 'Updates', child: _UpdateSettings(controller: updates)),
         const _Section(title: 'Keyboard shortcuts', child: _ShortcutList()),
-        const _Section(
-          title: 'Video quality & shaders',
-          enabled: false,
-          trailing: _SoonBadge(),
-          child: Text('Upscaling and shader presets for mpv.',
-              style: TextStyle(color: Colors.grey)),
-        ),
+        const _Section(title: 'Video quality & shaders', child: _ShaderSettings()),
       ],
     );
   }
@@ -46,38 +45,18 @@ class SettingsPage extends StatelessWidget {
 class _Section extends StatelessWidget {
   final String title;
   final Widget child;
-  final bool enabled;
-  final Widget? trailing;
-  const _Section(
-      {required this.title, required this.child, this.enabled = true, this.trailing});
+  const _Section({required this.title, required this.child});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: kGap),
       child: Panel(
-        enabled: enabled,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [SectionLabel(title, trailing: trailing), child],
+          children: [SectionLabel(title), child],
         ),
       ),
-    );
-  }
-}
-
-class _SoonBadge extends StatelessWidget {
-  const _SoonBadge();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: const Text('Coming soon', style: TextStyle(fontSize: 12)),
     );
   }
 }
@@ -134,6 +113,125 @@ class _HwdecSettingState extends State<_HwdecSetting> {
                 onChanged: _s.setHwdecCustom,
               ),
             ),
+        ],
+      );
+    });
+  }
+}
+
+class _ShaderSettings extends StatelessWidget {
+  const _ShaderSettings();
+
+  Future<void> _addFiles() async {
+    final List<PlatformFile> files;
+    try {
+      files = await FilePicker.pickFiles(
+        dialogTitle: 'Pick mpv GLSL shaders',
+        type: FileType.custom,
+        allowedExtensions: const ['glsl', 'hook'],
+      );
+    } catch (_) {
+      return;
+    }
+    final s = AppSettings.instance;
+    final current = s.customShaders.peek();
+    final added = [
+      for (final f in files)
+        if (f.path case final p? when !current.contains(p)) p,
+    ];
+    if (added.isNotEmpty) s.setCustomShaders([...current, ...added]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppSettings.instance;
+    return SignalBuilder(builder: (context) {
+      final preset = s.shaderPreset.value;
+      final quality = s.shaderQuality.value;
+      final custom = s.customShaders.value;
+      final mode = PlaybackController.lastRenderMode.value;
+      const hint = TextStyle(fontSize: 12, color: Colors.grey);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Anime4K upscales and sharpens anime on your GPU, for you only. '
+            'Mode A suits 1080p sources, B 720p, C 480p; A+A, B+B and C+A add '
+            'a second pass. HQ is for strong GPUs (GTX 1080 and up), Fast for '
+            'weaker ones. Costs GPU time every frame and only works with '
+            'hardware video rendering. In the player: the ✨ button or '
+            'Ctrl+1…6, Ctrl+0 for off; changes apply live and are saved here.',
+            style: hint,
+          ),
+          if (mode == RenderMode.software || mode == RenderMode.softwareGl)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                mode == RenderMode.software
+                    ? 'The last session used software rendering: shaders had no effect there.'
+                    : 'The last session rendered OpenGL on the CPU: shaders will be slow.',
+                style: const TextStyle(fontSize: 12, color: Colors.orange),
+              ),
+            ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Text('Shaders'),
+              const SizedBox(width: 16),
+              DropdownButton<ShaderPreset>(
+                value: preset,
+                onChanged: (p) {
+                  if (p != null) s.setShaderPreset(p);
+                },
+                items: [
+                  for (final p in ShaderPreset.values)
+                    DropdownMenuItem(value: p, child: Text(p.label)),
+                ],
+              ),
+              const Spacer(),
+              SegmentedButton<ShaderQuality>(
+                showSelectedIcon: false,
+                segments: [
+                  for (final q in ShaderQuality.values)
+                    ButtonSegment(value: q, label: Text(q.label)),
+                ],
+                selected: {quality},
+                onSelectionChanged: (q) => s.setShaderQuality(q.first),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Expanded(child: Text('Custom shaders (run in this order)')),
+              TextButton.icon(
+                onPressed: _addFiles,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add .glsl files'),
+              ),
+            ],
+          ),
+          if (custom.isEmpty)
+            const Text('None picked.', style: hint)
+          else
+            for (final (i, path) in custom.indexed)
+              Row(
+                children: [
+                  Expanded(
+                    child: Tooltip(
+                      message: path,
+                      child: Text(path.split(RegExp(r'[/\\]')).last,
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Remove',
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () =>
+                        s.setCustomShaders([...custom]..removeAt(i)),
+                  ),
+                ],
+              ),
         ],
       );
     });

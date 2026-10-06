@@ -6,6 +6,8 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:signals/signals_flutter.dart';
 
+import '../shaders/shader_assets.dart';
+import '../shaders/shader_presets.dart';
 import '../state/settings.dart';
 import '../sync/state_diff.dart';
 import '../sync/user_seek.dart';
@@ -32,6 +34,11 @@ class PlaybackController {
   Timer? _watchTimer;
   bool _probing = false;
   final FrameWatchdog _watchdog = FrameWatchdog();
+  StreamSubscription<PlayerLog>? _logSub;
+  // `glsl-shaders` as last set on the current player ('' = none).
+  String _shaders = '';
+  Future<void> _shaderOp = Future.value();
+  int _noticeId = 0;
 
   /// Bumped for every new player; the video view keys itself on it so a
   /// recreated player gets a fresh `Video` widget.
@@ -53,6 +60,14 @@ class PlaybackController {
   /// Seeks from the video controls (seek bar) go here instead of to mpv.
   void Function(Duration position)? onUserSeek;
 
+  /// Latest shader message for the user (the session screen toasts it).
+  final shaderNotice = signal<ShaderNotice?>(null);
+
+  /// How media_kit renders the current player's video (shaders need
+  /// [RenderMode.gpu]); [lastRenderMode] keeps it after leaving.
+  final renderMode = signal(RenderMode.unknown);
+  static final lastRenderMode = signal(RenderMode.unknown);
+
   /// Pinned mpv properties whose read-back differs from what was set
   /// (mpv ignores invalid values silently), as `name: wanted -> got`.
   final List<String> pinMismatches = [];
@@ -67,10 +82,12 @@ class PlaybackController {
     final hwdec = _hwdecOverride;
     // media_kit's video output sets hwdec itself on attach ('auto' unless
     // configured), which used to override SYNC_RELAY_HWDEC.
-    return _video = VideoController(
+    final video = _video = VideoController(
       player,
       configuration: VideoControllerConfiguration(hwdec: hwdec),
     );
+    unawaited(_detectRenderMode(player, video));
+    return video;
   }
 
   // SYNC_RELAY_HWDEC wins over the Settings choice; read per player, so a
@@ -88,9 +105,16 @@ class PlaybackController {
       bufferSize: maxBytes,
       libass: true,
       vo: Platform.environment['SYNC_RELAY_VO'],
+      // Verbose: the render-mode probe needs mpv's GL init lines.
+      logLevel: MPVLogLevel.v,
     ))
       ..onUserSeek = (d) => onUserSeek?.call(d);
+    _shaders = '';
+    renderMode.value = RenderMode.unknown;
+    shaderNotice.value = null;
+    _logSub = _player!.stream.log.listen(_onLog);
     await _pinBufferProps();
+    await applyShaders();
     _watchdog.reset();
     _watchTimer = Timer.periodic(const Duration(seconds: 1), (_) => _watch());
     generation.value++;
@@ -137,6 +161,132 @@ class PlaybackController {
     }
     await _pin('stream-lavf-o',
         'reconnect_streamed=1,reconnect_on_http_error=1,reconnect_delay_max=4');
+  }
+
+  /// Puts the saved shader choice (Settings, Ctrl+0..6, shader button) on
+  /// the current player, live. A missing file or a value mpv won't take
+  /// turns shaders off and says why in [shaderNotice]; [announce] also
+  /// reports success ("Shaders: Mode A (HQ)").
+  Future<void> applyShaders({bool announce = false}) =>
+      _shaderOp = _shaderOp.then((_) => _applyShaders(announce));
+
+  Future<void> _applyShaders(bool announce) async {
+    final p = _player;
+    if (p == null) return;
+    final s = AppSettings.instance;
+    final preset = s.shaderPreset.peek();
+    final label = shaderLabel(preset, s.shaderQuality.peek());
+    String? problem;
+    var paths = const <String>[];
+    try {
+      paths = await shaderPathsFor(
+          preset, s.shaderQuality.peek(), s.customShaders.peek());
+      if (preset == ShaderPreset.custom && paths.isEmpty) {
+        problem = 'no custom shader files picked';
+      } else {
+        problem = shaderPathsProblem(paths);
+      }
+    } catch (e) {
+      problem = 'could not unpack the shaders ($e)';
+    }
+    if (!identical(p, _player)) return;
+    if (problem != null) paths = const [];
+    final value = joinShaderPaths(paths);
+    if (value != _shaders || problem != null) {
+      final got = await setShaderValue(value);
+      if (!identical(p, _player)) return;
+      if (problem == null && got != value) {
+        problem = 'mpv did not take them';
+        await setShaderValue('');
+      }
+    }
+    if (problem != null) {
+      _turnShadersOff('$label failed: $problem — turned off');
+    } else if (announce) {
+      _notice('Shaders: $label${_softwareHint(paths)}');
+    }
+  }
+
+  /// Sets mpv `glsl-shaders` on the current player and returns the
+  /// read-back (null on error).
+  @visibleForTesting
+  Future<String?> setShaderValue(String value) async {
+    try {
+      final dynamic platform = player.platform;
+      await platform?.setProperty('glsl-shaders', value);
+      final got = '${await platform?.getProperty('glsl-shaders')}';
+      _shaders = got;
+      if (got != value) debugPrint('glsl-shaders=$value not applied: "$got"');
+      return got;
+    } catch (e, st) {
+      debugPrint('glsl-shaders=$value failed: $e\n$st');
+      return null;
+    }
+  }
+
+  void _turnShadersOff(String message) {
+    AppSettings.instance.setShaderPreset(ShaderPreset.off);
+    _notice(message);
+  }
+
+  void _notice(String text) {
+    shaderNotice.value = ShaderNotice(++_noticeId, text);
+  }
+
+  String _softwareHint(List<String> paths) => paths.isEmpty
+      ? ''
+      : switch (renderMode.peek()) {
+          RenderMode.software => ' (no effect: video uses software rendering)',
+          RenderMode.softwareGl => ' (likely slow: OpenGL runs on the CPU)',
+          _ => '',
+        };
+
+  // mpv logs from the render context: GL init lines mean GPU rendering;
+  // an error there while shaders are on is a shader that failed to load
+  // or compile (mpv then renders without it).
+  void _onLog(PlayerLog log) {
+    if (log.prefix != 'libmpv_render') return;
+    if (log.text.contains('suspected software renderer')) {
+      _setRenderMode(RenderMode.softwareGl);
+    } else if (log.text.startsWith('GL_VERSION') &&
+        renderMode.peek() == RenderMode.unknown) {
+      _setRenderMode(RenderMode.gpu);
+    } else if ((log.level == 'error' || log.level == 'fatal') &&
+        _shaders.isNotEmpty) {
+      debugPrint('shader error: ${log.text}');
+      final p = _player;
+      _shaders = '';
+      _shaderOp = _shaderOp.then((_) async {
+        if (!identical(p, _player)) return;
+        await setShaderValue('');
+        _turnShadersOff('Shaders failed in mpv (${log.text}) — turned off');
+      });
+    }
+  }
+
+  void _setRenderMode(RenderMode mode) {
+    renderMode.value = mode;
+    lastRenderMode.value = mode;
+  }
+
+  // media_kit's Linux/Windows video output creates mpv's render context
+  // while the controller is created: OpenGL when it can, else the
+  // software renderer, which never logs GL init (and ignores shaders).
+  Future<void> _detectRenderMode(Player p, VideoController video) async {
+    try {
+      await video.platform.future;
+    } catch (_) {
+      return;
+    }
+    await Future.delayed(const Duration(milliseconds: 1500));
+    if (!identical(p, _player) || renderMode.peek() != RenderMode.unknown) {
+      return;
+    }
+    _setRenderMode(RenderMode.software);
+    debugPrint('video output: software rendering (no GL init logged)');
+    if (_shaders.isNotEmpty) {
+      _notice('Shaders have no effect: video uses software rendering');
+    }
   }
 
   /// Fingerprint of the decoder's current frame (mpv `screenshot-raw`,
@@ -267,6 +417,8 @@ class PlaybackController {
     if (p == null) return;
     _watchTimer?.cancel();
     _watchTimer = null;
+    await _logSub?.cancel();
+    _logSub = null;
     _player = null;
     _video = null;
     alive.value = false;
@@ -298,6 +450,22 @@ class PlaybackController {
       debugPrint('player stop failed: $e\n$st');
     }
   }
+}
+
+enum RenderMode {
+  unknown,
+  /// OpenGL on a real GPU: shaders work.
+  gpu,
+  /// OpenGL on a software rasterizer (llvmpipe): shaders crawl.
+  softwareGl,
+  /// media_kit's software fallback: shaders are ignored.
+  software,
+}
+
+class ShaderNotice {
+  final int id;
+  final String text;
+  const ShaderNotice(this.id, this.text);
 }
 
 /// mpv echoes numbers in its own format (`150` reads back `150.000000`).

@@ -6,20 +6,7 @@ off by deleting it in the same commit as the code. Wire changes also edit
 
 ## Backlog
 
-1. **Shaders.** Per-viewer local setting using mpv `glsl-shaders` (set after
-   the player is created), shipping Anime4K presets (bloc97, MIT). Shaders only
-   apply on media_kit's hardware path (verified with a test shader); warn
-   when the software fallback is active. The hardware path is fragile:
-   media_kit borrows whatever EGL context GDK left current on the main
-   thread (upstream media-kit#1404), so a `VideoController` created before
-   the first frame, an X11 session, or a Flutter/GDK change can silently
-   fall back to software. Log which path media_kit picked; a vendored
-   media_kit_video fix (build the EGL display from GDK's native display) is
-   the durable answer if it regresses. The video freeze after GPU idle is not
-   explained by this; next suspect is media_kit's context switching on the
-   raster thread with NVIDIA.
-
-2. **Windows build + CI.** There is no Windows runner. Try
+1. **Windows build + CI.** There is no Windows runner. Try
    `ubuntu2610/flutter_build` (LLVM-MinGW + Wine `gen_snapshot`) on the Linux
    runner, fallback a GitHub Actions mirror. The manifest needs per-platform
    URLs and `release_publish.sh` must handle a second platform. The updater's
@@ -27,9 +14,15 @@ off by deleting it in the same commit as the code. Wire changes also edit
    `watch-together-server` needs a Windows `dart compile exe` too. Desktop
    tests are not in CI either.
 
-3. **Jellyfin** (epic, below).
+2. **Jellyfin** (epic, below).
 
-4. **Smaller items**
+3. **Smaller items**
+   - Video output robustness: if media_kit's hardware path regresses to
+     software (see ARCHITECTURE, Media: render mode), vendor a
+     media_kit_video fix that builds the EGL display from GDK's native
+     display. The video freeze after GPU idle is not explained by this;
+     next suspect is media_kit's context switching on the raster thread
+     with NVIDIA.
    - Link conveniences: a link swap in session updates the remembered media;
      show the open link with an open-in-browser button; the session's swap
      panel reuses Home's `MediaPicker`.

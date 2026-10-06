@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:signals/signals_flutter.dart';
 
+import '../shaders/shader_presets.dart';
+
 // App preferences (Settings page), one Hive box. Signals start at their
 // defaults and take the stored values once [AppSettings.ensureLoaded]
 // finishes; setters write through.
@@ -11,6 +13,9 @@ const settingsBoxName = 'settings';
 const _keyHwdecMode = 'hwdecMode';
 const _keyHwdecCustom = 'hwdecCustom';
 const _keyAutoCheckUpdates = 'autoCheckUpdates';
+const _keyShaderPreset = 'shaderPreset';
+const _keyShaderQuality = 'shaderQuality';
+const _keyCustomShaders = 'customShaders';
 
 enum HwdecMode { auto, off, custom }
 
@@ -20,6 +25,13 @@ class AppSettings {
   final hwdecMode = signal(HwdecMode.auto);
   final hwdecCustom = signal('');
   final autoCheckUpdates = signal(true);
+
+  /// Video shaders: one choice, used on join and changed both here and
+  /// in the session (Ctrl+0..6, the shader button).
+  final shaderPreset = signal(ShaderPreset.off);
+  final shaderQuality = signal(ShaderQuality.hq);
+  /// .glsl files of [ShaderPreset.custom], in mpv order.
+  final customShaders = signal<List<String>>(const []);
 
   /// mpv `hwdec` value: 'auto', 'no', or the custom value ('auto' when
   /// custom is blank).
@@ -47,6 +59,18 @@ class AppSettings {
       if (custom is String) hwdecCustom.value = custom;
       final auto = box.get(_keyAutoCheckUpdates);
       if (auto is bool) autoCheckUpdates.value = auto;
+      final preset = box.get(_keyShaderPreset);
+      shaderPreset.value =
+          ShaderPreset.values.where((p) => p.name == preset).firstOrNull ??
+              ShaderPreset.off;
+      final quality = box.get(_keyShaderQuality);
+      shaderQuality.value =
+          ShaderQuality.values.where((q) => q.name == quality).firstOrNull ??
+              ShaderQuality.hq;
+      final files = box.get(_keyCustomShaders);
+      if (files is List) {
+        customShaders.value = List.unmodifiable(files.whereType<String>());
+      }
     } catch (e, st) {
       debugPrint('load settings failed: $e\n$st');
     }
@@ -65,6 +89,21 @@ class AppSettings {
   void setAutoCheckUpdates(bool on) {
     autoCheckUpdates.value = on;
     _put(_keyAutoCheckUpdates, on);
+  }
+
+  void setShaderPreset(ShaderPreset preset) {
+    shaderPreset.value = preset;
+    _put(_keyShaderPreset, preset.name);
+  }
+
+  void setShaderQuality(ShaderQuality quality) {
+    shaderQuality.value = quality;
+    _put(_keyShaderQuality, quality.name);
+  }
+
+  void setCustomShaders(List<String> paths) {
+    customShaders.value = List.unmodifiable(paths);
+    _put(_keyCustomShaders, [...paths]);
   }
 
   Future<void> _put(String key, Object value) async {

@@ -5,6 +5,10 @@ import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
 import '../session/health.dart';
+import '../session/session_coordinator.dart';
+import '../shaders/shader_menu.dart';
+import '../shaders/shader_presets.dart';
+import '../state/settings.dart';
 import '../state/session_state.dart';
 import '../update/updater.dart';
 import '../widgets/dialogs.dart';
@@ -38,7 +42,12 @@ class _SessionScreenState extends State<SessionScreen> {
   late final void Function() _stopKickWatch;
   late final void Function() _stopSheetWatch;
   late final void Function() _stopPlayerWatch;
+  late final void Function() _stopShaderWatch;
   late final FocusNode _noFocus;
+  bool _shaderMenuOpen = false;
+  // Own toast ids, negative: the coordinator counts up from 1.
+  int _toastSeq = 0;
+  int _shaderNoticeSeen = 0;
 
   @override
   void initState() {
@@ -56,6 +65,13 @@ class _SessionScreenState extends State<SessionScreen> {
       if (!_sheetOpen.value) {
         FocusManager.instance.primaryFocus?.unfocus();
       }
+    });
+    // Shader messages (preset changes, load failures) become toasts.
+    _stopShaderWatch = effect(() {
+      final n = session.coordinator.playback.shaderNotice.value;
+      if (n == null || n.id == _shaderNoticeSeen) return;
+      _shaderNoticeSeen = n.id;
+      _toast(n.text);
     });
     // The fullscreen route holds its own `Video` of the old player: leave
     // it before the player goes away, re-enter once the new one is up.
@@ -88,6 +104,25 @@ class _SessionScreenState extends State<SessionScreen> {
     coord.reloadVideo();
   }
 
+  void _toast(String text) {
+    final coord = SessionState.instance.coordinator;
+    coord.toasts.value = [
+      ...coord.toasts.peek(),
+      ToastItem(id: --_toastSeq, text: text, at: DateTime.now().toUtc()),
+    ];
+  }
+
+  /// Menu, Ctrl+0..6: saved as the choice (also used on the next join)
+  /// and applied live. A null quality keeps the saved one.
+  void _pickShader(ShaderPreset preset, ShaderQuality? quality) {
+    final s = AppSettings.instance;
+    if (quality != null) s.setShaderQuality(quality);
+    s.setShaderPreset(preset);
+    final coord = SessionState.instance.coordinator;
+    coord.markInput();
+    coord.playback.applyShaders(announce: true);
+  }
+
   void _toggleFullscreen() {
     if (_isFullscreen.peek()) {
       if (mounted) {
@@ -106,6 +141,7 @@ class _SessionScreenState extends State<SessionScreen> {
     _stopKickWatch();
     _stopSheetWatch();
     _stopPlayerWatch();
+    _stopShaderWatch();
     _chat.dispose();
     _chatFocus.dispose();
     _swapLink.dispose();
@@ -122,6 +158,14 @@ class _SessionScreenState extends State<SessionScreen> {
       return false;
     }
     final coord = SessionState.instance.coordinator;
+    // Ctrl+0..6: Anime4K's own mpv keys (off, modes A..C+A).
+    final digit = _shaderKeys.indexOf(event.logicalKey);
+    if (digit >= 0 && HardwareKeyboard.instance.isControlPressed) {
+      _lastKeyAt = now;
+      _pickShader(
+          digit == 0 ? ShaderPreset.off : ShaderPreset.modes[digit - 1], null);
+      return true;
+    }
     if (event.logicalKey == LogicalKeyboardKey.keyR &&
         HardwareKeyboard.instance.isControlPressed) {
       _lastKeyAt = now;
@@ -150,6 +194,10 @@ class _SessionScreenState extends State<SessionScreen> {
       return true;
     }
     if (event.logicalKey == LogicalKeyboardKey.escape) {
+      if (_shaderMenuOpen) {
+        if (mounted) Navigator.of(context, rootNavigator: true).maybePop();
+        return true;
+      }
       if (_sheetOpen.peek()) {
         _sheetOpen.value = false;
         return true;
@@ -212,6 +260,12 @@ class _SessionScreenState extends State<SessionScreen> {
         _ReloadVideoControlButton(focusNode: _noFocus, onPressed: _reloadVideo),
         const MaterialDesktopPositionIndicator(),
         const Spacer(),
+        ShaderControlButton(
+          focusNode: _noFocus,
+          renderMode: coord.playback.renderMode,
+          onPick: _pickShader,
+          onMenuOpen: (open) => _shaderMenuOpen = open,
+        ),
         const MaterialDesktopFullscreenButton(),
       ],
     );
@@ -526,6 +580,16 @@ class _SessionScreenState extends State<SessionScreen> {
     );
   }
 }
+
+const _shaderKeys = [
+  LogicalKeyboardKey.digit0,
+  LogicalKeyboardKey.digit1,
+  LogicalKeyboardKey.digit2,
+  LogicalKeyboardKey.digit3,
+  LogicalKeyboardKey.digit4,
+  LogicalKeyboardKey.digit5,
+  LogicalKeyboardKey.digit6,
+];
 
 class _ReadyControlButton extends StatelessWidget {
   final FocusNode focusNode;

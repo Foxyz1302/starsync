@@ -7,7 +7,7 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 
 | Path | What | Rule |
 |---|---|---|
-| `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging | pure Dart, no Flutter |
+| `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client | pure Dart, no Flutter |
 | `packages/server` | Relic HTTP + WebSocket server (`SyncServer`, `ServerHub`, `Session`, media endpoint), the `serve()` entrypoint, `bin/server.dart` (dedicated server) | pure Dart, no Flutter |
 | `apps/desktop` | Flutter app: UI, `SyncClient`, `SessionCoordinator`, `PlaybackController` (media_kit/mpv), `ServerIsolate`, updater | ships with `watch-together-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
@@ -196,6 +196,36 @@ and is passed to the `VideoController`; env `SYNC_RELAY_HWDEC` (e.g. `no`)
 overrides it. It is read per player, so a change applies on the next join or
 Reload video.
 
+Shaders (per viewer, local only, no wire change): mpv `glsl-shaders`, set
+through the same dynamic `setProperty` and read back
+(`PlaybackController.applyShaders`). The value is the platform path list
+(`:` joined, `;` on Windows). One saved choice in `AppSettings`
+(`shaderPreset`, `shaderQuality`, `customShaders`): applied on every player
+creation (join, Reload video) and live when changed from the session (the
+control bar's shader menu, Ctrl+0..6, both also save it). The Anime4K
+v4.0.1 files live in `apps/desktop/assets/shaders/anime4k/` (only the 14
+the presets use, plus its MIT LICENSE); mpv needs real paths, so
+`extractAnime4k` copies them once per version to
+`<app support>/shaders/anime4k-<version>/` (a `.complete` marker is written
+last). `anime4kFiles` maps each mode to the file list of Anime4K's mpv
+templates: HQ = the high-end GPU set (VL + M networks), Fast = the low-end
+set (M + S). A missing file, a path containing the list separator, a
+read-back mismatch, or an mpv `libmpv_render` error while shaders are on
+turns shaders off (saved) with a toast.
+
+Render mode: media_kit's Linux/Windows video output creates mpv's render
+context (OpenGL, else its software renderer) when the `VideoController` is
+created, and nothing in its API says which. The player therefore requests
+mpv logs at `v`: OpenGL init logs `GL_VERSION` under `libmpv_render`
+(`RenderMode.gpu`; "suspected software renderer" means llvmpipe,
+`softwareGl`); none within 1.5 s of the controller being ready means the
+software path (`software`, where shaders do nothing; the shader toast, the
+menu and Settings say so). After startup the `v` level adds no steady
+traffic (measured: 0 messages over 5 s of playback). The hardware path is
+fragile: media_kit borrows whatever EGL context GDK left current on the main
+thread (upstream media-kit#1404), so an X11 session or a Flutter/GDK change
+can silently fall back to software.
+
 Player lifecycle: the `Player` and its `VideoController` live for one
 session: created on join, disposed on leave, replaced by `recreate()` for
 "Reload video" (button or Ctrl+R; volume kept). `openUrl` opens with `play: false`; play/pause/seek/rate come only from
@@ -218,6 +248,42 @@ Never unmount GPU-textured widgets (avatar images) on a transport-gated
 branch: teardown races mpv's frame upload and the window goes black. Keep them
 mounted and skip painting (`Visibility` with `maintainState`).
 
+## Jellyfin client
+
+`packages/core/lib/src/jellyfin/`, pure Dart over `dart:io` `HttpClient`
+behind a `JellyfinHttp` interface (tests inject a fake). Plans:
+[ROADMAP.md](ROADMAP.md) "Epic: Jellyfin".
+
+- `JellyfinClient`: one server + one user. Auth (Quick Connect, password,
+  `/Users/Me` check, logout), browsing (views, Resume, NextUp, Latest, paged
+  `/Items`, search, seasons, episodes), image URLs (tag + maxWidth, no token
+  needed), PlaybackInfo, stream URLs, Playing / Progress / Stopped reports,
+  played / unplayed / resume position.
+- `normalizeServerUrl`, `parseJellyfinLink`: pasted addresses and item links
+  -> `(baseUrl, itemId)`; accounts are keyed by `ServerId`
+  (`/System/Info/Public`).
+- `episodeAfter`: next episode is the successor in `/Shows/{id}/Episodes`
+  (crosses seasons, skips other copies of the same episode); NextUp means
+  first unwatched, not next-after-X.
+- `matchTrack` / `matchTracks`: carry audio/subtitle choice to the next
+  episode (language required, then title words, forced/HI flags, codec,
+  channels).
+
+Gotchas (Jellyfin 10.11):
+- Every request sends `Authorization: MediaBrowser Client, Device, DeviceId,
+  Version[, Token]` (values percent-encoded). Unauthenticated calls missing a
+  field get 400 with no body.
+- A POST must carry `Content-Length` even when empty: behind nginx a
+  body-less POST without it gets 400 (this was the Quick Connect Initiate
+  failure).
+- Jellyfin overwrites a token's stored device name and app version with the
+  header's. Only use tokens this app obtained itself; a relay using a
+  viewer's token must send that viewer's client fields.
+- Static streams (`/Videos/{id}/stream?static=true`) serve the original file
+  with byte ranges. The share URL has no credentials; each side adds its own
+  `api_key` (`authorizeUrl`).
+- Ticks: 10,000,000 per second.
+
 ## Desktop UI
 
 One `HomeScreen` (`screens/home/`) with a single top bar (`top_bar.dart`):
@@ -235,7 +301,7 @@ port, password and Host sit in a 340 px column on the right, below the
 picker under 860 px. Text fields have fixed or capped widths (720 px max) so
 they stay compact on ultrawide screens. Submit state (busy, cancel,
 per-tab errors, server crash) is `ConnectFlow`. Settings (profile, hardware
-decoding, updates, shortcuts, shaders "coming soon"), Integrations
+decoding, updates, video shaders, shortcuts), Integrations
 (Jellyfin "coming soon") and About open in the same body. Settings persist
 in two Hive boxes: `connect_form` (last form and recents; saved even when a
 join fails) and `settings`. Link media names are derived from the URL path

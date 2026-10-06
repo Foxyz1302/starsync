@@ -83,12 +83,13 @@ x to forget it. Ctrl+1 / Ctrl+2 switch between Join and Host.
 
 Profile, hardware decoding (auto, off or custom; the env var
 `SYNC_RELAY_HWDEC` overrides it; applies on the next join or Reload video),
-updates, and the keyboard shortcuts (read-only). Integrations (Jellyfin) and
-shaders show "coming soon". About shows the version.
+updates, video shaders (see below), and the keyboard shortcuts (read-only).
+Integrations (Jellyfin) shows "coming soon". About shows the version.
 
 Keys in a session: Space = ready / unready, Tab = side panel (people, log,
 chat, change video), Left/Right = seek 10 s, F = fullscreen, Esc = close
-panel or ask to leave, Ctrl+R = reload video.
+panel or ask to leave, Ctrl+R = reload video, Ctrl+1..6 = Anime4K mode A, B,
+C, A+A, B+B, C+A, Ctrl+0 = shaders off.
 
 ## Ports
 
@@ -107,8 +108,19 @@ planned: see [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Video quality and shaders
 
-Planned: Anime4K and other mpv shaders as a per-viewer setting. See
-[docs/ROADMAP.md](docs/ROADMAP.md).
+Each viewer can run mpv GLSL shaders on their own picture; nobody else is
+affected. The app ships [Anime4K](https://github.com/bloc97/Anime4K) v4.0.1
+(MIT) with the presets of its mpv guide: Mode A (1080p sources), B (720p),
+C (480p), A+A, B+B, C+A, each as HQ (strong GPUs, GTX 1080 and up) or Fast
+(the guide's low-end set). "Custom shaders" runs your own `.glsl` files.
+
+Pick one with the ✨ button in the player's control bar (also in
+fullscreen) or Ctrl+0..6; the change applies live and is saved, so the next
+session starts with it. Settings → Video quality & shaders sets the default,
+HQ or Fast (used by Ctrl+1..6) and the custom files. Shaders cost GPU time
+every frame and need hardware video rendering: on media_kit's software
+fallback they do nothing, and the app says so. A shader that is missing or
+fails to load shows a toast and switches shaders off.
 
 ## Troubleshooting
 
