@@ -8,10 +8,10 @@ import 'package:sync_relay_server/server.dart';
 Future<void> main(List<String> args) async {
   final parser = ArgParser()
     ..addOption('port', abbr: 'p', defaultsTo: '8080')
-    ..addOption('secret', defaultsTo: 'change-me')
+    ..addOption('secret', defaultsTo: '')
     ..addOption('name', defaultsTo: 'room')
     ..addOption('media', defaultsTo: '')
-    ..addOption('advertise-host', defaultsTo: '127.0.0.1')
+    ..addOption('advertise-host', defaultsTo: '')
     ..addOption('config')
     ..addFlag('help', abbr: 'h', negatable: false);
   final parsed = parser.parse(args);

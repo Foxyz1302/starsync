@@ -156,7 +156,7 @@ class RoomEngine {
   void applySeek(String token, double seekPosition) {
     final member = members[token];
     if (member == null) return;
-    if (seekPosition.isNaN || seekPosition < 0) return;
+    if (!seekPosition.isFinite || seekPosition < 0) return;
     member.lastSeen = now;
     position = seekPosition;
     serverTime = now;
@@ -164,7 +164,9 @@ class RoomEngine {
     feed.add(FeedMessage(actor: member.name, action: 'seek', at: now));
   }
 
-  void applySwap(String actorToken, HelloMedia next) {
+  /// Returns false (no state change) for media with non-finite numbers.
+  bool applySwap(String actorToken, HelloMedia next) {
+    if (!next.duration.isFinite || next.size < 0) return false;
     final actor = members[actorToken];
     mediaId++;
     media = next;
@@ -178,13 +180,15 @@ class RoomEngine {
       member.buffered = 0;
     }
     feed.add(FeedMessage(actor: actor?.name ?? '?', action: 'swap', at: now));
+    return true;
   }
 
   void applyReport(String token, double reportPosition, double buffered, int reportEventId) {
     final member = members[token];
     if (member == null) return;
+    if (!reportPosition.isFinite) return;
     member.lastSeen = now;
-    member.buffered = buffered.isNaN || buffered < 0 ? 0 : buffered;
+    member.buffered = !buffered.isFinite || buffered < 0 ? 0 : buffered;
     if (reportEventId < eventId) return;
     evaluate();
   }

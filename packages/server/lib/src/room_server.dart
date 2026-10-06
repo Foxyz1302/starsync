@@ -55,16 +55,17 @@ class RoomServer {
           'viewers': viewers,
           'bytesServed': bytes,
           'uptimeSecs': uptime,
-          'media': s?.media?.name,
-          'transport': hub.engine.transport.name,
-          'eventId': hub.engine.eventId,
         })),
       );
     });
     mountSessionMediaRoute(_app, sessions);
-    mountSyncRoute(_app, hub, (sid, token, media) {
+    mountSyncRoute(_app, hub, (sid, token, media, dialledHost) {
       final name = Uri.encodeComponent(media?.name ?? 'file');
-      return 'http://${config.advertiseHost}:$boundPort/m/$sid/$token/$name';
+      // advertiseHost is only an explicit override; otherwise echo what the client dialled.
+      final authority = config.advertiseHost.isNotEmpty
+          ? '${config.advertiseHost}:$boundPort'
+          : dialledHost;
+      return 'http://$authority/m/$sid/$token/$name';
     });
     _app.fallback = (final req) => Response.notFound(
           body: Body.fromString('not found'),
@@ -84,6 +85,9 @@ class RoomServer {
       } else {
         _log.warning('media file not found: ${config.mediaPath}');
       }
+    }
+    if (config.secret.isEmpty) {
+      _log.warning('no password set: open server, anyone who can reach it can join');
     }
     _mountRoutes();
     _server = await _app.serve(

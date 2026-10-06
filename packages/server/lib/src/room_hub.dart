@@ -96,9 +96,28 @@ class RoomHub {
   Future<void> kickById(String targetId, String reason) async {
     final member = engine.byId(targetId);
     if (member == null) throw const AuthException('unknown kick target');
+    if (session.tokens[member.token]?.isHost ?? false) {
+      throw const AuthException("can't kick the host");
+    }
     await session.kick(member.token, reason: reason);
   }
 }
+
+/// Media names are shown to everyone and must never carry a URL (api_key etc.).
+/// A URL-looking name is reduced to its last path segment, no query/fragment.
+String sanitizeMediaName(String name) {
+  final trimmed = name.trim();
+  if (!RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*://').hasMatch(trimmed)) return name;
+  final uri = Uri.tryParse(trimmed);
+  final segments = uri?.pathSegments.where((s) => s.isNotEmpty).toList() ?? const [];
+  if (segments.isNotEmpty) return segments.last;
+  return 'media';
+}
+
+bool _isLoopback(String address) =>
+    address == '::1' ||
+    address.startsWith('127.') ||
+    address.startsWith('::ffff:127.');
 
 void wsErr(RelicWebSocket ws, String message) {
   ws.trySendText(jsonEncode({'t': 'err', 'message': message}));
@@ -107,9 +126,15 @@ void wsErr(RelicWebSocket ws, String message) {
 void mountSyncRoute(
   RelicApp app,
   RoomHub hub,
-  String Function(String sid, String token, SessionMedia? media) urlBuilder,
+  String Function(String sid, String token, SessionMedia? media, String host)
+      urlBuilder,
 ) {
   app.get('/sync', (final req) {
+    // Host the client dialled (Host header), so file URLs work for remote joiners.
+    final dialledHost = req.url.hasPort
+        ? '${req.url.host.contains(':') ? '[${req.url.host}]' : req.url.host}:${req.url.port}'
+        : (req.url.host.contains(':') ? '[${req.url.host}]' : req.url.host);
+    final fromLoopback = _isLoopback(req.connectionInfo.remote.address.toString());
     return WebSocketUpgrade((final ws) async {
       ws.pingInterval = Duration(seconds: RelayConstants.pingIntervalSecs);
       final firstText = Completer<String>();
@@ -155,12 +180,26 @@ void mountSyncRoute(
               hub.changed();
             case 'swap':
               if (token == null) return;
-              final intent = SwapIntent.fromJson(decoded);
-              hub.engine.applySwap(token, intent.media);
+              final parsed = SwapIntent.fromJson(decoded).media;
+              final intent = SwapIntent(
+                  media: HelloMedia(
+                      name: sanitizeMediaName(parsed.name),
+                      size: parsed.size,
+                      duration: parsed.duration,
+                      url: parsed.url));
               final current = session.media;
-              if (current?.file != null &&
+              final matchesFile = current?.file != null &&
                   current!.name == intent.media.name &&
-                  current.size == intent.media.size) {
+                  current.size == intent.media.size;
+              if (!matchesFile && (intent.media.url ?? '').isEmpty) {
+                wsErr(ws, 'swap needs a url or the hosted file');
+                return;
+              }
+              if (!hub.engine.applySwap(token, intent.media)) {
+                wsErr(ws, 'bad swap media');
+                return;
+              }
+              if (matchesFile) {
                 session.media = SessionMedia(
                     name: current.name,
                     size: current.size,
@@ -193,12 +232,18 @@ void mountSyncRoute(
                 wsErr(ws, 'unknown kick target');
                 return;
               }
+              if (session.tokens[member.token]?.isHost ?? false) {
+                wsErr(ws, "can't kick the host");
+                return;
+              }
               final by = viewer?.name ?? '?';
               unawaited(hub.session.kick(member.token,
                   reason: kickReq.reason.isEmpty
                       ? 'kicked by $by'
                       : kickReq.reason));
           }
+        } on ProtocolException catch (e) {
+          wsErr(ws, 'bad message: ${e.message}');
         } catch (_) {
           return;
         }
@@ -250,7 +295,7 @@ void mountSyncRoute(
         return;
       }
       final session = hub.session;
-      if (hello.secret != session.secret) {
+      if (session.secret.isNotEmpty && hello.secret != session.secret) {
         _hubLog.warning('reject ${hello.user.name}: wrong secret');
         wsErr(ws, 'wrong secret');
         await close();
@@ -264,6 +309,7 @@ void mountSyncRoute(
         await close();
         return;
       }
+      session.tokens[token]!.isHost = fromLoopback;
       final memberId = hub.engine.applyJoin(token, hello.user.name, hello.user.avatar);
       final activeToken = token;
       hub.sockets[activeToken] = ws;
@@ -277,7 +323,7 @@ void mountSyncRoute(
       final welcome = WelcomeMessage(
         token: activeToken,
         memberId: memberId,
-        mediaUrl: media?.file != null ? urlBuilder('default', activeToken, media) : media?.url,
+        mediaUrl: media?.file != null ? urlBuilder('default', activeToken, media, dialledHost) : media?.url,
         state: hub.engine.broadcast().toJson(),
       );
       try {

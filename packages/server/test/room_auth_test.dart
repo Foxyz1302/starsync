@@ -8,6 +8,15 @@ import 'package:sync_relay_server/server.dart';
 import 'package:test/test.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+Future<String?> _lanAddress() async {
+  for (final i in await NetworkInterface.list(type: InternetAddressType.IPv4)) {
+    for (final a in i.addresses) {
+      if (!a.isLoopback) return a.address;
+    }
+  }
+  return null;
+}
+
 void main() {
   group('room auth live', () {
     late File file;
@@ -73,7 +82,7 @@ void main() {
       expect(decoded['proto'], RelayConstants.protoVersion);
       expect(decoded['viewers'], 0);
       expect(decoded['bytesServed'], 0);
-      expect(decoded['media'], isNotNull);
+      expect(decoded.containsKey('media'), isFalse, reason: 'no media name leak');
     });
 
     test('wrong secret gets err, right secret gets welcome+token', () async {
@@ -238,10 +247,16 @@ void main() {
     });
 
     test('kick via socket: peer kicked, unknown target errors', () async {
-      WebSocketChannel open() => WebSocketChannel.connect(
-          Uri.parse('ws://127.0.0.1:${server.boundPort}/sync'));
-      Future<(WebSocketChannel, String, String, List<String>)> join(String who) async {
-        final ch = open();
+      final lan = await _lanAddress();
+      if (lan == null) {
+        markTestSkipped('no non-loopback IPv4 to act as a non-host peer');
+        return;
+      }
+      // Loopback peers are the host and unkickable, so bob dials the LAN address.
+      Future<(WebSocketChannel, String, String, List<String>)> join(String who,
+          [String host = '127.0.0.1']) async {
+        final ch = WebSocketChannel.connect(
+            Uri.parse('ws://$host:${server.boundPort}/sync'));
         final messages = <String>[];
         ch.stream.listen((m) => messages.add('$m'));
         final msg = HelloMessage(
@@ -289,7 +304,7 @@ void main() {
       }
 
       final (a, _, _, messagesA) = await join('alice');
-      final (b, tokenB, idB, messagesB) = await join('bob');
+      final (b, tokenB, idB, messagesB) = await join('bob', lan);
       try {
         a.sink.add(jsonEncode(
             KickRequest(target: idB, reason: 'afk?').toJson()));

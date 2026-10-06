@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sync_relay_core/core.dart';
 import 'package:test/test.dart';
 
@@ -6,7 +8,8 @@ void main() {
     test('defaults are sane', () {
       final c = AppConfig.defaults();
       expect(c.port, 8080);
-      expect(c.secret, isNotEmpty);
+      expect(c.secret, isEmpty, reason: 'empty password = open server');
+      expect(c.advertiseHost, isEmpty);
     });
 
     test('fromMap tolerates missing keys', () {
@@ -31,6 +34,26 @@ void main() {
   });
 
   group('protocol', () {
+    test('non-finite numbers are rejected', () {
+      final inf = jsonDecode('{"t":"seek","position":1e400}') as Map<String, Object?>;
+      expect(inf['position'], double.infinity);
+      expect(() => SeekIntent.fromJson(inf), throwsA(isA<ProtocolException>()));
+      expect(
+          () => ReportMessage.fromJson(
+              {'t': 'report', 'position': 1.0, 'buffered': double.infinity}),
+          throwsA(isA<ProtocolException>()));
+      expect(
+          () => ReportMessage.fromJson(
+              {'t': 'report', 'position': double.nan, 'buffered': 1.0}),
+          throwsA(isA<ProtocolException>()));
+      expect(
+          () => SwapIntent.fromJson({
+                't': 'swap',
+                'media': {'name': 'a', 'size': 1, 'duration': double.infinity}
+              }),
+          throwsA(isA<ProtocolException>()));
+    });
+
     test('hello round-trips', () {
       const msg = HelloMessage(
         proto: 1,

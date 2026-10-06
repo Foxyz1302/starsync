@@ -10,6 +10,8 @@ class ViewerToken {
   final String name;
   final String avatar;
   bool kicked = false;
+  /// Connected from a loopback address: the host's own in-process client.
+  bool isHost = false;
   int bytesServed = 0;
   DateTime lastSeen;
   Future<void> Function(String reason)? onKick;

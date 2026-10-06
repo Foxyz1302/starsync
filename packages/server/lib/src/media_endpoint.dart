@@ -191,7 +191,6 @@ void mountSessionMediaRoute(
     }
     final end = res.end ?? size - 1;
     final byteCount = end - res.start + 1;
-    session.addBytes(token, byteCount);
     final shortToken = token.length > 4 ? '…${token.substring(token.length - 4)}' : token;
     onLog?.call(token, MediaLog(
       method: req.method.name,
@@ -201,7 +200,12 @@ void mountSessionMediaRoute(
       bytesWritten: byteCount,
       durationMs: stopwatch.elapsedMilliseconds,
     ));
-    final stream = file.openRead(res.start, end + 1).map((c) => Uint8List.fromList(c));
+    // Count bytes as they are actually sent: mpv often asks for `bytes=N-`
+    // and drops the connection early, so the requested range overcounts.
+    final stream = file.openRead(res.start, end + 1).map((c) {
+      session.addBytes(token, c.length);
+      return Uint8List.fromList(c);
+    });
     return Response(
       res.status,
       body: Body.fromDataStream(stream, contentLength: byteCount),

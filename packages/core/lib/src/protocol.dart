@@ -17,6 +17,23 @@ enum MessageKind {
   cancel,
 }
 
+/// Reads an optional JSON number as a finite double. JSON like 1e400 decodes to
+/// Infinity, which would later break jsonEncode on every broadcast.
+double finiteDouble(Object? value, String field, {double fallback = 0.0}) {
+  if (value == null) return fallback;
+  final d = (value as num).toDouble();
+  if (!d.isFinite) throw ProtocolException('$field must be finite');
+  return d;
+}
+
+/// Same as [finiteDouble] but for integers.
+int finiteInt(Object? value, String field, {int fallback = 0}) {
+  if (value == null) return fallback;
+  final n = value as num;
+  if (!n.isFinite) throw ProtocolException('$field must be finite');
+  return n.toInt();
+}
+
 class HelloUser {
   final String name;
   final String avatar;
@@ -39,8 +56,8 @@ class HelloMedia {
 
   factory HelloMedia.fromJson(Map<String, Object?> json) => HelloMedia(
         name: (json['name'] as String?) ?? '',
-        size: (json['size'] as num?)?.toInt() ?? 0,
-        duration: (json['duration'] as num?)?.toDouble() ?? 0.0,
+        size: finiteInt(json['size'], 'size', fallback: 0),
+        duration: finiteDouble(json['duration'], 'duration'),
         url: json['url'] as String?,
       );
 }
@@ -66,7 +83,7 @@ class HelloMessage {
     final media = json['media'];
     if (user is! Map || media is! Map) throw const ProtocolException('hello missing user/media');
     return HelloMessage(
-      proto: (json['proto'] as num?)?.toInt() ?? RelayConstants.protoVersion,
+      proto: finiteInt(json['proto'], 'proto', fallback: RelayConstants.protoVersion),
       secret: (json['secret'] as String?) ?? '',
       user: HelloUser.fromJson(Map<String, Object?>.from(user)),
       media: HelloMedia.fromJson(Map<String, Object?>.from(media)),
@@ -89,9 +106,9 @@ class RoomState {
       };
 
   factory RoomState.fromJson(Map<String, Object?> json) => RoomState(
-        position: (json['position'] as num?)?.toDouble() ?? 0.0,
+        position: finiteDouble(json['position'], 'position'),
         paused: (json['paused'] as bool?) ?? true,
-        mediaId: (json['mediaId'] as num?)?.toInt() ?? 0,
+        mediaId: finiteInt(json['mediaId'], 'mediaId', fallback: 0),
         serverTime: DateTime.tryParse('${json['serverTime']}') ?? DateTime.now().toUtc(),
       );
 }
@@ -191,7 +208,7 @@ class SeekIntent {
 
   factory SeekIntent.fromJson(Map<String, Object?> json) {
     if (json['t'] != 'seek') throw const ProtocolException('not a seek intent');
-    return SeekIntent(position: (json['position'] as num?)?.toDouble() ?? 0.0);
+    return SeekIntent(position: finiteDouble(json['position'], 'position'));
   }
 }
 
@@ -221,9 +238,9 @@ class ReportMessage {
   factory ReportMessage.fromJson(Map<String, Object?> json) {
     if (json['t'] != 'report') throw const ProtocolException('not a report');
     return ReportMessage(
-      position: (json['position'] as num?)?.toDouble() ?? 0.0,
-      buffered: (json['buffered'] as num?)?.toDouble() ?? 0.0,
-      eventId: (json['eventId'] as num?)?.toInt() ?? 0,
+      position: finiteDouble(json['position'], 'position'),
+      buffered: finiteDouble(json['buffered'], 'buffered'),
+      eventId: finiteInt(json['eventId'], 'eventId', fallback: 0),
     );
   }
 }
@@ -274,7 +291,7 @@ class MemberView {
         avatar: (json['avatar'] as String?) ?? '',
         ready: (json['ready'] as bool?) ?? false,
         inSet: (json['inSet'] as bool?) ?? false,
-        buffered: (json['buffered'] as num?)?.toDouble() ?? 0.0,
+        buffered: finiteDouble(json['buffered'], 'buffered'),
         stale: (json['stale'] as bool?) ?? false,
       );
 }
@@ -313,11 +330,11 @@ class RoomBroadcast {
     final members = json['members'];
     final media = json['media'];
     return RoomBroadcast(
-      eventId: (json['eventId'] as num?)?.toInt() ?? 0,
+      eventId: finiteInt(json['eventId'], 'eventId', fallback: 0),
       transport: (json['transport'] as String?) ?? 'held',
-      position: (json['position'] as num?)?.toDouble() ?? 0.0,
+      position: finiteDouble(json['position'], 'position'),
       serverTime: DateTime.tryParse('${json['serverTime']}') ?? DateTime.now().toUtc(),
-      mediaId: (json['mediaId'] as num?)?.toInt() ?? 0,
+      mediaId: finiteInt(json['mediaId'], 'mediaId', fallback: 0),
       media: media is Map ? Map<String, Object?>.from(media) : null,
       members: members is List
           ? members
@@ -382,9 +399,9 @@ class SyncEvent {  final String kind;
     if (json['t'] != 'event') throw const ProtocolException('not an event message');
     return SyncEvent(
       kind: (json['kind'] as String?) ?? '',
-      position: (json['position'] as num?)?.toDouble() ?? 0.0,
+      position: finiteDouble(json['position'], 'position'),
       doSeek: (json['doSeek'] as bool?) ?? false,
-      ignoringOnTheFly: (json['ignoringOnTheFly'] as num?)?.toInt() ?? 0,
+      ignoringOnTheFly: finiteInt(json['ignoringOnTheFly'], 'ignoringOnTheFly', fallback: 0),
     );
   }
 }

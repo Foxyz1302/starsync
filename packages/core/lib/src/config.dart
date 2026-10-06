@@ -12,6 +12,8 @@ class AppConfig {
   final String name;
   final String mediaPath;
   final String logLevel;
+  /// Optional explicit host for file-media URLs; empty means use the host the
+  /// client dialled.
   final String advertiseHost;
 
   const AppConfig({
@@ -20,21 +22,21 @@ class AppConfig {
     required this.name,
     this.mediaPath = '',
     this.logLevel = 'INFO',
-    this.advertiseHost = '127.0.0.1',
+    this.advertiseHost = '',
   });
 
   factory AppConfig.defaults() =>
-      const AppConfig(port: 8080, secret: 'change-me', name: 'room');
+      const AppConfig(port: 8080, secret: '', name: 'room');
 
   factory AppConfig.fromMap(Map<String, Object?> map) {
     try {
       return AppConfig(
         port: (map['port'] as num?)?.toInt() ?? 8080,
-        secret: (map['secret'] as String?) ?? 'change-me',
+        secret: (map['secret'] as String?) ?? '',
         name: (map['name'] as String?) ?? 'room',
         mediaPath: (map['mediaPath'] as String?) ?? '',
         logLevel: (map['logLevel'] as String?) ?? 'INFO',
-        advertiseHost: (map['advertiseHost'] as String?) ?? '127.0.0.1',
+        advertiseHost: (map['advertiseHost'] as String?) ?? '',
       );
     } catch (e) {
       throw ConfigException('invalid config map: $e');

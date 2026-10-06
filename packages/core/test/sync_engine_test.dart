@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sync_relay_core/core.dart';
 import 'package:test/test.dart';
 
@@ -15,6 +17,24 @@ void main() {
 
   void buffer(String token, double secs) =>
       engine.applyReport(token, engine.positionAt(), secs, engine.eventId);
+
+  group('non-finite guards', () {
+    test('seek/report/swap reject Infinity and NaN, broadcast stays encodable', () {
+      join('a', 'alice');
+      engine.applySeek('a', double.infinity);
+      engine.applySeek('a', double.nan);
+      expect(engine.position, 0);
+      engine.applyReport('a', double.infinity, 1, engine.eventId);
+      engine.applyReport('a', 1, double.infinity, engine.eventId);
+      expect(engine.members['a']!.buffered, 0);
+      expect(
+          engine.applySwap('a',
+              const HelloMedia(name: 'x', size: 1, duration: double.infinity)),
+          isFalse);
+      expect(engine.mediaId, 1);
+      jsonEncode(engine.broadcast().toJson());
+    });
+  });
 
   group('membership + gate', () {
     test('join lands out-of-set, room stays held', () {
