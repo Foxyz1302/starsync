@@ -6,6 +6,8 @@ import 'package:flutter/widgets.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
+import '../jellyfin/accounts.dart';
+import '../jellyfin/session_media.dart';
 import '../sfx/sfx.dart';
 import '../session/health.dart';
 import '../session/session_coordinator.dart';
@@ -154,6 +156,7 @@ class SessionState {
   final SfxService sfx = const NoopSfxService();
   late final SessionCoordinator coordinator = SessionCoordinator(sfx: sfx);
   final lastForm = ConnectForm();
+  JellyfinAccounts get jellyfin => JellyfinAccounts.instance;
   /// Set when the hosted server died mid-session; Home shows it on the
   /// Host card and clears it.
   final serverCrash = signal<String?>(null);
@@ -232,6 +235,14 @@ class SessionState {
       if (op != _op) throw const ConnectCancelled();
       final hostKey = newHostKey();
       _setupCrash = null;
+      // A pasted Jellyfin link goes up as a ref like a browser pick.
+      final media = params.media ??
+          (params.linkUrl.isEmpty ? null : await mediaForLink(jellyfin, params.linkUrl));
+      if (op != _op) throw const ConnectCancelled();
+      // Guests without an account watch through the server, with the
+      // host's own sign-in (the hosted item's server, else the default).
+      await jellyfin.ensureLoaded(validate: false);
+      final relay = relayCredentialFor(jellyfin, serverId: media?.jellyfin?.serverId);
       late final ServerIsolate server;
       try {
         server = await ServerIsolate.start(
@@ -241,6 +252,7 @@ class SessionState {
             name: 'server',
             mediaPath: params.mediaPath,
             hostKey: hostKey,
+            jellyfin: relay,
           ),
           onLog: (line) => debugPrint('[server] $line'),
           onCrash: (cause) => _onServerCrash(server, cause),
@@ -256,6 +268,8 @@ class SessionState {
         throw const ConnectCancelled();
       }
       _server = server;
+      coordinator.hostFile = (path) async =>
+          identical(_server, server) ? server.setFile(path) : null;
       status.value =
           HealthStatus(HealthSeverity.ok, 'hosting on port ${server.port}');
       try {
@@ -265,8 +279,8 @@ class SessionState {
           secret: params.secret,
           name: params.name,
           avatar: params.avatar,
-          linkUrl: params.linkUrl,
           hostKey: hostKey,
+          media: media,
         ));
         if (op != _op) throw const ConnectCancelled();
       } catch (e) {
@@ -353,6 +367,7 @@ class SessionState {
   }
 
   Future<void> stopServer() async {
+    coordinator.hostFile = null;
     _stopKickWatch?.call();
     _stopKickWatch = null;
     final server = _server;

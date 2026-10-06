@@ -46,7 +46,8 @@ and `e2e_check` (simulated viewers against a live server).
 - `cd packages/core && dart test`, `cd packages/server && dart test`.
 - `cd apps/desktop && flutter test test/<file>`.
 - Real-mpv tests: `sync_playback_e2e`, `coord_presence`, `video_reload_e2e`,
-  `seek_drag_e2e`, `end_of_file_e2e`, `readahead_e2e`. The sync and
+  `seek_drag_e2e`, `end_of_file_e2e`, `readahead_e2e`, `jellyfin_e2e` (a
+  local fake Jellyfin over HTTP; tests never talk to a real Jellyfin). The sync and
   end-of-file ones expect `~/Videos/chiyo.mp4`; others generate media with
   ffmpeg into `WT_TEST_TMP`. Headless mpv (no video output attached) won't
   open video-only files, so test media needs an audio track. Tests always log

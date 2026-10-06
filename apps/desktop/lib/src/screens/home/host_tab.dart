@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:sync_relay_core/core.dart' show HelloMedia;
 
 import '../../jellyfin/accounts.dart';
+import '../../jellyfin/session_media.dart';
 import '../../state/session_state.dart';
 import 'connect_flow.dart';
 import 'connect_status.dart';
@@ -48,20 +50,17 @@ class HostFields {
   }
 }
 
-/// INTERIM(jellyfin-protocol): until the protocol carries a Jellyfin item,
-/// the host plays it as a link: this install's authorised static stream URL
-/// (token in the query, so viewers stream with the host's sign-in and the
-/// URL must not be persisted). Throws [FormatException] with a user-facing
-/// message when the server is not linked any more.
-String interimJellyfinLink(JellyfinAccounts accounts, JellyfinMedia media) {
-  final client = accounts.clientFor(media.serverId);
-  if (client == null) {
+/// What hosting a picked Jellyfin item sends: its ref (no URL, no token).
+/// Throws [FormatException] with a user-facing message when the server is
+/// not linked any more or its sign-in expired.
+HelloMedia hostJellyfinMedia(JellyfinAccounts accounts, JellyfinMedia media) {
+  if (accounts.account(media.serverId) == null) {
     throw const FormatException('that Jellyfin server is not linked any more — pick again');
   }
   if (accounts.statusOf(media.serverId) == JellyfinAccountStatus.expired) {
     throw const FormatException('Jellyfin sign-in expired — reconnect it in Integrations');
   }
-  return client.streamUrl(media.itemId, mediaSourceId: media.mediaSourceId).toString();
+  return mediaForPick(media);
 }
 
 /// Below this width the server column moves under the media picker.
@@ -79,10 +78,10 @@ class HostTab extends StatelessWidget {
   void _host() {
     if (flow.busy != null) return;
     final media = fields.media.selection;
-    String? link;
+    HelloMedia? jellyfinMedia;
     if (media is JellyfinMedia) {
       try {
-        link = interimJellyfinLink(fields.jellyfin, media);
+        jellyfinMedia = hostJellyfinMedia(fields.jellyfin, media);
       } on FormatException catch (e) {
         flow.showError(ConnectMode.host, CardError('Check the form', e.message));
         return;
@@ -96,7 +95,7 @@ class HostTab extends StatelessWidget {
         ..hostSecret = fields.secret.text
         ..mediaPath = media is FileMedia ? media.path : ''
         ..linkUrl = media is LinkMedia ? media.url : '',
-      linkOverride: link,
+      media: jellyfinMedia,
     );
   }
 

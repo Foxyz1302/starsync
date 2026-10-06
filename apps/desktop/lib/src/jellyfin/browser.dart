@@ -36,7 +36,11 @@ class JellyfinBrowser extends StatefulWidget {
   final bool expanded;
   final VoidCallback? onOpenIntegrations;
   final Duration searchDebounce;
+  /// Opens here instead of the remembered location (the series of the
+  /// episode playing, in the session's swap panel).
+  final BrowseStart? start;
   const JellyfinBrowser({
+    this.start,
     super.key,
     required this.accounts,
     required this.onPick,
@@ -67,10 +71,30 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
   @override
   void initState() {
     super.initState();
-    _serverId = widget.selected != null && _accounts.account(widget.selected!.serverId) != null
-        ? widget.selected!.serverId
-        : _accounts.defaultServerId;
+    final start = widget.start;
+    if (start != null && _accounts.account(start.serverId) != null) {
+      _serverId = start.serverId;
+      _stack = start.stack.isEmpty ? const [HomeRoute()] : start.stack;
+      _remember();
+    } else {
+      _serverId = widget.selected != null && _accounts.account(widget.selected!.serverId) != null
+          ? widget.selected!.serverId
+          : _accounts.defaultServerId;
+      _stack = _restored(_serverId);
+    }
     _accounts.addListener(_changed);
+  }
+
+  /// The remembered location on [serverId], else Home.
+  List<BrowseRoute> _restored(String? serverId) =>
+      (serverId == null ? null : decodeBrowseStack(_accounts.browseLocation(serverId))) ??
+      const [HomeRoute()];
+
+  /// Every navigation is saved per server (Hive), so the next browser
+  /// (Host tab, swap panel, next start) opens where this one was.
+  void _remember() {
+    final id = _account?.serverId;
+    if (id != null) unawaited(_accounts.saveBrowseLocation(id, encodeBrowseStack(_stack)));
   }
 
   @override
@@ -104,7 +128,7 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
     if (serverId == _account?.serverId) return;
     setState(() {
       _serverId = serverId;
-      _stack = const [HomeRoute()];
+      _stack = _restored(serverId);
       _peek.value = null;
       _clearSearch();
     });
@@ -117,12 +141,14 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
       _clearSearch();
       if (_stack.last.key != route.key) _stack = [..._stack, route];
     });
+    _remember();
     _body.requestFocus();
   }
 
   bool _back() {
     if (_stack.length <= 1) return false;
     setState(() => _stack = _stack.sublist(0, _stack.length - 1));
+    _remember();
     _body.requestFocus();
     return true;
   }
@@ -132,6 +158,7 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
       _clearSearch();
       _stack = _stack.sublist(0, index + 1);
     });
+    _remember();
     _body.requestFocus();
   }
 

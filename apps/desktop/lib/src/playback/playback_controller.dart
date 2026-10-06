@@ -5,6 +5,9 @@ import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:sync_relay_core/core.dart' show JellyfinStreamType;
+
+import '../jellyfin/track_prefs.dart' show MpvTrack;
 
 import '../shaders/shader_assets.dart';
 import '../shaders/shader_presets.dart';
@@ -356,13 +359,86 @@ class PlaybackController {
     }
   }
 
-  Future<void> openUrl(String url) async {
+  /// Opens [url] paused. [headers] go with every request for it (mpv
+  /// `http-header-fields`): a Jellyfin token travels there, not in the URL.
+  Future<void> openUrl(String url, {Map<String, String>? headers}) async {
     if (!_ready) return;
     try {
-      await player.open(Media(url), play: false);
+      // An empty map, not null: media_kit caches headers per URI.
+      await player.open(Media(url, httpHeaders: headers ?? const {}), play: false);
     } catch (e, st) {
-      debugPrint('open $url failed: $e\n$st');
+      debugPrint('open ${Uri.tryParse(url)?.replace(query: '') ?? 'media'} failed: $e\n$st');
       rethrow;
+    }
+  }
+
+  /// The audio / subtitle tracks of the open file (mpv's track-list).
+  List<MpvTrack> get tracks {
+    final p = _player;
+    if (p == null) return const [];
+    MpvTrack? of(dynamic t, JellyfinStreamType type) {
+      final id = int.tryParse('${t.id}');
+      if (id == null) return null;
+      return MpvTrack(
+        id: id,
+        type: type,
+        language: t.language as String?,
+        title: t.title as String?,
+        codec: t.codec as String?,
+        channels: (t.channelscount ?? t.audiochannels) as int?,
+        isDefault: t.isDefault == true,
+      );
+    }
+
+    return [
+      for (final t in p.state.tracks.audio) ?of(t, JellyfinStreamType.audio),
+      for (final t in p.state.tracks.subtitle) ?of(t, JellyfinStreamType.subtitle),
+    ];
+  }
+
+  /// Waits (bounded) until the open file's tracks are listed and mpv has
+  /// selected its audio track, so a report or a carried-over choice sees
+  /// the real selection.
+  Future<List<MpvTrack>> waitForTracks({Duration timeout = const Duration(seconds: 5)}) async {
+    final end = DateTime.now().add(timeout);
+    while (_player != null && DateTime.now().isBefore(end)) {
+      final t = tracks;
+      final hasAudio = t.any((x) => x.type == JellyfinStreamType.audio);
+      if (t.isNotEmpty && (!hasAudio || (await currentTrackIds()).aid != null)) return t;
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    return tracks;
+  }
+
+  /// mpv's selected audio and subtitle track ids (null = none / off).
+  Future<({int? aid, int? sid})> currentTrackIds() async {
+    final p = _player;
+    if (p == null) return (aid: null, sid: null);
+    try {
+      final dynamic platform = p.platform;
+      final aid = int.tryParse('${await platform?.getProperty('current-tracks/audio/id')}');
+      final sid = int.tryParse('${await platform?.getProperty('current-tracks/sub/id')}');
+      return (aid: aid, sid: sid);
+    } catch (_) {
+      return (aid: null, sid: null);
+    }
+  }
+
+  /// Selects tracks by mpv id; a null [aid] keeps audio, [subtitlesOff]
+  /// turns subtitles off, else a null [sid] keeps them.
+  Future<void> selectTracks({int? aid, int? sid, bool subtitlesOff = false}) async {
+    final p = _player;
+    if (p == null) return;
+    try {
+      final dynamic platform = p.platform;
+      if (aid != null) await platform?.setProperty('aid', '$aid');
+      if (subtitlesOff) {
+        await platform?.setProperty('sid', 'no');
+      } else if (sid != null) {
+        await platform?.setProperty('sid', '$sid');
+      }
+    } catch (e) {
+      debugPrint('select tracks failed: $e');
     }
   }
 

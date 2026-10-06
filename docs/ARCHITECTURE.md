@@ -26,7 +26,10 @@ an `AppConfig.toMap()` (primitives only, so it crosses isolates). It starts a
 `SyncServer` (bound to all IPv4 interfaces) and reports on the `events` port:
 `ready` (with the port and a `stop` SendPort), `error` (start failed), and
 every log record as `log`. Sending `{'t':'stop'}` to the `stop` port closes
-all sockets and returns, and the isolate exits.
+all sockets and returns, and the isolate exits. `{'t':'file', 'path', 'reply'}`
+on the same port makes a local file the hosted one and answers its name and
+size (`ServerIsolate.setFile`): the host's in-session File swap then sends a
+`swap` with that name and size, which the server matches to the file.
 
 - **Hosting from the app**: `SessionState.host()` spawns an isolate running
   `serve` (`ServerIsolate`), waits for `ready`, then joins it over
@@ -96,7 +99,10 @@ Loosely modeled on Syncplay, with a different readiness design.
   position, bumps `eventId` and records who sent it (`seekBy`, `seekSeq` in
   `state` for that event); flags are untouched. Clients diff each `state`
   broadcast by `eventId` (`StateDiff`): new event means seek to the computed
-  server position, transport change means play/pause. Between events: drift
+  server position, transport change means play/pause. The coordinator
+  applies states one at a time, newest first (a state arriving meanwhile
+  replaces any still waiting): interleaved applies could land an older
+  pause after a newer play. Between events: drift
   over 5 s for more than 2 s seeks, ahead by more than 1.5 s sets rate 0.95
   until level, otherwise nothing.
 - **User seeks**: the player is a `SyncPlayer` whose public `seek` is the
@@ -141,7 +147,10 @@ Three sources, same sync.
 
 - **Link**: the media field holds an http(s) URL. It travels as `media.url`
   in `swap` and `state`, and as `mediaUrl` in `welcome`. Each app plays it
-  directly; the server is only the clock.
+  directly; the server is only the clock. A pasted link that
+  `parseJellyfinLink` recognises goes up as a Jellyfin ref instead when the
+  ServerId is known (in the link, else `/System/Info/Public`), so its
+  `api_key` is never shared (`mediaForLink`, host and swap alike).
 - **Host local file**: `SyncServer.setLocalFile` / `mediaPath` makes the file
   the session media. `GET /m/<sid>/<token>/<name>` serves it with a Range
   table, gated by the viewer's token. The server builds the URL per viewer
@@ -319,6 +328,66 @@ errors leave it out).
   subscription does).
 - No progress reporting in the server: watched state is per client.
 
+## Jellyfin in a session
+
+Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
+`track_prefs.dart`, wired in `SessionCoordinator`):
+- **Resolve**: a `state` whose media is a ref is resolved per viewer
+  (`resolveJellyfinRef`): an account for that ServerId that is not expired
+  -> PlaybackInfo with its own user (PlaySessionId, media source; `/Items/{id}`
+  alongside for series and episode numbers), then mpv plays the static
+  stream with the token in `http-header-fields` (`Authorization:
+  MediaBrowser` with this install's fields), not in the URL: `OwnPlay`,
+  `report.jf {serverId: true}`. Else, when `state.relay`, `welcome.relayUrl`
+  or `/j/default/<token>/<itemId>` on the dialled host: `RelayPlay`,
+  `jf: false`. Else `BlockedPlay`: the session shows "This needs a
+  Jellyfin account on <server> (or the host can relay)" with a button that
+  opens Integrations over the session; linking (or reconnecting) the
+  account retries by itself. A 401 marks the account expired. The member
+  list shows "via host" for members whose `jf` is false for the current
+  item. A reconnect to the same item with `OwnPlay` keeps playing as is.
+- **Progress** (`JellyfinProgressReporter`, `OwnPlay` only): Playing once the
+  file is open and mpv has picked its tracks; Progress every 10 s and at
+  once on pause, resume, a seek (position more than 3 s from where playback
+  should be) or a track change; Stopped on swap, leave, kick, window close
+  (bounded to 1.5 s inside the graceful leave) and at `finished` (position =
+  duration, so Jellyfin marks it played); seeking back from the end sends
+  Playing again. Reports carry `PositionTicks`, `IsPaused` and mpv's
+  `aid`/`sid` as Jellyfin stream indices (`jellyfinIndexForMpvTrack`,
+  `SubtitleStreamIndex -1` = off). They go out in order on one chain;
+  failures are logged, one quiet toast per session, playback is never
+  touched; a 401 marks the account expired and ends reporting.
+- **Episodes**: with `OwnPlay` on an episode, `adjacentEpisodes` (one
+  `/Shows/{id}/Episodes` call; `episodeBefore` / `episodeAfter`) gives the
+  previous and next episode. The controls show previous / next buttons
+  (also `<` `>`, Shift+P / Shift+N); from `nextPromptStart` (last 2 min of
+  the runtime; the single place to switch to an outro segment later) a
+  floating "Next episode" pill shows outside the auto-hiding controls. Any
+  of them swaps to that episode's ref with the clicker's account. Guests
+  (relay, blocked) see none of it.
+- **Auto-advance** (Settings, on by default): at `finished` with a known
+  next episode, every client with the setting on shows a 10 s countdown
+  card (Cancel / Play now; without the setting, a "Next" card with Play
+  next). Exactly one client swaps: `autoAdvanceSwapper`, the lowest member
+  id among non-stale members whose `jf` for that server is true. Only what
+  every client sees in `state` decides it (who put the item up is not in
+  `state`; a late joiner never saw that swap), so clients agree without a
+  wire change. Cancel is local: it stops the countdown on that screen, and
+  the swapper's Cancel stops the swap; a seek by anyone ends `finished`
+  and with it every countdown.
+- **Tracks**: the controls' subtitles button lists mpv's audio and subtitle
+  tracks. A pick is applied, reported, and saved as a `TrackChoice`
+  (language, title, codec, channels, forced/HI: from the Jellyfin streams
+  with `OwnPlay`, else from mpv's track list) per series and as the global
+  fallback in the `track_prefs` Hive box. On the next Jellyfin item it is
+  matched with `matchTrack` against the source's streams (mapped to mpv ids
+  with `mpvTrackId`) or mpv's track list, and selected locally. Nothing goes
+  on the wire.
+- **Swap panel**: "Change video" in the side panel opens the shared
+  `MediaPicker` over the video (`screens/session/swap_panel.dart`); Link
+  goes through `mediaForLink`, a Jellyfin pick as a ref, File (host only)
+  through `ServerIsolate.setFile` and a matching `swap`.
+
 ## Desktop UI
 
 One `HomeScreen` (`screens/home/`) with a single top bar (`top_bar.dart`):
@@ -339,7 +408,7 @@ Jellyfin source the browser fills the height and can be enlarged, which
 turns the column into a one-row bar under it. Text fields have fixed or capped widths (720 px max) so
 they stay compact on ultrawide screens. Submit state (busy, cancel,
 per-tab errors, server crash) is `ConnectFlow`. Settings (profile, hardware
-decoding, updates, video shaders, shortcuts), Integrations
+decoding, Jellyfin auto-advance, updates, video shaders, shortcuts), Integrations
 (linked Jellyfin servers) and About open in the same body. Settings persist
 in two Hive boxes: `connect_form` (last form and recents; saved even when a
 join fails) and `settings`. Link media names are derived from the URL path
@@ -369,11 +438,17 @@ Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
   hover/focus from 1400 px browser width.
 - Picking an item gives a `JellyfinMedia` (serverId, baseUrl, itemId,
   mediaSourceId?, title, subtitle, runtime; no credentials). The Host tab
-  remembers the last pick in the `jellyfin` box. Interim until the protocol
-  carries Jellyfin items: `interimJellyfinLink` in `host_tab.dart`
-  (`INTERIM(jellyfin-protocol)`) hosts it as a link to the host's
-  authorised static stream URL; `ConnectFlow.submit(linkOverride:)` keeps
-  that token-bearing URL out of the saved form.
+  remembers the last pick in the `jellyfin` box and hosts it as a ref
+  (`hostJellyfinMedia`, `ConnectFlow.submit(media:)`); the hosted server
+  gets the relay credential (`relayCredentialFor`: the account of the
+  item's server, else the default one, not expired; its token with
+  exactly `JellyfinAccounts.clientInfo`'s device fields).
+- Browser location: every navigation saves the route stack per server
+  (`browse:<serverId>` in the `jellyfin` box, `encodeBrowseStack`: ids,
+  names and the fields pages start from), so the Host tab, the swap panel
+  and the next start open where the browser was. A `BrowseStart` overrides
+  it: the swap panel opens on the series of the episode playing, its
+  season selected and the episode highlighted.
 
 Window chrome is frameless (`window_manager`): every screen brings its own
 drag area and min/max/close buttons (Home's top bar; the session uses

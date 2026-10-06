@@ -4,8 +4,14 @@ import 'package:flutter/widgets.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
+import '../jellyfin/accounts.dart';
+import '../jellyfin/progress.dart';
+import '../jellyfin/session_media.dart';
+import '../jellyfin/track_prefs.dart';
 import '../playback/playback_controller.dart';
+import '../screens/home/picked_media.dart';
 import '../sfx/sfx.dart';
+import '../state/settings.dart';
 import '../sync/state_diff.dart';
 import '../sync/sync_client.dart';
 import '../sync/user_seek.dart';
@@ -21,19 +27,7 @@ class ConnectCancelled implements Exception {
 
 /// Display name for a link: last path segment, decoded, never the query
 /// (Jellyfin-style links carry api_key there and names are broadcast).
-String linkDisplayName(String url) {
-  final uri = Uri.tryParse(url.trim());
-  if (uri == null) return 'link';
-  final segs = uri.pathSegments.where((s) => s.isNotEmpty).toList();
-  if (segs.isNotEmpty) {
-    try {
-      return Uri.decodeComponent(segs.last);
-    } catch (_) {
-      return segs.last;
-    }
-  }
-  return uri.host.isNotEmpty ? uri.host : 'link';
-}
+String linkDisplayName(String url) => linkName(url);
 
 class ConnectParams {
   final String host;
@@ -45,6 +39,9 @@ class ConnectParams {
   final String linkUrl;
   /// Sent in hello by the hosting app's own client (see AppConfig.hostKey).
   final String hostKey;
+  /// Put up with a `swap` right after joining (a Jellyfin ref or a link);
+  /// wins over [linkUrl].
+  final HelloMedia? media;
   const ConnectParams({
     required this.host,
     required this.port,
@@ -54,8 +51,36 @@ class ConnectParams {
     this.mediaPath = '',
     this.linkUrl = '',
     this.hostKey = '',
+    this.media,
   });
+
+  ConnectParams withMedia(HelloMedia? media) => ConnectParams(
+        host: host,
+        port: port,
+        secret: secret,
+        name: name,
+        avatar: avatar,
+        mediaPath: mediaPath,
+        linkUrl: media == null ? linkUrl : '',
+        hostKey: hostKey,
+        media: media,
+      );
 }
+
+/// The end-of-episode countdown (auto-advance). Every client with the
+/// setting on shows it; only [swapper] puts the next episode up.
+class AutoAdvance {
+  final int mediaId;
+  final int secondsLeft;
+  final EpisodeLink next;
+  /// This client performs the swap (see [autoAdvanceSwapper]).
+  final bool swapper;
+  const AutoAdvance(
+      {required this.mediaId, required this.secondsLeft, required this.next, required this.swapper});
+}
+
+/// Seconds of the end-of-episode countdown.
+const autoAdvanceSecs = 10;
 
 class ToastItem {
   final int id;
@@ -76,6 +101,13 @@ String? stateMediaUrl(StateBroadcast state) {
 
 class SessionCoordinator {
   final SfxService sfx;
+  /// Linked Jellyfin servers: how this viewer plays Jellyfin refs.
+  final JellyfinAccounts jellyfin;
+  /// Audio/subtitle carry-over between Jellyfin items.
+  final TrackPrefs trackPrefs;
+  /// Set by the hosting app: makes a local file the hosted one (File swap);
+  /// null when this app is not the host.
+  Future<({String name, int size})?> Function(String path)? hostFile;
   final SyncClient sync = SyncClient();
   final PlaybackController playback = PlaybackController();
   final StateDiff diff = StateDiff();
@@ -88,6 +120,21 @@ class SessionCoordinator {
   final reconnecting = signal(false);
   final kickReason = signal<String?>(null);
   final starving = signal<String?>(null);
+
+  /// The current media's Jellyfin ref (null for links and files).
+  final currentRef = signal<JellyfinRef?>(null);
+  /// How this viewer plays [currentRef]; null while resolving.
+  final jellyfinPlan = signal<JellyfinPlan?>(null);
+  /// Set when this viewer cannot play the Jellyfin media: no account and
+  /// no relay. The session shows it with a way to link an account.
+  final jellyfinBlocked = signal<BlockedPlay?>(null);
+  /// Neighbouring episodes this viewer can put up (own account only).
+  final previousEpisode = signal<EpisodeLink?>(null);
+  final nextEpisode = signal<EpisodeLink?>(null);
+  /// The floating "Next episode" pill near the end of an episode.
+  final nextPromptVisible = signal(false);
+  /// End-of-episode countdown; null when none runs here.
+  final autoAdvance = signal<AutoAdvance?>(null);
 
   late final Computed<MemberView?> selfMember = computed(() {
     final r = serverState.value;
@@ -139,8 +186,25 @@ class SessionCoordinator {
   int _toastId = 0;
   ConnectParams? _params;
   bool _everConnected = false;
+  Map<String, String>? _openHeaders;
 
-  SessionCoordinator({this.sfx = const NoopSfxService()});
+  // Jellyfin: the resolved ref, the mediaId it belongs to, a generation
+  // that stale resolutions check, and the progress reporter.
+  JellyfinRef? _jfRef;
+  int _jfMediaId = -1;
+  int _jfGen = 0;
+  JellyfinProgressReporter? _reporter;
+  PlayerSnapshot? _lastSnap;
+  bool _jfToastShown = false;
+  Timer? _advanceTimer;
+  int _advanceDoneFor = -1;
+  String _blockedKey = '';
+  bool _jellyfinListening = false;
+
+  SessionCoordinator(
+      {this.sfx = const NoopSfxService(), JellyfinAccounts? jellyfin, TrackPrefs? trackPrefs})
+      : jellyfin = jellyfin ?? JellyfinAccounts.instance,
+        trackPrefs = trackPrefs ?? TrackPrefs();
 
   /// Player lifetime = one session: created here on connect, disposed by
   /// [leave]. Never reused across sessions (a GPU-side video freeze sticks
@@ -175,9 +239,10 @@ class SessionCoordinator {
     try {
       await playback.recreate();
       final url = _openUrl;
+      final headers = _openHeaders;
       _openUrl = null;
       _clearPendingSeek();
-      if (url != null) await _openMedia(url);
+      if (url != null) await _openMedia(url, headers: headers);
     } catch (e, st) {
       debugPrint('video reload failed: $e\n$st');
       health.value =
@@ -221,6 +286,12 @@ class SessionCoordinator {
     _seekGate.reset();
     _clearPendingSeek();
     _lastEventId = -1;
+    _resetJellyfin();
+    _jfToastShown = false;
+    if (!_jellyfinListening) {
+      _jellyfinListening = true;
+      jellyfin.addListener(_onAccountsChanged);
+    }
     markInput();
     _subscribe();
     feedLog.value = [];
@@ -252,13 +323,10 @@ class SessionCoordinator {
         health.value = const HealthStatus(
             HealthSeverity.info, 'connected — waiting for host media…');
       }
-      if (params.linkUrl.isNotEmpty) {
-        sync.sendSwap(HelloMedia(
-            name: linkDisplayName(params.linkUrl),
-            size: 0,
-            duration: 0,
-            url: params.linkUrl));
-      }
+      final media = params.media ??
+          (params.linkUrl.isEmpty ? null : await mediaForLink(jellyfin, params.linkUrl));
+      if (epoch != _epoch) throw const ConnectCancelled();
+      if (media != null) sync.sendSwap(media);
       _startTicker();
     } catch (e) {
       if (epoch != _epoch) throw const ConnectCancelled();
@@ -286,19 +354,23 @@ class SessionCoordinator {
     });
   }
 
-  Future<void> _openMedia(String url) async {
-    if (url == _openUrl) return;
+  /// Opens [url] (with [headers] on every request); false on failure.
+  Future<bool> _openMedia(String url, {Map<String, String>? headers}) async {
+    if (url == _openUrl) return true;
     _openUrl = url;
+    _openHeaders = headers;
     diff.reset();
     _opening = true;
     try {
-      await playback.openUrl(url);
+      await playback.openUrl(url, headers: headers);
       health.value =
           const HealthStatus(HealthSeverity.ok, 'connected');
+      return true;
     } catch (e) {
       debugPrint('open media failed: $e');
       health.value =
           HealthStatus(HealthSeverity.error, 'cannot open media: $e');
+      return false;
     } finally {
       _opening = false;
     }
@@ -308,28 +380,73 @@ class SessionCoordinator {
     return 'http://$_wsHost:$_wsPort/m/default/${sync.token}/${Uri.encodeComponent(name)}';
   }
 
-  Future<void> _onState(StateBroadcast r) async {
+  StateBroadcast? _queuedState;
+  bool _applying = false;
+
+  /// States are applied one at a time, newest first: two applies running
+  /// interleaved could land an older pause after a newer play (seen with
+  /// three viewers readying at once). A state that arrives meanwhile
+  /// replaces any still waiting.
+  void _onState(StateBroadcast r) {
     _lastStateAt = DateTime.now().toUtc();
     serverState.value = r;
+    _queuedState = r;
+    if (_applying) return;
+    _applying = true;
+    () async {
+      try {
+        while (_queuedState != null) {
+          final next = _queuedState!;
+          _queuedState = null;
+          try {
+            await _applyState(next);
+          } catch (e, st) {
+            debugPrint('apply state failed: $e\n$st');
+          }
+        }
+      } finally {
+        _applying = false;
+      }
+    }();
+  }
+
+  Future<void> _applyState(StateBroadcast r) async {
     _trackSelfReady(r);
     _seekGate.observe(r, sync.memberId);
     final newEvent = r.eventId != _lastEventId;
     _lastEventId = r.eventId;
     if (r.mediaId != _mediaId) {
       _mediaId = r.mediaId;
-      var url = stateMediaUrl(r);
-      if ((url == null || url.isEmpty) && sync.token.isNotEmpty) {
-        final name = (r.media?['name'] as String?) ?? '';
-        if (name.isNotEmpty) url = _fileUrlFor(name);
-      }
-      if (url != null && url.isNotEmpty) {
-        await _openMedia(url);
-      } else {
-        _openUrl = null;
+      final ref = refOfStateMedia(r.media);
+      // Back after a dropped connection on the same item played with our
+      // own account: nothing to resolve or reopen.
+      final same = ref != null &&
+          r.mediaId == _jfMediaId &&
+          sameJellyfinItem(ref, _jfRef) &&
+          jellyfinPlan.peek() is OwnPlay;
+      if (!same) {
+        _seekGate.reset();
+        _clearPendingSeek();
+        _leaveJellyfinItem();
+        if (ref != null) {
+          await _playJellyfin(ref, r);
+        } else {
+          var url = stateMediaUrl(r);
+          if ((url == null || url.isEmpty) && sync.token.isNotEmpty) {
+            final name = (r.media?['name'] as String?) ?? '';
+            if (name.isNotEmpty) url = _fileUrlFor(name);
+          }
+          if (url != null && url.isNotEmpty) {
+            await _openMedia(url);
+          } else {
+            _openUrl = null;
+          }
+        }
       }
       _seekGate.reset();
       _clearPendingSeek();
     }
+    _jellyfinTransport(r);
     if (!_playerReady || _openUrl == null) {
       _wasPlayAllowed = false;
       _updateStarving(r, 0);
@@ -475,6 +592,7 @@ class SessionCoordinator {
     // Stop, not pause: a paused player keeps filling its cache from the
     // host's media URL.
     _openUrl = null;
+    await _stopJellyfin();
     try {
       await playback.stop();
     } catch (_) {}
@@ -504,8 +622,10 @@ class SessionCoordinator {
         eventId: r.eventId,
         duration: known ? playback.durationSecs : 0,
         mediaId: known ? r.mediaId : 0,
+        jf: _jfAccessFor(r),
       );
       _checkSeekLanded(r);
+      unawaited(_tickJellyfin(r));
     }
     if (!_manualClose &&
         kickReason.peek() == null &&
@@ -661,10 +781,362 @@ class SessionCoordinator {
     sync.sendKick(memberId, reason: reason);
   }
 
+  /// A pasted link: a recognised Jellyfin item link goes up as a ref
+  /// (see [mediaForLink]), anything else as the link.
   Future<void> swapLink(String url) async {
     markInput();
-    sync.sendSwap(HelloMedia(
-        name: linkDisplayName(url), size: 0, duration: 0, url: url));
+    sync.sendSwap(await mediaForLink(jellyfin, url));
+  }
+
+  /// A Jellyfin pick (browser, next / previous episode) goes up as a ref.
+  void swapJellyfin(JellyfinMedia media) {
+    markInput();
+    sync.sendSwap(mediaForPick(media));
+  }
+
+  /// The host's File swap: the server takes the file, then the swap puts
+  /// it up. Returns an error text, or null when sent.
+  Future<String?> swapFile(String path) async {
+    markInput();
+    final host = hostFile;
+    if (host == null) return 'only the host can share a file';
+    final file = await host(path);
+    if (file == null) return 'file not found — check the path';
+    sync.sendSwap(HelloMedia(name: file.name, size: file.size, duration: 0));
+    return null;
+  }
+
+  /// Any picker selection.
+  Future<String?> swapPicked(PickedMedia media) async {
+    switch (media) {
+      case LinkMedia(:final url):
+        await swapLink(url);
+      case JellyfinMedia():
+        swapJellyfin(media);
+      case FileMedia(:final path):
+        return swapFile(path);
+    }
+    return null;
+  }
+
+  void playNextEpisode() {
+    final n = nextEpisode.peek();
+    if (n != null) swapJellyfin(n.pick);
+  }
+
+  void playPreviousEpisode() {
+    final p = previousEpisode.peek();
+    if (p != null) swapJellyfin(p.pick);
+  }
+
+  /// Hides the countdown here; this client will not auto-advance this
+  /// item (if it is the swapper, nobody does).
+  void cancelAutoAdvance() {
+    _advanceTimer?.cancel();
+    _advanceTimer = null;
+    final a = autoAdvance.peek();
+    if (a != null) _advanceDoneFor = a.mediaId;
+    autoAdvance.value = null;
+  }
+
+  // ------------------------------------------------------------- jellyfin
+
+  void _pushToast(String text) {
+    _toastId++;
+    toasts.value = [
+      ...toasts.peek(),
+      ToastItem(id: _toastId, text: text, at: DateTime.now().toUtc())
+    ];
+  }
+
+  void _resetJellyfin() {
+    _jfGen++;
+    _jfRef = null;
+    _jfMediaId = -1;
+    _reporter = null;
+    _lastSnap = null;
+    _openHeaders = null;
+    _blockedKey = '';
+    currentRef.value = null;
+    jellyfinPlan.value = null;
+    jellyfinBlocked.value = null;
+    previousEpisode.value = null;
+    nextEpisode.value = null;
+    nextPromptVisible.value = false;
+    _advanceTimer?.cancel();
+    _advanceTimer = null;
+    _advanceDoneFor = -1;
+    autoAdvance.value = null;
+  }
+
+  /// The current item is being replaced: Stopped goes out (not awaited:
+  /// reports are sent in order), per-item state clears.
+  void _leaveJellyfinItem() {
+    final reporter = _reporter;
+    final snap = _snapNow();
+    _resetJellyfin();
+    if (reporter != null && snap != null) unawaited(reporter.stop(snap));
+  }
+
+  /// Leave / kick / window close: Stopped, bounded so leaving never hangs.
+  Future<void> _stopJellyfin() async {
+    final reporter = _reporter;
+    final snap = _snapNow();
+    _resetJellyfin();
+    if (reporter == null || snap == null) return;
+    try {
+      await reporter.stop(snap).timeout(const Duration(milliseconds: 1500));
+    } catch (_) {}
+  }
+
+  /// The last sampled tracks with the position as of now.
+  PlayerSnapshot? _snapNow() {
+    if (!_playerReady) return _lastSnap;
+    final last = _lastSnap;
+    return PlayerSnapshot(
+      position: playback.positionSecs,
+      paused: !playback.player.state.playing,
+      aid: last?.aid,
+      sid: last?.sid,
+    );
+  }
+
+  Future<PlayerSnapshot?> _snapshot() async {
+    if (!_playerReady) return null;
+    final ids = await playback.currentTrackIds();
+    if (!_playerReady) return null;
+    return _lastSnap = PlayerSnapshot(
+      position: playback.positionSecs,
+      paused: !playback.player.state.playing,
+      aid: ids.aid,
+      sid: ids.sid,
+    );
+  }
+
+  String? _relayUrlFor(JellyfinRef ref) {
+    if (sync.token.isEmpty) return null;
+    final welcome = sync.relayUrl;
+    if (welcome != null &&
+        welcome.contains('/${sync.token}/') &&
+        welcome.endsWith('/${Uri.encodeComponent(ref.itemId)}')) {
+      return welcome;
+    }
+    return relayUrlFor(_wsHost, _wsPort, sync.token, ref.itemId);
+  }
+
+  Map<String, bool>? _jfAccessFor(StateBroadcast r) {
+    final ref = _jfRef;
+    final access = jellyfinPlan.peek()?.jfAccess;
+    if (ref == null || access == null || r.mediaId != _jfMediaId) return null;
+    return {ref.serverId: access};
+  }
+
+  /// Resolves [ref] for this viewer and opens it: own account (direct
+  /// play, progress reports, neighbouring episodes), the relay, or the
+  /// blocked state. Then carries the audio/subtitle choice over.
+  Future<void> _playJellyfin(JellyfinRef ref, StateBroadcast r) async {
+    final gen = ++_jfGen;
+    _jfRef = ref;
+    _jfMediaId = r.mediaId;
+    currentRef.value = ref;
+    // Until it resolves nothing is open: no syncing the previous media.
+    final prevUrl = _openUrl;
+    _openUrl = null;
+    _opening = true;
+    if (_playerReady) {
+      try {
+        await playback.player.pause();
+      } catch (_) {}
+    }
+    final JellyfinPlan plan;
+    try {
+      plan = await resolveJellyfinRef(jellyfin, ref, relay: r.relay, relayUrl: _relayUrlFor(ref));
+    } finally {
+      if (gen == _jfGen) _opening = false;
+    }
+    if (gen != _jfGen) return;
+    jellyfinPlan.value = plan;
+    switch (plan) {
+      case BlockedPlay():
+        jellyfinBlocked.value = plan;
+        _blockedKey = _accountKey(ref.serverId);
+        try {
+          await playback.stop();
+        } catch (_) {}
+        return;
+      case RelayPlay(:final url):
+        jellyfinBlocked.value = null;
+        // Same relay URL (resumed member): the player still has it.
+        if (url == prevUrl) {
+          _openUrl = url;
+          return;
+        }
+        if (!await _openMedia(url) || gen != _jfGen) return;
+      case OwnPlay(:final url, :final headers):
+        jellyfinBlocked.value = null;
+        if (!await _openMedia(url, headers: headers) || gen != _jfGen) return;
+        final reporter = JellyfinProgressReporter(
+          client: plan.client,
+          itemId: ref.itemId,
+          source: plan.source,
+          playSessionId: plan.info.playSessionId,
+          onUnauthorized: () => jellyfin.markExpired(ref.serverId),
+          onError: (e) {
+            if (_jfToastShown) return;
+            _jfToastShown = true;
+            _pushToast('Jellyfin progress not saved: ${e is JellyfinException && e.isUnauthorized ? 'sign-in expired' : 'server unreachable'}');
+          },
+        );
+        unawaited(_findEpisodes(plan, gen));
+        // Playing carries the tracks: wait (bounded) until the file is in.
+        await playback.waitForTracks();
+        if (gen != _jfGen) return;
+        final snap = await _snapshot();
+        if (gen != _jfGen || snap == null) return;
+        // Installed once started: the per-state restart (after the end)
+        // must not send the first Playing without the tracks.
+        _reporter = reporter..start(snap);
+    }
+    await _applyTrackChoice(plan, gen);
+  }
+
+  Future<void> _findEpisodes(OwnPlay plan, int gen) async {
+    final around = await findAdjacentEpisodes(plan);
+    if (gen != _jfGen) return;
+    previousEpisode.value = around.previous;
+    nextEpisode.value = around.next;
+    final r = serverState.peek();
+    if (r != null) _jellyfinTransport(r);
+  }
+
+  Future<void> _applyTrackChoice(JellyfinPlan plan, int gen) async {
+    final own = plan is OwnPlay ? plan : null;
+    final choice = await trackPrefs.load(seriesId: own?.item?.seriesId);
+    if (choice == null || gen != _jfGen || !_playerReady) return;
+    final tracks = await playback.waitForTracks();
+    if (gen != _jfGen) return;
+    final pick = chooseTracks(choice, source: own?.source, tracks: tracks);
+    await playback.selectTracks(aid: pick.aid, sid: pick.sid, subtitlesOff: pick.subtitlesOff);
+  }
+
+  /// A track picked in the player: applied, remembered for the next
+  /// Jellyfin item (per series and overall), reported.
+  Future<void> selectTrack({int? aid, int? sid, bool subtitlesOff = false}) async {
+    markInput();
+    await playback.selectTracks(aid: aid, sid: sid, subtitlesOff: subtitlesOff);
+    final ids = await playback.currentTrackIds();
+    final plan = jellyfinPlan.peek();
+    final own = plan is OwnPlay ? plan : null;
+    await trackPrefs.save(
+        TrackChoice.of(aid: ids.aid, sid: ids.sid, source: own?.source, tracks: playback.tracks),
+        seriesId: own?.item?.seriesId);
+    final snap = await _snapshot();
+    if (snap != null) _reporter?.update(snap, force: true);
+  }
+
+  Future<void> _tickJellyfin(StateBroadcast r) async {
+    final reporter = _reporter;
+    if (_jfRef == null || r.mediaId != _jfMediaId) return;
+    final snap = await _snapshot();
+    if (snap == null) return;
+    if (reporter != null && identical(reporter, _reporter) && r.transport != 'finished') {
+      reporter.update(snap);
+    }
+    final next = nextEpisode.peek();
+    final duration = playback.durationSecs;
+    var show = false;
+    if (next != null && duration > 0 && autoAdvance.peek() == null && r.transport != 'finished') {
+      final item = (jellyfinPlan.peek() as OwnPlay?)?.item;
+      final at = nextPromptStart(item, Duration(milliseconds: (duration * 1000).round()));
+      show = snap.position * 1000 >= at.inMilliseconds;
+    }
+    nextPromptVisible.value = show;
+  }
+
+  /// Per state: played to the end -> Stopped (Jellyfin marks it watched)
+  /// and the auto-advance countdown; seeked back from the end -> Playing
+  /// again.
+  void _jellyfinTransport(StateBroadcast r) {
+    final ref = _jfRef;
+    if (ref == null || r.mediaId != _jfMediaId) return;
+    final reporter = _reporter;
+    final finished = r.transport == 'finished';
+    if (reporter != null && _openUrl != null && !_opening) {
+      final snap = _snapNow();
+      if (finished && reporter.active && snap != null) {
+        unawaited(reporter.stop(PlayerSnapshot(
+            position: r.position, paused: true, aid: snap.aid, sid: snap.sid)));
+      } else if (!finished && !reporter.active && snap != null) {
+        reporter.start(snap);
+      }
+    }
+    if (!finished) {
+      if (autoAdvance.peek() != null) cancelAutoAdvance();
+      _advanceDoneFor = -1;
+      return;
+    }
+    nextPromptVisible.value = false;
+    final next = nextEpisode.peek();
+    if (next == null ||
+        !AppSettings.instance.autoAdvance.peek() ||
+        _advanceDoneFor == r.mediaId ||
+        autoAdvance.peek()?.mediaId == r.mediaId) {
+      return;
+    }
+    autoAdvance.value = AutoAdvance(
+        mediaId: r.mediaId, secondsLeft: autoAdvanceSecs, next: next, swapper: _isSwapper(r, ref));
+    _advanceTimer?.cancel();
+    _advanceTimer = Timer.periodic(const Duration(seconds: 1), (_) => _advanceTick());
+  }
+
+  bool _isSwapper(StateBroadcast r, JellyfinRef ref) =>
+      autoAdvanceSwapper(r.members, ref.serverId) == sync.memberId;
+
+  void _advanceTick() {
+    final a = autoAdvance.peek();
+    final r = serverState.peek();
+    final ref = _jfRef;
+    if (a == null || r == null || ref == null || r.mediaId != a.mediaId || r.transport != 'finished') {
+      cancelAutoAdvance();
+      return;
+    }
+    final left = a.secondsLeft - 1;
+    if (left > 0) {
+      autoAdvance.value = AutoAdvance(
+          mediaId: a.mediaId, secondsLeft: left, next: a.next, swapper: _isSwapper(r, ref));
+      return;
+    }
+    // Decided on the latest state: one swapper among the clients counting.
+    final swap = _isSwapper(r, ref);
+    cancelAutoAdvance();
+    if (swap) swapJellyfin(a.next.pick);
+  }
+
+  String _accountKey(String serverId) =>
+      '${jellyfin.account(serverId)?.token}|${jellyfin.statusOf(serverId).name}';
+
+  /// A blocked viewer links (or reconnects) the account: try again.
+  void _onAccountsChanged() {
+    final blocked = jellyfinBlocked.peek();
+    if (blocked == null) return;
+    final key = _accountKey(blocked.serverId);
+    if (key == _blockedKey) return;
+    _blockedKey = key;
+    final status = jellyfin.statusOf(blocked.serverId);
+    if (jellyfin.account(blocked.serverId) == null ||
+        status == JellyfinAccountStatus.expired ||
+        status == JellyfinAccountStatus.checking) {
+      return;
+    }
+    retryJellyfin();
+  }
+
+  /// "Try again" on the blocked card (and after linking an account).
+  void retryJellyfin() {
+    final r = serverState.peek();
+    final ref = refOfStateMedia(r?.media);
+    if (r == null || ref == null) return;
+    unawaited(_playJellyfin(ref, r));
   }
 
   void _scheduleReconnect({bool manual = false}) {
@@ -790,6 +1262,7 @@ class SessionCoordinator {
     _seekTimer = null;
     _seekGate.reset();
     reconnecting.value = false;
+    await _stopJellyfin();
     _playerReady = false;
     try {
       await playback.dispose();
@@ -806,6 +1279,10 @@ class SessionCoordinator {
 
   Future<void> dispose() async {
     await leave(silent: true);
+    if (_jellyfinListening) {
+      _jellyfinListening = false;
+      jellyfin.removeListener(_onAccountsChanged);
+    }
     await _stateSub?.cancel();
     await _feedSub?.cancel();
     await _kickSub?.cancel();

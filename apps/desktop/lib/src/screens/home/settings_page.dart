@@ -17,6 +17,7 @@ const sessionShortcuts = [
   ('F', 'Toggle fullscreen'),
   ('Tab', 'Open / close the people & chat panel'),
   ('Ctrl+R', 'Reload the video'),
+  ('> or Shift+N', 'Put up the next Jellyfin episode'),
   ('Ctrl+1…6', 'Shaders: Anime4K mode A, B, C, A+A, B+B, C+A'),
   ('Ctrl+0', 'Shaders off'),
   ('Esc', 'Close panel or fullscreen, else ask to leave'),
@@ -34,6 +35,7 @@ class SettingsPage extends StatelessWidget {
         const PageTitle('Settings'),
         const _Section(title: 'Profile', child: ProfileEditor()),
         const _Section(title: 'Player', child: _HwdecSetting()),
+        const _Section(title: 'Jellyfin', child: _AutoAdvanceSetting()),
         _Section(title: 'Updates', child: _UpdateSettings(controller: updates)),
         const _Section(title: 'Keyboard shortcuts', child: _ShortcutList()),
         const _Section(title: 'Video quality & shaders', child: _ShaderSettings()),
@@ -286,6 +288,26 @@ class _UpdateSettings extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _AutoAdvanceSetting extends StatelessWidget {
+  const _AutoAdvanceSetting();
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppSettings.instance;
+    return SignalBuilder(
+      builder: (context) => SwitchListTile(
+        key: const ValueKey('auto-advance'),
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Play the next episode automatically'),
+        subtitle: const Text('When an episode ends, a 10 s countdown puts up the next one; '
+            'anyone can cancel it on their screen.'),
+        value: s.autoAdvance.value,
+        onChanged: s.setAutoAdvance,
+      ),
     );
   }
 }

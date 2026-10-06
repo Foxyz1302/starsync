@@ -24,8 +24,7 @@ off by deleting it in the same commit as the code. Wire changes also edit
      next suspect is media_kit's context switching on the raster thread
      with NVIDIA.
    - Link conveniences: a link swap in session updates the remembered media;
-     show the open link with an open-in-browser button; the session's swap
-     panel reuses Home's `MediaPicker`.
+     show the open link with an open-in-browser button.
    - Time UI: remaining time, scrubber preview.
    - mpv / mpv.net shortcut parity.
    - Sounds: replace `NoopSfxService` (cues already fire). Candidates:
@@ -38,32 +37,25 @@ off by deleting it in the same commit as the code. Wire changes also edit
    - Avatar caching: serve avatar bytes once by hash instead of base64 in
      every `state` broadcast.
    - The `state` broadcast carries the full media URL, which can include an
-     `api_key`.
+     `api_key` (recognised Jellyfin links become refs; other links do not).
    - TLS: document a reverse proxy in front of the server.
    - Playlist: `queue-add`, `queue-skip`, auto-advance like a swap.
    - Sidecar subtitles.
 
 ## Epic: Jellyfin
 
-- Each viewer logs in to Jellyfin themselves (Quick Connect or password).
-- Several Jellyfin servers can be linked, keyed by `ServerId`.
-- The sync server shares only `{ServerId, ItemId}`. Pasted Jellyfin links are
-  recognised and reduced to that pair.
-- Viewers with an account direct-play `/Videos/{id}/stream?static=true`
-  with their own token and report Playing / Progress / Stopped, so watched
-  state and Continue Watching update per account.
-- Guests without an account play through the sync server, which fetches with a
-  credential that stays server-side (the host's own or a configured one).
-- Next episode: the successor in `/Shows/{seriesId}/Episodes` (NextUp means
-  first unwatched, not next-after-X); audio and subtitle track matching by language, then title,
-  then codec/channels.
-- Library browser; anyone can put up items.
-
-Spike facts (Jellyfin 10.11.11): `/Videos/{id}/stream?static=true&mediaSourceId=`
-serves the original with byte ranges (206). PlaybackInfo gives `PlaySessionId`
-and DirectPlay. All audio and subtitle tracks are embedded in the mkv. Quick
-Connect is enabled but `/QuickConnect/Initiate` returned 400: investigate
-(likely missing client/device fields in the auth header).
+What is left (the rest is in [ARCHITECTURE.md](ARCHITECTURE.md), "Jellyfin
+in a session"):
+- Queue: put several library items (a season, a pick list) up as a
+  playlist that advances like a swap (shares `queue-add` / `queue-skip`
+  with the backlog's Playlist item).
+- The "Next episode" prompt from the item's Outro / credits segment instead
+  of the last two minutes (`nextPromptStart`).
+- Auto-advance cancel for everyone: today Cancel is per screen (the
+  designated swapper's Cancel stops the swap; a seek stops all). A shared
+  cancel needs a wire message.
+- Sidecar (external) subtitle streams of Jellyfin items: only embedded
+  tracks are mapped to mpv today.
 
 ## Deferred
 

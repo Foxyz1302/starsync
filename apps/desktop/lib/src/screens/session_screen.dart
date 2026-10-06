@@ -4,6 +4,8 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
+import '../jellyfin/browse_scope.dart' show BrowseStart;
+import '../jellyfin/session_media.dart';
 import '../session/health.dart';
 import '../session/session_coordinator.dart';
 import '../shaders/shader_menu.dart';
@@ -17,6 +19,10 @@ import '../widgets/shown_frame_probe.dart';
 import '../widgets/text_focus.dart';
 import '../widgets/window_buttons.dart';
 import '../widgets/window_drag_layer.dart';
+import 'home/integrations_page.dart';
+import 'home/media_picker.dart';
+import 'session/jellyfin_widgets.dart';
+import 'session/swap_panel.dart';
 
 class SessionScreen extends StatefulWidget {
   const SessionScreen({super.key});
@@ -38,7 +44,10 @@ class _SessionScreenState extends State<SessionScreen> {
   DateTime? _lastKeyAt;
   final _chat = TextEditingController();
   final _chatFocus = FocusNode();
-  final _swapLink = TextEditingController();
+  // "Change video": the shared media picker over the video.
+  final _swapOpen = signal(false);
+  MediaPickerController? _swapPicker;
+  bool _integrationsOpen = false;
   late final void Function() _stopKickWatch;
   late final void Function() _stopSheetWatch;
   late final void Function() _stopPlayerWatch;
@@ -54,6 +63,7 @@ class _SessionScreenState extends State<SessionScreen> {
     super.initState();
     final session = SessionState.instance;
     _noFocus = FocusNode(skipTraversal: true, canRequestFocus: false);
+    session.coordinator.jellyfin.ensureLoaded();
     session.coordinator.playback.shownFrame = _frameProbe.sample;
     HardwareKeyboard.instance.addHandler(_globalKey);
     _stopKickWatch = effect(() {
@@ -144,14 +154,70 @@ class _SessionScreenState extends State<SessionScreen> {
     _stopShaderWatch();
     _chat.dispose();
     _chatFocus.dispose();
-    _swapLink.dispose();
+    _swapPicker?.dispose();
     _noFocus.dispose();
     super.dispose();
+  }
+
+  /// Opens the swap panel: the browser starts on the series of the
+  /// episode playing (season selected, episode highlighted), else where it
+  /// was last.
+  void _openSwap() {
+    final coord = SessionState.instance.coordinator;
+    coord.markInput();
+    final ref = coord.currentRef.peek();
+    final accounts = coord.jellyfin;
+    final pick = ref == null ? null : pickForRef(accounts, ref);
+    final plan = coord.jellyfinPlan.peek();
+    _swapPicker?.dispose();
+    _swapPicker = MediaPickerController(
+      jellyfin: pick,
+      source: pick != null || (accounts.loaded && !accounts.isEmpty)
+          ? MediaKind.jellyfin
+          : MediaKind.link,
+    );
+    _swapStart = ref != null && plan is OwnPlay && plan.item != null
+        ? BrowseStart.seriesOf(ref.serverId, plan.item!)
+        : null;
+    _sheetOpen.value = false;
+    _swapOpen.value = true;
+  }
+
+  BrowseStart? _swapStart;
+
+  void _closeSwap() {
+    _swapOpen.value = false;
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
+  /// Integrations over the session (link an account for a blocked item).
+  Future<void> _openIntegrations() async {
+    if (_integrationsOpen) return;
+    _integrationsOpen = true;
+    try {
+      await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute<void>(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('Integrations')),
+          body: IntegrationsPage(jellyfin: SessionState.instance.coordinator.jellyfin),
+        ),
+      ));
+    } finally {
+      _integrationsOpen = false;
+    }
   }
 
   bool _globalKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
     if (SessionState.instance.route.peek() != AppRoute.session) return false;
+    if (_integrationsOpen) return false;
+    if (_swapOpen.peek()) {
+      // The picker owns the keyboard; Esc outside a field closes it.
+      if (event.logicalKey == LogicalKeyboardKey.escape && !textInputFocused()) {
+        _closeSwap();
+        return true;
+      }
+      return false;
+    }
     if (textInputFocused()) return false;
     final now = DateTime.now().toUtc();
     if (_lastKeyAt != null && now.difference(_lastKeyAt!).inMilliseconds < 350) {
@@ -175,6 +241,20 @@ class _SessionScreenState extends State<SessionScreen> {
     if (event.logicalKey == LogicalKeyboardKey.space) {
       _lastKeyAt = now;
       coord.toggleReady();
+      return true;
+    }
+    // mpv's playlist keys (< >) and Shift+P / Shift+N: Jellyfin episodes.
+    final shift = HardwareKeyboard.instance.isShiftPressed;
+    if (event.character == '>' || (shift && event.logicalKey == LogicalKeyboardKey.keyN)) {
+      if (coord.nextEpisode.peek() == null) return false;
+      _lastKeyAt = now;
+      coord.playNextEpisode();
+      return true;
+    }
+    if (event.character == '<' || (shift && event.logicalKey == LogicalKeyboardKey.keyP)) {
+      if (coord.previousEpisode.peek() == null) return false;
+      _lastKeyAt = now;
+      coord.playPreviousEpisode();
       return true;
     }
     if (event.logicalKey == LogicalKeyboardKey.tab) {
@@ -254,12 +334,35 @@ class _SessionScreenState extends State<SessionScreen> {
         ),
       ],
       bottomButtonBar: [
+        SignalBuilder(
+          builder: (context) => EpisodeSkipButton(
+            focusNode: _noFocus,
+            episode: coord.previousEpisode.value,
+            next: false,
+            onPressed: coord.playPreviousEpisode,
+          ),
+        ),
+        SignalBuilder(
+          builder: (context) => EpisodeSkipButton(
+            focusNode: _noFocus,
+            episode: coord.nextEpisode.value,
+            next: true,
+            onPressed: coord.playNextEpisode,
+          ),
+        ),
         const MaterialDesktopVolumeButton(),
         _ReadyControlButton(focusNode: _noFocus),
         _MarkAllReadyControlButton(focusNode: _noFocus),
         _ReloadVideoControlButton(focusNode: _noFocus, onPressed: _reloadVideo),
         const MaterialDesktopPositionIndicator(),
         const Spacer(),
+        TracksControlButton(
+          focusNode: _noFocus,
+          tracks: () => coord.playback.tracks,
+          current: coord.playback.currentTrackIds,
+          onPick: (p) => coord.selectTrack(aid: p.aid, sid: p.sid, subtitlesOff: p.subtitlesOff),
+          onMenuOpen: (open) => _shaderMenuOpen = open,
+        ),
         ShaderControlButton(
           focusNode: _noFocus,
           renderMode: coord.playback.renderMode,
@@ -320,8 +423,10 @@ class _SessionScreenState extends State<SessionScreen> {
         MaterialDesktopVideoControls(state),
         _healthOverlay(),
         _waitingOverlay(),
+        _jellyfinOverlay(),
         _toastsOverlay(),
         _sheetOverlay(),
+        _swapOverlay(),
         _leaveOverlay(),
         Positioned.fill(
           child: SignalBuilder(
@@ -329,7 +434,7 @@ class _SessionScreenState extends State<SessionScreen> {
               final sheetOpen = _sheetOpen.value;
               final confirm = _confirmLeave.value;
               return WindowDragLayer(
-                enabled: !confirm,
+                enabled: !confirm && !_swapOpen.value,
                 exclusions: [
                   (s) => Rect.fromLTWH(0, s.height - 120, s.width, 120),
                   if (sheetOpen) (s) => Rect.fromLTWH(s.width - 380, 0, 380, s.height),
@@ -469,6 +574,94 @@ class _SessionScreenState extends State<SessionScreen> {
     );
   }
 
+  /// Jellyfin: the blocked card, the end-of-episode card (countdown) and
+  /// the "Next episode" pill. Outside the auto-hiding controls, so they
+  /// also show in fullscreen.
+  Widget _jellyfinOverlay() {
+    final coord = SessionState.instance.coordinator;
+    return Positioned.fill(
+      child: SignalBuilder(
+        builder: (context) {
+          final blocked = coord.jellyfinBlocked.value;
+          final next = coord.nextEpisode.value;
+          final countdown = coord.autoAdvance.value;
+          final finished = coord.serverState.value?.transport == 'finished';
+          final pill = coord.nextPromptVisible.value;
+          return Stack(
+            children: [
+              if (blocked != null)
+                Center(
+                  child: JellyfinBlockedCard(
+                    blocked: blocked,
+                    onLinkAccount: _openIntegrations,
+                    onRetry: coord.retryJellyfin,
+                  ),
+                ),
+              if (next != null && (finished || countdown != null))
+                Positioned(
+                  right: 24,
+                  bottom: 110,
+                  child: EndOfEpisodeCard(
+                    next: next,
+                    countdown: countdown,
+                    onPlayNow: coord.playNextEpisode,
+                    onCancel: coord.cancelAutoAdvance,
+                  ),
+                )
+              else if (next != null && pill)
+                Positioned(
+                  right: 24,
+                  bottom: 96,
+                  child: NextEpisodePill(episode: next, onPressed: coord.playNextEpisode),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _swapOverlay() {
+    final coord = SessionState.instance.coordinator;
+    return SignalBuilder(
+      builder: (context) {
+        final picker = _swapPicker;
+        if (!_swapOpen.value || picker == null) return const SizedBox.shrink();
+        return Positioned.fill(
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: _closeSwap,
+                  child: Container(color: Colors.black54),
+                ),
+              ),
+              Positioned.fill(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(32, 48, 32, 32),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1400),
+                      child: SwapPanel(
+                        controller: picker,
+                        accounts: coord.jellyfin,
+                        isHost: coord.hostFile != null,
+                        jellyfinStart: _swapStart,
+                        onSwap: coord.swapPicked,
+                        onClose: _closeSwap,
+                        onOpenIntegrations: _openIntegrations,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _toastsOverlay() {
     final coord = SessionState.instance.coordinator;
     return Positioned(
@@ -526,7 +719,7 @@ class _SessionScreenState extends State<SessionScreen> {
                       child: _SheetPanel(
                         chat: _chat,
                         chatFocus: _chatFocus,
-                        swapLink: _swapLink,
+                        onChangeVideo: _openSwap,
                         onClose: () => _sheetOpen.value = false,
                         onLeave: () {
                           _sheetOpen.value = false;
@@ -697,10 +890,10 @@ class _ToastCardState extends State<_ToastCard> {
 class _SheetPanel extends StatelessWidget {
   final TextEditingController chat;
   final FocusNode chatFocus;
-  final TextEditingController swapLink;
+  final VoidCallback onChangeVideo;
   final VoidCallback onClose;
   final VoidCallback onLeave;
-  const _SheetPanel({required this.chat, required this.chatFocus, required this.swapLink, required this.onClose, required this.onLeave});
+  const _SheetPanel({required this.chat, required this.chatFocus, required this.onChangeVideo, required this.onClose, required this.onLeave});
 
   @override
   Widget build(BuildContext context) {
@@ -750,7 +943,12 @@ class _SheetPanel extends StatelessWidget {
                 const Divider(height: 20),
                 Text('Users (${members.length})', style: sectionStyle),
                 const SizedBox(height: 2),
-                for (final m in members) _MemberRow(member: m, isSelf: m.id == coord.sync.memberId),
+                for (final m in members)
+                  _MemberRow(
+                    member: m,
+                    isSelf: m.id == coord.sync.memberId,
+                    viaHost: viaHostOf(m, coord.currentRef.value),
+                  ),
                 const Divider(height: 20),
                 Text('Activity', style: sectionStyle),
                 const SizedBox(height: 6),
@@ -790,34 +988,14 @@ class _SheetPanel extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 12),
-                Text('Share a link', style: sectionStyle),
-                const SizedBox(height: 8),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: swapLink,
-                        decoration: const InputDecoration(labelText: 'Swap to link URL', border: OutlineInputBorder(), isDense: true),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    ValueListenableBuilder<TextEditingValue>(
-                      valueListenable: swapLink,
-                      builder: (context, value, _) {
-                        final link = value.text.trim();
-                        return IconButton(
-                          icon: const Icon(Icons.swap_horiz),
-                          onPressed: link.isEmpty
-                              ? null
-                              : () {
-                                  coord.swapLink(link);
-                                  swapLink.clear();
-                                },
-                        );
-                      },
-                    ),
-                  ],
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    key: const ValueKey('change-video'),
+                    icon: const Icon(Icons.swap_horiz),
+                    label: const Text('Change video'),
+                    onPressed: onChangeVideo,
+                  ),
                 ),
                 const Divider(height: 20),
                 SizedBox(
@@ -880,10 +1058,14 @@ class _StatusChip extends StatelessWidget {
   }
 }
 
+/// The member plays the current Jellyfin item through the host's relay.
+bool viaHostOf(MemberView m, JellyfinRef? ref) => ref != null && m.jf[ref.serverId] == false;
+
 class _MemberRow extends StatelessWidget {
   final MemberView member;
   final bool isSelf;
-  const _MemberRow({required this.member, required this.isSelf});
+  final bool viaHost;
+  const _MemberRow({required this.member, required this.isSelf, this.viaHost = false});
 
   @override
   Widget build(BuildContext context) {
@@ -920,6 +1102,7 @@ class _MemberRow extends StatelessWidget {
                       status.$1,
                       style: theme.textTheme.bodySmall?.copyWith(color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.75)),
                     ),
+                    if (viaHost) ...[const SizedBox(width: 6), const ViaHostBadge()],
                   ],
                 ),
               ],

@@ -16,6 +16,7 @@ const _keyAutoCheckUpdates = 'autoCheckUpdates';
 const _keyShaderPreset = 'shaderPreset';
 const _keyShaderQuality = 'shaderQuality';
 const _keyCustomShaders = 'customShaders';
+const _keyAutoAdvance = 'autoAdvance';
 
 enum HwdecMode { auto, off, custom }
 
@@ -25,6 +26,8 @@ class AppSettings {
   final hwdecMode = signal(HwdecMode.auto);
   final hwdecCustom = signal('');
   final autoCheckUpdates = signal(true);
+  /// Jellyfin episodes: at the end, count down 10 s and put up the next.
+  final autoAdvance = signal(true);
 
   /// Video shaders: one choice, used on join and changed both here and
   /// in the session (Ctrl+0..6, the shader button).
@@ -59,6 +62,8 @@ class AppSettings {
       if (custom is String) hwdecCustom.value = custom;
       final auto = box.get(_keyAutoCheckUpdates);
       if (auto is bool) autoCheckUpdates.value = auto;
+      final advance = box.get(_keyAutoAdvance);
+      if (advance is bool) autoAdvance.value = advance;
       final preset = box.get(_keyShaderPreset);
       shaderPreset.value =
           ShaderPreset.values.where((p) => p.name == preset).firstOrNull ??
@@ -89,6 +94,11 @@ class AppSettings {
   void setAutoCheckUpdates(bool on) {
     autoCheckUpdates.value = on;
     _put(_keyAutoCheckUpdates, on);
+  }
+
+  void setAutoAdvance(bool on) {
+    autoAdvance.value = on;
+    _put(_keyAutoAdvance, on);
   }
 
   void setShaderPreset(ShaderPreset preset) {

@@ -53,6 +53,94 @@ final class DetailRoute extends BrowseRoute {
   String get key => 'item:${item.id}';
 }
 
+/// A route stack as JSON for [JellyfinAccounts.saveBrowseLocation]: only
+/// ids, names and the fields the pages start from (each page loads the
+/// full item itself).
+List<Map<String, Object?>> encodeBrowseStack(List<BrowseRoute> stack) => [
+      for (final r in stack)
+        switch (r) {
+          HomeRoute() => {'r': 'home'},
+          LibraryRoute(:final folder) => {'r': 'lib', ..._itemJson(folder)},
+          SeriesRoute(:final series, :final seasonId) => {
+              'r': 'series',
+              ..._itemJson(series),
+              'seasonId': ?seasonId,
+            },
+          DetailRoute(:final item) => {'r': 'item', ..._itemJson(item)},
+        }
+    ];
+
+/// Inverse of [encodeBrowseStack]; always starts with Home. Null when
+/// [raw] is not a stack.
+List<BrowseRoute>? decodeBrowseStack(Object? raw) {
+  if (raw is! List) return null;
+  final out = <BrowseRoute>[const HomeRoute()];
+  for (final e in raw) {
+    if (e is! Map) return null;
+    final item = _itemFrom(e);
+    final route = switch (e['r']) {
+      'home' => null,
+      'lib' when item != null => LibraryRoute(item),
+      'series' when item != null =>
+        SeriesRoute(item, seasonId: e['seasonId'] is String ? e['seasonId'] as String : null),
+      'item' when item != null => DetailRoute(item),
+      _ => null,
+    };
+    if (route != null && out.every((r) => r.key != route.key)) out.add(route);
+  }
+  return out;
+}
+
+Map<String, Object?> _itemJson(JellyfinItem i) => {
+      'id': i.id,
+      'name': i.name,
+      'type': i.type,
+      if (i.isFolder) 'isFolder': true,
+      'collectionType': ?i.collectionType,
+      'seriesId': ?i.seriesId,
+      'seriesName': ?i.seriesName,
+      'seasonId': ?i.seasonId,
+      'indexNumber': ?i.indexNumber,
+      'parentIndexNumber': ?i.parentIndexNumber,
+    };
+
+JellyfinItem? _itemFrom(Map e) {
+  String? s(String k) => e[k] is String && (e[k] as String).isNotEmpty ? e[k] as String : null;
+  final id = s('id');
+  if (id == null) return null;
+  return JellyfinItem(
+    id: id,
+    name: s('name') ?? '',
+    type: s('type') ?? '',
+    isFolder: e['isFolder'] == true,
+    collectionType: s('collectionType'),
+    seriesId: s('seriesId'),
+    seriesName: s('seriesName'),
+    seasonId: e['r'] == 'series' ? null : s('seasonId'),
+    indexNumber: e['indexNumber'] is int ? e['indexNumber'] as int : null,
+    parentIndexNumber: e['parentIndexNumber'] is int ? e['parentIndexNumber'] as int : null,
+  );
+}
+
+/// Where a browser opens instead of the remembered location: a server and
+/// a route stack (e.g. the series of the episode playing).
+class BrowseStart {
+  final String serverId;
+  final List<BrowseRoute> stack;
+  const BrowseStart(this.serverId, this.stack);
+
+  /// The series page of [episode] with its season selected.
+  static BrowseStart? seriesOf(String serverId, JellyfinItem episode) {
+    final sid = episode.seriesId;
+    if (sid == null) return null;
+    return BrowseStart(serverId, [
+      const HomeRoute(),
+      SeriesRoute(JellyfinItem(id: sid, name: episode.seriesName ?? '', type: 'Series'),
+          seasonId: episode.seasonId),
+    ]);
+  }
+}
+
 /// What every browser page needs, provided by [JellyfinBrowser].
 class BrowseScope extends InheritedWidget {
   final JellyfinAccounts accounts;

@@ -51,6 +51,31 @@ void main() {
     errors.close();
   });
 
+  test('serve: the file control message makes a local file the hosted one', () async {
+    final events = ReceivePort();
+    final exit = ReceivePort();
+    final dir = Directory.systemTemp.createTempSync('serve_file_');
+    final file = File('${dir.path}/ep 2.mkv')..writeAsBytesSync(List.filled(1000, 1));
+    await Isolate.spawn(_run, (const AppConfig(port: 0, secret: '', name: 'f').toMap(), events.sendPort),
+        onExit: exit.sendPort);
+    final ready = await events.firstWhere((m) => m is Map && m['t'] == 'ready') as Map;
+    final stop = ready['stop'] as SendPort;
+    Future<Object?> ask(String path) async {
+      final reply = ReceivePort();
+      stop.send({'t': 'file', 'path': path, 'reply': reply.sendPort});
+      final r = await reply.first.timeout(const Duration(seconds: 5));
+      reply.close();
+      return r;
+    }
+
+    expect(await ask(file.path), {'ok': true, 'name': 'ep 2.mkv', 'size': 1000});
+    expect(await ask('${dir.path}/missing.mkv'), {'ok': false});
+    stop.send({'t': 'stop'});
+    await exit.first.timeout(const Duration(seconds: 10));
+    events.close();
+    dir.deleteSync(recursive: true);
+  });
+
   test('serve reports a bind failure as an error event', () async {
     final blocker = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
     final events = ReceivePort();

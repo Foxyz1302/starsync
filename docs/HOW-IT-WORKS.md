@@ -17,7 +17,9 @@ A five-minute tour. Details: [ARCHITECTURE.md](ARCHITECTURE.md), wire format:
         +----------------------------------------+
 
  video bytes come from somewhere else:
-   - a link (Jellyfin, any http/https URL): each app fetches it directly
+   - a link (any http/https URL): each app fetches it directly
+   - a Jellyfin item: each app plays it with its own Jellyfin account,
+     friends without one through the server (/j/... endpoint)
    - a file on the host's disk: the server streams it (/m/... endpoint)
 ```
 
@@ -26,8 +28,10 @@ A five-minute tour. Details: [ARCHITECTURE.md](ARCHITECTURE.md), wire format:
 - **Server**: keeps one shared clock and the list of people. It never sees
   video frames, only "position 123 s, playing". There is exactly one server
   and one watch session on it.
-- **Jellyfin** (or any web host): where a link's video lives. The server does
-  not touch it today; each app downloads it itself.
+- **Jellyfin** (or any web host): where the video lives. For a Jellyfin
+  item the server only knows which item it is; each app signs in with its
+  own account and reports what it watched. For friends without an account
+  the server fetches the item with the host's sign-in and passes it on.
 
 ## Ways to run
 
@@ -71,7 +75,9 @@ anyone except the host.
 ## Where video comes from
 
 - **Link**: you paste an http(s) URL. Every app plays it directly with mpv.
-  Works for a Jellyfin direct-download link or any file on the web.
+  A pasted Jellyfin link becomes the Jellyfin item below when possible.
+- **Jellyfin item**: picked in the app's library browser. Shared as "this
+  item on this Jellyfin server", never as a link with someone's sign-in.
 - **Local file (host only)**: you pick a file on your disk. The server
   streams it to everyone, host included, over HTTP with range requests, each
   with a per-person token. Nothing is stored or converted.

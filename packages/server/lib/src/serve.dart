@@ -14,7 +14,11 @@ import 'sync_server.dart';
 /// `{'t':'error','message':m}`, and forwards log records as
 /// `{'t':'log','level','logger','message'[,'error']}`. Sending
 /// `{'t':'stop'}` to the `stop` port stops the server; the returned future
-/// completes once it is down. Without [events] a start failure throws.
+/// completes once it is down. `{'t':'file','path':p,'reply':SendPort}` makes
+/// a file on this machine the hosted file (the hosting app's in-session file
+/// swap; a following `swap` with its name and size puts it up) and answers
+/// `{'ok':true,'name':n,'size':s}` or `{'ok':false}`. Without [events] a
+/// start failure throws.
 Future<void> serve(Map<String, Object?> config, {SendPort? events}) async {
   StreamSubscription<pkg_logging.LogRecord>? logs;
   if (events != null) {
@@ -39,7 +43,20 @@ Future<void> serve(Map<String, Object?> config, {SendPort? events}) async {
   final control = ReceivePort('serve control');
   events?.send({'t': 'ready', 'port': server.boundPort, 'stop': control.sendPort});
   await for (final msg in control) {
-    if (msg is Map && msg['t'] == 'stop') break;
+    if (msg is! Map) continue;
+    if (msg['t'] == 'stop') break;
+    if (msg['t'] == 'file' && msg['path'] is String && msg['reply'] is SendPort) {
+      final reply = msg['reply'] as SendPort;
+      try {
+        final ok = await server.setLocalFile(msg['path'] as String);
+        final media = server.session.media;
+        reply.send(ok && media != null
+            ? {'ok': true, 'name': media.name, 'size': media.size}
+            : {'ok': false});
+      } catch (_) {
+        reply.send({'ok': false});
+      }
+    }
   }
   control.close();
   await server.stop();

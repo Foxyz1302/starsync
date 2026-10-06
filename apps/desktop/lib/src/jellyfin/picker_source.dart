@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../screens/home/picked_media.dart';
 import '../screens/home/ui.dart';
 import 'accounts.dart';
+import 'browse_scope.dart';
 import 'browser.dart';
 import 'sign_in_panel.dart';
 
@@ -15,8 +16,10 @@ class JellyfinPickerSource extends StatefulWidget {
   final VoidCallback? onOpenIntegrations;
   final VoidCallback? onToggleExpanded;
   final bool expanded;
+  final BrowseStart? start;
   const JellyfinPickerSource({
     super.key,
+    this.start,
     required this.accounts,
     required this.onPick,
     this.selected,
@@ -54,6 +57,7 @@ class _JellyfinPickerSourceState extends State<JellyfinPickerSource> {
           onOpenIntegrations: widget.onOpenIntegrations,
           onToggleExpanded: widget.onToggleExpanded,
           expanded: widget.expanded,
+          start: widget.start,
         );
       },
     );

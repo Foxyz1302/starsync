@@ -1,7 +1,7 @@
 # watch-together
 
 Watch a video with friends, in sync, with the quality of a real mpv player.
-Paste a Jellyfin link, any direct video link, or pick a file on your own disk;
+Pick from your Jellyfin library, paste any direct video link, or pick a file on your own disk;
 everyone's play, pause and seek stay together.
 
 Why not Jellyfin SyncPlay: it runs in the browser and its sync is poor.
@@ -83,12 +83,14 @@ x to forget it. Ctrl+1 / Ctrl+2 switch between Join and Host.
 
 Profile, hardware decoding (auto, off or custom; the env var
 `SYNC_RELAY_HWDEC` overrides it; applies on the next join or Reload video),
-updates, video shaders (see below), and the keyboard shortcuts (read-only).
+updates, playing the next Jellyfin episode automatically, video shaders
+(see below), and the keyboard shortcuts (read-only).
 Integrations links Jellyfin servers (below). About shows the version.
 
 Keys in a session: Space = ready / unready, Tab = side panel (people, log,
 chat, change video), Left/Right = seek 10 s, F = fullscreen, Esc = close
-panel or ask to leave, Ctrl+R = reload video, Ctrl+1..6 = Anime4K mode A, B,
+panel or ask to leave, Ctrl+R = reload video, `<` / `>` or Shift+P /
+Shift+N = previous / next Jellyfin episode, Ctrl+1..6 = Anime4K mode A, B,
 C, A+A, B+B, C+A, Ctrl+0 = shaders off.
 
 ## Ports
@@ -122,11 +124,43 @@ Keys in the browser: arrows move, Enter picks or opens, I = details,
 Esc / Backspace / Alt+Left = back (Esc first clears a search), / or Ctrl+F =
 search.
 
-For now a hosted Jellyfin pick is shared as a stream link carrying the
-host's sign-in, so everyone watches through the host's account. Per-person
-playback, watched status and progress sync are planned: see
-[docs/ROADMAP.md](docs/ROADMAP.md). Pasting a Jellyfin direct-play link
-still works like any link.
+Host from the library: pick a movie or episode and Host. Only the item
+goes to the server (which Jellyfin server and which item), never a link or
+your sign-in. Pasting a Jellyfin link (web page or stream link) does the
+same when the app can reach that Jellyfin; otherwise it is shared as a
+plain link.
+
+Watching:
+- Everyone with their own account on that Jellyfin server plays the file
+  directly with their own sign-in. Jellyfin tracks progress per account:
+  your watched state, Continue watching and resume point follow what you
+  saw (reported on start, every 10 s, on pause, resume, seek and track
+  change, and when it stops).
+- Friends without an account watch through the host: the server fetches
+  the file with the host's sign-in and passes it on (only the current item,
+  only to people in the session). They show "via host" in the member list.
+  A dedicated server relays when started with `--jellyfin <file>` (see
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), Jellyfin relay).
+- Without either, the app says "This needs a Jellyfin account on ..." with
+  a button to link one; it plays as soon as you are signed in.
+
+Episodes: the ⏮ / ⏭ buttons next to the controls (or `<` / `>`,
+Shift+P / Shift+N) put up the previous or next episode for everyone. In
+the last two minutes a "Next episode" button floats in the corner. When an
+episode ends, a card shows what is next with Play next; with "Play the
+next episode automatically" (Settings, on by default) it counts down 10 s
+first, and Cancel stops it on your screen (seeking back stops it for
+everyone). Anyone with an account can put the next one up; friends
+watching via the host cannot.
+
+Audio and subtitles: the subtitles button in the controls picks tracks.
+Your choice is remembered per series (and as a default) and the closest
+match (language, then title, then codec and channels) is selected on the
+next episode. This is per person; nobody else is affected.
+
+"Change video" in the session panel (Tab) opens the same picker as the Host
+tab: the library starts on the series you are watching with the current
+season, else where you left it. File is offered to the host only.
 
 ## Video quality and shaders
 

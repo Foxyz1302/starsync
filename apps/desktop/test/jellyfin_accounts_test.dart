@@ -7,7 +7,7 @@ import 'package:sync_relay_core/core.dart';
 import 'package:watch_together/src/jellyfin/accounts.dart';
 import 'package:watch_together/src/jellyfin/format.dart';
 import 'package:watch_together/src/jellyfin/sign_in.dart';
-import 'package:watch_together/src/screens/home/host_tab.dart' show interimJellyfinLink, mediaSummary;
+import 'package:watch_together/src/screens/home/host_tab.dart' show mediaSummary;
 import 'package:watch_together/src/screens/home/media_picker.dart';
 
 /// Captured Jellyfin 10.11 answers shared with packages/core's client tests.
@@ -341,22 +341,6 @@ void main() {
       expect(m.itemId, '1c67aa9143ebcdcea7953aada4db543a');
       expect(m.subtitle, 'Black Summoner · S1E6');
       expect(m.runtime, isNotNull);
-    });
-
-    test('INTERIM: the host plays a Jellyfin pick as its authorised stream link', () async {
-      final (accounts, _) = await linkedAccounts();
-      const m = JellyfinMedia(
-          serverId: fixtureServerId, baseUrl: 'https://example.invalid', itemId: 'abc', title: 't');
-      final url = Uri.parse(interimJellyfinLink(accounts, m));
-      expect(url.path, '/Videos/abc/stream');
-      expect(url.queryParameters['static'], 'true');
-      expect(url.queryParameters['api_key'], 'TEST_ACCESS_TOKEN');
-      expect(
-          () => interimJellyfinLink(
-              accounts, const JellyfinMedia(serverId: 'gone', baseUrl: 'x', itemId: 'i', title: 't')),
-          throwsFormatException);
-      accounts.markExpired(fixtureServerId);
-      expect(() => interimJellyfinLink(accounts, m), throwsFormatException);
     });
   });
 

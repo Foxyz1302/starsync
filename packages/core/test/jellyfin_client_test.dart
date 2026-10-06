@@ -235,6 +235,22 @@ void main() {
       expect(episodeAfter(eps, eps.last.id), isNull);
       expect(episodeAfter(eps, 'nope'), isNull);
     });
+
+    test('adjacentEpisodes: previous mirrors next across seasons and copies', () async {
+      http.on('GET', '/Shows/57d896451d17d2024129cf237759a491/Episodes', fixture: 'episodes');
+      final eps = await client.episodes('57d896451d17d2024129cf237759a491');
+      final s3e2 = eps.firstWhere((e) => e.episodeLabel == 'S3E2');
+      final around = await client.adjacentEpisodes(s3e2);
+      // S3E1 exists twice: the predecessor is the copy right before S3E2.
+      expect(around.previous!.episodeLabel, 'S3E1');
+      expect(around.next!.episodeLabel, 'S3E3');
+      final s3e1 = eps.lastWhere((e) => e.episodeLabel == 'S3E1');
+      expect(episodeBefore(eps, s3e1.id)!.episodeLabel, 'S2E12');
+      expect(episodeBefore(eps, eps.first.id), isNull);
+      expect(episodeBefore(eps, 'nope'), isNull);
+      expect((await client.adjacentEpisodes(const JellyfinItem(id: 'x', name: 'm', type: 'Movie'))).next,
+          isNull);
+    });
   });
 
   group('images', () {

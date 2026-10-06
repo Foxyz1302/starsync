@@ -23,6 +23,7 @@ const _keyDeviceId = 'deviceId';
 const _keyAccounts = 'accounts';
 const _keyDefault = 'defaultServer';
 const _keyLastPick = 'lastPick';
+const _keyBrowsePrefix = 'browse:';
 
 /// One signed-in user on one server.
 class JellyfinAccount {
@@ -124,10 +125,12 @@ abstract class JellyfinStore {
 }
 
 class HiveJellyfinStore implements JellyfinStore {
+  HiveJellyfinStore({this.boxName = jellyfinBoxName});
+  final String boxName;
   Box? _box;
 
   @override
-  Future<void> open() async => _box ??= await Hive.openBox(jellyfinBoxName);
+  Future<void> open() async => _box ??= await Hive.openBox(boxName);
 
   @override
   Object? get(String key) => _box?.get(key);
@@ -458,6 +461,26 @@ class JellyfinAccounts extends ChangeNotifier {
       await _store.put(_keyLastPick, pick == null ? null : jsonEncode(pick.toJson()));
     } catch (e) {
       debugPrint('save jellyfin pick failed: $e');
+    }
+  }
+
+  /// The browser's last location on [serverId] (encoded route stack, see
+  /// `browse_scope.dart`), restored by every browser and across restarts.
+  Object? browseLocation(String serverId) {
+    try {
+      final v = _store.get('$_keyBrowsePrefix$serverId');
+      return v is String ? _tryJson(v) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveBrowseLocation(String serverId, Object? location) async {
+    try {
+      await _store.put(
+          '$_keyBrowsePrefix$serverId', location == null ? null : jsonEncode(location));
+    } catch (e) {
+      debugPrint('save browse location failed: $e');
     }
   }
 

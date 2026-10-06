@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
+import 'package:watch_together/src/jellyfin/accounts.dart';
 import 'package:watch_together/src/session/session_coordinator.dart';
 import 'package:watch_together/src/state/server_isolate.dart';
 import 'package:watch_together/src/state/session_state.dart';
@@ -160,6 +161,61 @@ void main() {
       await friend?.ws.close();
       await session.coordinator.leave(silent: true);
       await session.stopServer();
+    }
+  });
+
+  test('host path: a Jellyfin pick goes up as a ref with the host relay; File swap',
+      timeout: const Timeout(Duration(minutes: 2)), () async {
+    MediaKit.ensureInitialized();
+    final tmp = Platform.environment['WT_TEST_TMP'] ?? Directory.systemTemp.path;
+    Hive.init('$tmp/hive_isolate_jf_test');
+    const sid = 'abcdefabcdefabcdefabcdefabcdef12';
+    final accounts = JellyfinAccounts.instance;
+    await accounts.ensureLoaded(validate: false);
+    // An unreachable Jellyfin: only the wire and the relay flag matter here.
+    await accounts.link(
+        baseUrl: 'http://127.0.0.1:9',
+        server: const JellyfinServerInfo(id: sid, name: 'J', version: '10.11.11'),
+        auth: const JellyfinAuthResult(
+            accessToken: 'HOSTTOKEN', user: JellyfinUser(id: 'u', name: 'u'), serverId: sid));
+    final session = SessionState.instance;
+    final port = await _freePort();
+    _Raw? friend;
+    final file = File('$tmp/host file swap.mkv')..writeAsBytesSync(List.filled(4096, 7));
+    try {
+      await session.host(
+          ConnectParams(
+              host: '',
+              port: port,
+              secret: '',
+              name: 'host',
+              media: const HelloMedia(
+                  name: 'Pilot',
+                  size: 0,
+                  duration: 0,
+                  jellyfin: JellyfinRef(serverId: sid, itemId: 'e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1', title: 'Pilot'))),
+          ConnectForm());
+      await session.coordinator.playback.player.setVolume(0);
+      friend = await _Raw.join(port, 'friend');
+      final state = await friend.next('state', where: (m) => m['media'] != null);
+      final media = state['media'] as Map;
+      expect(media['jellyfin'], isA<Map>());
+      expect(media.containsKey('url'), isFalse);
+      expect(state['relay'], isTrue, reason: "the host's own sign-in relays for guests");
+      expect(jsonEncode(state), isNot(contains('HOSTTOKEN')));
+
+      expect(await session.coordinator.swapFile(file.path), isNull);
+      final swapped = await friend.next('state',
+          where: (m) => (m['media'] as Map?)?['name'] == 'host file swap.mkv');
+      expect((swapped['media'] as Map)['jellyfin'], isNull);
+      expect(swapped['relay'], isNull);
+      expect(await session.coordinator.swapFile('$tmp/missing.mkv'), contains('not found'));
+    } finally {
+      await friend?.ws.close();
+      await session.coordinator.leave(silent: true);
+      await session.stopServer();
+      await accounts.signOut(sid);
+      if (file.existsSync()) file.deleteSync();
     }
   });
 }

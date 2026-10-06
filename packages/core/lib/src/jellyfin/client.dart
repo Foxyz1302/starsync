@@ -426,6 +426,16 @@ class JellyfinClient {
         await episodes(seriesId, withMediaStreams: withMediaStreams), episode.id);
   }
 
+  /// The episodes before and after [episode] in its series (one
+  /// `/Shows/{id}/Episodes` call; see [episodeBefore] / [episodeAfter]).
+  Future<({JellyfinItem? previous, JellyfinItem? next})> adjacentEpisodes(
+      JellyfinItem episode) async {
+    final seriesId = episode.seriesId;
+    if (seriesId == null) return (previous: null, next: null);
+    final list = await episodes(seriesId);
+    return (previous: episodeBefore(list, episode.id), next: episodeAfter(list, episode.id));
+  }
+
   // -------------------------------------------------------------- images
 
   /// Image URL for caching and display. Images need no token on Jellyfin,
@@ -586,6 +596,23 @@ JellyfinItem? episodeAfter(List<JellyfinItem> episodes, String episodeId) {
   if (at < 0) return null;
   final cur = episodes[at];
   for (var i = at + 1; i < episodes.length; i++) {
+    final e = episodes[i];
+    final sameEpisode = cur.indexNumber != null &&
+        e.indexNumber == cur.indexNumber &&
+        e.parentIndexNumber == cur.parentIndexNumber;
+    if (!sameEpisode) return e;
+  }
+  return null;
+}
+
+/// The predecessor of [episodeId] in [episodes], the mirror of
+/// [episodeAfter]: crossing seasons, skipping other copies of the same
+/// episode. Null when it is first or not in the list.
+JellyfinItem? episodeBefore(List<JellyfinItem> episodes, String episodeId) {
+  final at = episodes.indexWhere((e) => e.id == episodeId);
+  if (at < 0) return null;
+  final cur = episodes[at];
+  for (var i = at - 1; i >= 0; i--) {
     final e = episodes[i];
     final sameEpisode = cur.indexNumber != null &&
         e.indexNumber == cur.indexNumber &&

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../jellyfin/accounts.dart';
+import '../../jellyfin/browse_scope.dart' show BrowseStart;
 import '../../jellyfin/picker_source.dart';
 import '../../widgets/media_input.dart';
 import 'picked_media.dart';
@@ -114,8 +115,17 @@ class MediaPicker extends StatefulWidget {
   /// Jellyfin source only: the browser's "bigger" toggle.
   final VoidCallback? onToggleExpanded;
   final bool expanded;
+  /// Where the Jellyfin browser opens instead of its remembered location.
+  final BrowseStart? jellyfinStart;
+  /// False hides the File source (only the host can serve a file).
+  final bool allowFile;
+  /// Shown under the Link field instead of the default help.
+  final String? linkHelp;
   const MediaPicker({
     super.key,
+    this.jellyfinStart,
+    this.allowFile = true,
+    this.linkHelp,
     required this.controller,
     this.onChanged,
     this.onSubmit,
@@ -221,6 +231,7 @@ class _MediaPickerState extends State<MediaPicker> {
           onOpenIntegrations: widget.onOpenIntegrations,
           onToggleExpanded: widget.onToggleExpanded,
           expanded: widget.expanded,
+          start: widget.jellyfinStart,
         ),
       MediaKind.link => _FieldRow(
           key: const ValueKey('media-link'),
@@ -236,7 +247,9 @@ class _MediaPickerState extends State<MediaPicker> {
             icon: const Icon(Icons.content_paste, size: 18),
             label: const Text('Paste'),
           ),
-          help: 'A direct http(s) link to a video file; everyone streams it from there.',
+          help: widget.linkHelp ??
+              'A direct http(s) link to a video file; everyone streams it from there. '
+                  'Jellyfin links are shared as the item, without your sign-in.',
           notice: _c.notice,
         ),
       MediaKind.file => _FieldRow(
@@ -260,17 +273,17 @@ class _MediaPickerState extends State<MediaPicker> {
       child: SegmentedButton<MediaKind>(
         key: const ValueKey('media-source'),
         showSelectedIcon: false,
-        segments: const [
-          ButtonSegment(
+        segments: [
+          const ButtonSegment(
               value: MediaKind.jellyfin,
               icon: Icon(Icons.video_library_outlined),
               label: Text('Jellyfin')),
-          ButtonSegment(value: MediaKind.link, icon: Icon(Icons.link), label: Text('Link')),
-          ButtonSegment(
+          const ButtonSegment(value: MediaKind.link, icon: Icon(Icons.link), label: Text('Link')),
+          const ButtonSegment(
               value: MediaKind.file,
               icon: Icon(Icons.insert_drive_file_outlined),
               label: Text('File')),
-        ],
+        ].where((s) => widget.allowFile || s.value != MediaKind.file).toList(),
         selected: {source},
         onSelectionChanged: (s) => _c.source = s.first,
       ),

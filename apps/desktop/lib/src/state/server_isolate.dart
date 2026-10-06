@@ -131,6 +131,27 @@ class ServerIsolate {
     if (!_stopping) crash?.call(_lastError ?? 'the server stopped unexpectedly');
   }
 
+  /// Makes [path] the hosted file (the in-session File swap). Returns its
+  /// name and size for the `swap` that puts it up, or null when the file
+  /// is missing or the server is gone.
+  Future<({String name, int size})?> setFile(String path,
+      {Duration timeout = const Duration(seconds: 5)}) async {
+    if (_exited.isCompleted) return null;
+    final reply = ReceivePort('server file');
+    try {
+      _stop.send({'t': 'file', 'path': path, 'reply': reply.sendPort});
+      final msg = await reply.first.timeout(timeout);
+      if (msg is Map && msg['ok'] == true) {
+        return (name: msg['name'] as String, size: msg['size'] as int);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    } finally {
+      reply.close();
+    }
+  }
+
   /// Asks the server to close its sockets and exit; kills the isolate if it
   /// has not exited within [timeout].
   Future<void> stop({Duration timeout = const Duration(seconds: 3)}) async {

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:sync_relay_core/core.dart' show HelloMedia;
 
 import '../../session/session_coordinator.dart';
 import '../../state/session_state.dart';
@@ -91,11 +92,11 @@ class ConnectFlow extends ChangeNotifier {
   }
 
   /// [edit] fills the card's fields into a copy of the last form, so the
-  /// other card's saved values survive. [linkOverride] (host only) is played
-  /// as the link but never stored in the form: the interim Jellyfin stream
-  /// URL carries a token.
+  /// other card's saved values survive. [media] (host only) is put up
+  /// instead of the form's link or file (a Jellyfin ref; the pick itself is
+  /// remembered in the Jellyfin box, not the form).
   Future<void> submit(ConnectMode mode, void Function(ConnectForm f) edit,
-      {String? linkOverride}) async {
+      {HelloMedia? media}) async {
     if (busy != null) return;
     final myAttempt = ++_attempt;
     final form = _session.lastForm.copy();
@@ -113,15 +114,10 @@ class ConnectFlow extends ChangeNotifier {
     notices[mode] = null;
     _notify();
 
-    final ConnectParams params;
+    ConnectParams params;
     try {
-      params = await buildParams(
-          mode,
-          linkOverride == null || mode != ConnectMode.host
-              ? form
-              : (form.copy()
-                ..mediaPath = ''
-                ..linkUrl = linkOverride));
+      params = await buildParams(mode, form);
+      if (media != null && mode == ConnectMode.host) params = params.withMedia(media);
     } catch (e) {
       if (myAttempt != _attempt) return;
       busy = null;

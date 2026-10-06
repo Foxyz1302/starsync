@@ -36,6 +36,9 @@ class SyncClient {
   String token = '';
   String memberId = '';
   String? mediaUrl;
+  /// This member's `/j/...` URL from `welcome` (Jellyfin media the server
+  /// relays); private like [token].
+  String? relayUrl;
   StateBroadcast? lastState;
   Completer<WelcomeMessage>? _pendingWelcome;
 
@@ -89,6 +92,7 @@ class SyncClient {
       token = welcome.token;
       memberId = welcome.memberId;
       mediaUrl = welcome.mediaUrl;
+      relayUrl = welcome.relayUrl;
       if (welcome.state != null) {
         try {
           lastState = StateBroadcast.fromJson(welcome.state!);
@@ -214,6 +218,7 @@ class SyncClient {
     required int eventId,
     double duration = 0,
     int mediaId = 0,
+    Map<String, bool>? jf,
   }) {
     final safeBuffered = buffered.isNaN || buffered < 0 ? 0.0 : buffered;
     _send(
@@ -223,6 +228,7 @@ class SyncClient {
         eventId: eventId,
         duration: duration.isFinite && duration > 0 ? duration : 0,
         mediaId: mediaId,
+        jf: jf,
       ).toJson(),
     );
   }
@@ -254,6 +260,7 @@ class SyncClient {
     token = '';
     memberId = '';
     mediaUrl = null;
+    relayUrl = null;
     lastState = null;
   }
 
