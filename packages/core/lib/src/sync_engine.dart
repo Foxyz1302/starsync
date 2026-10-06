@@ -22,6 +22,8 @@ class EngineMember {
   bool ready = false;
   bool inSet = false;
   double buffered = 0;
+  /// Last reported Jellyfin access by ServerId (`report.jf`).
+  Map<String, bool> jf = const {};
   DateTime lastSeen;
   EngineMember({
     required this.id,
@@ -39,6 +41,7 @@ class EngineMember {
         inSet: inSet,
         buffered: buffered,
         stale: stale,
+        jf: jf,
       );
 }
 
@@ -234,17 +237,18 @@ class SyncEngine {
   }
 
   void applyReport(String token, double reportPosition, double buffered, int reportEventId,
-      {double duration = 0, int mediaId = 0}) {
+      {double duration = 0, int mediaId = 0, Map<String, bool>? jf}) {
     final member = members[token];
     if (member == null) return;
     if (!reportPosition.isFinite) return;
     _seen(member);
+    if (jf != null) member.jf = Map.unmodifiable(jf);
     member.buffered = !buffered.isFinite || buffered < 0 ? 0 : buffered;
     final m = media;
     // First report of the length wins; only for the media the client has open.
     if (m != null && m.duration <= 0 && mediaId == this.mediaId &&
         duration.isFinite && duration > 0) {
-      media = HelloMedia(name: m.name, size: m.size, duration: duration, url: m.url);
+      media = m.copyWith(duration: duration);
     }
     if (reportEventId < eventId) return;
     evaluate();
@@ -317,7 +321,9 @@ class SyncEngine {
     }
   }
 
-  StateBroadcast broadcast() {
+  /// [relay]: whether the server can relay the current Jellyfin media; the
+  /// engine does not know the server's credential.
+  StateBroadcast broadcast({bool relay = false}) {
     final bySeek = _seekEventId == eventId;
     return StateBroadcast(
       eventId: eventId,
@@ -329,6 +335,7 @@ class SyncEngine {
       members: members.values.map((m) => m.view(stale: isStale(m))).toList(),
       seekBy: bySeek ? _seekBy : null,
       seekSeq: bySeek ? _seekSeq : null,
+      relay: relay,
     );
   }
 }

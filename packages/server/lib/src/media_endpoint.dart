@@ -136,7 +136,9 @@ void mountMediaRoute(RelicApp app, File file,
     log(byteCount);
     return Response(
       res.status,
-      body: Body.fromDataStream(stream, contentLength: byteCount),
+      // Relic replaces Content-Type with the body's mime type, so set it here.
+      body: Body.fromDataStream(stream,
+          mimeType: _mimeOf(res.headers['content-type']), contentLength: byteCount),
       headers: Headers.build((h) {
         res.headers.forEach((k, v) => h[k] = [v]);
       }),
@@ -208,10 +210,20 @@ void mountSessionMediaRoute(
     });
     return Response(
       res.status,
-      body: Body.fromDataStream(stream, contentLength: byteCount),
+      // Relic replaces Content-Type with the body's mime type, so set it here.
+      body: Body.fromDataStream(stream,
+          mimeType: _mimeOf(res.headers['content-type']), contentLength: byteCount),
       headers: Headers.build((h) {
         res.headers.forEach((k, v) => h[k] = [v]);
       }),
     );
   });
+}
+
+MimeType _mimeOf(String? contentType) {
+  try {
+    return MimeType.parse(contentType ?? '');
+  } catch (_) {
+    return MimeType.octetStream;
+  }
 }

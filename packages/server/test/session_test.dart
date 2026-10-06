@@ -80,8 +80,8 @@ void main() {
   });
 
   group('core welcome + proto', () {
-    test('proto 6: state broadcast + hello hostKey', () {
-      expect(RelayConstants.protoVersion, 6);
+    test('proto 7: Jellyfin refs and relay', () {
+      expect(RelayConstants.protoVersion, 7);
     });
 
     test('welcome round-trips with token + member id', () {

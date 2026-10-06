@@ -18,7 +18,7 @@ void main() {
     setUp(() async {
       bytes = Uint8List.fromList(List<int>.generate(8192, (i) => i % 251));
       file = File(
-          '${Directory.systemTemp.path}/server_test_${DateTime.now().microsecondsSinceEpoch}.bin');
+          '${Directory.systemTemp.path}/server_test_${DateTime.now().microsecondsSinceEpoch}.mkv');
       await file.writeAsBytes(bytes);
       server = SyncServer(AppConfig(
           port: 0, secret: 'shh', name: 'test', mediaPath: file.path));
@@ -117,6 +117,8 @@ void main() {
       resp = await mediaGet('/m/default/$token/$name', range: 'bytes=0-99');
       expect(resp.statusCode, 206);
       expect(resp.headers.value('content-range'), 'bytes 0-99/8192');
+      expect(resp.headers.contentType?.mimeType, contentTypeForFile(name));
+      expect(contentTypeForFile(name), isNot('application/octet-stream'));
       final body = <int>[];
       await for (final c in resp) {
         body.addAll(c);

@@ -1,5 +1,5 @@
 abstract class RelayConstants {
-  static const int protoVersion = 6;
+  static const int protoVersion = 7;
 
   static const int chunkBytes = 256 * 1024;
   static const int creditWindowChunks = 8;

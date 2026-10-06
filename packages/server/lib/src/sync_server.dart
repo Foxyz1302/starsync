@@ -6,6 +6,7 @@ import 'package:logging/logging.dart' as pkg_logging;
 import 'package:relic/relic.dart';
 import 'package:sync_relay_core/core.dart';
 
+import 'jellyfin_relay.dart';
 import 'media_endpoint.dart';
 import 'server_hub.dart';
 import 'session.dart';
@@ -20,9 +21,11 @@ class SyncServer {
   DateTime? _startedAt;
   Timer? _heartbeat;
   bool _routesMounted = false;
+  /// Upstream connections of the Jellyfin relay; created on first use.
+  HttpClient? _relayClient;
 
   SyncServer(this.config) {
-    hub = ServerHub(sessions, config.secret, hostKey: config.hostKey);
+    hub = ServerHub(sessions, config.secret, hostKey: config.hostKey, jellyfin: config.jellyfin);
   }
 
   bool get isRunning => _server != null;
@@ -59,14 +62,17 @@ class SyncServer {
       );
     });
     mountSessionMediaRoute(_app, sessions);
+    mountJellyfinRelayRoute(
+        _app, sessions, () => hub.jellyfin, () => _relayClient ??= HttpClient());
+    // advertiseHost is only an explicit override; otherwise echo what the client dialled.
+    String authority(String dialledHost) => config.advertiseHost.isNotEmpty
+        ? '${config.advertiseHost}:$boundPort'
+        : dialledHost;
     mountSyncRoute(_app, hub, (sid, token, media, dialledHost) {
       final name = Uri.encodeComponent(media?.name ?? 'file');
-      // advertiseHost is only an explicit override; otherwise echo what the client dialled.
-      final authority = config.advertiseHost.isNotEmpty
-          ? '${config.advertiseHost}:$boundPort'
-          : dialledHost;
-      return 'http://$authority/m/$sid/$token/$name';
-    });
+      return 'http://${authority(dialledHost)}/m/$sid/$token/$name';
+    }, relayUrlBuilder: (sid, token, itemId, dialledHost) =>
+        'http://${authority(dialledHost)}/j/$sid/$token/${Uri.encodeComponent(itemId)}');
     _app.fallback = (final req) => Response.notFound(
           body: Body.fromString('not found'),
         );
@@ -89,6 +95,7 @@ class SyncServer {
     if (config.secret.isEmpty) {
       _log.warning('no password set: open server, anyone who can reach it can join');
     }
+    await _resolveJellyfinServerId();
     _mountRoutes();
     _server = await _app.serve(
       address: InternetAddress.anyIPv4,
@@ -110,10 +117,32 @@ class SyncServer {
     _log.info('server "${config.name}" listening on $boundPort');
   }
 
+  /// A configured credential without a ServerId gets it from
+  /// `/System/Info/Public` (unauthenticated). On failure the relay stays off.
+  Future<void> _resolveJellyfinServerId() async {
+    final cred = hub.jellyfin;
+    if (cred == null) return;
+    if (cred.serverId.isEmpty) {
+      final client = JellyfinClient(baseUrl: cred.baseUrl, clientInfo: cred.clientInfo);
+      try {
+        final info = await client.publicInfo().timeout(const Duration(seconds: 10));
+        hub.jellyfin = cred.withServerId(info.id);
+      } catch (e) {
+        _log.warning('jellyfin relay off: server id lookup failed: $e');
+        return;
+      } finally {
+        client.close();
+      }
+    }
+    _log.info('jellyfin relay on for server ${hub.jellyfin!.serverId}');
+  }
+
   Future<void> stop() async {
     if (_server == null) return;
     _heartbeat?.cancel();
     _heartbeat = null;
+    _relayClient?.close(force: true);
+    _relayClient = null;
     await hub.closeAllSockets();
     await _app.close();
     _server = null;

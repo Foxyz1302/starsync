@@ -16,10 +16,21 @@ class ServerHub {
   final String hostKey;
   final SyncEngine engine;
   final Map<String, RelicWebSocket> sockets = {};
+  /// The server's Jellyfin login for the `/j/...` relay; null = no relay.
+  JellyfinCredential? jellyfin;
 
   ServerHub(this.sessions, this.expectedSecret,
-      {SyncEngine? engine, this.hostKey = ''})
+      {SyncEngine? engine, this.hostKey = '', this.jellyfin})
       : engine = engine ?? SyncEngine();
+
+  /// The current media is a Jellyfin ref on the server [jellyfin] logs in to.
+  bool get relayAvailable {
+    final ref = session.media?.jellyfin;
+    final cred = jellyfin;
+    return ref != null && cred != null && cred.serverId.isNotEmpty && cred.serverId == ref.serverId;
+  }
+
+  StateBroadcast stateBroadcast() => engine.broadcast(relay: relayAvailable);
 
   bool isHostKey(String key) => hostKey.isNotEmpty && key == hostKey;
 
@@ -35,7 +46,7 @@ class ServerHub {
   Session get session => sessions.getOrCreate('default', expectedSecret);
 
   void broadcastState() {
-    final raw = jsonEncode(engine.broadcast().toJson());
+    final raw = jsonEncode(stateBroadcast().toJson());
     for (final ws in sockets.values.toList()) {
       ws.trySendText(raw);
     }
@@ -139,12 +150,34 @@ void wsErr(RelicWebSocket ws, String message) {
   ws.trySendText(jsonEncode({'t': 'err', 'message': message}));
 }
 
+/// Jellyfin ids are path segments of upstream requests: keep them plain.
+final _jellyfinId = RegExp(r'^[A-Za-z0-9-]{1,64}$');
+
+/// The swap's Jellyfin ref cleaned for broadcast (names like
+/// [sanitizeMediaName]), or null when its ids are unusable.
+JellyfinRef? sanitizeJellyfinRef(JellyfinRef ref) {
+  if (!_jellyfinId.hasMatch(ref.serverId) || !_jellyfinId.hasMatch(ref.itemId)) return null;
+  final source = ref.mediaSourceId;
+  if (source != null && !_jellyfinId.hasMatch(source)) return null;
+  final runtime = ref.runtimeSecs;
+  return JellyfinRef(
+    serverId: ref.serverId,
+    itemId: ref.itemId,
+    mediaSourceId: source,
+    title: sanitizeMediaName(ref.title),
+    subtitle: ref.subtitle == null ? null : sanitizeMediaName(ref.subtitle!),
+    runtimeSecs: runtime == null || runtime < 0 ? null : runtime,
+  );
+}
+
+/// [relayUrlBuilder] builds a member's `/j/...` URL for `welcome.relayUrl`.
 void mountSyncRoute(
   RelicApp app,
   ServerHub hub,
   String Function(String sid, String token, SessionMedia? media, String host)
-      urlBuilder,
-) {
+      urlBuilder, {
+  String Function(String sid, String token, String itemId, String host)? relayUrlBuilder,
+}) {
   app.get('/sync', (final req) {
     // Host the client dialled (Host header), so file URLs work for remote joiners.
     final dialledHost = req.url.hasPort
@@ -196,6 +229,30 @@ void mountSyncRoute(
             case 'swap':
               if (token == null) return;
               final parsed = SwapIntent.fromJson(decoded).media;
+              if (parsed.jellyfin != null) {
+                // By reference only: no URL (it could carry a token) is
+                // stored or broadcast for Jellyfin media.
+                final ref = sanitizeJellyfinRef(parsed.jellyfin!);
+                final media = ref == null
+                    ? null
+                    : HelloMedia(
+                        name: sanitizeMediaName(parsed.name.isEmpty ? ref.title : parsed.name),
+                        size: parsed.size,
+                        duration: parsed.duration,
+                        jellyfin: ref);
+                if (media == null || !hub.engine.applySwap(token, media)) {
+                  wsErr(ws, 'bad swap media');
+                  return;
+                }
+                session.media = SessionMedia(
+                    name: media.name,
+                    size: media.size,
+                    duration: media.duration,
+                    jellyfin: ref,
+                    mediaId: hub.engine.mediaId);
+                hub.changed();
+                return;
+              }
               final intent = SwapIntent(
                   media: HelloMedia(
                       name: sanitizeMediaName(parsed.name),
@@ -236,7 +293,7 @@ void mountSyncRoute(
               final report = ReportMessage.fromJson(decoded);
               hub.engine.applyReport(
                   token, report.position, report.buffered, report.eventId,
-                  duration: report.duration, mediaId: report.mediaId);
+                  duration: report.duration, mediaId: report.mediaId, jf: report.jf);
               hub.changed();
             case 'ping':
               final ping = PingMessage.fromJson(decoded);
@@ -355,11 +412,15 @@ void mountSyncRoute(
         hub.forgetSocketOf(activeToken, ws);
       };
       final media = session.media;
+      final relay = hub.relayAvailable;
       final welcome = WelcomeMessage(
         token: activeToken,
         memberId: memberId,
         mediaUrl: media?.file != null ? urlBuilder('default', activeToken, media, dialledHost) : media?.url,
-        state: hub.engine.broadcast().toJson(),
+        relayUrl: relay && relayUrlBuilder != null
+            ? relayUrlBuilder('default', activeToken, media!.jellyfin!.itemId, dialledHost)
+            : null,
+        state: hub.stateBroadcast().toJson(),
       );
       try {
         ws.sendText(jsonEncode(welcome.toJson()));

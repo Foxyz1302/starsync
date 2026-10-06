@@ -1,4 +1,4 @@
-# Protocol (proto = 6)
+# Protocol (proto = 7)
 
 Wire format only. Behavior (gate, clock, timeouts) is in
 [ARCHITECTURE.md](ARCHITECTURE.md). Source of truth:
@@ -21,19 +21,22 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
 - `GET /health` returns JSON (`ok`, `name`, `proto`, `viewers`, `bytesServed`,
   `uptimeSecs`; unauthenticated). `GET /m/<sid>/<token>/<name>`
   serves the host's file (Range table in ARCHITECTURE.md).
+  `GET /j/<sid>/<token>/<itemId>` relays the current Jellyfin media (see
+  "Jellyfin media" below).
 
 ## Client to server
 
 ```
-{"t":"hello","proto":6,"secret":"","user":{"name":"","avatar":""},
+{"t":"hello","proto":7,"secret":"","user":{"name":"","avatar":""},
  "media":{"name":"","size":0,"duration":0,"url":null},"hostKey":"...",
  "resume":"<token>"}
 {"t":"ready","ready":true,"source":"manual"}      source: manual | auto
 {"t":"force","target":"all"|"<memberId>","ready":true}
 {"t":"seek","position":123.4,"seq":3}
 {"t":"swap","media":{"name":"","size":0,"duration":0,"url":"..."}}
+{"t":"swap","media":{"name":"","size":0,"duration":0,"jellyfin":{<ref>}}}
 {"t":"report","position":123.1,"buffered":6.2,"eventId":41,
- "duration":1440.5,"mediaId":2}
+ "duration":1440.5,"mediaId":2,"jf":{"<serverId>":true}}
 {"t":"ping","c":1767225600000}
 {"t":"chat","text":"..."}
 {"t":"kick","target":"<memberId>","reason":""}
@@ -58,23 +61,30 @@ Field notes:
 - `report.duration` / `report.mediaId` (optional, omitted when 0): the open
   media's length in seconds and the `mediaId` it belongs to. The server takes
   the first one whose `mediaId` is current while its media duration is 0.
+- `report.jf` (optional): Jellyfin access per `ServerId`, `true` = this
+  client plays the item with its own account, `false` = through the relay.
+  Sticky: a report without `jf` keeps the last one. At most 8 entries, keys
+  up to 64 characters; others are dropped.
 - `ping.c`: the client's clock in epoch ms; answered with `pong`.
 - `user.avatar`: base64 image, at most 256 KiB of characters. `name` is
   trimmed, empty becomes `?`, cut to 32 characters.
 - `chat.text` is cut to 500 characters.
 - `swap.media.url` is the link; `name`, `size`, `duration` are informational.
+  `swap.media.jellyfin` makes it Jellyfin media (see below); then `url` is
+  dropped.
 - Frames before `welcome` (other than `hello`) are ignored; unparsable or
   unknown frames are ignored silently.
 
 ## Server to client
 
 ```
-{"t":"welcome","token":"...","memberId":"m1","mediaUrl":"...","state":{<state>}}
+{"t":"welcome","token":"...","memberId":"m1","mediaUrl":"...","relayUrl":"...",
+ "state":{<state>}}
 {"t":"state","eventId":7,"transport":"playing"|"held"|"finished","position":12.3,
  "serverTime":"<ISO-8601 UTC>","mediaId":1,
- "media":{name,size,duration,url?}|absent,
- "members":[{"id","name","avatar","ready","inSet","buffered","stale"}],
- "seekBy":"m1","seekSeq":3}
+ "media":{name,size,duration,url?,jellyfin?}|absent,
+ "members":[{"id","name","avatar","ready","inSet","buffered","stale","jf"?}],
+ "seekBy":"m1","seekSeq":3,"relay":true}
 {"t":"pong","c":1767225600000,"s":1767225600012}
 {"t":"feed","actor":"","action":"","target":"","reason":"","at":"<ISO-8601>"}
 {"t":"chat","text":"...","from":"<name>"}
@@ -86,7 +96,9 @@ Field notes:
   media URL. `mediaUrl` is omitted when there is no media; it is a built
   `/m/...` URL for a host file (host part = what the client dialled), otherwise
   the shared link.
-  `welcome.state` has the same shape as `state`.
+  `welcome.state` has the same shape as `state`. `relayUrl` is present only
+  when `state.relay` is: this member's `/j/...` URL for the current
+  Jellyfin media (private like `token`).
 - `state` is sent every second and on every change. `position` is the value at
   `serverTime` (server clock); clients extrapolate while `transport` is
   `playing`, on the server's clock (see `pong`). `finished`: the media
@@ -94,7 +106,9 @@ Field notes:
   `eventId` increases on seek, swap and transport changes.
   `mediaId` increases on swap. `media.duration` is 0 until a client reports
   it. `seekBy` (member id) and `seekSeq` are present only while the current
-  `eventId` came from a seek.
+  `eventId` came from a seek. `relay` (omitted when false): the server can
+  relay the current Jellyfin media. `members[].jf` is the member's last
+  `report.jf`, omitted when it never sent one.
 - `pong.c` echoes the ping's `c`; `pong.s` is the server's clock in epoch ms
   (the clock `serverTime` uses). With `t3` the local receive time, the offset
   is `s - (c + t3) / 2`, accurate to half the round trip.
@@ -106,6 +120,37 @@ Field notes:
 - Chat is delivered twice: a `chat` frame with the text and a textless
   `feed` with `action:"chat"`. Render the `chat` frame only; the reference
   client drops the textless feed entry.
+
+## Jellyfin media
+
+```
+<ref> = {"serverId":"<Jellyfin ServerId>","itemId":"<32 hex>",
+         "mediaSourceId":"...","title":"Pilot","subtitle":"Show - S01E01",
+         "runtimeSecs":1440.5}
+```
+
+- `serverId`, `itemId` required; `mediaSourceId`, `subtitle`, `runtimeSecs`
+  optional (omitted when absent); `title` always sent (may be empty).
+  `runtimeSecs` is informational: the sync clock still uses the duration a
+  client reports.
+- The server keeps only the ref: for Jellyfin media no URL or token is stored
+  or broadcast (a `url` sent along is dropped). `serverId`, `itemId` and
+  `mediaSourceId` must match `[A-Za-z0-9-]{1,64}`, otherwise `bad swap media`.
+  `media.name` is the swap's name, else the ref's `title`; names are
+  sanitized like link names.
+- Each client resolves the ref with its own account on that server. A client
+  without one plays the relay URL when `state.relay` is true: `welcome.relayUrl`,
+  or after a swap built like the `/m` one from the host it dialled:
+  `http://<host>/j/default/<token>/<itemId>`.
+- `GET /j/<sid>/<token>/<itemId>`: the server fetches
+  `/Videos/<itemId>/stream?static=true&mediaSourceId=<id>` (the original
+  file) with its own credential and streams it through. `Range` is forwarded
+  as sent; status, `Content-Range`, `Content-Length`, `Content-Type` and
+  `Accept-Ranges` come back as Jellyfin sent them. Errors: 401 bad token,
+  403 kicked or not the current item, 404 no relay for the current media,
+  410 unknown session, 502 Jellyfin unreachable or rejecting the server's
+  credential. Bytes count toward `bytesServed`.
+- Pasted Jellyfin links sent as plain `url` stay plain links.
 
 ## Join and reconnect
 

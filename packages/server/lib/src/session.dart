@@ -30,6 +30,8 @@ class SessionMedia {
   final double duration;
   final String? url;
   final File? file;
+  /// Jellyfin media by reference; never together with [url] or [file].
+  final JellyfinRef? jellyfin;
   final int mediaId;
   const SessionMedia({
     required this.name,
@@ -37,6 +39,7 @@ class SessionMedia {
     required this.duration,
     this.url,
     this.file,
+    this.jellyfin,
     this.mediaId = 1,
   });
 }

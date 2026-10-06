@@ -16,6 +16,9 @@ Future<void> main(List<String> args) async {
     ..addOption('name', defaultsTo: 'server', help: 'Server name, reported by /health.')
     ..addOption('media', defaultsTo: '', help: 'Local file to serve as the starting media.')
     ..addOption('advertise-host', defaultsTo: '', help: 'Host put in file-media URLs instead of the one each client dialled.')
+    ..addOption('jellyfin',
+        help: 'YAML or JSON file with a Jellyfin login (baseUrl, token, client, device, deviceId, version[, serverId]) '
+            'to relay Jellyfin media to viewers without an account. The device fields must be the ones the token was issued with.')
     ..addOption('config', help: 'YAML or JSON config file (keys as in AppConfig); overrides the other flags.')
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show this help.');
   final ArgResults parsed;
@@ -49,6 +52,20 @@ Future<void> main(List<String> args) async {
         name: '${parsed['name']}',
         mediaPath: '${parsed['media']}',
         advertiseHost: '${parsed['advertise-host']}',
+      );
+    }
+    final jellyfinPath = parsed['jellyfin'] as String?;
+    if (jellyfinPath != null) {
+      final c = config;
+      config = AppConfig(
+        port: c.port,
+        secret: c.secret,
+        name: c.name,
+        mediaPath: c.mediaPath,
+        logLevel: c.logLevel,
+        advertiseHost: c.advertiseHost,
+        hostKey: c.hostKey,
+        jellyfin: await JellyfinCredential.loadFile(jellyfinPath),
       );
     }
   } on ConfigException catch (e) {

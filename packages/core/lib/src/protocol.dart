@@ -45,21 +45,96 @@ class HelloUser {
       HelloUser(name: (json['name'] as String?) ?? '', avatar: (json['avatar'] as String?) ?? '');
 }
 
+/// A Jellyfin item the session plays, by reference: each viewer resolves it
+/// with its own account (or through the server's relay). Never carries a URL
+/// or a token.
+class JellyfinRef {
+  /// Jellyfin `ServerId` (`/System/Info/Public`), the key accounts are stored by.
+  final String serverId;
+  final String itemId;
+  final String? mediaSourceId;
+  /// Display text: item name, and e.g. "Show - S01E02" for episodes.
+  final String title;
+  final String? subtitle;
+  /// Length from Jellyfin's RunTimeTicks, informational; the sync clock
+  /// still uses the length a client reports.
+  final double? runtimeSecs;
+  const JellyfinRef({
+    required this.serverId,
+    required this.itemId,
+    this.mediaSourceId,
+    this.title = '',
+    this.subtitle,
+    this.runtimeSecs,
+  });
+
+  Map<String, Object?> toJson() => {
+        'serverId': serverId,
+        'itemId': itemId,
+        if (mediaSourceId != null) 'mediaSourceId': mediaSourceId,
+        'title': title,
+        if (subtitle != null) 'subtitle': subtitle,
+        if (runtimeSecs != null) 'runtimeSecs': runtimeSecs,
+      };
+
+  factory JellyfinRef.fromJson(Map<String, Object?> json) {
+    final runtime = json['runtimeSecs'];
+    return JellyfinRef(
+      serverId: (json['serverId'] as String?) ?? '',
+      itemId: (json['itemId'] as String?) ?? '',
+      mediaSourceId: json['mediaSourceId'] as String?,
+      title: (json['title'] as String?) ?? '',
+      subtitle: json['subtitle'] as String?,
+      runtimeSecs: runtime == null ? null : finiteDouble(runtime, 'runtimeSecs'),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is JellyfinRef &&
+      other.serverId == serverId &&
+      other.itemId == itemId &&
+      other.mediaSourceId == mediaSourceId &&
+      other.title == title &&
+      other.subtitle == subtitle &&
+      other.runtimeSecs == runtimeSecs;
+
+  @override
+  int get hashCode =>
+      Object.hash(serverId, itemId, mediaSourceId, title, subtitle, runtimeSecs);
+}
+
 class HelloMedia {
   final String name;
   final int size;
   final double duration;
   final String? url;
-  const HelloMedia({required this.name, required this.size, required this.duration, this.url});
+  /// Set for Jellyfin media; then there is no [url] (the server drops one).
+  final JellyfinRef? jellyfin;
+  const HelloMedia(
+      {required this.name, required this.size, required this.duration, this.url, this.jellyfin});
 
-  Map<String, Object?> toJson() => {'name': name, 'size': size, 'duration': duration, if (url != null) 'url': url};
+  HelloMedia copyWith({double? duration}) => HelloMedia(
+      name: name, size: size, duration: duration ?? this.duration, url: url, jellyfin: jellyfin);
 
-  factory HelloMedia.fromJson(Map<String, Object?> json) => HelloMedia(
-        name: (json['name'] as String?) ?? '',
-        size: finiteInt(json['size'], 'size', fallback: 0),
-        duration: finiteDouble(json['duration'], 'duration'),
-        url: json['url'] as String?,
-      );
+  Map<String, Object?> toJson() => {
+        'name': name,
+        'size': size,
+        'duration': duration,
+        if (url != null) 'url': url,
+        if (jellyfin != null) 'jellyfin': jellyfin!.toJson(),
+      };
+
+  factory HelloMedia.fromJson(Map<String, Object?> json) {
+    final jf = json['jellyfin'];
+    return HelloMedia(
+      name: (json['name'] as String?) ?? '',
+      size: finiteInt(json['size'], 'size', fallback: 0),
+      duration: finiteDouble(json['duration'], 'duration'),
+      url: json['url'] as String?,
+      jellyfin: jf is Map ? JellyfinRef.fromJson(Map<String, Object?>.from(jf)) : null,
+    );
+  }
 }
 
 class HelloMessage {
@@ -134,14 +209,19 @@ class WelcomeMessage {
   final String token;
   final String memberId;
   final String? mediaUrl;
+  /// This member's `/j/...` URL for the current Jellyfin media when the
+  /// server can relay it (`state.relay`); private like [token].
+  final String? relayUrl;
   final Map<String, Object?>? state;
-  const WelcomeMessage({required this.token, this.memberId = '', this.mediaUrl, this.state});
+  const WelcomeMessage(
+      {required this.token, this.memberId = '', this.mediaUrl, this.relayUrl, this.state});
 
   Map<String, Object?> toJson() => {
         't': 'welcome',
         'token': token,
         'memberId': memberId,
         if (mediaUrl != null) 'mediaUrl': mediaUrl,
+        if (relayUrl != null) 'relayUrl': relayUrl,
         if (state != null) 'state': state,
       };
 
@@ -152,6 +232,7 @@ class WelcomeMessage {
       token: (json['token'] as String?) ?? '',
       memberId: (json['memberId'] as String?) ?? '',
       mediaUrl: json['mediaUrl'] as String?,
+      relayUrl: json['relayUrl'] as String?,
       state: state is Map ? Map<String, Object?>.from(state) : null,
     );
   }
@@ -257,12 +338,16 @@ class ReportMessage {
   final double duration;
   /// The `mediaId` the client has open; [duration] belongs to it.
   final int mediaId;
+  /// Jellyfin access by `ServerId`: true = plays with its own account,
+  /// false = through the server's relay. Null leaves the last one in place.
+  final Map<String, bool>? jf;
   const ReportMessage(
       {required this.position,
       required this.buffered,
       required this.eventId,
       this.duration = 0,
-      this.mediaId = 0});
+      this.mediaId = 0,
+      this.jf});
 
   Map<String, Object?> toJson() => {
         't': 'report',
@@ -271,6 +356,7 @@ class ReportMessage {
         'eventId': eventId,
         if (duration > 0) 'duration': duration,
         if (mediaId != 0) 'mediaId': mediaId,
+        if (jf != null) 'jf': jf,
       };
 
   factory ReportMessage.fromJson(Map<String, Object?> json) {
@@ -281,8 +367,23 @@ class ReportMessage {
       eventId: finiteInt(json['eventId'], 'eventId', fallback: 0),
       duration: finiteDouble(json['duration'], 'duration'),
       mediaId: finiteInt(json['mediaId'], 'mediaId'),
+      jf: jfAccessFromJson(json['jf']),
     );
   }
+}
+
+/// Reads a `jf` map (`{serverId: bool}`), dropping non-bool entries and
+/// keys over 64 characters, at most 8 entries (it rides in every `state`);
+/// null when absent or not a map.
+Map<String, bool>? jfAccessFromJson(Object? value) {
+  if (value is! Map) return null;
+  final out = <String, bool>{};
+  for (final e in value.entries) {
+    if (out.length >= 8) break;
+    final k = e.key;
+    if (k is String && k.length <= 64 && e.value is bool) out[k] = e.value as bool;
+  }
+  return out;
 }
 
 /// Clock probe: the client sends its own clock in [clientMs]; the server
@@ -333,6 +434,8 @@ class MemberView {
   final bool inSet;
   final double buffered;
   final bool stale;
+  /// Last `report.jf` of this member; empty when never reported.
+  final Map<String, bool> jf;
   const MemberView({
     required this.id,
     required this.name,
@@ -341,6 +444,7 @@ class MemberView {
     required this.inSet,
     required this.buffered,
     required this.stale,
+    this.jf = const {},
   });
 
   Map<String, Object?> toJson() => {
@@ -351,6 +455,7 @@ class MemberView {
         'inSet': inSet,
         'buffered': buffered,
         'stale': stale,
+        if (jf.isNotEmpty) 'jf': jf,
       };
 
   factory MemberView.fromJson(Map<String, Object?> json) => MemberView(
@@ -361,6 +466,7 @@ class MemberView {
         inSet: (json['inSet'] as bool?) ?? false,
         buffered: finiteDouble(json['buffered'], 'buffered'),
         stale: (json['stale'] as bool?) ?? false,
+        jf: jfAccessFromJson(json['jf']) ?? const {},
       );
 }
 
@@ -376,6 +482,9 @@ class StateBroadcast {
   /// current event is not a seek.
   final String? seekBy;
   final int? seekSeq;
+  /// The server can relay the current Jellyfin media (`/j/...`) for viewers
+  /// without their own access to it.
+  final bool relay;
   const StateBroadcast({
     required this.eventId,
     required this.transport,
@@ -386,6 +495,7 @@ class StateBroadcast {
     required this.members,
     this.seekBy,
     this.seekSeq,
+    this.relay = false,
   });
 
   Map<String, Object?> toJson() => {
@@ -399,6 +509,7 @@ class StateBroadcast {
         'members': members.map((m) => m.toJson()).toList(),
         if (seekBy != null) 'seekBy': seekBy,
         if (seekSeq != null) 'seekSeq': seekSeq,
+        if (relay) 'relay': true,
       };
 
   factory StateBroadcast.fromJson(Map<String, Object?> json) {
@@ -420,6 +531,7 @@ class StateBroadcast {
           : const [],
       seekBy: json['seekBy'] as String?,
       seekSeq: json['seekSeq'] == null ? null : finiteInt(json['seekSeq'], 'seekSeq'),
+      relay: (json['relay'] as bool?) ?? false,
     );
   }
 }

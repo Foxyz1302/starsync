@@ -8,7 +8,7 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 | Path | What | Rule |
 |---|---|---|
 | `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client | pure Dart, no Flutter |
-| `packages/server` | Relic HTTP + WebSocket server (`SyncServer`, `ServerHub`, `Session`, media endpoint), the `serve()` entrypoint, `bin/server.dart` (dedicated server) | pure Dart, no Flutter |
+| `packages/server` | Relic HTTP + WebSocket server (`SyncServer`, `ServerHub`, `Session`, media endpoint, Jellyfin relay), the `serve()` entrypoint, `bin/server.dart` (dedicated server) | pure Dart, no Flutter |
 | `apps/desktop` | Flutter app: UI, `SyncClient`, `SessionCoordinator`, `PlaybackController` (media_kit/mpv), `ServerIsolate`, updater | ships with `watch-together-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
 | `deploy` | systemd unit for the dedicated server | |
@@ -40,7 +40,7 @@ all sockets and returns, and the isolate exits.
 - **Dedicated server**: `bin/server.dart` compiled with `dart compile exe`
   and shipped next to the app as `watch-together-server`. It parses flags
   (`--port`, `--secret`, `--name`, `--media`, `--advertise-host`,
-  `--config`; default port 8080) into the same map and calls `serve`;
+  `--jellyfin <file>`, `--config`; default port 8080) into the same map and calls `serve`;
   SIGINT and SIGTERM stop it. A Flutter binary cannot run without a
   display, which is why the server is its own build.
 
@@ -137,7 +137,7 @@ Additive wire changes only; bump `proto` and PROTOCOL.md in the same commit.
 
 ## Media
 
-Two sources, same sync.
+Three sources, same sync.
 
 - **Link**: the media field holds an http(s) URL. It travels as `media.url`
   in `swap` and `state`, and as `mediaUrl` in `welcome`. Each app plays it
@@ -152,6 +152,12 @@ Two sources, same sync.
   it connected to. Bytes stream file to socket and are counted as streamed
   (`bytesServed`); nothing is stored. The host plays through loopback like
   everyone else.
+
+- **Jellyfin item**: the media is a ref (`{serverId, itemId, ...}`, wire in
+  [PROTOCOL.md](PROTOCOL.md) "Jellyfin media"); the server never stores or
+  sends a URL or token for it. Each app resolves it with its own account and
+  direct-plays the static stream; guests use the relay (see "Jellyfin
+  relay").
 
 Range table (`resolveMediaRequest`, tested byte-exact):
 
@@ -278,11 +284,40 @@ Gotchas (Jellyfin 10.11):
   failure).
 - Jellyfin overwrites a token's stored device name and app version with the
   header's. Only use tokens this app obtained itself; a relay using a
-  viewer's token must send that viewer's client fields.
+  viewer's token must send that viewer's client fields (the server relay
+  sends exactly its credential's fields).
 - Static streams (`/Videos/{id}/stream?static=true`) serve the original file
   with byte ranges. The share URL has no credentials; each side adds its own
   `api_key` (`authorizeUrl`).
 - Ticks: 10,000,000 per second.
+
+## Jellyfin relay
+
+For viewers without an account on the item's Jellyfin
+(`packages/server/lib/src/jellyfin_relay.dart`). The server may hold one
+`JellyfinCredential` (config key `jellyfin`: `baseUrl`, `serverId`, `token`,
+`client`, `device`, `deviceId`, `version`; primitives, so it crosses the
+isolate boundary in the `serve()` map). The hosting app fills it with its
+own app-obtained token and that token's device fields; the dedicated server
+reads it from `--jellyfin <file>` (YAML/JSON with those keys, keeps the
+token off the command line) or a `jellyfin:` map in `--config`. An empty
+`serverId` is looked up at start (`/System/Info/Public`); if that fails the
+relay stays off. The token is never logged (`toString` and config parse
+errors leave it out).
+
+- Available (`state.relay`) only while the current media is a ref whose
+  `serverId` equals the credential's. Only that item is relayed, only to a
+  valid, unkicked viewer token: no open proxy.
+- Each request opens `/Videos/{id}/stream?static=true&mediaSourceId=` with
+  `Authorization: MediaBrowser` built from exactly the configured fields
+  (Jellyfin rewrites a token's device fields from the header), forwards
+  `Range` untouched and `Accept-Encoding: identity`, and returns Jellyfin's
+  status and range headers. Bytes stream through (no buffering) and count
+  toward `bytesServed` as sent. A viewer disconnect cancels the upstream
+  response, which closes that connection (tested: `HttpClientRequest.abort`
+  does nothing once the response has arrived; cancelling the response
+  subscription does).
+- No progress reporting in the server: watched state is per client.
 
 ## Desktop UI
 
