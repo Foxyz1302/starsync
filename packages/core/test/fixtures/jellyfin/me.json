@@ -1,0 +1,11 @@
+{
+ "Name": "testuser",
+ "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+ "Id": "95b50af4ac466551c3887fd2f9f3e785",
+ "HasPassword": true,
+ "HasConfiguredPassword": true,
+ "HasConfiguredEasyPassword": false,
+ "EnableAutoLogin": false,
+ "LastLoginDate": "2026-05-02T17:06:16.9449873Z",
+ "LastActivityDate": "2026-10-06T17:16:17.677702Z"
+}

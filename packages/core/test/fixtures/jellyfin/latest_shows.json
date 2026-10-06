@@ -1,0 +1,147 @@
+[
+ {
+  "Name": "Hanashi Tales",
+  "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+  "Id": "af0cd70cca5678989e1bbd59d502b2a4",
+  "PremiereDate": "2009-07-02T23:00:00.0000000Z",
+  "OfficialRating": "GB-18",
+  "ChannelId": null,
+  "CommunityRating": 8.094,
+  "RunTimeTicks": 14400000000,
+  "IsFolder": true,
+  "Type": "Series",
+  "UserData": {
+   "UnplayedItemCount": 86,
+   "PlaybackPositionTicks": 0,
+   "PlayCount": 0,
+   "IsFavorite": false,
+   "Played": false,
+   "Key": "af0cd70c-ca56-7898-9e1b-bd59d502b2a4",
+   "ItemId": "af0cd70cca5678989e1bbd59d502b2a4"
+  },
+  "ChildCount": 30,
+  "Status": "Continuing",
+  "AirDays": [],
+  "PrimaryImageAspectRatio": 0.6666666666666666,
+  "DisplayOrder": "",
+  "ImageTags": {
+   "Primary": "470217a9056b1c14d8247134d52a0c69",
+   "Thumb": "8e4c9da95460c9be21817704a3f3b0b8",
+   "Logo": "be4ceedd15eeaf23e4331b128ffc4081"
+  },
+  "BackdropImageTags": [
+   "f48f20ca63da21c488e3523c52e52e87"
+  ],
+  "LocationType": "FileSystem",
+  "MediaType": "Unknown",
+  "EndDate": "2024-10-18T23:00:00.0000000Z"
+ },
+ {
+  "Name": "Noisy Neighbors",
+  "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+  "Id": "0693a6738ce9759e4fb929c7ab4d1e9b",
+  "PremiereDate": "2022-10-14T00:00:00.0000000Z",
+  "OfficialRating": "TV-14",
+  "ChannelId": null,
+  "CommunityRating": 6.9,
+  "RunTimeTicks": 13800000000,
+  "ProductionYear": 2022,
+  "IsFolder": true,
+  "Type": "Series",
+  "UserData": {
+   "UnplayedItemCount": 46,
+   "PlaybackPositionTicks": 0,
+   "PlayCount": 0,
+   "IsFavorite": false,
+   "Played": false,
+   "Key": "0693a673-8ce9-759e-4fb9-29c7ab4d1e9b",
+   "ItemId": "0693a6738ce9759e4fb929c7ab4d1e9b"
+  },
+  "ChildCount": 23,
+  "Status": "Ended",
+  "AirDays": [],
+  "PrimaryImageAspectRatio": 0.6666666666666666,
+  "ImageTags": {
+   "Thumb": "4cdb51e6aecedfbff886805806866811",
+   "Primary": "c4b6e7502dc74c6c8cf2e337692b3c3c",
+   "Logo": "5723514e752c8c3d9c7d5aa3d65eee0f"
+  },
+  "BackdropImageTags": [
+   "b55a7153150a781267e9aa7e505856c6"
+  ],
+  "LocationType": "FileSystem",
+  "MediaType": "Unknown",
+  "EndDate": "2024-06-21T00:00:00.0000000Z"
+ },
+ {
+  "Name": "Iron Gardener",
+  "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+  "Id": "4181d0bbf7e02d0e25db1323dc3ea48b",
+  "PremiereDate": "2024-01-04T00:00:00.0000000Z",
+  "OfficialRating": "TV-MA",
+  "ChannelId": null,
+  "CommunityRating": 7.643,
+  "RunTimeTicks": 14400000000,
+  "ProductionYear": 2024,
+  "IsFolder": true,
+  "Type": "Series",
+  "UserData": {
+   "UnplayedItemCount": 12,
+   "PlaybackPositionTicks": 0,
+   "PlayCount": 0,
+   "IsFavorite": false,
+   "Played": false,
+   "Key": "4181d0bb-f7e0-2d0e-25db-1323dc3ea48b",
+   "ItemId": "4181d0bbf7e02d0e25db1323dc3ea48b"
+  },
+  "ChildCount": 12,
+  "Status": "Continuing",
+  "AirDays": [],
+  "PrimaryImageAspectRatio": 0.6666666666666666,
+  "ImageTags": {
+   "Primary": "abe811495915f2aac37ba10d525c60ec",
+   "Thumb": "c66a8eaea36e3c13abd61556d089aa4d",
+   "Logo": "d1cdceb5b0df8cfa28d7d89a3b93d12a"
+  },
+  "BackdropImageTags": [
+   "0dc81c4bcf59385cfcae48b159eaa382"
+  ],
+  "LocationType": "FileSystem",
+  "MediaType": "Unknown",
+  "EndDate": "2024-03-21T00:00:00.0000000Z"
+ },
+ {
+  "Name": "So What If I Came Back as a Mushroom?",
+  "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+  "Id": "787f67e173cae44786e77fea56c34ee7",
+  "PremiereDate": "2026-10-05T00:00:00.0000000Z",
+  "ChannelId": null,
+  "RunTimeTicks": 0,
+  "IsFolder": true,
+  "Type": "Series",
+  "UserData": {
+   "UnplayedItemCount": 2,
+   "PlaybackPositionTicks": 0,
+   "PlayCount": 0,
+   "IsFavorite": false,
+   "Played": false,
+   "Key": "787f67e1-73ca-e447-86e7-7fea56c34ee7",
+   "ItemId": "787f67e173cae44786e77fea56c34ee7"
+  },
+  "ChildCount": 2,
+  "Status": "Continuing",
+  "AirDays": [],
+  "PrimaryImageAspectRatio": 0.6666666666666666,
+  "ImageTags": {
+   "Primary": "fd18a0f08a3a2f6a5c684f9989517c7a",
+   "Logo": "347f5198f5f5e47dbac3d1b0433c5210",
+   "Thumb": "dd978d4870aed47feca978db71a698d3"
+  },
+  "BackdropImageTags": [
+   "d15c939a418019bece00aea0a3e8c463"
+  ],
+  "LocationType": "FileSystem",
+  "MediaType": "Unknown",
+  "EndDate": "2026-10-05T00:00:00.0000000Z"
+ }
+]

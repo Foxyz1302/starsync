@@ -1,0 +1,9 @@
+{
+ "LocalAddress": "https://example.invalid",
+ "ServerName": "Example Server",
+ "Version": "10.11.11",
+ "ProductName": "Jellyfin Server",
+ "OperatingSystem": "",
+ "Id": "a3c3646f1fc722c7a34e0e47e5450b05",
+ "StartupWizardCompleted": true
+}

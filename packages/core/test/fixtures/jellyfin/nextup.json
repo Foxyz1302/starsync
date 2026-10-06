@@ -1,0 +1,141 @@
+{
+ "Items": [
+  {
+   "Name": "Bread and Bandits and Knights",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "a43e1cfa5013da4ea9323c2ebdc22c3c",
+   "HasSubtitles": true,
+   "Container": "mkv",
+   "PremiereDate": "2022-08-12T23:00:00.0000000Z",
+   "ChannelId": null,
+   "Overview": "An invented summary for the test fixtures, number 25.",
+   "CommunityRating": 7.143,
+   "RunTimeTicks": 14201120000,
+   "ProductionYear": 2022,
+   "IndexNumber": 6,
+   "ParentIndexNumber": 1,
+   "IsFolder": false,
+   "Type": "Episode",
+   "ParentLogoItemId": "66d14ad0b34a4a6d92109a8f2f065259",
+   "ParentBackdropItemId": "66d14ad0b34a4a6d92109a8f2f065259",
+   "ParentBackdropImageTags": [
+    "de68b0e680ebd1cddb3c6b205fdf4a0f"
+   ],
+   "UserData": {
+    "PlaybackPositionTicks": 0,
+    "PlayCount": 0,
+    "IsFavorite": false,
+    "Played": false,
+    "Key": "900102001006",
+    "ItemId": "a43e1cfa5013da4ea9323c2ebdc22c3c"
+   },
+   "SeriesName": "Copper Warden",
+   "SeriesId": "66d14ad0b34a4a6d92109a8f2f065259",
+   "SeasonId": "5f495475ada7f05fecbfec2d30e34233",
+   "PrimaryImageAspectRatio": 1.7777777777777777,
+   "SeriesPrimaryImageTag": "f88c4ef406e35cf8e57b8806ed1dc2b1",
+   "SeasonName": "Season 1",
+   "VideoType": "VideoFile",
+   "ImageTags": {
+    "Primary": "e5ea05efe8fa94082d4e8ed7dc33e6f8"
+   },
+   "BackdropImageTags": [],
+   "ParentLogoImageTag": "135451bd006549510b37aa74b66da20f",
+   "ParentThumbItemId": "66d14ad0b34a4a6d92109a8f2f065259",
+   "ParentThumbImageTag": "8b405376a5e85536efb00623727b6cc8",
+   "LocationType": "FileSystem",
+   "MediaType": "Video"
+  },
+  {
+   "Name": "The Sand-Born Drifters",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "3fd19bfe4ae0d540d0fc4f4f071d2cc4",
+   "HasSubtitles": true,
+   "Container": "mkv",
+   "PremiereDate": "2026-10-01T23:00:00.0000000Z",
+   "ChannelId": null,
+   "CommunityRating": 1,
+   "RunTimeTicks": 15120940000,
+   "ProductionYear": 2026,
+   "IndexNumber": 3,
+   "ParentIndexNumber": 6,
+   "IsFolder": false,
+   "Type": "Episode",
+   "ParentLogoItemId": "645ba801414bcb3e23e02cd6c3d73bfd",
+   "ParentBackdropItemId": "645ba801414bcb3e23e02cd6c3d73bfd",
+   "ParentBackdropImageTags": [
+    "1e3b506acfc7243bd18ad0d80abfe6a5"
+   ],
+   "UserData": {
+    "PlaybackPositionTicks": 0,
+    "PlayCount": 0,
+    "IsFavorite": false,
+    "Played": false,
+    "Key": "900104006003",
+    "ItemId": "3fd19bfe4ae0d540d0fc4f4f071d2cc4"
+   },
+   "SeriesName": "Milo's Curious Voyage",
+   "SeriesId": "645ba801414bcb3e23e02cd6c3d73bfd",
+   "SeasonId": "a26dafcf0d0de11783697a8bc627721c",
+   "PrimaryImageAspectRatio": 1.7777777777777777,
+   "SeriesPrimaryImageTag": "fe1e25be45dd3310c9d90c748e49d502",
+   "SeasonName": "Season 6",
+   "VideoType": "VideoFile",
+   "ImageTags": {
+    "Primary": "0cbf7a366b5f92cd651daef2fe9d9e80"
+   },
+   "BackdropImageTags": [],
+   "ParentLogoImageTag": "7a1bae35b0c36cfe0b9c1c2d7707c8e7",
+   "ParentThumbItemId": "645ba801414bcb3e23e02cd6c3d73bfd",
+   "ParentThumbImageTag": "eba7b44f3acd5f72601ab5575d3fe924",
+   "LocationType": "FileSystem",
+   "MediaType": "Video"
+  },
+  {
+   "Name": "The Very, Very, Very Long Title Club - S03E08 - Hana-Senpai's Grandmother WEBDL",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "02734fa856c635f9203f6bb05fbb9dac",
+   "HasSubtitles": true,
+   "Container": "mkv",
+   "PremiereDate": "1970-01-01T00:00:00.0000000Z",
+   "ChannelId": null,
+   "RunTimeTicks": 14301630000,
+   "ProductionYear": 1970,
+   "IndexNumber": 8,
+   "ParentIndexNumber": 3,
+   "IsFolder": false,
+   "Type": "Episode",
+   "ParentLogoItemId": "bcfb7f0cb186feb5135ea542f85f0e6b",
+   "ParentBackdropItemId": "bcfb7f0cb186feb5135ea542f85f0e6b",
+   "ParentBackdropImageTags": [
+    "a589a1780bbf7cd9cbea6173f84c8c85"
+   ],
+   "UserData": {
+    "PlaybackPositionTicks": 0,
+    "PlayCount": 0,
+    "IsFavorite": false,
+    "Played": false,
+    "Key": "900103003008",
+    "ItemId": "02734fa856c635f9203f6bb05fbb9dac"
+   },
+   "SeriesName": "The Very, Very, Very Long Title Club",
+   "SeriesId": "bcfb7f0cb186feb5135ea542f85f0e6b",
+   "SeasonId": "5d5ea5dfae005b6c74e010e460344d65",
+   "PrimaryImageAspectRatio": 1.7777777777777777,
+   "SeriesPrimaryImageTag": "64ceebc8591670e79d58e13233c9d12b",
+   "SeasonName": "Season 3",
+   "VideoType": "VideoFile",
+   "ImageTags": {
+    "Primary": "9a2149bdfba67c0ee406b4da5f5ff07b"
+   },
+   "BackdropImageTags": [],
+   "ParentLogoImageTag": "dfef63f26785f2f583808283562b97f2",
+   "ParentThumbItemId": "bcfb7f0cb186feb5135ea542f85f0e6b",
+   "ParentThumbImageTag": "c08c561860df44221a655fddc49bfc3b",
+   "LocationType": "FileSystem",
+   "MediaType": "Video"
+  }
+ ],
+ "TotalRecordCount": 44,
+ "StartIndex": 0
+}

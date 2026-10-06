@@ -1,0 +1,147 @@
+{
+ "Items": [
+  {
+   "Name": "A Secret Kept from the Guild, and a Lost Map",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "7519dde1027046c78339b41cb7d7eaf9",
+   "HasSubtitles": true,
+   "Container": "mkv",
+   "PremiereDate": "2022-07-22T23:00:00.0000000Z",
+   "ChannelId": null,
+   "Overview": "An invented summary for the test fixtures, number 4.",
+   "CommunityRating": 7.375,
+   "RunTimeTicks": 14200480000,
+   "ProductionYear": 2022,
+   "IndexNumber": 3,
+   "ParentIndexNumber": 1,
+   "IsFolder": false,
+   "Type": "Episode",
+   "ParentLogoItemId": "66d14ad0b34a4a6d92109a8f2f065259",
+   "ParentBackdropItemId": "66d14ad0b34a4a6d92109a8f2f065259",
+   "ParentBackdropImageTags": [
+    "de68b0e680ebd1cddb3c6b205fdf4a0f"
+   ],
+   "UserData": {
+    "PlayedPercentage": 85.06994129775894,
+    "PlaybackPositionTicks": 12080340000,
+    "PlayCount": 2,
+    "IsFavorite": false,
+    "LastPlayedDate": "2026-10-06T12:10:32.978Z",
+    "Played": true,
+    "Key": "7519dde1-0270-46c7-8339-b41cb7d7eaf9",
+    "ItemId": "7519dde1027046c78339b41cb7d7eaf9"
+   },
+   "SeriesName": "Copper Warden",
+   "SeriesId": "66d14ad0b34a4a6d92109a8f2f065259",
+   "SeasonId": "5f495475ada7f05fecbfec2d30e34233",
+   "PrimaryImageAspectRatio": 1.7777777777777777,
+   "SeriesPrimaryImageTag": "f88c4ef406e35cf8e57b8806ed1dc2b1",
+   "SeasonName": "Season 1",
+   "VideoType": "VideoFile",
+   "ImageTags": {
+    "Primary": "11f0009c425e1167227df6fa723308f0"
+   },
+   "BackdropImageTags": [],
+   "ParentLogoImageTag": "135451bd006549510b37aa74b66da20f",
+   "ParentThumbItemId": "66d14ad0b34a4a6d92109a8f2f065259",
+   "ParentThumbImageTag": "8b405376a5e85536efb00623727b6cc8",
+   "LocationType": "FileSystem",
+   "MediaType": "Video"
+  },
+  {
+   "Name": "The Quiet Orchard Keeper - S01E10 - The Orchard Keeper Guards a Princess",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "b1288dce2b1a7c86bf598053bfe46176",
+   "HasSubtitles": true,
+   "Container": "mkv",
+   "PremiereDate": "2025-06-07T00:00:00.0000000Z",
+   "ChannelId": null,
+   "Overview": "An invented summary for the test fixtures, number 32.",
+   "RunTimeTicks": 14190920000,
+   "ProductionYear": 2025,
+   "IndexNumber": 10,
+   "ParentIndexNumber": 1,
+   "IsFolder": false,
+   "Type": "Episode",
+   "ParentLogoItemId": "f18d1de05bc91bc801054cef399479e2",
+   "ParentBackdropItemId": "f18d1de05bc91bc801054cef399479e2",
+   "ParentBackdropImageTags": [
+    "490e32fc24f5f465169b22a88fb8e35a"
+   ],
+   "UserData": {
+    "PlayedPercentage": 71.43748044524246,
+    "PlaybackPositionTicks": 10137635700,
+    "PlayCount": 2,
+    "IsFavorite": false,
+    "LastPlayedDate": "2026-08-07T07:33:27.4085253Z",
+    "Played": false,
+    "Key": "b1288dce-2b1a-7c86-bf59-8053bfe46176",
+    "ItemId": "b1288dce2b1a7c86bf598053bfe46176"
+   },
+   "SeriesName": "The Quiet Orchard Keeper",
+   "SeriesId": "f18d1de05bc91bc801054cef399479e2",
+   "SeasonId": "6c01819180a562b8790fc0660fe654a6",
+   "PrimaryImageAspectRatio": 1.7777777777777777,
+   "SeriesPrimaryImageTag": "e00424df8ef9d44ef5a431afd5b3df58",
+   "SeasonName": "Season 1",
+   "VideoType": "VideoFile",
+   "ImageTags": {
+    "Primary": "ebd9404da325c36dc2ae17fc9bec4073"
+   },
+   "BackdropImageTags": [],
+   "ParentLogoImageTag": "178909f52dcc0cf8ff85740c83982434",
+   "ParentThumbItemId": "f18d1de05bc91bc801054cef399479e2",
+   "ParentThumbImageTag": "1783937e01e20133241a22172df3782e",
+   "LocationType": "FileSystem",
+   "MediaType": "Video"
+  },
+  {
+   "Name": "The Orchard Keeper Watches Them Grow",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "dea96b42e57b090d4478f828b5d56a13",
+   "HasSubtitles": true,
+   "Container": "mkv",
+   "PremiereDate": "2026-07-14T23:00:00.0000000Z",
+   "ChannelId": null,
+   "RunTimeTicks": 14130560000,
+   "ProductionYear": 2026,
+   "IndexNumber": 2,
+   "ParentIndexNumber": 2,
+   "IsFolder": false,
+   "Type": "Episode",
+   "ParentLogoItemId": "f18d1de05bc91bc801054cef399479e2",
+   "ParentBackdropItemId": "f18d1de05bc91bc801054cef399479e2",
+   "ParentBackdropImageTags": [
+    "490e32fc24f5f465169b22a88fb8e35a"
+   ],
+   "UserData": {
+    "PlayedPercentage": 75.48837837990851,
+    "PlaybackPositionTicks": 10666930600,
+    "PlayCount": 1,
+    "IsFavorite": false,
+    "LastPlayedDate": "2026-08-07T07:30:29.3856702Z",
+    "Played": false,
+    "Key": "dea96b42-e57b-090d-4478-f828b5d56a13",
+    "ItemId": "dea96b42e57b090d4478f828b5d56a13"
+   },
+   "SeriesName": "The Quiet Orchard Keeper",
+   "SeriesId": "f18d1de05bc91bc801054cef399479e2",
+   "SeasonId": "4437a309b9fa10e30f0226d2784b7702",
+   "PrimaryImageAspectRatio": 1.7777777777777777,
+   "SeriesPrimaryImageTag": "e00424df8ef9d44ef5a431afd5b3df58",
+   "SeasonName": "Season 2",
+   "VideoType": "VideoFile",
+   "ImageTags": {
+    "Primary": "ae2d97273ebfe8b8d3024d55e58a254c"
+   },
+   "BackdropImageTags": [],
+   "ParentLogoImageTag": "178909f52dcc0cf8ff85740c83982434",
+   "ParentThumbItemId": "f18d1de05bc91bc801054cef399479e2",
+   "ParentThumbImageTag": "1783937e01e20133241a22172df3782e",
+   "LocationType": "FileSystem",
+   "MediaType": "Video"
+  }
+ ],
+ "TotalRecordCount": 6,
+ "StartIndex": 0
+}

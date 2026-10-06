@@ -1,0 +1,106 @@
+{
+ "Items": [
+  {
+   "Name": "Harbor.of.Lights",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "b3015682af77a74c3e2208783f9d79a2",
+   "HasSubtitles": true,
+   "Container": "mkv",
+   "ChannelId": null,
+   "RunTimeTicks": 86766720000,
+   "ProductionYear": 2005,
+   "IsFolder": false,
+   "Type": "Movie",
+   "UserData": {
+    "PlaybackPositionTicks": 0,
+    "PlayCount": 0,
+    "IsFavorite": false,
+    "Played": false,
+    "Key": "b3015682-af77-a74c-3e22-08783f9d79a2",
+    "ItemId": "b3015682af77a74c3e2208783f9d79a2"
+   },
+   "PrimaryImageAspectRatio": 1.7777777777777777,
+   "VideoType": "VideoFile",
+   "ImageTags": {
+    "Primary": "93023c22961fdb3fdbd634f986f7c010"
+   },
+   "BackdropImageTags": [],
+   "LocationType": "FileSystem",
+   "MediaType": "Video"
+  },
+  {
+   "Name": "Star Pearl: The Long Climb",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "86380fc74bdb617125f26fbe19374413",
+   "HasSubtitles": true,
+   "Container": "mkv",
+   "PremiereDate": "1996-03-04T00:00:00.0000000Z",
+   "OfficialRating": "Unrated",
+   "ChannelId": null,
+   "Overview": "An invented summary for the test fixtures, number 2.",
+   "CommunityRating": 7.371,
+   "RunTimeTicks": 47779399999,
+   "ProductionYear": 1996,
+   "IsFolder": false,
+   "Type": "Movie",
+   "UserData": {
+    "PlaybackPositionTicks": 0,
+    "PlayCount": 0,
+    "IsFavorite": false,
+    "Played": false,
+    "Key": "86380fc7-4bdb-6171-25f2-6fbe19374413",
+    "ItemId": "86380fc74bdb617125f26fbe19374413"
+   },
+   "PrimaryImageAspectRatio": 0.7103825136612022,
+   "VideoType": "VideoFile",
+   "ImageTags": {
+    "Primary": "9f4b95286a9caf87da7b6d86fc550952",
+    "Thumb": "acc8741b90ae07c5f211ca163d1d1889",
+    "Logo": "ceb4759836c8d3abf828c751dd6b33fd"
+   },
+   "BackdropImageTags": [
+    "5d172e54868671d1dd3bb8873da42a61"
+   ],
+   "LocationType": "FileSystem",
+   "MediaType": "Video"
+  },
+  {
+   "Name": "The Block Builders",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "90831539f2d1a2154effac24610764dc",
+   "HasSubtitles": true,
+   "Container": "mkv",
+   "PremiereDate": "2025-03-31T00:00:00.0000000Z",
+   "OfficialRating": "PG",
+   "ChannelId": null,
+   "Overview": "An invented summary for the test fixtures, number 12.",
+   "CommunityRating": 6.531,
+   "RunTimeTicks": 60538810000,
+   "ProductionYear": 2025,
+   "IsFolder": false,
+   "Type": "Movie",
+   "UserData": {
+    "PlaybackPositionTicks": 0,
+    "PlayCount": 0,
+    "IsFavorite": false,
+    "Played": false,
+    "Key": "90831539-f2d1-a215-4eff-ac24610764dc",
+    "ItemId": "90831539f2d1a2154effac24610764dc"
+   },
+   "PrimaryImageAspectRatio": 0.6666666666666666,
+   "VideoType": "VideoFile",
+   "ImageTags": {
+    "Primary": "e29701267cfa6976ba9347a672d63c4a",
+    "Logo": "7dabc50c2158e0feaf58b2c8dcfdc7f7",
+    "Thumb": "d1b83a113b1d985ce5ac29646ca8e544"
+   },
+   "BackdropImageTags": [
+    "41573b6793593bb3421be64d9a6e42da"
+   ],
+   "LocationType": "FileSystem",
+   "MediaType": "Video"
+  }
+ ],
+ "TotalRecordCount": 3,
+ "StartIndex": 0
+}

@@ -1,0 +1,136 @@
+{
+ "Name": "Lanternfall: The Mapmaker's Long Road",
+ "OriginalTitle": "ランタンフォール 地図職人の長い道",
+ "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+ "Id": "2e5dd5c4fd13e23e38fe15dec5b36122",
+ "Etag": "9f0c301fea5766fb8c9524c2f2381fde",
+ "DateCreated": "2025-05-07T14:25:18.703198Z",
+ "DateLastMediaAdded": "2026-05-02T23:41:55.0996881Z",
+ "CanDelete": false,
+ "CanDownload": false,
+ "SortName": "lanternfall: the mapmakers long road",
+ "PremiereDate": "2019-07-08T00:00:00.0000000Z",
+ "Path": "/media/Lanternfall - The Mapmaker's Long Road",
+ "EnableMediaSourceDisplay": true,
+ "OfficialRating": "TV-14",
+ "ChannelId": null,
+ "Overview": "An invented summary for the test fixtures, number 29.",
+ "Taglines": [],
+ "Genres": [
+  "Action",
+  "Adventure",
+  "Animation",
+  "Anime",
+  "Comedy",
+  "Fantasy",
+  "Romance"
+ ],
+ "CommunityRating": 7,
+ "CumulativeRunTimeTicks": 14400000000,
+ "RunTimeTicks": 14400000000,
+ "PlayAccess": "Full",
+ "ProductionYear": 2019,
+ "RemoteTrailers": [
+  {
+   "Url": "https://www.youtube.com/watch?v=xxxxxxxxxxx"
+  }
+ ],
+ "ProviderIds": {
+  "Imdb": "tt9000108",
+  "Tmdb": "900106",
+  "TvMaze": "900107",
+  "Tvdb": "900101"
+ },
+ "IsFolder": true,
+ "ParentId": "824be1681f4ac630f35189b600a9f07a",
+ "Type": "Series",
+ "Studios": [
+  {
+   "Name": "Studio Kite",
+   "Id": "ba005cf0a3c1a6a02f466ce80aa1c23c"
+  }
+ ],
+ "GenreItems": [
+  {
+   "Name": "Action",
+   "Id": "4b751ce9b380b489fa8d91f446e6125f"
+  },
+  {
+   "Name": "Adventure",
+   "Id": "74c64dc2df57af43b9b02df25cc8d72f"
+  },
+  {
+   "Name": "Animation",
+   "Id": "0a5506fb9dc674d25072dea517e84d18"
+  },
+  {
+   "Name": "Anime",
+   "Id": "204a88b7b0110530e668836d9149c9ae"
+  },
+  {
+   "Name": "Comedy",
+   "Id": "f21b320f4fcfd003ec9f0e46bc06449a"
+  },
+  {
+   "Name": "Fantasy",
+   "Id": "2c61edd96e923032e87b36fffa45f265"
+  },
+  {
+   "Name": "Romance",
+   "Id": "79a5064e24e4053309527f077f5943a0"
+  }
+ ],
+ "LocalTrailerCount": 0,
+ "UserData": {
+  "PlayedPercentage": 0,
+  "UnplayedItemCount": 41,
+  "PlaybackPositionTicks": 0,
+  "PlayCount": 0,
+  "IsFavorite": false,
+  "Played": false,
+  "Key": "2e5dd5c4-fd13-e23e-38fe-15dec5b36122",
+  "ItemId": "2e5dd5c4fd13e23e38fe15dec5b36122"
+ },
+ "RecursiveItemCount": 41,
+ "ChildCount": 2,
+ "SpecialFeatureCount": 0,
+ "DisplayPreferencesId": "a61d0d743e865ae3d977fa2196bcb905",
+ "Status": "Continuing",
+ "AirDays": [],
+ "Tags": [
+  "vampire",
+  "high school",
+  "harem",
+  "eye patch",
+  "adventurer",
+  "anime",
+  "sword and sorcery",
+  "japanese high school",
+  "isekai",
+  "human vampire relationship",
+  "guns",
+  "vampiress (female vampire)",
+  "based on light novel",
+  "adventure",
+  "classmates relationship",
+  "teen fantasy",
+  "transported to another world",
+  "marie antoinette syndrome",
+  "progression fantasy"
+ ],
+ "PrimaryImageAspectRatio": 0.68,
+ "ImageTags": {
+  "Banner": "8b03ed72e46d35d9b40b098dc34a84ff",
+  "Thumb": "8ddb753359fa720c04cef4d094da7fbd",
+  "Primary": "bb06696ef398a9022856a523dc8bb741",
+  "Logo": "260d5526b3da4decc6cca96ae1a5a97d"
+ },
+ "BackdropImageTags": [
+  "ac79a5835ef413b3ae79357aa51586b7"
+ ],
+ "LocationType": "FileSystem",
+ "MediaType": "Unknown",
+ "EndDate": "2025-02-17T00:00:00.0000000Z",
+ "LockedFields": [],
+ "LockData": false
+}

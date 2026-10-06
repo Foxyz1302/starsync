@@ -1,0 +1,80 @@
+{
+ "Items": [
+  {
+   "Name": "Season 2",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "7321284310d804c4718144bd6a72c3f8",
+   "PremiereDate": "2022-01-13T00:00:00.0000000Z",
+   "ChannelId": null,
+   "ProductionYear": 2022,
+   "IndexNumber": 2,
+   "IsFolder": true,
+   "Type": "Season",
+   "ParentLogoItemId": "2e5dd5c4fd13e23e38fe15dec5b36122",
+   "ParentBackdropItemId": "2e5dd5c4fd13e23e38fe15dec5b36122",
+   "ParentBackdropImageTags": [
+    "ac79a5835ef413b3ae79357aa51586b7"
+   ],
+   "UserData": {
+    "UnplayedItemCount": 12,
+    "PlaybackPositionTicks": 0,
+    "PlayCount": 0,
+    "IsFavorite": false,
+    "Played": false,
+    "Key": "900101002",
+    "ItemId": "7321284310d804c4718144bd6a72c3f8"
+   },
+   "SeriesName": "Lanternfall: The Mapmaker's Long Road",
+   "SeriesId": "2e5dd5c4fd13e23e38fe15dec5b36122",
+   "SeriesPrimaryImageTag": "bb06696ef398a9022856a523dc8bb741",
+   "ImageTags": {
+    "Primary": "31f969f253e972d5910451ab621714ea"
+   },
+   "BackdropImageTags": [],
+   "ParentLogoImageTag": "260d5526b3da4decc6cca96ae1a5a97d",
+   "ParentThumbItemId": "2e5dd5c4fd13e23e38fe15dec5b36122",
+   "ParentThumbImageTag": "8ddb753359fa720c04cef4d094da7fbd",
+   "LocationType": "FileSystem",
+   "MediaType": "Unknown"
+  },
+  {
+   "Name": "Season 3",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "20f17983f00e360469692dcf4585b99f",
+   "PremiereDate": "2024-10-14T00:00:00.0000000Z",
+   "ChannelId": null,
+   "ProductionYear": 2024,
+   "IndexNumber": 3,
+   "IsFolder": true,
+   "Type": "Season",
+   "ParentLogoItemId": "2e5dd5c4fd13e23e38fe15dec5b36122",
+   "ParentBackdropItemId": "2e5dd5c4fd13e23e38fe15dec5b36122",
+   "ParentBackdropImageTags": [
+    "ac79a5835ef413b3ae79357aa51586b7"
+   ],
+   "UserData": {
+    "UnplayedItemCount": 29,
+    "PlaybackPositionTicks": 0,
+    "PlayCount": 0,
+    "IsFavorite": false,
+    "Played": false,
+    "Key": "900101003",
+    "ItemId": "20f17983f00e360469692dcf4585b99f"
+   },
+   "SeriesName": "Lanternfall: The Mapmaker's Long Road",
+   "SeriesId": "2e5dd5c4fd13e23e38fe15dec5b36122",
+   "SeriesPrimaryImageTag": "bb06696ef398a9022856a523dc8bb741",
+   "ImageTags": {
+    "Primary": "e6f0a8e08bcfc5e3eabe204584a2d79e"
+   },
+   "BackdropImageTags": [],
+   "ParentLogoImageTag": "260d5526b3da4decc6cca96ae1a5a97d",
+   "ParentThumbItemId": "2e5dd5c4fd13e23e38fe15dec5b36122",
+   "ParentThumbImageTag": "8ddb753359fa720c04cef4d094da7fbd",
+   "LocationType": "FileSystem",
+   "MediaType": "Unknown"
+  }
+ ],
+ "TotalRecordCount": 2,
+ "StartIndex": 0
+}

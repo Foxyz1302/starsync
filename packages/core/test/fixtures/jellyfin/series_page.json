@@ -1,0 +1,178 @@
+{
+ "Items": [
+  {
+   "Name": "The \"Sleepy\" Prince and the Stone Cat.",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "f2e8ecb84ac77ee3ecac2611c65aee62",
+   "PremiereDate": "2013-04-13T00:00:00.0000000Z",
+   "OfficialRating": "16+",
+   "ChannelId": null,
+   "Overview": "An invented summary for the test fixtures, number 34.",
+   "CommunityRating": 6.7,
+   "RunTimeTicks": 14400000000,
+   "ProductionYear": 2013,
+   "IsFolder": true,
+   "Type": "Series",
+   "UserData": {
+    "UnplayedItemCount": 12,
+    "PlaybackPositionTicks": 0,
+    "PlayCount": 0,
+    "IsFavorite": false,
+    "Played": false,
+    "Key": "f2e8ecb8-4ac7-7ee3-ecac-2611c65aee62",
+    "ItemId": "f2e8ecb84ac77ee3ecac2611c65aee62"
+   },
+   "Status": "Ended",
+   "AirDays": [],
+   "PrimaryImageAspectRatio": 0.68,
+   "ImageTags": {
+    "Logo": "dc2411afdf5fff9214b5701338dc655b",
+    "Primary": "bb520dd9f3e0dee14f0983a7247f2517",
+    "Thumb": "bc4d4144266ac0be4d7cb5a47f010c56"
+   },
+   "BackdropImageTags": [
+    "005c0d2e3780cb6368d4512d802a14ef"
+   ],
+   "LocationType": "FileSystem",
+   "MediaType": "Unknown",
+   "EndDate": "2013-06-29T00:00:00.0000000Z"
+  },
+  {
+   "Name": "The Very, Very, Very Long Title Club",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "bcfb7f0cb186feb5135ea542f85f0e6b",
+   "PremiereDate": "2023-10-07T23:00:00.0000000Z",
+   "OfficialRating": "TV-14",
+   "ChannelId": null,
+   "Overview": "An invented summary for the test fixtures, number 28.",
+   "CommunityRating": 8.191,
+   "RunTimeTicks": 13800000000,
+   "IsFolder": true,
+   "Type": "Series",
+   "UserData": {
+    "UnplayedItemCount": 5,
+    "PlaybackPositionTicks": 0,
+    "PlayCount": 0,
+    "IsFavorite": false,
+    "Played": false,
+    "Key": "900103",
+    "ItemId": "bcfb7f0cb186feb5135ea542f85f0e6b"
+   },
+   "Status": "Continuing",
+   "AirDays": [],
+   "PrimaryImageAspectRatio": 0.6666666666666666,
+   "ImageTags": {
+    "Logo": "dfef63f26785f2f583808283562b97f2",
+    "Primary": "64ceebc8591670e79d58e13233c9d12b",
+    "Thumb": "c08c561860df44221a655fddc49bfc3b"
+   },
+   "BackdropImageTags": [
+    "a589a1780bbf7cd9cbea6173f84c8c85"
+   ],
+   "LocationType": "FileSystem",
+   "MediaType": "Unknown",
+   "EndDate": "2026-07-04T23:00:00.0000000Z"
+  },
+  {
+   "Name": "A Courier's Daily Round at Age 31",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "f4a16ff7373c7102fd3476a95d953de8",
+   "PremiereDate": "2026-01-07T00:00:00.0000000Z",
+   "ChannelId": null,
+   "Overview": "An invented summary for the test fixtures, number 10.",
+   "RunTimeTicks": 0,
+   "IsFolder": true,
+   "Type": "Series",
+   "UserData": {
+    "UnplayedItemCount": 1,
+    "PlaybackPositionTicks": 0,
+    "PlayCount": 0,
+    "IsFavorite": false,
+    "Played": false,
+    "Key": "f4a16ff7-373c-7102-fd34-76a95d953de8",
+    "ItemId": "f4a16ff7373c7102fd3476a95d953de8"
+   },
+   "Status": "Continuing",
+   "AirDays": [],
+   "PrimaryImageAspectRatio": 0.6666666666666666,
+   "ImageTags": {
+    "Thumb": "18d6b385af9438489bc488098ccae19c",
+    "Primary": "68111d77dfc06527dc97a5e1ccd5a9d9",
+    "Logo": "5e9470a50e9a7cf4b9880120a77e5a7b"
+   },
+   "BackdropImageTags": [
+    "a3151ac77cc064910fde87e1d95b55b7"
+   ],
+   "LocationType": "FileSystem",
+   "MediaType": "Unknown"
+  },
+  {
+   "Name": "Paper Lantern Cat",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "973a171c4f424b35e0567cf050b4c8d6",
+   "PremiereDate": "1992-10-20T00:00:00.0000000Z",
+   "OfficialRating": "TV-14",
+   "ChannelId": null,
+   "Overview": "An invented summary for the test fixtures, number 3.",
+   "CommunityRating": 6.9,
+   "RunTimeTicks": 16800000000,
+   "ProductionYear": 1992,
+   "IsFolder": true,
+   "Type": "Series",
+   "UserData": {
+    "UnplayedItemCount": 6,
+    "PlaybackPositionTicks": 0,
+    "PlayCount": 0,
+    "IsFavorite": false,
+    "Played": false,
+    "Key": "973a171c-4f42-4b35-e056-7cf050b4c8d6",
+    "ItemId": "973a171c4f424b35e0567cf050b4c8d6"
+   },
+   "Status": "Ended",
+   "AirDays": [],
+   "PrimaryImageAspectRatio": 0.68,
+   "ImageTags": {
+    "Logo": "0b62fe5bfc8390e51a3b5604c6f9d690",
+    "Primary": "0288e21cc87ba2e85ad2e27018d63e4f"
+   },
+   "BackdropImageTags": [
+    "b205011ddef8aef04d58a9ef9bb268ff"
+   ],
+   "LocationType": "FileSystem",
+   "MediaType": "Unknown",
+   "EndDate": "1998-12-09T00:00:00.0000000Z"
+  },
+  {
+   "Name": "Mira-chan Wants a Garden!",
+   "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+   "Id": "d0e6f05583bc7c92d81b9843e54397c6",
+   "PremiereDate": "2025-10-05T00:00:00.0000000Z",
+   "ChannelId": null,
+   "Overview": "An invented summary for the test fixtures, number 1.",
+   "RunTimeTicks": 0,
+   "IsFolder": true,
+   "Type": "Series",
+   "UserData": {
+    "UnplayedItemCount": 9,
+    "PlaybackPositionTicks": 0,
+    "PlayCount": 0,
+    "IsFavorite": false,
+    "Played": false,
+    "Key": "d0e6f055-83bc-7c92-d81b-9843e54397c6",
+    "ItemId": "d0e6f05583bc7c92d81b9843e54397c6"
+   },
+   "Status": "Continuing",
+   "AirDays": [],
+   "PrimaryImageAspectRatio": 0.6666666666666666,
+   "ImageTags": {
+    "Logo": "62e5527ce8db35461d5557a169fdc706",
+    "Primary": "6041f9d29bf5d3c941b66dfe8024c671"
+   },
+   "BackdropImageTags": [],
+   "LocationType": "FileSystem",
+   "MediaType": "Unknown"
+  }
+ ],
+ "TotalRecordCount": 218,
+ "StartIndex": 0
+}

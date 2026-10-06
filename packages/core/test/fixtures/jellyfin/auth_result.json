@@ -1,0 +1,12 @@
+{
+ "User": {
+  "Name": "testuser",
+  "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05",
+  "Id": "95b50af4ac466551c3887fd2f9f3e785",
+  "HasPassword": true,
+  "Policy": {"IsAdministrator": false}
+ },
+ "SessionInfo": {"Id": "8ca0666f602f479af355b63211dd2058", "UserId": "95b50af4ac466551c3887fd2f9f3e785", "Client": "WatchTogether", "DeviceId": "wt-test-device"},
+ "AccessToken": "TEST_ACCESS_TOKEN",
+ "ServerId": "a3c3646f1fc722c7a34e0e47e5450b05"
+}
