@@ -3,7 +3,9 @@
 # upload it to Discord.
 # Usage: tool/package_linux.sh [--skip-build] [--noupload|--no-upload]
 # Output: dist/watch-together-<version>-linux-x64.tar.gz containing one
-# top-level folder with the executable, lib/ and data/ as built.
+# top-level folder with the executable, lib/ and data/ as built, plus
+# update.sh (runs the binary with --upgrade). The in-app updater strips
+# that top-level folder — keep the layout in sync with updater_test.dart.
 # Upload: set DISCORD_WEBHOOK_URL in the environment (never commit it).
 # The tarball must stay under Discord's upload limit (25 MB free tier).
 # The upload posts a Components V2 card (flag 1<<15): version header,
@@ -43,6 +45,7 @@ TARBALL="$DIST/$FOLDER-linux-$ARCH.tar.gz"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/$FOLDER" "$DIST"
 cp -r "$BUNDLE/." "$STAGE/$FOLDER/"
+install -m 755 "$APP/lib/src/update/bundle/update.sh" "$STAGE/$FOLDER/update.sh"
 tar -czf "$TARBALL" -C "$STAGE" "$FOLDER"
 rm -rf "$STAGE"
 ls -la "$TARBALL"
