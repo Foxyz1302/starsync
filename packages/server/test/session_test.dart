@@ -80,8 +80,8 @@ void main() {
   });
 
   group('core welcome + proto', () {
-    test('proto 5: state broadcast + hello hostKey', () {
-      expect(RelayConstants.protoVersion, 5);
+    test('proto 6: state broadcast + hello hostKey', () {
+      expect(RelayConstants.protoVersion, 6);
     });
 
     test('welcome round-trips with token + member id', () {

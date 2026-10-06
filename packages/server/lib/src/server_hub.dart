@@ -23,6 +23,15 @@ class ServerHub {
 
   bool isHostKey(String key) => hostKey.isNotEmpty && key == hostKey;
 
+  /// The member a reconnecting client may take over with its old token:
+  /// still known and not kicked.
+  EngineMember? resumable(String token) {
+    if (token.isEmpty) return null;
+    final viewer = session.tokens[token];
+    if (viewer == null || viewer.kicked) return null;
+    return engine.members[token];
+  }
+
   Session get session => sessions.getOrCreate('default', expectedSecret);
 
   void broadcastState() {
@@ -88,6 +97,13 @@ class ServerHub {
   void changed() {
     broadcastState();
     broadcastFeed();
+  }
+
+  /// Like [forgetSocket], but only while [ws] is still the member's socket:
+  /// after a resume the old socket's close must not remove the member.
+  void forgetSocketOf(String token, RelicWebSocket ws) {
+    if (!identical(sockets[token], ws)) return;
+    forgetSocket(token);
   }
 
   void forgetSocket(String token) {
@@ -175,7 +191,7 @@ void mountSyncRoute(
             case 'seek':
               if (token == null) return;
               final intent = SeekIntent.fromJson(decoded);
-              hub.engine.applySeek(token, intent.position);
+              hub.engine.applySeek(token, intent.position, seq: intent.seq);
               hub.changed();
             case 'swap':
               if (token == null) return;
@@ -219,8 +235,15 @@ void mountSyncRoute(
               if (token == null) return;
               final report = ReportMessage.fromJson(decoded);
               hub.engine.applyReport(
-                  token, report.position, report.buffered, report.eventId);
-              hub.broadcastState();
+                  token, report.position, report.buffered, report.eventId,
+                  duration: report.duration, mediaId: report.mediaId);
+              hub.changed();
+            case 'ping':
+              final ping = PingMessage.fromJson(decoded);
+              ws.trySendText(jsonEncode(PongMessage(
+                      clientMs: ping.clientMs,
+                      serverMs: hub.engine.now.millisecondsSinceEpoch)
+                  .toJson()));
             case 'chat':
               final chat = ChatMessage.fromJson(decoded);
               hub.broadcastChat(viewer?.name ?? '?', chat.text);
@@ -258,13 +281,13 @@ void mountSyncRoute(
           }
         },
         onError: (_) {
-          if (token != null) hub.forgetSocket(token);
+          if (token != null) hub.forgetSocketOf(token, ws);
         },
         onDone: () {
           if (!firstText.isCompleted) {
             firstText.completeError(StateError('closed before hello'));
           } else if (token != null) {
-            hub.forgetSocket(token);
+            hub.forgetSocketOf(token, ws);
           }
         },
       );
@@ -300,23 +323,36 @@ void mountSyncRoute(
         await close();
         return;
       }
-      try {
-        token = session.issueToken(hello.user.name, hello.user.avatar);
-      } catch (e) {
-        _hubLog.warning('reject ${hello.user.name}: $e');
-        wsErr(ws, 'rejected: $e');
-        await close();
-        return;
+      final resumed = hub.resumable(hello.resume);
+      String memberId;
+      if (resumed != null) {
+        // Unclean drop the server has not noticed yet: take the member over
+        // (same token, id, ready flag) and drop the dead socket quietly.
+        token = hello.resume;
+        memberId = resumed.id;
+        final old = hub.sockets.remove(token);
+        if (old != null) unawaited(old.tryClose());
+        hub.engine.applyResume(token);
+        _hubLog.info('resume ${hello.user.name} ($memberId)');
+      } else {
+        try {
+          token = session.issueToken(hello.user.name, hello.user.avatar);
+        } catch (e) {
+          _hubLog.warning('reject ${hello.user.name}: $e');
+          wsErr(ws, 'rejected: $e');
+          await close();
+          return;
+        }
+        memberId = hub.engine.applyJoin(token, hello.user.name, hello.user.avatar);
       }
       session.tokens[token]!.isHost = hub.isHostKey(hello.hostKey);
-      final memberId = hub.engine.applyJoin(token, hello.user.name, hello.user.avatar);
       final activeToken = token;
       hub.sockets[activeToken] = ws;
       session.tokens[activeToken]!.onKick = (reason) async {
         ws.trySendText(jsonEncode(KickedMessage(reason: reason).toJson()));
         await Future.delayed(const Duration(milliseconds: 200));
         await ws.tryClose();
-        hub.forgetSocket(activeToken);
+        hub.forgetSocketOf(activeToken, ws);
       };
       final media = session.media;
       final welcome = WelcomeMessage(

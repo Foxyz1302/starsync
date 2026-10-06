@@ -19,9 +19,13 @@ class RateAction extends PlayerAction {
   const RateAction(this.rate);
 }
 
-double serverPositionAt(StateBroadcast state, DateTime now) {
+/// Server position at [serverNow], which must be on the server's clock
+/// (`SyncClient.serverNow()`, local time corrected by the clock offset):
+/// `state.serverTime` is stamped by the server.
+double serverPositionAt(StateBroadcast state, DateTime serverNow) {
   if (state.transport != 'playing') return state.position;
-  return state.position + now.difference(state.serverTime).inMilliseconds / 1000.0;
+  return state.position +
+      serverNow.difference(state.serverTime).inMicroseconds / 1e6;
 }
 
 bool seekLanded({required double ownPosition, required double target}) {
@@ -39,12 +43,6 @@ bool localPlayAllowed(StateBroadcast state, String memberId) {
   return false;
 }
 
-/// Self is ready but out of the set and fresh again: the server's stale
-/// sweep dropped it from the set during a signal gap and nothing puts it
-/// back. Re-sending ready restores it without the user pressing Space.
-bool shouldReassertReady(MemberView? self) =>
-    self != null && self.ready && !self.inSet && !self.stale;
-
 class StateDiff {
   static const debounceWindow = Duration(seconds: 2);
 
@@ -57,6 +55,7 @@ class StateDiff {
 
   bool get slowing => _slowing;
 
+  /// [now] is server time (see [serverPositionAt]).
   List<PlayerAction> diff(StateBroadcast state, double ownPosition, DateTime now) {
     final out = <PlayerAction>[];
     final serverPos = serverPositionAt(state, now);
@@ -70,6 +69,25 @@ class StateDiff {
       out.add(const SeekAction(0));
       out.add(const TransportAction(false));
       out.add(const RateAction(1.0));
+      return out;
+    }
+
+    // End of media: everyone stops where they are (at or just before the
+    // end). No seek to the very end and no drift correction.
+    if (state.transport == 'finished') {
+      final first = _lastEventId == -1;
+      final changed = first ||
+          state.eventId != _lastEventId ||
+          state.transport != _lastTransport;
+      _lastEventId = state.eventId;
+      _lastTransport = state.transport;
+      _lastMediaId = state.mediaId;
+      _slowing = false;
+      _deviatingSince = null;
+      if (!changed) return out;
+      out.add(const RateAction(1.0));
+      if (first) out.add(SeekAction(serverPos > 1 ? serverPos - 1 : 0));
+      out.add(const TransportAction(false));
       return out;
     }
 

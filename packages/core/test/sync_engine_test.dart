@@ -402,4 +402,139 @@ void main() {
       expect(rpBack.eventId, 3);
     });
   });
+
+  group('stale ready rejoins', () {
+    test('ready member swept while stale is back in the set when reports resume', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applyReady('a', true);
+      engine.applyReady('b', true);
+      buffer('a', 6.0);
+      buffer('b', 6.0);
+      expect(engine.transport, Transport.playing);
+      // bob goes silent past staleAfter; alice keeps reporting.
+      for (var i = 0; i < 16; i++) {
+        t = t.add(const Duration(seconds: 1));
+        buffer('a', 6.0);
+        engine.sweepStale();
+      }
+      expect(engine.members['b']!.inSet, isFalse);
+      expect(engine.members['b']!.ready, isTrue);
+      // bob's reports resume: he must be gated again without pressing Space.
+      buffer('b', 6.0);
+      expect(engine.members['b']!.inSet, isTrue);
+      expect(engine.broadcast().members.firstWhere((m) => m.id == 'm2').inSet,
+          isTrue);
+    });
+
+    test('unready member does not rejoin on reports', () {
+      join('a', 'alice');
+      buffer('a', 6.0);
+      expect(engine.members['a']!.inSet, isFalse);
+    });
+  });
+
+  group('end of file', () {
+    setUp(() {
+      engine.media = const HelloMedia(name: 'f', size: 1, duration: 20);
+    });
+
+    void playTo(double secs, {required double Function(double pos) buffered}) {
+      while (engine.positionAt() < secs) {
+        t = t.add(const Duration(milliseconds: 500));
+        final pos = engine.positionAt();
+        engine.applyReport('a', pos, buffered(pos), engine.eventId);
+        engine.tick();
+      }
+    }
+
+    test('last seconds play out with less than 4 s left, then finished', () {
+      join('a', 'alice');
+      engine.applyReady('a', true);
+      buffer('a', 6.0);
+      expect(engine.transport, Transport.playing);
+      // mpv's read-ahead cannot exceed what is left of the file.
+      double left(double pos) => (20 - pos).clamp(0, 6).toDouble();
+      playTo(19.5, buffered: left);
+      expect(engine.transport, Transport.playing);
+      t = t.add(const Duration(seconds: 1));
+      engine.tick();
+      expect(engine.transport, Transport.finished);
+      expect(engine.positionAt(), 20);
+      expect(engine.broadcast().transport, 'finished');
+      // Finished never auto-resumes, however ready everyone is.
+      t = t.add(const Duration(seconds: 5));
+      buffer('a', 0);
+      engine.tick();
+      expect(engine.transport, Transport.finished);
+    });
+
+    test('seek back from finished resumes for ready members', () {
+      join('a', 'alice');
+      engine.applyReady('a', true);
+      buffer('a', 6.0);
+      t = t.add(const Duration(seconds: 21));
+      engine.tick();
+      expect(engine.transport, Transport.finished);
+      engine.applySeek('a', 5);
+      buffer('a', 6.0);
+      expect(engine.transport, Transport.playing);
+      expect(engine.positionAt(), 5);
+    });
+
+    test('swap after finished resets to held', () {
+      join('a', 'alice');
+      engine.applyReady('a', true);
+      buffer('a', 6.0);
+      t = t.add(const Duration(seconds: 21));
+      engine.tick();
+      expect(engine.transport, Transport.finished);
+      engine.applySwap(
+          'a', const HelloMedia(name: 'g', size: 1, duration: 0, url: 'http://x/g'));
+      expect(engine.transport, Transport.held);
+      expect(engine.media!.duration, 0);
+    });
+
+    test('duration learned from reports for the current media only', () {
+      engine.media = const HelloMedia(name: 'f', size: 1, duration: 0);
+      join('a', 'alice');
+      engine.applyReport('a', 0, 1, engine.eventId,
+          duration: 99, mediaId: engine.mediaId - 1);
+      expect(engine.media!.duration, 0);
+      engine.applyReport('a', 0, 1, engine.eventId,
+          duration: 42.5, mediaId: engine.mediaId);
+      expect(engine.media!.duration, 42.5);
+      expect(engine.broadcast().media!['duration'], 42.5);
+    });
+
+    test('requirement is min(4 s, remaining) with slack', () {
+      join('a', 'alice');
+      engine.applySeek('a', 18);
+      expect(engine.requiredBufferSecs(), lessThan(RelayConstants.minBufferSecs));
+      engine.applySeek('a', 5);
+      expect(engine.requiredBufferSecs(), RelayConstants.minBufferSecs);
+      engine.media = const HelloMedia(name: 'f', size: 1, duration: 0);
+      expect(engine.requiredBufferSecs(), RelayConstants.minBufferSecs);
+    });
+  });
+
+  group('seek attribution', () {
+    test('state carries who sent the seek and its seq, only for that event', () {
+      join('a', 'alice');
+      engine.applySeek('a', 10, seq: 7);
+      var s = engine.broadcast();
+      expect(s.seekBy, 'm1');
+      expect(s.seekSeq, 7);
+      final back = StateBroadcast.fromJson(Map<String, Object?>.from(
+          jsonDecode(jsonEncode(s.toJson())) as Map));
+      expect(back.seekBy, 'm1');
+      expect(back.seekSeq, 7);
+      // A later event (gate) is not attributed to the seek.
+      engine.applyReady('a', true);
+      buffer('a', 6.0);
+      s = engine.broadcast();
+      expect(s.transport, 'playing');
+      expect(s.seekBy, isNull);
+    });
+  });
 }

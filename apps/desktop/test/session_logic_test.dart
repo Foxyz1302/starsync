@@ -1,19 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:sync_relay_core/core.dart';
 import 'package:watch_together/src/session/idle.dart';
 import 'package:watch_together/src/session/session_coordinator.dart';
-import 'package:watch_together/src/sync/state_diff.dart';
-
-MemberView _self({bool ready = true, bool inSet = true, bool stale = false}) =>
-    MemberView(
-      id: 'm1',
-      name: 'me',
-      avatar: '',
-      ready: ready,
-      inSet: inSet,
-      buffered: 5,
-      stale: stale,
-    );
 
 void main() {
   group('IdleTracker', () {
@@ -102,19 +89,6 @@ void main() {
           'https://jf.example.com/Items/1/Download?api_key=SECRET');
       expect(n, 'Download');
       expect(n.contains('SECRET'), isFalse);
-    });
-  });
-
-  group('shouldReassertReady', () {
-    test('ready, fresh, out of set (after stale sweep) -> reassert', () {
-      expect(shouldReassertReady(_self(inSet: false)), isTrue);
-    });
-    test('normal states -> no', () {
-      expect(shouldReassertReady(null), isFalse);
-      expect(shouldReassertReady(_self()), isFalse);
-      expect(shouldReassertReady(_self(ready: false, inSet: false)), isFalse);
-      expect(shouldReassertReady(_self(ready: false)), isFalse);
-      expect(shouldReassertReady(_self(inSet: false, stale: true)), isFalse);
     });
   });
 }

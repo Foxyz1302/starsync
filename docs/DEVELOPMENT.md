@@ -45,8 +45,13 @@ and `e2e_check` (simulated viewers against a live server).
 
 - `cd packages/core && dart test`, `cd packages/server && dart test`.
 - `cd apps/desktop && flutter test test/<file>`.
-- `sync_playback_e2e_test.dart` and `coord_presence_test.dart` use real mpv;
-  the e2e one also expects `~/Videos/chiyo.mp4`. Run only tests related to
+- Real-mpv tests: `sync_playback_e2e`, `coord_presence`, `video_reload_e2e`,
+  `seek_drag_e2e`, `end_of_file_e2e`, `readahead_e2e`. The sync and
+  end-of-file ones expect `~/Videos/chiyo.mp4`; others generate media with
+  ffmpeg into `WT_TEST_TMP`. Headless mpv (no video output attached) won't
+  open video-only files, so test media needs an audio track. Tests always log
+  media_kit "S/W rendering" because they have no display; that says nothing
+  about the app. Run only tests related to
   what you changed.
 - CI (`.gitea/workflows/ci.yml`): analyze + test for core and server, plus
   `dart compile exe` of the dedicated server (fails if Flutter creeps into

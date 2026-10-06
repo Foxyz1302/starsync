@@ -47,7 +47,9 @@ Friends join either way with the Join card on Home.
    says we are, and buffers. A new arrival is not ready yet and never holds
    anyone back.
 3. **Ready gate.** Press Space to say you are ready. The server starts
-   playback only when everyone who is ready has at least 4 seconds buffered.
+   playback only when everyone who is ready has at least 4 seconds buffered
+   (or what is left, near the end). At the end everyone stops and the server
+   stays finished until someone seeks back or changes the video.
    If two or more people are ready, one person alone cannot start it for the
    others. A lone viewer can play alone.
 4. **Play.** The server owns the clock. Each app compares its mpv position
@@ -61,7 +63,7 @@ Friends join either way with the Join card on Home.
 7. **Leave.** Closing or leaving drops you from the server; the others keep
    going. If you vanish without saying goodbye, you are marked stale after 15 s
    (stops blocking) and removed after 30 s. The app reconnects by itself and
-   restores your ready flag.
+   takes over your old place (same member, ready flag and video).
 
 There are no roles: anyone can seek, swap, force-ready others and kick
 anyone except the host.

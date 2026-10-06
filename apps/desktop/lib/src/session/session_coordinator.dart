@@ -8,6 +8,7 @@ import '../playback/playback_controller.dart';
 import '../sfx/sfx.dart';
 import '../sync/state_diff.dart';
 import '../sync/sync_client.dart';
+import '../sync/user_seek.dart';
 import 'health.dart';
 import 'idle.dart';
 
@@ -113,7 +114,6 @@ class SessionCoordinator {
   // Set after a reconnect until the server echoes the restored ready, so
   // the fresh member's ready=false doesn't overwrite [_lastReady].
   bool _restoringReady = false;
-  DateTime? _reassertAt;
   // Bumped by every connect/leave/cancel/retry: stale attempts no-op.
   int _epoch = 0;
   Timer? _reconnectTimer;
@@ -121,10 +121,19 @@ class SessionCoordinator {
   String? _openUrl;
   String _wsHost = '';
   int _wsPort = 0;
-  double _lastPos = 0;
-  double? _pendingSeekTarget;
+  // Server seek applied to the player (event id and when), checked once it
+  // should have landed.
+  int? _pendingSeekEvent;
   DateTime? _pendingSeekAt;
   int _seekRetries = 0;
+  int _lastEventId = -1;
+  final UserSeekGate _seekGate = UserSeekGate();
+  Timer? _seekTimer;
+  // True while a media open is in flight: the player's duration may still
+  // belong to the previous media then.
+  bool _opening = false;
+  // Token of the current connection, offered as `resume` on reconnect.
+  String _resumeToken = '';
   DateTime? _lastStateAt;
   final IdleTracker _idle = IdleTracker(DateTime.now().toUtc());
   int _toastId = 0;
@@ -140,6 +149,7 @@ class SessionCoordinator {
     if (_playerReady) return;
     try {
       playback.onFrozen = () => unawaited(reloadVideo(auto: true));
+      playback.onUserSeek = (d) => _userSeek(d.inMicroseconds / 1e6);
       await playback.init();
       _playerReady = true;
     } catch (e, st) {
@@ -166,12 +176,7 @@ class SessionCoordinator {
       await playback.recreate();
       final url = _openUrl;
       _openUrl = null;
-      _pendingSeekTarget = null;
-      _pendingSeekAt = null;
-      _seekRetries = 0;
-      // New player starts at 0: without this the first tick would read
-      // the drop to 0 as a user seek and send everyone there.
-      _lastPos = 0;
+      _clearPendingSeek();
       if (url != null) await _openMedia(url);
     } catch (e, st) {
       debugPrint('video reload failed: $e\n$st');
@@ -212,6 +217,10 @@ class SessionCoordinator {
     _restoringReady = false;
     _wasPlayAllowed = false;
     _everConnected = false;
+    _resumeToken = '';
+    _seekGate.reset();
+    _clearPendingSeek();
+    _lastEventId = -1;
     markInput();
     _subscribe();
     feedLog.value = [];
@@ -233,6 +242,7 @@ class SessionCoordinator {
       if (epoch != _epoch) throw const ConnectCancelled();
       reconnecting.value = false;
       _everConnected = true;
+      _resumeToken = sync.token;
       health.value = const HealthStatus(HealthSeverity.ok, 'connected');
       _lastStateAt = DateTime.now().toUtc();
       final url = welcome.mediaUrl;
@@ -280,6 +290,7 @@ class SessionCoordinator {
     if (url == _openUrl) return;
     _openUrl = url;
     diff.reset();
+    _opening = true;
     try {
       await playback.openUrl(url);
       health.value =
@@ -288,6 +299,8 @@ class SessionCoordinator {
       debugPrint('open media failed: $e');
       health.value =
           HealthStatus(HealthSeverity.error, 'cannot open media: $e');
+    } finally {
+      _opening = false;
     }
   }
 
@@ -296,10 +309,12 @@ class SessionCoordinator {
   }
 
   Future<void> _onState(StateBroadcast r) async {
-    final now = DateTime.now().toUtc();
-    _lastStateAt = now;
+    _lastStateAt = DateTime.now().toUtc();
     serverState.value = r;
-    _trackSelfReady(r, now);
+    _trackSelfReady(r);
+    _seekGate.observe(r, sync.memberId);
+    final newEvent = r.eventId != _lastEventId;
+    _lastEventId = r.eventId;
     if (r.mediaId != _mediaId) {
       _mediaId = r.mediaId;
       var url = stateMediaUrl(r);
@@ -312,14 +327,16 @@ class SessionCoordinator {
       } else {
         _openUrl = null;
       }
-      _pendingSeekTarget = null;
-      _seekRetries = 0;
+      _seekGate.reset();
+      _clearPendingSeek();
     }
     if (!_playerReady || _openUrl == null) {
       _wasPlayAllowed = false;
       _updateStarving(r, 0);
       return;
     }
+    // Server clock: serverTime in the state is the server's.
+    final now = sync.serverNow();
     final allowed = localPlayAllowed(r, sync.memberId);
     var actions = diff.diff(r, playback.positionSecs, now);
     if (r.transport == 'playing' && !allowed) {
@@ -335,23 +352,28 @@ class SessionCoordinator {
         SeekAction(edge),
         const TransportAction(true),
       ];
-      _pendingSeekTarget = edge;
-      _pendingSeekAt = now;
     }
     _wasPlayAllowed = allowed;
-    for (final a in actions) {
-      if (a is SeekAction) {
-        _pendingSeekTarget = a.position;
-        _pendingSeekAt = now;
-      }
+    // The user is seeking (or our seek has not echoed yet), or this is the
+    // echo of our own seek arriving: the player is where the user put it.
+    // Later drift corrections within that event still apply.
+    if (_seekGate.holdsPlayer(DateTime.now().toUtc()) ||
+        (newEvent && _seekGate.isOwnEcho(r, sync.memberId))) {
+      actions = [for (final a in actions) if (a is! SeekAction) a];
+    }
+    if (actions.any((a) => a is SeekAction)) {
+      _pendingSeekEvent = r.eventId;
+      _pendingSeekAt = DateTime.now().toUtc();
+      _seekRetries = 0;
     }
     await playback.apply(actions);
     _updateStarving(r, playback.bufferedSecsAhead);
   }
 
   /// Mirrors the server's ready flag for self into [_lastReady] (force
-  /// by others included) and re-enters the set after a stale spell.
-  void _trackSelfReady(StateBroadcast r, DateTime now) {
+  /// by others included). After a stale spell the server puts a ready
+  /// member back in the set by itself.
+  void _trackSelfReady(StateBroadcast r) {
     final self = selfMember.peek();
     if (self == null) return;
     if (r.mediaId != _mediaId) _restoringReady = false;
@@ -360,17 +382,15 @@ class SessionCoordinator {
     } else {
       _lastReady = self.ready;
     }
-    if (shouldReassertReady(self) &&
-        (_reassertAt == null ||
-            now.difference(_reassertAt!) >= const Duration(seconds: 3))) {
-      _reassertAt = now;
-      sync.sendReady(true, source: 'auto');
-    }
   }
 
   void _updateStarving(StateBroadcast r, double bufferedAhead) {
     if (r.transport == 'playing') {
       starving.value = null;
+      return;
+    }
+    if (r.transport == 'finished') {
+      starving.value = 'finished — seek back or change media';
       return;
     }
     for (final m in r.members) {
@@ -474,13 +494,17 @@ class SessionCoordinator {
     toasts.value =
         toasts.peek().where((t) => now.difference(t.at).inSeconds < 4).toList();
     final r = serverState.peek();
+    if (sync.token.isNotEmpty) sync.sendPing();
     if (sync.token.isNotEmpty && r != null && _playerReady) {
+      // Duration only once the open media is the server's current one.
+      final known = !_opening && _openUrl != null && _mediaId == r.mediaId;
       sync.sendReport(
         position: playback.positionSecs,
         buffered: playback.bufferedSecsAhead,
         eventId: r.eventId,
+        duration: known ? playback.durationSecs : 0,
+        mediaId: known ? r.mediaId : 0,
       );
-      _detectUserSeek(r);
       _checkSeekLanded(r);
     }
     if (!_manualClose &&
@@ -492,8 +516,7 @@ class SessionCoordinator {
         starving.value = null;
         _wasPlayAllowed = false;
         _mediaId = -1;
-        _pendingSeekTarget = null;
-        _seekRetries = 0;
+        _clearPendingSeek();
         diff.reset();
       }
       if (!reconnecting.peek()) {
@@ -527,44 +550,68 @@ class SessionCoordinator {
     }
   }
 
-  void _detectUserSeek(StateBroadcast r) {
-    if (_openUrl == null) {
-      _lastPos = playback.positionSecs;
-      return;
-    }
-    final now = DateTime.now().toUtc();
-    final pos = playback.positionSecs;
-    final jumped = (pos - _lastPos).abs();
-    _lastPos = pos;
-    if (jumped <= 2.0) return;
-    if ((pos - serverPositionAt(r, now)).abs() < 2.0) return;
-    final recentSync = _pendingSeekAt != null &&
-        now.difference(_pendingSeekAt!).inMilliseconds < 1000;
-    if (recentSync) return;
-    markInput();
-    sync.sendSeek(pos);
+  void _clearPendingSeek() {
+    _pendingSeekEvent = null;
+    _pendingSeekAt = null;
+    _seekRetries = 0;
   }
 
+  /// A server seek that has not landed after 1.5 s is applied once more,
+  /// to where the server is now (never the old target: it went stale
+  /// while playing). Dropped when a newer event or a user seek took over.
   Future<void> _checkSeekLanded(StateBroadcast r) async {
-    final target = _pendingSeekTarget;
+    final event = _pendingSeekEvent;
     final at = _pendingSeekAt;
-    if (target == null || at == null) return;
-    if (DateTime.now().toUtc().difference(at).inMilliseconds < 1500) return;
+    if (event == null || at == null) return;
+    final now = DateTime.now().toUtc();
+    if (event != r.eventId || _seekGate.holdsPlayer(now)) {
+      _clearPendingSeek();
+      return;
+    }
+    if (now.difference(at).inMilliseconds < 1500) return;
+    final target = serverPositionAt(r, sync.serverNow());
     if (seekLanded(ownPosition: playback.positionSecs, target: target)) {
-      _pendingSeekTarget = null;
-      _pendingSeekAt = null;
-      _seekRetries = 0;
+      _clearPendingSeek();
       return;
     }
     if (_seekRetries < 1) {
       _seekRetries++;
-      _pendingSeekAt = DateTime.now().toUtc();
+      _pendingSeekAt = now;
       await playback.apply([SeekAction(target)]);
     } else {
-      _pendingSeekTarget = null;
-      _pendingSeekAt = null;
-      _seekRetries = 0;
+      _clearPendingSeek();
     }
+  }
+
+  /// Every user seek (seek bar, arrow keys, [seekTo]) lands here: the
+  /// player moves at once (scrub preview), the server hears one `seek`
+  /// once the user stops for [UserSeekGate.debounce].
+  void _userSeek(double position) {
+    if (!position.isFinite || position < 0) return;
+    if (serverState.peek() == null || _openUrl == null) return;
+    markInput();
+    final now = DateTime.now().toUtc();
+    _seekGate.request(position, now);
+    _clearPendingSeek();
+    unawaited(playback.apply([SeekAction(position)]));
+    _seekTimer?.cancel();
+    _seekTimer = Timer(_seekGate.debounce, _flushUserSeek);
+  }
+
+  void _flushUserSeek() {
+    _seekTimer = null;
+    final settled = _seekGate.takeSettled(DateTime.now().toUtc());
+    if (settled == null) return;
+    var position = settled.position;
+    // Playing on since the request: send where the player is now, so the
+    // server's clock and ours agree when the echo comes back.
+    final own = playback.positionSecs;
+    if (_playerReady &&
+        playback.player.state.playing &&
+        (own - position).abs() < 2.0) {
+      position = own;
+    }
+    sync.sendSeek(position, seq: settled.seq);
   }
 
   void toggleReady() {
@@ -587,19 +634,17 @@ class SessionCoordinator {
     sync.sendForce('all', true);
   }
 
-  void seekTo(double position) {
-    markInput();
-    sync.sendSeek(position);
-  }
+  void seekTo(double position) => _userSeek(position);
 
+  /// Arrow keys: relative to a seek still in flight, so repeated presses
+  /// add up.
   void nudge(double deltaSecs) {
     final r = serverState.peek();
     if (r == null || _openUrl == null) return;
-    final target =
-        serverPositionAt(r, DateTime.now().toUtc()) + deltaSecs;
-    if (target.isNaN || target < 0) return;
-    markInput();
-    sync.sendSeek(target);
+    final base = _seekGate.target ?? serverPositionAt(r, sync.serverNow());
+    final target = base + deltaSecs;
+    if (target.isNaN) return;
+    _userSeek(target < 0 ? 0 : target);
   }
 
   void sendChat(String text) {
@@ -656,11 +701,13 @@ class SessionCoordinator {
         name: params.name,
         avatar: params.avatar,
         hostKey: params.hostKey,
+        resume: _resumeToken,
       );
       // Whoever bumped the epoch also closed (or replaced) the socket.
       if (stale()) return;
       reconnecting.value = false;
       _everConnected = true;
+      _resumeToken = sync.token;
       _lastStateAt = DateTime.now().toUtc();
       health.value = const HealthStatus(HealthSeverity.ok, 'connected');
       final url = welcome.mediaUrl;
@@ -739,6 +786,9 @@ class SessionCoordinator {
     _reconnectTimer = null;
     _ticker?.cancel();
     _ticker = null;
+    _seekTimer?.cancel();
+    _seekTimer = null;
+    _seekGate.reset();
     reconnecting.value = false;
     _playerReady = false;
     try {

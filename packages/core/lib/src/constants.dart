@@ -1,5 +1,5 @@
 abstract class RelayConstants {
-  static const int protoVersion = 5;
+  static const int protoVersion = 6;
 
   static const int chunkBytes = 256 * 1024;
   static const int creditWindowChunks = 8;
@@ -10,6 +10,10 @@ abstract class RelayConstants {
   static const double slowDownThresholdSecs = 1.5;
   static const double slowDownRate = 0.95;
   static const double minBufferSecs = 4.0;
+  /// Near the end the buffer requirement is what is left minus this, so a
+  /// client slightly ahead of the clock (or whose last packet ends a bit
+  /// early) still passes.
+  static const double endSlackSecs = 2.0;
   static const double resumeHysteresisSecs = 4.0;
 
   static const int stateHeartbeatSecs = 1;

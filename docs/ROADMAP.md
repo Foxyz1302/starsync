@@ -6,31 +6,20 @@ off by deleting it in the same commit as the code. Wire changes also edit
 
 ## Backlog
 
-1. **Sync fixes.**
-   - Jumpy seek. Root cause: the media_kit seek bar calls `player.seek`
-     continuously while dragging; the coordinator only notices through its
-     1 s position poll (`_detectUserSeek`), so it fights the server echo and
-     the seek-landed retry (`_checkSeekLanded`).
-   - End-of-file stall. The 4 s buffered gate cannot be met in the last 4 s of
-     a file, the server never learns the duration, and there is no finished
-     state. Add duration reporting and a finished state.
-   - Tiny read-ahead. Our own pins (`cache-secs=10`,
-     `demuxer-readahead-secs=10` in `playback_controller.dart`) cap it; want
-     about two minutes for large files.
-   - Remote clock offset is not corrected: clients assume their clock equals
-     the server's.
-   - Stale-ready. A ready member who went stale (no reports for 15 s) should
-     return to the ready set when reports resume; the client re-sends ready as
-     a workaround (remove it then).
-   - Ghost member after an unclean drop until `dropAfter`.
+1. **Shaders.** Per-viewer local setting using mpv `glsl-shaders` (set after
+   the player is created), shipping Anime4K presets (bloc97, MIT). Shaders only
+   apply on media_kit's hardware path (verified with a test shader); warn
+   when the software fallback is active. The hardware path is fragile:
+   media_kit borrows whatever EGL context GDK left current on the main
+   thread (upstream media-kit#1404), so a `VideoController` created before
+   the first frame, an X11 session, or a Flutter/GDK change can silently
+   fall back to software. Log which path media_kit picked; a vendored
+   media_kit_video fix (build the EGL display from GDK's native display) is
+   the durable answer if it regresses. The video freeze after GPU idle is not
+   explained by this; next suspect is media_kit's context switching on the
+   raster thread with NVIDIA.
 
-2. **Rendering, then shaders.** media_kit falls back to software rendering
-   on the dev machine. Suspect Impeller on Linux against media_kit's GL
-   texture path; investigate first, since shaders need hardware rendering and
-   it may also cause the video freeze. Then shaders: per-viewer local setting
-   using mpv `glsl-shaders`, shipping Anime4K presets (bloc97, MIT).
-
-3. **Windows build + CI.** There is no Windows runner. Try
+2. **Windows build + CI.** There is no Windows runner. Try
    `ubuntu2610/flutter_build` (LLVM-MinGW + Wine `gen_snapshot`) on the Linux
    runner, fallback a GitHub Actions mirror. The manifest needs per-platform
    URLs and `release_publish.sh` must handle a second platform. The updater's
@@ -38,12 +27,12 @@ off by deleting it in the same commit as the code. Wire changes also edit
    `watch-together-server` needs a Windows `dart compile exe` too. Desktop
    tests are not in CI either.
 
-4. **Jellyfin** (epic, below).
+3. **Jellyfin** (epic, below).
 
-5. **Smaller items**
-   - Link conveniences: Ctrl+V pastes into the media field; a link swap in
-     session updates the remembered media; show the open link with an
-     open-in-browser button.
+4. **Smaller items**
+   - Link conveniences: a link swap in session updates the remembered media;
+     show the open link with an open-in-browser button; the session's swap
+     panel reuses Home's `MediaPicker`.
    - Time UI: remaining time, scrubber preview.
    - mpv / mpv.net shortcut parity.
    - Sounds: replace `NoopSfxService` (cues already fire). Candidates:

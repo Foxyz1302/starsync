@@ -7,6 +7,18 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 enum SyncStatus { idle, connecting, open, kicked, closed, error }
 
 class SyncClient {
+  /// Local clock; injectable so tests can run a client whose clock is off.
+  final DateTime Function() _clock;
+  SyncClient({DateTime Function()? clock})
+      : _clock = clock ?? (() => DateTime.now().toUtc());
+
+  /// Offset to the server's clock, from ping/pong round trips.
+  final ClockSync clockSync = ClockSync();
+
+  /// Now on the server's clock: use this, not the local clock, against
+  /// `serverTime` in a state.
+  DateTime serverNow() => clockSync.serverNow(_clock());
+
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
   final StreamController<StateBroadcast> _states = StreamController.broadcast();
@@ -34,8 +46,10 @@ class SyncClient {
     String avatar = '',
     HelloMedia? media,
     String hostKey = '',
+    String resume = '',
   }) async {
     await disconnect();
+    clockSync.reset();
     _status.add(SyncStatus.connecting);
     final ch = WebSocketChannel.connect(wsUri);
     unawaited(ch.ready.then((_) {}, onError: (_) {}));
@@ -63,6 +77,7 @@ class SyncClient {
       user: HelloUser(name: name, avatar: avatar),
       media: media ?? const HelloMedia(name: '', size: 0, duration: 0),
       hostKey: hostKey,
+      resume: resume,
     );
     ch.sink.add(jsonEncode(hello.toJson()));
     _pendingWelcome = welcomeCompleter;
@@ -81,6 +96,7 @@ class SyncClient {
         } catch (_) {}
       }
       _status.add(SyncStatus.open);
+      sendPing();
       return welcome;
     } catch (e) {
       _pendingWelcome = null;
@@ -138,6 +154,14 @@ class SyncClient {
         } catch (_) {
           _kicked.add('');
         }
+      case 'pong':
+        try {
+          final pong = PongMessage.fromJson(decoded);
+          clockSync.add(
+              sentMs: pong.clientMs,
+              serverMs: pong.serverMs,
+              receivedMs: _clock().millisecondsSinceEpoch);
+        } catch (_) {}
       case 'err':
         _errors.add('${decoded['message'] ?? 'error'}');
       case 'chat':
@@ -170,9 +194,14 @@ class SyncClient {
     _send(ForceIntent(target: target, ready: ready).toJson());
   }
 
-  void sendSeek(double position) {
+  void sendSeek(double position, {int seq = 0}) {
     if (position.isNaN || position < 0) return;
-    _send(SeekIntent(position: position).toJson());
+    _send(SeekIntent(position: position, seq: seq).toJson());
+  }
+
+  /// One clock sample; the coordinator sends one per second.
+  void sendPing() {
+    _send(PingMessage(clientMs: _clock().millisecondsSinceEpoch).toJson());
   }
 
   void sendSwap(HelloMedia media) {
@@ -183,6 +212,8 @@ class SyncClient {
     required double position,
     required double buffered,
     required int eventId,
+    double duration = 0,
+    int mediaId = 0,
   }) {
     final safeBuffered = buffered.isNaN || buffered < 0 ? 0.0 : buffered;
     _send(
@@ -190,6 +221,8 @@ class SyncClient {
         position: position,
         buffered: safeBuffered,
         eventId: eventId,
+        duration: duration.isFinite && duration > 0 ? duration : 0,
+        mediaId: mediaId,
       ).toJson(),
     );
   }

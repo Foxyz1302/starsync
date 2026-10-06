@@ -156,4 +156,39 @@ void main() {
       expect(localPlayAllowed(state, ''), isFalse);
     });
   });
+
+  group('finished', () {
+    test('stops in place: pause, no seek to the end, no drift seeks', () {
+      final diff = StateDiff();
+      final t = DateTime.now().toUtc();
+      diff.diff(_state(eventId: 1, transport: 'playing', position: 100), 100, t);
+      final end = _state(eventId: 2, transport: 'finished', position: 120);
+      final actions = diff.diff(end, 119.4, t);
+      expect(actions.whereType<SeekAction>(), isEmpty);
+      expect(actions.whereType<TransportAction>().single.playing, isFalse);
+      // Far off and later: still nothing.
+      expect(diff.diff(end, 50, t.add(const Duration(seconds: 10))), isEmpty);
+    });
+
+    test('late joiner lands just before the end, paused', () {
+      final diff = StateDiff();
+      final actions = diff.diff(
+          _state(eventId: 5, transport: 'finished', position: 120), 0,
+          DateTime.now().toUtc());
+      expect(actions.whereType<SeekAction>().single.position, 119);
+      expect(actions.whereType<TransportAction>().single.playing, isFalse);
+    });
+  });
+
+  test('serverPositionAt extrapolates on the server clock', () {
+    final st = StateBroadcast(
+      eventId: 1,
+      transport: 'playing',
+      position: 10,
+      serverTime: DateTime.utc(2026, 1, 1, 12),
+      mediaId: 1,
+      members: const [],
+    );
+    expect(serverPositionAt(st, DateTime.utc(2026, 1, 1, 12, 0, 2, 500)), 12.5);
+  });
 }

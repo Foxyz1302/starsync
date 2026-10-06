@@ -62,36 +62,65 @@ rejoin at once with a new token.
 
 Loosely modeled on Syncplay, with a different readiness design.
 
-- **Transport** is `playing` or `held`. The server owns the clock:
+- **Transport** is `playing`, `held` or `finished`. The server owns the clock:
   `positionAt(now) = position + (playing ? now - serverTime : 0)`.
-  Reports from clients never move it. Only seek, swap and gate transitions
-  write `position`/`serverTime` and bump `eventId`.
-- **Reports**: clients send `position`, `buffered`, `eventId` every 1 s. The
-  server stores `buffered` and liveness; a report with `eventId` older than
-  current has its position ignored.
+  Reports from clients never move it. Only seek, swap, gate transitions and
+  the end of media write `position`/`serverTime` and bump `eventId`.
+- **Clock offset**: `serverTime` is on the server's clock. Each client sends
+  a `ping` with its clock every second and estimates the offset NTP style
+  (`ClockSync`: `offset = s - (t0 + t3) / 2` of the sample with the smallest
+  round trip among the last 16). All extrapolation uses
+  `SyncClient.serverNow()` (local clock plus offset), so a client whose clock
+  is off still lands on the server position.
+- **Reports**: clients send `position`, `buffered`, `eventId` every 1 s, plus
+  the media `duration` and its `mediaId` once the player knows it. The
+  server stores `buffered` and liveness, and takes the first reported
+  duration for the current media (swap resets it); a report with `eventId`
+  older than current has its position ignored.
 - **Ready gate** (HELD to PLAYING): the in-set is non-empty, every in-set
-  member is ready, fresh and has `buffered >= 4 s` (`minBufferSecs`), and
-  quorum holds: in-set size >= 2, unless at most one member is fresh. So a
-  lone viewer plays alone; with a second viewer present one Space waits for the
-  other. Joining members start with `inSet=false, ready=false` and never block.
-  Disconnect removes from the set; swap clears everyone.
+  member is ready, fresh and has `buffered >= need`, and quorum holds: in-set
+  size >= 2, unless at most one member is fresh. `need` is 4 s
+  (`minBufferSecs`), or near the end what is left minus 2 s (`endSlackSecs`,
+  floor 0), since mpv cannot buffer past the end. So a lone viewer plays
+  alone; with a second viewer present one Space waits for the other. Joining
+  members start with `inSet=false, ready=false` and never block. Disconnect
+  removes from the set; swap clears everyone.
 - **Pause**: while PLAYING, any in-set member who becomes not ready, under
-  4 s buffered or stale flips the server to HELD (feed action `pause` by `server`).
-  Recovery resumes by itself when the gate passes.
+  `need` buffered or stale flips the server to HELD (feed action `pause` by
+  `server`). Recovery resumes by itself when the gate passes.
+- **End**: while PLAYING with a known duration, reaching it sets FINISHED
+  (feed `finished` by `server`, position = duration). Clients pause where they
+  are; FINISHED never auto-resumes. A seek turns it into HELD at the new
+  position (resuming at once if the gate passes); a swap resets to HELD.
 - **Seek**: allowed from any member in any transport; the server writes the
-  position and bumps `eventId`; flags are untouched. Clients diff each `state`
+  position, bumps `eventId` and records who sent it (`seekBy`, `seekSeq` in
+  `state` for that event); flags are untouched. Clients diff each `state`
   broadcast by `eventId` (`StateDiff`): new event means seek to the computed
   server position, transport change means play/pause. Between events: drift
   over 5 s for more than 2 s seeks, ahead by more than 1.5 s sets rate 0.95
-  until level, otherwise nothing. Local seeks are detected by the coordinator
-  polling mpv position once per second (`_detectUserSeek`, jump over 2 s and
-  more than 2 s from the server position) and sent as a `seek` intent; a retry
-  (`_checkSeekLanded`) re-applies a server seek that has not landed after 1.5 s.
-  Known roughness: see ROADMAP.
+  until level, otherwise nothing.
+- **User seeks**: the player is a `SyncPlayer` whose public `seek` is the
+  user's: media_kit's seek bar (one `seek` per pointer move while dragging),
+  the arrow keys and `seekTo` all become explicit events. The player moves at
+  once (scrub preview); `UserSeekGate` sends one `seek` intent with a fresh
+  `seq` after 300 ms without another request (`seekDebounceMs`). While the
+  user is seeking, and until the echo of the last sent seq arrives (3 s at
+  most), server seeks never touch the player; the echo of our own seek is not
+  applied either (the player is already there). A server seek that has not
+  landed after 1.5 s is re-applied once (`_checkSeekLanded`), to the server
+  position recomputed now, and only while its event is still current and the
+  user is not seeking.
 - **Liveness**: WS ping every 5 s; silent over 15 s means stale (out of the
   gate, `stale` feed); over 30 s the socket is closed and the member removed.
+  A stale member that was ready goes back into the set with its next frame.
   Closed sockets are polled with `isClosed` every second: Relic's server-side
   `onDone` does not fire for dead peers, so presence never relies on it.
+- **Resume**: a reconnecting client sends its previous token as
+  `hello.resume`. If the server still has that member (an unclean drop it has
+  not noticed), the new socket takes it over: same token, member id, ready
+  flag and media URL (the player keeps streaming), no join/leave feed, and the
+  dead socket is closed without removing the member. An unknown or kicked
+  token joins as a new member.
 - **Client policies**: no state broadcast for 5 s means connection lost, clear
   the server state and reconnect every 1.5 s until cancelled (an epoch counter makes
   a cancelled attempt stale) or kicked. After a reconnect the ready flag is
@@ -102,8 +131,7 @@ Loosely modeled on Syncplay, with a different readiness design.
   auto-unready at 10 min, and never less than 2 min after the warning.
 - **Deviations from Syncplay**: clock never follows the slowest watcher; no
   pause-on-leave; anyone can force ready/unready (all or one); quorum gate;
-  the clock is server time, and remote clock offset is not corrected (clients
-  assume their clock matches the server's).
+  the clock is server time (clients correct for their offset to it).
 
 Additive wire changes only; bump `proto` and PROTOCOL.md in the same commit.
 
@@ -149,12 +177,21 @@ open-ended), then every seek is a fresh `bytes=N-` connection. A server
 outage of a few seconds is ridden out from mpv's cache with no error. Longer
 outages exhaust the cache and rely on reconnect (not chaos-tested yet).
 
-mpv settings (`PlaybackController`): `Player` with `bufferSize` 64 MiB,
-`libass` on; pinned via runtime property: `demuxer-readahead-secs=10`,
-`cache-secs=10`, `stream-lavf-o=reconnect_streamed=1,reconnect_on_http_error=1,reconnect_delay_max=4`
-(comma form; this mpv build rejects colon-joined). media_kit has no public
-`setProperty`; the code calls it through a guarded dynamic call on
-`player.platform`. Hardware decoding comes from Settings (auto, off, custom)
+mpv settings (`PlaybackController`): `Player` with `bufferSize` 256 MiB
+(media_kit's `bufferSize` sets both `demuxer-max-bytes` and
+`demuxer-max-back-bytes`), `libass` on; pinned via runtime property:
+`demuxer-readahead-secs=150`, `cache-secs=150` (about two minutes of
+read-ahead: rides out short drops, intro skips are instant),
+`demuxer-max-bytes=268435456` (150 s up to ~14 Mbit/s; a 1.4 GB / 24 min
+file is ~8), `demuxer-max-back-bytes=67108864`,
+`stream-lavf-o=reconnect_streamed=1,reconnect_on_http_error=1,reconnect_delay_max=4`
+(comma form; this mpv build rejects colon-joined). The cache is in RAM:
+media_kit sets `cache-on-disk` without a `cache-dir`, and mpv falls back. mpv
+ignores invalid values silently, so every pin is read back and a mismatch is
+logged and kept in `pinMismatches`. Measured against the `/m` endpoint
+(`readahead_e2e_test`): a paused player buffers ~147 s ahead (10 s before).
+media_kit has no public `setProperty`/`getProperty`; the code calls them
+through a guarded dynamic call on `player.platform`. Hardware decoding comes from Settings (auto, off, custom)
 and is passed to the `VideoController`; env `SYNC_RELAY_HWDEC` (e.g. `no`)
 overrides it. It is read per player, so a change applies on the next join or
 Reload video.
@@ -162,8 +199,8 @@ Reload video.
 Player lifecycle: the `Player` and its `VideoController` live for one
 session: created on join, disposed on leave, replaced by `recreate()` for
 "Reload video" (button or Ctrl+R; volume kept). `openUrl` opens with `play: false`; play/pause/seek/rate come only from
-`StateDiff` actions or the play gate (`localPlayAllowed`: self in-set and
-ready). A server seek within 0.5 s of the current position is skipped. `leave()`
+`StateDiff` actions, the play gate (`localPlayAllowed`: self in-set and
+ready) or the user's own seeks (see Sync model). A server seek within 0.5 s of the current position is skipped. `leave()`
 stops the player (otherwise audio keeps playing). On media change
 (`mediaId` bump) the coordinator opens the new URL and `StateDiff` seeks to 0,
 holds and resets rate.
@@ -183,17 +220,30 @@ mounted and skip painting (`Visibility` with `maintainState`).
 
 ## Desktop UI
 
-One `HomeScreen` (`screens/home/`) with a nav rail: Home (profile chip, Join
-card, Host card, up to 6 Recent server chips for one-click rejoin), Settings
-(profile, hardware decoding, updates, shortcuts, shaders "coming soon"),
-Integrations (Jellyfin "coming soon") and About. The update indicator sits on
-Home. Settings persist in two Hive boxes: `connect_form` (last form and
-recents; saved even when a join fails) and `settings`. Link media names are
-derived from the URL path and never contain a query string.
+One `HomeScreen` (`screens/home/`) with a single top bar (`top_bar.dart`):
+profile chip, Join and Host tabs, the update indicator, Settings /
+Integrations / About buttons, and the window drag area and buttons. Only the
+selected view is mounted; form state lives in `HomeShell`. Join
+(`join_tab.dart`): one compact address/port/password row, then up to 6
+Recent server tiles in a grid that adds columns as the window widens. While
+the Join tab is visible each tile polls the server's `GET /health` every
+10 s (`health_probe.dart`) for online, name, viewer count and a "needs
+update" badge when `proto` differs from ours. Host (`host_tab.dart`): the
+media picker (`media_picker.dart`: Jellyfin placeholder, Link, File; a
+reusable widget driven by a `MediaPickerController`) fills the main area;
+port, password and Host sit in a 340 px column on the right, below the
+picker under 860 px. Text fields have fixed or capped widths (720 px max) so
+they stay compact on ultrawide screens. Submit state (busy, cancel,
+per-tab errors, server crash) is `ConnectFlow`. Settings (profile, hardware
+decoding, updates, shortcuts, shaders "coming soon"), Integrations
+(Jellyfin "coming soon") and About open in the same body. Settings persist
+in two Hive boxes: `connect_form` (last form and recents; saved even when a
+join fails) and `settings`. Link media names are derived from the URL path
+and never contain a query string.
 
 Window chrome is frameless (`window_manager`): every screen brings its own
-drag area and min/max/close buttons (`widgets/window_chrome_bar.dart`,
-`window_buttons.dart`); the session drag layer is `window_drag_layer.dart`.
+drag area and min/max/close buttons (Home's top bar; the session uses
+`widgets/window_chrome_bar.dart`; both use `window_buttons.dart`); the session drag layer is `window_drag_layer.dart`.
 
 ## Health reporting
 
@@ -203,8 +253,9 @@ for connecting, reconnecting, wrong password, version mismatch, kicked,
 host offline, and starvation ("waiting for X - N.N s buffered").
 Errors are logged with a stack trace at the boundary, then turned into a
 displayable state. The server's `GET /health` returns JSON (`ok`, `name`,
-`proto`, `viewers`, `bytesServed`, `uptimeSecs`); it is unauthenticated and
-the app does not read it.
+`proto`, `viewers`, `bytesServed`, `uptimeSecs`); it is unauthenticated, so
+it carries nothing sensitive. Home's recent-server tiles poll it for live
+status.
 
 ## Updater
 

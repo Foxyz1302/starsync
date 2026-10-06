@@ -101,7 +101,7 @@ class SyncServer {
     );
     _startedAt = DateTime.now();
     _heartbeat = Timer.periodic(const Duration(seconds: 1), (_) {
-      hub.engine.sweepStale();
+      hub.engine.tick();
       hub.sweepClosedSockets();
       hub.dropSilentSockets();
       hub.broadcastState();

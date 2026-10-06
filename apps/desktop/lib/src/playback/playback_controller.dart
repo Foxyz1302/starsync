@@ -8,6 +8,7 @@ import 'package:signals/signals_flutter.dart';
 
 import '../state/settings.dart';
 import '../sync/state_diff.dart';
+import '../sync/user_seek.dart';
 import 'frame_watchdog.dart';
 
 /// Owns one mpv [Player] (and its [VideoController]) per session: created
@@ -15,7 +16,18 @@ import 'frame_watchdog.dart';
 /// [recreate] for "Reload video". Never reuse a player across sessions —
 /// a GPU-side freeze sticks to the player, not to the widget.
 class PlaybackController {
-  Player? _player;
+  /// Read-ahead target: about two minutes rides out short outages and
+  /// makes skipping an intro instant.
+  static const readAheadSecs = 150;
+  /// Forward demuxer cache. Holds [readAheadSecs] up to ~14 Mbit/s (a
+  /// 1.4 GB / 24 min file is ~8); higher bitrates get less time. In RAM:
+  /// media_kit sets cache-on-disk but no cache-dir, so mpv falls back.
+  static const maxBytes = 256 * 1024 * 1024;
+  /// Back buffer (media_kit sets it to bufferSize too): enough for a short
+  /// seek back without holding another 256 MiB.
+  static const maxBackBytes = 64 * 1024 * 1024;
+
+  SyncPlayer? _player;
   VideoController? _video;
   Timer? _watchTimer;
   bool _probing = false;
@@ -37,6 +49,13 @@ class PlaybackController {
   Future<int?> Function()? shownFrame;
 
   Player get player => _player!;
+
+  /// Seeks from the video controls (seek bar) go here instead of to mpv.
+  void Function(Duration position)? onUserSeek;
+
+  /// Pinned mpv properties whose read-back differs from what was set
+  /// (mpv ignores invalid values silently), as `name: wanted -> got`.
+  final List<String> pinMismatches = [];
   bool get _ready => _player != null;
 
   /// The [VideoController] of the current player. Created lazily by the
@@ -64,12 +83,13 @@ class PlaybackController {
 
   Future<void> init() async {
     if (_player != null) return;
-    _player = Player(
+    _player = SyncPlayer(
         configuration: PlayerConfiguration(
-      bufferSize: 64 * 1024 * 1024,
+      bufferSize: maxBytes,
       libass: true,
       vo: Platform.environment['SYNC_RELAY_VO'],
-    ));
+    ))
+      ..onUserSeek = (d) => onUserSeek?.call(d);
     await _pinBufferProps();
     _watchdog.reset();
     _watchTimer = Timer.periodic(const Duration(seconds: 1), (_) => _watch());
@@ -94,14 +114,23 @@ class PlaybackController {
     try {
       final dynamic platform = player.platform;
       await platform?.setProperty(property, value);
+      final got = '${await platform?.getProperty(property)}';
+      if (!pinMatches(value, got)) {
+        pinMismatches.add('$property: $value -> $got');
+        debugPrint('pin $property=$value not applied, mpv has "$got"');
+      }
     } catch (e, st) {
+      pinMismatches.add('$property: $value -> error $e');
       debugPrint('pin $property=$value failed: $e\n$st');
     }
   }
 
   Future<void> _pinBufferProps() async {
-    await _pin('demuxer-readahead-secs', '10');
-    await _pin('cache-secs', '10');
+    pinMismatches.clear();
+    await _pin('demuxer-readahead-secs', '$readAheadSecs');
+    await _pin('cache-secs', '$readAheadSecs');
+    await _pin('demuxer-max-bytes', '$maxBytes');
+    await _pin('demuxer-max-back-bytes', '$maxBackBytes');
     final hwdec = _hwdecOverride;
     if (hwdec != null) {
       await _pin('hwdec', hwdec);
@@ -214,7 +243,8 @@ class PlaybackController {
         switch (action) {
           case SeekAction(:final position):
             if ((positionSecs - position).abs() < 0.5) break;
-            await player.seek(Duration(milliseconds: (position * 1000).round()));
+            await _player!
+                .syncSeek(Duration(milliseconds: (position * 1000).round()));
           case TransportAction(:final playing):
             if (playing) {
               await player.play();
@@ -268,4 +298,11 @@ class PlaybackController {
       debugPrint('player stop failed: $e\n$st');
     }
   }
+}
+
+/// mpv echoes numbers in its own format (`150` reads back `150.000000`).
+bool pinMatches(String wanted, String got) {
+  if (wanted == got) return true;
+  final a = double.tryParse(wanted), b = double.tryParse(got);
+  return a != null && b != null && a == b;
 }

@@ -3,7 +3,7 @@ import 'protocol.dart';
 
 typedef SyncClock = DateTime Function();
 
-enum Transport { playing, held }
+enum Transport { playing, held, finished }
 
 enum Correction { none, slowDown, seek }
 
@@ -66,6 +66,10 @@ class SyncEngine {
   int mediaId = 1;
   HelloMedia? media;
   int _nextId = 1;
+  // Who sent the seek that produced [_seekEventId], for the echo check.
+  String? _seekBy;
+  int _seekSeq = 0;
+  int _seekEventId = -1;
 
   SyncEngine({SyncClock? clock, Duration? staleAfter, Duration? dropAfter})
       : clock = clock ?? (() => DateTime.now().toUtc()),
@@ -84,12 +88,50 @@ class SyncEngine {
   bool isStale(EngineMember member, [DateTime? at]) =>
       (at ?? now).difference(member.lastSeen) > staleAfter;
 
+  /// Media length in seconds, null while nobody has reported it.
+  double? get duration {
+    final d = media?.duration ?? 0;
+    return d > 0 ? d : null;
+  }
+
+  /// Buffer every in-set member needs: [RelayConstants.minBufferSecs], or
+  /// less near the end where that much is not left to buffer.
+  double requiredBufferSecs([DateTime? at]) {
+    final d = duration;
+    const full = RelayConstants.minBufferSecs;
+    if (d == null) return full;
+    final left = d - positionAt(at) - RelayConstants.endSlackSecs;
+    return left.clamp(0.0, full).toDouble();
+  }
+
+  /// Any frame from a member: fresh again, and a ready member the stale
+  /// sweep took out of the set goes back in (ready && !inSet only arises
+  /// from that sweep).
+  void _seen(EngineMember member) {
+    member.lastSeen = now;
+    if (member.ready && !member.inSet) member.inSet = true;
+  }
+
+  /// Heartbeat: stale sweep, end of media.
+  void tick() {
+    sweepStale();
+    evaluate();
+  }
+
   String applyJoin(String token, String name, String avatar) {
     final id = 'm${_nextId++}';
     members[token] =
         EngineMember(id: id, token: token, name: name, avatar: avatar, now: now);
     feed.add(FeedMessage(actor: name, action: 'join', at: now));
     return id;
+  }
+
+  /// A reconnect took over [token]'s member (see `hello.resume`).
+  void applyResume(String token) {
+    final member = members[token];
+    if (member == null) return;
+    _seen(member);
+    evaluate();
   }
 
   String? applyLeave(String token) {
@@ -110,7 +152,7 @@ class SyncEngine {
   void applyReady(String token, bool ready, {String source = 'manual'}) {
     final member = members[token];
     if (member == null) return;
-    member.lastSeen = now;
+    _seen(member);
     if (member.ready == ready && member.inSet) {
       evaluate();
       return;
@@ -153,15 +195,23 @@ class SyncEngine {
     evaluate();
   }
 
-  void applySeek(String token, double seekPosition) {
+  void applySeek(String token, double seekPosition, {int seq = 0}) {
     final member = members[token];
     if (member == null) return;
     if (!seekPosition.isFinite || seekPosition < 0) return;
-    member.lastSeen = now;
+    _seen(member);
     position = seekPosition;
     serverTime = now;
     eventId++;
+    _seekBy = member.id;
+    _seekSeq = seq;
+    _seekEventId = eventId;
     feed.add(FeedMessage(actor: member.name, action: 'seek', at: now));
+    // Seeking back from the end: held, and resumes once the gate passes.
+    if (transport == Transport.finished) {
+      transport = Transport.held;
+      evaluate();
+    }
   }
 
   /// Returns false (no state change) for media with non-finite numbers.
@@ -183,12 +233,19 @@ class SyncEngine {
     return true;
   }
 
-  void applyReport(String token, double reportPosition, double buffered, int reportEventId) {
+  void applyReport(String token, double reportPosition, double buffered, int reportEventId,
+      {double duration = 0, int mediaId = 0}) {
     final member = members[token];
     if (member == null) return;
     if (!reportPosition.isFinite) return;
-    member.lastSeen = now;
+    _seen(member);
     member.buffered = !buffered.isFinite || buffered < 0 ? 0 : buffered;
+    final m = media;
+    // First report of the length wins; only for the media the client has open.
+    if (m != null && m.duration <= 0 && mediaId == this.mediaId &&
+        duration.isFinite && duration > 0) {
+      media = HelloMedia(name: m.name, size: m.size, duration: duration, url: m.url);
+    }
     if (reportEventId < eventId) return;
     evaluate();
   }
@@ -221,10 +278,21 @@ class SyncEngine {
 
   void evaluate() {
     final t = now;
+    if (transport == Transport.finished) return;
+    final need = requiredBufferSecs(t);
     if (transport == Transport.playing) {
+      final d = duration;
+      if (d != null && positionAt(t) >= d) {
+        position = d;
+        serverTime = t;
+        eventId++;
+        transport = Transport.finished;
+        feed.add(FeedMessage(actor: 'server', action: 'finished', at: t));
+        return;
+      }
       final blocked = members.values
           .where((m) => m.inSet)
-          .any((m) => !m.ready || m.buffered < RelayConstants.minBufferSecs || isStale(m, t));
+          .any((m) => !m.ready || m.buffered < need || isStale(m, t));
       if (blocked) {
         position = positionAt(t);
         serverTime = t;
@@ -240,7 +308,7 @@ class SyncEngine {
         members.values.where((m) => !isStale(m, t)).length;
     final quorum = inSet.length >= 2 || freshCount <= 1;
     final allGood = inSet.every(
-        (m) => m.ready && m.buffered >= RelayConstants.minBufferSecs && !isStale(m, t));
+        (m) => m.ready && m.buffered >= need && !isStale(m, t));
     if (allGood && quorum) {
       serverTime = t;
       eventId++;
@@ -249,13 +317,18 @@ class SyncEngine {
     }
   }
 
-  StateBroadcast broadcast() => StateBroadcast(
-        eventId: eventId,
-        transport: transport == Transport.playing ? 'playing' : 'held',
-        position: position,
-        serverTime: serverTime,
-        mediaId: mediaId,
-        media: media?.toJson(),
-        members: members.values.map((m) => m.view(stale: isStale(m))).toList(),
-      );
+  StateBroadcast broadcast() {
+    final bySeek = _seekEventId == eventId;
+    return StateBroadcast(
+      eventId: eventId,
+      transport: transport.name,
+      position: position,
+      serverTime: serverTime,
+      mediaId: mediaId,
+      media: media?.toJson(),
+      members: members.values.map((m) => m.view(stale: isStale(m))).toList(),
+      seekBy: bySeek ? _seekBy : null,
+      seekSeq: bySeek ? _seekSeq : null,
+    );
+  }
 }

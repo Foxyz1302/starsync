@@ -70,12 +70,17 @@ class HelloMessage {
   /// The hosting app's own client proves it is the host with this; empty
   /// for everyone else.
   final String hostKey;
+  /// Token from this client's previous `welcome`, sent on reconnect: if the
+  /// server still has that member (an unclean drop it has not noticed), the
+  /// connection takes it over instead of leaving a ghost.
+  final String resume;
   const HelloMessage(
       {required this.proto,
       required this.secret,
       required this.user,
       required this.media,
-      this.hostKey = ''});
+      this.hostKey = '',
+      this.resume = ''});
 
   Map<String, Object?> toJson() => {
         't': 'hello',
@@ -84,6 +89,7 @@ class HelloMessage {
         'user': user.toJson(),
         'media': media.toJson(),
         if (hostKey.isNotEmpty) 'hostKey': hostKey,
+        if (resume.isNotEmpty) 'resume': resume,
       };
 
   factory HelloMessage.fromJson(Map<String, Object?> json) {
@@ -97,6 +103,7 @@ class HelloMessage {
       user: HelloUser.fromJson(Map<String, Object?>.from(user)),
       media: HelloMedia.fromJson(Map<String, Object?>.from(media)),
       hostKey: (json['hostKey'] as String?) ?? '',
+      resume: (json['resume'] as String?) ?? '',
     );
   }
 }
@@ -212,13 +219,19 @@ class ForceIntent {
 
 class SeekIntent {
   final double position;
-  const SeekIntent({required this.position});
+  /// Client-chosen, increasing per connection; echoed in `state.seekSeq` so
+  /// the sender recognises its own seek.
+  final int seq;
+  const SeekIntent({required this.position, this.seq = 0});
 
-  Map<String, Object?> toJson() => {'t': 'seek', 'position': position};
+  Map<String, Object?> toJson() =>
+      {'t': 'seek', 'position': position, if (seq != 0) 'seq': seq};
 
   factory SeekIntent.fromJson(Map<String, Object?> json) {
     if (json['t'] != 'seek') throw const ProtocolException('not a seek intent');
-    return SeekIntent(position: finiteDouble(json['position'], 'position'));
+    return SeekIntent(
+        position: finiteDouble(json['position'], 'position'),
+        seq: finiteInt(json['seq'], 'seq'));
   }
 }
 
@@ -240,10 +253,25 @@ class ReportMessage {
   final double position;
   final double buffered;
   final int eventId;
-  const ReportMessage({required this.position, required this.buffered, required this.eventId});
+  /// Length of the open media in seconds, 0 while unknown.
+  final double duration;
+  /// The `mediaId` the client has open; [duration] belongs to it.
+  final int mediaId;
+  const ReportMessage(
+      {required this.position,
+      required this.buffered,
+      required this.eventId,
+      this.duration = 0,
+      this.mediaId = 0});
 
-  Map<String, Object?> toJson() =>
-      {'t': 'report', 'position': position, 'buffered': buffered, 'eventId': eventId};
+  Map<String, Object?> toJson() => {
+        't': 'report',
+        'position': position,
+        'buffered': buffered,
+        'eventId': eventId,
+        if (duration > 0) 'duration': duration,
+        if (mediaId != 0) 'mediaId': mediaId,
+      };
 
   factory ReportMessage.fromJson(Map<String, Object?> json) {
     if (json['t'] != 'report') throw const ProtocolException('not a report');
@@ -251,7 +279,37 @@ class ReportMessage {
       position: finiteDouble(json['position'], 'position'),
       buffered: finiteDouble(json['buffered'], 'buffered'),
       eventId: finiteInt(json['eventId'], 'eventId', fallback: 0),
+      duration: finiteDouble(json['duration'], 'duration'),
+      mediaId: finiteInt(json['mediaId'], 'mediaId'),
     );
+  }
+}
+
+/// Clock probe: the client sends its own clock in [clientMs]; the server
+/// answers with a [PongMessage] carrying it back plus its clock.
+class PingMessage {
+  final int clientMs;
+  const PingMessage({required this.clientMs});
+
+  Map<String, Object?> toJson() => {'t': 'ping', 'c': clientMs};
+
+  factory PingMessage.fromJson(Map<String, Object?> json) {
+    if (json['t'] != 'ping') throw const ProtocolException('not a ping');
+    return PingMessage(clientMs: finiteInt(json['c'], 'c'));
+  }
+}
+
+class PongMessage {
+  final int clientMs;
+  final int serverMs;
+  const PongMessage({required this.clientMs, required this.serverMs});
+
+  Map<String, Object?> toJson() => {'t': 'pong', 'c': clientMs, 's': serverMs};
+
+  factory PongMessage.fromJson(Map<String, Object?> json) {
+    if (json['t'] != 'pong') throw const ProtocolException('not a pong');
+    return PongMessage(
+        clientMs: finiteInt(json['c'], 'c'), serverMs: finiteInt(json['s'], 's'));
   }
 }
 
@@ -314,6 +372,10 @@ class StateBroadcast {
   final int mediaId;
   final Map<String, Object?>? media;
   final List<MemberView> members;
+  /// Member id and seq of the seek that made [eventId]; null when the
+  /// current event is not a seek.
+  final String? seekBy;
+  final int? seekSeq;
   const StateBroadcast({
     required this.eventId,
     required this.transport,
@@ -322,6 +384,8 @@ class StateBroadcast {
     required this.mediaId,
     this.media,
     required this.members,
+    this.seekBy,
+    this.seekSeq,
   });
 
   Map<String, Object?> toJson() => {
@@ -333,6 +397,8 @@ class StateBroadcast {
         'mediaId': mediaId,
         if (media != null) 'media': media,
         'members': members.map((m) => m.toJson()).toList(),
+        if (seekBy != null) 'seekBy': seekBy,
+        if (seekSeq != null) 'seekSeq': seekSeq,
       };
 
   factory StateBroadcast.fromJson(Map<String, Object?> json) {
@@ -352,6 +418,8 @@ class StateBroadcast {
               .map((m) => MemberView.fromJson(Map<String, Object?>.from(m)))
               .toList()
           : const [],
+      seekBy: json['seekBy'] as String?,
+      seekSeq: json['seekSeq'] == null ? null : finiteInt(json['seekSeq'], 'seekSeq'),
     );
   }
 }
