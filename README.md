@@ -1,28 +1,98 @@
-# sync_relay_project
+# watch-together
 
-Watch-together desktop app (working title). One binary, three modes:
+Watch a video with friends, in sync, with the quality of a real mpv player.
+Paste a Jellyfin link, any direct video link, or pick a file on your own disk;
+everyone's play, pause and seek stay together.
 
-- **Client** — GUI Join, sync WS + mpv. No server code runs.
-- **Server+Client (Host)** — GUI Host starts `packages/server` in-process,
-  listens on a port, self-connects via loopback. Host must open ports.
-  Clients never open ports.
-- **Headless** — `watch.exe --headless`, same server package, no window.
+Why not Jellyfin SyncPlay: it runs in the browser and its sync is poor.
+This is a desktop app that drives mpv.
 
-v1 order: links support (shared http(s) media URL, Syncplay-style sync)
-first, file relay (server-proxied bytes, whitelist case) after.
-Jellyfin native + auto-update are deferred as their own undertakings.
+Name: `watch-together` is a placeholder and the final name is undecided
+(`sync-relay` is the working name). It appears in file names and the
+update manifest until that is settled.
 
-Layout:
+- Desktop only (Linux now, Windows planned), always mpv. No web clients.
+- No transcoding. Everyone plays the original file.
+- Friends trust model: no accounts, no roles. A blank password means an open server.
 
-```
-/packages/core      protocol, sync engine, messages (pure Dart, no Flutter)
-/packages/server    room + media HTTP endpoint (pure Dart, no Flutter)
-/apps/desktop       Flutter app embedding packages/server (the ONE binary)
-/tool               spikes + harnesses (range_logger, shaper, fake_viewer, e2e_check)
-/deploy             systemd unit, notes
-/docs               PROTOCOL.md, ARCHITECTURE.md, mpv-http-contract.md, ROADMAP.md
-```
+How it fits together: [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md).
 
-Phases + status: `docs/ROADMAP.md`. Session handoff: `HANDOFF.md` (root).
+## Install and update
 
-Enforcement: `core` and `server` must have zero Flutter imports (tested).
+Download the latest `watch-together-<version>-linux-x64.tar.gz` from the
+Releases page of this repo, extract it, run `watch_together`.
+
+Update from the app: when a newer version exists, an update indicator
+appears on Home and opens the update card. "Update and restart" downloads,
+verifies, applies in place and restarts; the install folder must be writable
+by you. Settings has Check now and an auto-check toggle. From a terminal:
+`watch_together --upgrade` or `update.sh` (shipped in the tarball). A
+release with a newer protocol is a required update: everyone on a server
+must run the same protocol version, and a mismatch is refused with a message
+telling you to update.
+
+## Host from the app
+
+Home, Host card. Pick a port, an optional password (blank = anyone can
+join), and optionally a video: a link or a file path. Your name and avatar
+come from your profile. The app starts a
+server inside itself and joins it. Friends need to reach your machine: open
+the TCP port on your router (or use a LAN or VPN address). Friends open nothing.
+
+If you pick a local file, the server streams it to everyone from your disk.
+Nothing is uploaded or stored anywhere.
+
+## Dedicated server
+
+Being reworked: today the server is started by the app (host) and the
+standalone server is a dev tool. The planned dedicated server is a separate
+binary built from `packages/server`. See [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Join
+
+Home, Join card. Enter the host's address, port, and the password if there
+is one. Your name and avatar come from your profile (Home chip or Settings).
+Servers you got into appear as up to 6 Recent chips on Home: one click rejoins.
+
+## Settings
+
+Profile, hardware decoding (auto, off or custom; the env var
+`SYNC_RELAY_HWDEC` overrides it; applies on the next join or Reload video),
+updates, and the keyboard shortcuts (read-only). Integrations (Jellyfin) and
+shaders show "coming soon". About shows the version.
+
+Keys in a session: Space = ready / unready, Tab = side panel (people, log,
+chat, change video), Left/Right = seek 10 s, F = fullscreen, Esc = close
+panel or ask to leave, Ctrl+R = reload video.
+
+## Ports
+
+| What | Default | Notes |
+|---|---|---|
+| Sync WebSocket and `/health` | TCP 8080 | plain `ws://`, no TLS |
+| Local file streaming | same port | path `/m/...`, needs a session token |
+
+Only the host needs the port reachable.
+
+## Jellyfin
+
+Pasting a Jellyfin direct-play link works today like any link. Proper
+Jellyfin support (per-person login, watched status, library browsing) is
+planned: see [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Video quality and shaders
+
+Planned: Anime4K and other mpv shaders as a per-viewer setting. See
+[docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Troubleshooting
+
+- "host offline - check address and port": wrong address, or the port is not open.
+- "wrong server password": password mismatch.
+- "host runs a different version": update the app on both sides.
+- Picture frozen but sound fine: Ctrl+R reloads the video; the app also does it automatically.
+- Everyone waits at "waiting for X": X has not buffered 4 seconds yet or has not pressed Space.
+- No Windows build yet.
+
+For contributors: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md),
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PROTOCOL.md](docs/PROTOCOL.md).

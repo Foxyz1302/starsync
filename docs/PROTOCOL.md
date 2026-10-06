@@ -1,120 +1,93 @@
-# PROTOCOL — v4 (Phase 3: sync engine + readiness)
+# Protocol (proto = 4)
 
-`proto = 4`. Bump history: v1 hello/state/event shapes; v2 `token` in
-welcome; v3 `kicked`/`kick`; v4 readiness intents, room fan-out, feed,
-public member ids (tokens never leave their owner — media URLs carry
-only the requester's own token).
+Wire format only. Behavior (gate, clock, timeouts) is in
+[ARCHITECTURE.md](ARCHITECTURE.md). Source of truth:
+`packages/core/lib/src/protocol.dart` and `packages/server/lib/src/room_hub.dart`.
 
-## Transport vs readiness (the core split)
+Any wire change bumps `RelayConstants.protoVersion` and edits this file in
+the same commit. Changes are additive.
 
-Room transport is PLAYING or HELD. Seeks move transport position only:
-while PLAYING anyone seeks freely, everyone follows, catch-up buffering
-is tolerated with no flag changes. Readiness gates only the
-HELD→PLAYING transition. Starvation pauses transport without touching
-flags; recovery auto-resumes on buffers, no Space needed.
+## Transport
 
-## Message catalog
+- WebSocket at `/sync`, JSON text frames, each an object with a `t` field.
+- The first client frame must be `hello` within 10 s. Server pings every 5 s.
+- Match incoming frames by `t`, never by order: `welcome` can race `room`.
+- Failures: server sends `{"t":"err","message":...}` and closes.
+  Messages: `bad hello: ...`, `proto mismatch: got X, want Y`, `wrong secret`,
+  `rejected: <reason>` (e.g. avatar too large), `bad message: ...` (a frame
+  with a non-finite number, e.g. NaN position), `bad swap media`,
+  `swap needs a url or the hosted file` (empty swap).
+- `GET /health` returns JSON (`ok`, `room`, `proto`, `viewers`, `bytesServed`,
+  `uptimeSecs`; unauthenticated). `GET /m/<sid>/<token>/<name>`
+  serves the host's file (Range table in ARCHITECTURE.md).
 
-Client→server intents (all post-hello text frames):
+## Client to server
 
 ```
-{"t":"ready","ready":true,"source":"manual|auto"}   Space flip / idle timer
-{"t":"force","target":"all|<memberId>","ready":false}
-{"t":"seek","position":123.4}                        doSeek event, room jumps
-{"t":"swap","media":{"name":..,"size":..,"duration":..,"url":..}}
+{"t":"hello","proto":4,"secret":"","user":{"name":"","avatar":""},
+ "media":{"name":"","size":0,"duration":0,"url":null}}
+{"t":"ready","ready":true,"source":"manual"}      source: manual | auto
+{"t":"force","target":"all"|"<memberId>","ready":true}
+{"t":"seek","position":123.4}
+{"t":"swap","media":{"name":"","size":0,"duration":0,"url":"..."}}
 {"t":"report","position":123.1,"buffered":6.2,"eventId":41}
-{"t":"chat","text":"…"}
-{"t":"kick","target":"<memberId>","reason":"…"}      v3, now by member id
+{"t":"chat","text":"..."}
+{"t":"kick","target":"<memberId>","reason":""}
 ```
 
-Server→client:
+Field notes:
+- `hello.secret`: the server password; a server with an empty secret is open.
+  The member connecting from a loopback address is the host.
+  `hello.media` is carried but not used by the server today.
+- `user.avatar`: base64 image, at most 256 KiB of characters. `name` is
+  trimmed, empty becomes `?`, cut to 32 characters.
+- `chat.text` is cut to 500 characters.
+- `swap.media.url` is the link; `name`, `size`, `duration` are informational.
+- Frames before `welcome` (other than `hello`) are ignored; unparsable or
+  unknown frames are ignored silently.
+
+## Server to client
 
 ```
-{"t":"room",{eventId,transport:"playing"|"held",position,serverTime,
-  mediaId,media:{…}|null,
-  members:[{id,name,avatar,ready,inSet,buffered,stale}]}}
-{"t":"feed",{actor,action,target?,reason?,at}}       toasts + sheet log
-{"t":"welcome",{token,memberId,mediaUrl?,state}}   v2+4, state now a room
-{"t":"kicked",{reason}}  {"t":"err",{message}}
+{"t":"welcome","token":"...","memberId":"m1","mediaUrl":"...","state":{<room>}}
+{"t":"room","eventId":7,"transport":"playing"|"held","position":12.3,
+ "serverTime":"<ISO-8601 UTC>","mediaId":1,
+ "media":{name,size,duration,url?}|absent,
+ "members":[{"id","name","avatar","ready","inSet","buffered","stale"}]}
+{"t":"feed","actor":"","action":"","target":"","reason":"","at":"<ISO-8601>"}
+{"t":"chat","text":"...","from":"<name>"}
+{"t":"kicked","reason":""}
+{"t":"err","message":""}
 ```
 
-`room` broadcasts at 1 Hz and on every change. Clients diff by
-`eventId`: position jump ⇒ seek, transport change ⇒ play/pause.
-`feed` actions: ready, unready, force-ready, force-unready, force-play,
-force-hold, kick, join, leave, stale, swap, seek, pause, resume, chat —
-every one carries actor + server timestamp.
-Force-play-all is `force` with `target:"all",ready:true`; anyone not
-ready Spaces back. Sounds key off feed actions.
-Chat dual delivery: the server emits both `{"t":"chat","text","from"}`
-(render this one — it carries the text) and a textless `feed` chat
-entry (housekeeping echo). Clients must render exactly one row per
-send; the reference client drops the textless feed entry.
+- `welcome.token` is private to its owner and appears only in that member's
+  media URL. `mediaUrl` is omitted when there is no media; it is a built
+  `/m/...` URL for a host file (host part = what the client dialled), otherwise
+  the shared link.
+  `welcome.state` has the same shape as `room`.
+- `room` is sent every second and on every change. `position` is the value at
+  `serverTime`; clients extrapolate while `transport` is `playing`.
+  `eventId` increases on seek, swap and transport changes.
+  `mediaId` increases on swap.
+- `feed.action` values: `ready`, `unready`, `force-ready`, `force-unready`,
+  `force-play`, `force-hold`, `kick`, `join`, `leave`, `stale`, `swap`,
+  `seek`, `pause`, `resume`, `chat`. `target` and `reason` are optional;
+  `reason` carries `auto`/`manual` for ready and `silent too long` or
+  `no signal` for leave/stale.
+- Chat is delivered twice: a `chat` frame with the text and a textless
+  `feed` with `action:"chat"`. Render the `chat` frame only; the reference
+  client drops the textless feed entry.
 
-## Membership set (kills join-cascade + ghost-quorum)
+## Join and reconnect
 
-- Join: `inSet=false, ready=false`. Catch up in background (open media,
-  seek to room edge, buffer). Flipping ready joins the set.
-- Unready while in set: stays in set, room re-evaluates → HELD.
-- Disconnect: removed from set, never counts toward quorum.
-- Swap: all sets cleared, all flags false.
-- Gate to PLAYING: set non-empty AND every in-set member
-  ready + buffered ≥ 4 s + fresh (not stale) AND quorum: in-set
-  size ≥ 2, unless no more than one member is fresh. A lone
-  watcher can play alone; the moment a second watcher is present,
-  one Space waits for the other. Empty set ⇒ HELD.
+`hello` then `welcome`, then the app opens `mediaUrl`, seeks to the room
+position and buffers. A joining member is `ready=false, inSet=false` until
+the first `ready`. A socket that dies loses its token; reconnect is a fresh
+`hello`, after which the client re-sends its prior ready flag.
 
-## Clock rules (Syncplay port)
+## Reserved, not implemented
 
-Server owns the advancing clock:
-`positionAt(now) = position + (playing ? now-serverTime : 0)`.
-Plain reports are informational and can never move it. Only seek, swap,
-and gate transitions write position/serverTime/eventId. Reports tagged
-with `eventId < current` have their position ignored (no ping-pong);
-buffered is still accepted. Pause (HELD) freezes position immediately;
-resume sets serverTime=now — laggards seek forward, never drag back.
-
-Tiered client correction on room state: |drift| > 5 s ⇒ seek;
-ahead > 1.5 s ⇒ 0.95× until level; inside deadzone ⇒ nothing.
-
-## Join state machine
-
-connect → hello → welcome → open media (server mediaUrl or shared
-url) → seek to room edge → buffer → not-ready catch-up → Space →
-in set → HELD→PLAYING when gate passes. Reconnect: re-hello (tokens
-die with the socket), prior flag restored, buffer gate holds playback
-until truly caught up.
-
-## Swap state machine
-
-anyone sends swap → HELD, mediaId++, clock reset (0/now), sets
-cleared, flags false → all clients re-run Join → auto-resume when the
-gate passes. No authority check in v1 (same trust basis as force).
-
-## Join / auth (v2–v3, unchanged)
-
-proto must equal server proto; secret is the room password; avatar
-≤64 KiB; failures get `err` + close. `sid="default"`, map keyed for
-later multi-session. `mediaUrl` carries the playable URL: a built
-`/m/…` URL when the server holds bytes, otherwise the shared link.
-
-## Media endpoint (Phase 1, unchanged)
-
-`GET /m/<sid>/<token>/<name>` Range table. 410/401/403/503 gates.
-
-## Heartbeat (Phase 2 baseline, feeds the gate)
-
-5 s WS pings; per-token lastSeen on every frame; silent >15 s ⇒ out
-of the gate (`stale` feed); silent >30 s ⇒ socket closed, member
-removed (`leave`), client reconnects via re-hello. No limbo sockets.
-Closed sockets are swept every second (`isClosed` poll — transport
-`onDone` is unreliable, so presence never depends on it).
-Client-side reconnect loop (fixed polite interval + manual escape)
-is app work.
-
-## Playlist (deferred, space reserved)
-
-Not v1. Shape when it lands: server-held `queue:[media…]` alongside
-the current media; anyone appends links (`queue-add`), anyone skips
-(`queue-skip`); reaching EOF auto-advances exactly like a swap
-(HELD, mediaId++, sets cleared, Join rerun, gate resumes). No code
-until then — `mediaId` + swap already carry it.
+Server-held queue (`queue-add`, `queue-skip`) would auto-advance like a swap.
+`RelayConstants.chunkBytes`, `creditWindowChunks`, `maxConcurrentOpen` and the
+`open`, `ack`, `cancel`, `eof`, `buffered`, `state`, `event` kinds in
+`MessageKind` are unused leftovers.

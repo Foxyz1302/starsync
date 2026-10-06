@@ -1,87 +1,97 @@
-# ROADMAP — sync_relay_project (backlog tracker)
+# Roadmap
 
-This is the durable source of truth for what is built and what is next.
-Chat is ephemeral; this file + `HANDOFF.md` (root) + `PROTOCOL.md` /
-`ARCHITECTURE.md` carry state across sessions. Check an item off when it
-lands, same commit as the code. Proto bumps still require PROTOCOL.md
-same-commit.
+Backlog and epics, in order. Done work lives in git history. Check an item
+off by deleting it in the same commit as the code. Wire changes also edit
+[PROTOCOL.md](PROTOCOL.md).
 
-Model: direct-serve (host opens ports, clients open nothing). The
-brief's old WSS host-upload tunnel is obsolete unless a VPS tier
-needs remote-host upload. Server = Relic, client WS =
-web_socket_channel. Protocol still v4.
+## Backlog
 
-## Built (phases 0–4 + hardening — done, details in git history)
+1. **Isolate server + dedicated server.** Replace host detection by loopback
+   peer (breaks behind a same-machine reverse proxy or tunnel) with an explicit
+   host token. Run the server on a Dart isolate
+   when hosting from the app; build the dedicated server as a separate
+   `dart compile exe` of `packages/server` (a Flutter binary cannot be
+   headless); drop `--headless`; rename "room" to "server" in code
+   (`RoomServer`, `RoomHub`, `RoomBroadcast`, wire `t:'room'`, `room` in
+   `/health`, config defaults) with the proto bump that implies; refresh
+   `deploy/` and the packaging.
 
-Scaffold + CI, mpv Range contract, sessions/tokens/media endpoint,
-sync engine + quorum, desktop shell (SyncClient, RoomDiff, media_kit,
-avatars, toasts+sheet, reconnect), presence hardening, frameless
-chrome, chat/idle fixes, chat double-row fix, avatar 256 KiB cap,
-Linux tarball packager + Discord upload card, updater v1
-(`--upgrade`: manifest check, download, sha256, apply-over).
-WAN-tested 2-client. Counts at last green: core 42, server 41,
-desktop 17 + 7 updater.
+2. **Sync fixes.**
+   - Jumpy seek. Root cause: the media_kit seek bar calls `player.seek`
+     continuously while dragging; the coordinator only notices through its
+     1 s position poll (`_detectUserSeek`), so it fights the server echo and
+     the seek-landed retry (`_checkSeekLanded`).
+   - End-of-file stall. The 4 s buffered gate cannot be met in the last 4 s of
+     a file, the server never learns the duration, and there is no finished
+     state. Add duration reporting and a finished state.
+   - Tiny read-ahead. Our own pins (`cache-secs=10`,
+     `demuxer-readahead-secs=10` in `playback_controller.dart`) cap it; want
+     about two minutes for large files.
+   - Remote clock offset is not corrected: clients assume their clock equals
+     the server's.
+   - Stale-ready. A ready member who went stale (no reports for 15 s) should
+     return to the ready set when reports resume; the client re-sends ready as
+     a workaround (remove it then).
+   - Ghost member after an unclean drop until `dropAfter`.
 
-## Backlog (priority order, each one sitting-sized)
+3. **Rendering, then shaders.** media_kit falls back to software rendering
+   on the dev machine. Suspect Impeller on Linux against media_kit's GL
+   texture path; investigate first, since shaders need hardware rendering and
+   it may also cause the video freeze. Then shaders: per-viewer local setting
+   using mpv `glsl-shaders`, shipping Anime4K presets (bloc97, MIT).
 
-1. First real release: `tool/release.sh` (derives the version,
-   writes the manifest, no typing) → review →
-   `git push --follow-tags` → CI (`release.yml`) builds the
-   tarball and publishes the Forgejo release. Verifies the whole
-   `--upgrade` chain end to end. Manual fallback is
-   `tool/package_linux.sh` + `tool/release_publish.sh <tag>`.
-2. Jumpy seek: live repro with timeline log first, then fix the
-   seek-land retry vs deadband/debounce fight.
-3. EOF stall (bug, dogfood 09-12): playback stops just before the
-   end and gates HELD ("waiting for X (3.9s)"). Suspect the
-   buffered≥4s readiness gate is unsatisfiable near end of media.
-4. Tiny buffer (bug, dogfood 09-12): 1–3 s observed; want ~2 min
-   for a 1.4 GB / 24 min file (intro skip + surviving short
-   drops). Investigate demuxer forward-queue props + 64 MB
-   `bufferSize`, then raise.
-5. Recovery controls: reload-current-media button + restart-player
-   button for when playback wedges.
-6. Link conveniences: Ctrl+V pastes clipboard into the media
-   field; session link swaps update the remembered media (today
-   only the connect screen persists); session shows the open link
-   with an open-in-browser button.
-7. Time UI: remaining time until end + scrubber preview (target
-   time while scrubbing).
-8. Shortcut parity pass with mpv / mpv.net.
-9. Sounds swap-in: replace `NoopSfxService` (flutter_soloud preload,
-   Kenney/ObsydianX/akx sources in HANDOFF §7); keep seek/pause/
-   resume cues muted or near-silent.
-10. `/health` auth + stop broadcasting the full media URL (api_key
-    leaks onto the wire).
-11. File-join wart: welcome mediaUrl advertises 127.0.0.1, remote file
-    joiners fail-open then self-heal on first room broadcast.
-12. Cache-exhaustion long outage via `tool/shaper.dart --kill-after`.
-13. Phase 5 chaos suite (host drop 5 s / 30 s, viewer stall, 20-seek
-    storm) + OOM / stuck-room / drift-recovery assertions.
-14. Windows zip in packaging + Discord card.
-15. TLS/Caddy doc.
-16. Chat history pane (schema exists, Activity log only for now).
-17. Shaders: anime4k upscaling via mpv glsl-shaders + UI toggle.
-18. Avatar caching + static serving (worth-it decision open):
-    serve avatar bytes once over HTTP by hash instead of
-    base64-in-every-room-broadcast.
-19. Backfill LAN soak + 1.4 GB test details (record-only, user ran
-    both 09-12).
+4. **Windows build + CI.** There is no Windows runner. Try
+   `ubuntu2610/flutter_build` (LLVM-MinGW + Wine `gen_snapshot`) on the Linux
+   runner, fallback a GitHub Actions mirror. The manifest needs per-platform
+   URLs and `release_publish.sh` must handle a second platform. The updater's
+   Windows apply path exists but is untested. Desktop tests are not in CI
+   either.
 
-## Epics (multi-sitting, scheduled whole — not before the backlog
-friction items above, except Jellyfin which is next feature)
+5. **Jellyfin** (epic, below).
 
-- File relay (original brief, second half): links shipped, relay
-  unbuilt. Split into sub-tasks when scheduled.
-- Jellyfin native — NEXT feature.
-- Updater expansion: in-app prompt, Windows helper (locked-exe
-  dance), auto-restart after apply.
-- Playlist (`queue-add`/`queue-skip`, shape reserved in PROTOCOL.md),
-  sidecar subtitles, local-file fallback (viewer plays matching
-  size+duration file locally, still synced), `HttpSource` (host
-  pastes a direct-stream URL, server fetches + re-serves).
+6. **Smaller items**
+   - Link conveniences: Ctrl+V pastes into the media field; a link swap in
+     session updates the remembered media; show the open link with an
+     open-in-browser button.
+   - Time UI: remaining time, scrubber preview.
+   - mpv / mpv.net shortcut parity.
+   - Sounds: replace `NoopSfxService` (cues already fire). Candidates:
+     Kenney Interface Sounds (CC0), ObsydianX Pack 1 (CC0), akx/Notifications
+     (CC0); playback via flutter_soloud. Keep seek/pause/resume near silent.
+   - Chaos suite: host drop 5 s / 30 s, viewer stall, 20-seek storm, long
+     outage with cache exhaustion (`tool/shaper.dart --kill-after`); assert no
+     OOM, no stuck session, drift recovers.
+   - Chat history pane (today: activity log only).
+   - Avatar caching: serve avatar bytes once by hash instead of base64 in
+     every `room` broadcast.
+   - The `room` broadcast carries the full media URL, which can include an
+     `api_key`.
+   - TLS: document a reverse proxy in front of the server.
+   - Playlist: `queue-add`, `queue-skip`, auto-advance like a swap.
+   - Sidecar subtitles.
 
-## Deferred (needs explicit approval; transcode is never)
+## Epic: Jellyfin
 
-P2P/WebRTC, multi-session, Android. Transcode: NEVER (user decision
-09-12 — not the age for it anymore).
+- Each viewer logs in to Jellyfin themselves (Quick Connect or password).
+- Several Jellyfin servers can be linked, keyed by `ServerId`.
+- The sync server shares only `{ServerId, ItemId}`. Pasted Jellyfin links are
+  recognised and reduced to that pair.
+- Viewers with an account direct-play `/Videos/{id}/stream?static=true`
+  with their own token and report Playing / Progress / Stopped, so watched
+  state and Continue Watching update per account.
+- Guests without an account play through the sync server, which fetches with a
+  credential that stays server-side (the host's own or a configured one).
+- Next episode: the successor in `/Shows/{seriesId}/Episodes` (NextUp means
+  first unwatched, not next-after-X); audio and subtitle track matching by language, then title,
+  then codec/channels.
+- Library browser; anyone can put up items.
+
+Spike facts (Jellyfin 10.11.11): `/Videos/{id}/stream?static=true&mediaSourceId=`
+serves the original with byte ranges (206). PlaybackInfo gives `PlaySessionId`
+and DirectPlay. All audio and subtitle tracks are embedded in the mkv. Quick
+Connect is enabled but `/QuickConnect/Initiate` returned 400: investigate
+(likely missing client/device fields in the auth header).
+
+## Deferred
+
+P2P, Android. Never: transcoding, web clients.

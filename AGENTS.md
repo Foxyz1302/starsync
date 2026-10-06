@@ -1,35 +1,42 @@
-# AGENTS.md — sync_relay_project
+# AGENTS.md
 
-Project conventions for agents. Global interaction rules live in the
-user-level AGENTS.md; this file holds repo-specific facts only.
-Source of truth order: codebase > `HANDOFF.md` + `docs/ROADMAP.md` >
-chat history.
+Repo-specific rules. Global interaction rules live in the user-level
+AGENTS.md. Source of truth: the code, then the docs below.
+
+## Docs
+
+- [README.md](README.md): users. [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md):
+  plain tour. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): packages, sync,
+  media, updater, decisions. [docs/PROTOCOL.md](docs/PROTOCOL.md): wire format.
+  [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): build, test, release, gotchas.
+  [docs/ROADMAP.md](docs/ROADMAP.md): backlog and epics.
+- Docs describe current truth only: no dates, no "fixed" notes, no phase
+  logs (git has history, plans go in ROADMAP).
+- Each fact lives in exactly one file; others link to it.
+- Code and its docs change in the same commit. A wire change also bumps
+  `RelayConstants.protoVersion` and edits PROTOCOL.md.
+- User-facing wording says "server" (there is only one), never "room".
+  Code identifiers and wire names keep their real names until the rename
+  in ROADMAP item 1.
 
 ## Wishlist drafts
 
-The user drops raw idea/bug lists as drafts (gitignored, never
-committed: `docs/Wishlist.md`, `docs/drafts/`). Agent duty on sight:
-translate each entry into its proper place — `docs/ROADMAP.md`
-backlog (ordered, one sitting-sized item each) or Epics, real bugs
-with repro detail preserved — then confirm placement with the user
-and delete the draft. Drafts must never be committed, even partially.
+The user drops raw idea/bug lists as drafts (gitignored, never committed:
+`docs/Wishlist.md`, `docs/drafts/`). On sight, translate each entry into its
+place in `docs/ROADMAP.md` (ordered backlog item or epic; keep repro detail
+for real bugs), confirm placement with the user, then delete the draft.
+Drafts must never be committed, even partially.
 
 ## Commits
 
-Few commits, one per topic/session — never per fix. Rewriting
-unpushed history (amend, squash) is expected, not exceptional.
-Commit code + its docs together. No `flutter analyze` unless asked
-or diagnosing; scoped `dart analyze` on touched files is the
-pre-commit check. Tests run only when the code under test changed.
+Few commits, one per topic/session, never per fix. Rewriting unpushed
+history (amend, squash) is normal. Commit code + its docs together. No
+`flutter analyze` unless asked or diagnosing; scoped `dart analyze` on touched
+files is the pre-commit check. Run tests only when the code under test changed.
 
-## Releases (user pushes tags, CI does the rest)
+## Releases
 
-Release flow: `tool/release.sh [patch|minor|major]` derives the
-version (no typing), bumps all pubspecs, commits, tags → review →
-`git push --follow-tags` → `.gitea/workflows/release.yml`
-builds and publishes the Forgejo release (manifest already written
-by release.sh — predictable asset URL, no CI roundtrip). `tool/release_publish.sh` is the same
-flow by hand. Workflows live in `.gitea/workflows` (this forge reads
-`.gitea` first, `.github` is ignored when it exists).
-Never commit secrets: tokens arrive via env (`DISCORD_WEBHOOK_URL`,
-`RELEASE_TOKEN`) or Actions-provided (`GITHUB_TOKEN/GITEA_TOKEN`).
+`tool/release.sh [patch|minor|major]` then `git push --follow-tags`; CI
+publishes. Details: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Never commit
+secrets: tokens come from env (`DISCORD_WEBHOOK_URL`, `RELEASE_TOKEN`) or
+Actions (`GITHUB_TOKEN`/`GITEA_TOKEN`).
