@@ -555,3 +555,54 @@ class JellyfinPlaybackInfo {
     return mediaSources.isEmpty ? null : mediaSources.first;
   }
 }
+
+/// Kind of a [JellyfinMediaSegment] (Jellyfin `MediaSegmentType`).
+enum JellyfinSegmentType {
+  unknown,
+  commercial,
+  preview,
+  recap,
+  outro,
+  intro;
+
+  static JellyfinSegmentType parse(String? v) => switch (v) {
+        'Commercial' => commercial,
+        'Preview' => preview,
+        'Recap' => recap,
+        'Outro' => outro,
+        'Intro' => intro,
+        _ => unknown,
+      };
+}
+
+/// A marked range of an item (`GET /MediaSegments/{itemId}`, Jellyfin
+/// 10.10+): intro, outro, recap, preview or commercial. Filled by segment
+/// provider plugins; without one the list is empty.
+class JellyfinMediaSegment {
+  final String id;
+  final String itemId;
+  final JellyfinSegmentType type;
+  final int startTicks;
+  final int endTicks;
+  const JellyfinMediaSegment({
+    required this.id,
+    required this.itemId,
+    required this.type,
+    required this.startTicks,
+    required this.endTicks,
+  });
+
+  Duration get start => ticksToDuration(startTicks);
+  Duration get end => ticksToDuration(endTicks);
+
+  factory JellyfinMediaSegment.fromJson(JellyfinJson j) => JellyfinMediaSegment(
+        id: _str(j['Id']) ?? '',
+        itemId: _str(j['ItemId']) ?? '',
+        type: JellyfinSegmentType.parse(_str(j['Type'])),
+        startTicks: _int(j['StartTicks']) ?? 0,
+        endTicks: _int(j['EndTicks']) ?? 0,
+      );
+
+  @override
+  String toString() => 'JellyfinMediaSegment(${type.name} $start-$end)';
+}

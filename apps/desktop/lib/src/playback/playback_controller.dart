@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -8,13 +9,13 @@ import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart' show JellyfinStreamType;
 
 import '../jellyfin/track_prefs.dart' show MpvTrack;
-
 import '../shaders/shader_assets.dart';
 import '../shaders/shader_presets.dart';
 import '../state/settings.dart';
 import '../sync/state_diff.dart';
 import '../sync/user_seek.dart';
 import 'frame_watchdog.dart';
+import 'media_marks.dart';
 
 /// Owns one mpv [Player] (and its [VideoController]) per session: created
 /// by [init] on join, released by [dispose] on leave, swapped by
@@ -38,6 +39,8 @@ class PlaybackController {
   bool _probing = false;
   final FrameWatchdog _watchdog = FrameWatchdog();
   StreamSubscription<PlayerLog>? _logSub;
+  final List<StreamSubscription<Duration>> _timeSubs = [];
+  String _chapterJson = '';
   // `glsl-shaders` as last set on the current player ('' = none).
   String _shaders = '';
   Future<void> _shaderOp = Future.value();
@@ -70,6 +73,44 @@ class PlaybackController {
   /// [RenderMode.gpu]); [lastRenderMode] keeps it after leaving.
   final renderMode = signal(RenderMode.unknown);
   static final lastRenderMode = signal(RenderMode.unknown);
+
+  // ------------------------------------------------- media marks (signals)
+  //
+  // What the open file has, for any controls UI (the session's seek bar,
+  // chapter / track menus and skip pills read these; nothing here knows
+  // about widgets). Reset when the player goes away; [segments] is owned
+  // by the coordinator (it survives Reload video, the item is the same).
+
+  /// mpv `chapter-list`: title and start; end = next start, or the
+  /// duration for the last one. Empty without chapters.
+  final chapters = signal<List<MediaChapter>>(const []);
+
+  /// Jellyfin MediaSegments of the current item (Intro / Outro / Recap /
+  /// Preview / Commercial). Only viewers with their own account fetch
+  /// them (relay viewers cannot call Jellyfin): empty otherwise.
+  final segments = signal<List<MediaSegment>>(const []);
+
+  /// Audio and subtitle tracks from mpv's `track-list` (id, language,
+  /// title, codec, channels, default / forced flags, [MpvTrack.selected]).
+  final tracks = signal<List<MpvTrack>>(const []);
+
+  /// Playback position, in 250 ms steps (enough for pills and menus; a
+  /// seek bar should listen to `player.stream.position`).
+  final position = signal(Duration.zero);
+
+  /// Duration of the open file (zero until known).
+  final duration = signal(Duration.zero);
+
+  /// The opening ([openingRange]: Intro segment, else an OP-titled
+  /// chapter) and the ending ([endingRange]: Outro, else ED-titled).
+  late final Computed<SkipRange?> opening =
+      computed(() => openingRange(segments.value, chapters.value));
+  late final Computed<SkipRange?> ending =
+      computed(() => endingRange(segments.value, chapters.value));
+
+  /// Index into [chapters] of the chapter playing now.
+  late final Computed<int?> currentChapter =
+      computed(() => chapterIndexAt(chapters.value, position.value));
 
   /// Pinned mpv properties whose read-back differs from what was set
   /// (mpv ignores invalid values silently), as `name: wanted -> got`.
@@ -116,6 +157,7 @@ class PlaybackController {
     renderMode.value = RenderMode.unknown;
     shaderNotice.value = null;
     _logSub = _player!.stream.log.listen(_onLog);
+    _watchMarks(_player!);
     await _pinBufferProps();
     await applyShaders();
     _watchdog.reset();
@@ -364,6 +406,9 @@ class PlaybackController {
   Future<void> openUrl(String url, {Map<String, String>? headers}) async {
     if (!_ready) return;
     try {
+      _chapterJson = '';
+      chapters.value = const [];
+      tracks.value = const [];
       // An empty map, not null: media_kit caches headers per URI.
       await player.open(Media(url, httpHeaders: headers ?? const {}), play: false);
     } catch (e, st) {
@@ -372,28 +417,58 @@ class PlaybackController {
     }
   }
 
-  /// The audio / subtitle tracks of the open file (mpv's track-list).
-  List<MpvTrack> get tracks {
-    final p = _player;
-    if (p == null) return const [];
-    MpvTrack? of(dynamic t, JellyfinStreamType type) {
-      final id = int.tryParse('${t.id}');
-      if (id == null) return null;
-      return MpvTrack(
-        id: id,
-        type: type,
-        language: t.language as String?,
-        title: t.title as String?,
-        codec: t.codec as String?,
-        channels: (t.channelscount ?? t.audiochannels) as int?,
-        isDefault: t.isDefault == true,
-      );
-    }
+  // Position / duration from media_kit's streams; chapter-list and
+  // track-list observed in mpv (read back as JSON).
+  void _watchMarks(SyncPlayer p) {
+    _timeSubs.add(p.stream.position.listen((d) {
+      final ms = d.inMilliseconds;
+      position.value = Duration(milliseconds: ms - ms % 250);
+    }));
+    _timeSubs.add(p.stream.duration.listen((d) {
+      duration.value = d;
+      // The last chapter ends at the duration.
+      if (_chapterJson.isNotEmpty) chapters.value = parseChapterList(_chapterJson, d);
+    }));
+    () async {
+      try {
+        final dynamic platform = p.platform;
+        await platform?.observeProperty('chapter-list', (String v) async {
+          if (!identical(p, _player)) return;
+          _chapterJson = v;
+          chapters.value = parseChapterList(v, duration.peek());
+        });
+        await platform?.observeProperty('track-list', (String v) async {
+          if (!identical(p, _player)) return;
+          _setTracks(parseTrackList(v));
+        });
+      } catch (e) {
+        debugPrint('observe chapters / tracks failed: $e');
+      }
+    }();
+  }
 
-    return [
-      for (final t in p.state.tracks.audio) ?of(t, JellyfinStreamType.audio),
-      for (final t in p.state.tracks.subtitle) ?of(t, JellyfinStreamType.subtitle),
-    ];
+  void _setTracks(List<MpvTrack> list) {
+    if (!listEquals(tracks.peek(), list)) tracks.value = list;
+  }
+
+  /// Reads `track-list` now (after a selection: [tracks] then shows it at
+  /// once instead of on mpv's next change notice).
+  Future<void> _refreshTracks() async {
+    final p = _player;
+    if (p == null) return;
+    try {
+      final dynamic platform = p.platform;
+      final v = '${await platform?.getProperty('track-list')}';
+      if (identical(p, _player)) _setTracks(parseTrackList(v));
+    } catch (_) {}
+  }
+
+  void _clearMarks() {
+    _chapterJson = '';
+    chapters.value = const [];
+    tracks.value = const [];
+    position.value = Duration.zero;
+    duration.value = Duration.zero;
   }
 
   /// Waits (bounded) until the open file's tracks are listed and mpv has
@@ -402,12 +477,12 @@ class PlaybackController {
   Future<List<MpvTrack>> waitForTracks({Duration timeout = const Duration(seconds: 5)}) async {
     final end = DateTime.now().add(timeout);
     while (_player != null && DateTime.now().isBefore(end)) {
-      final t = tracks;
+      final t = tracks.peek();
       final hasAudio = t.any((x) => x.type == JellyfinStreamType.audio);
       if (t.isNotEmpty && (!hasAudio || (await currentTrackIds()).aid != null)) return t;
       await Future.delayed(const Duration(milliseconds: 100));
     }
-    return tracks;
+    return tracks.peek();
   }
 
   /// mpv's selected audio and subtitle track ids (null = none / off).
@@ -440,6 +515,7 @@ class PlaybackController {
     } catch (e) {
       debugPrint('select tracks failed: $e');
     }
+    await _refreshTracks();
   }
 
   double get positionSecs {
@@ -495,9 +571,14 @@ class PlaybackController {
     _watchTimer = null;
     await _logSub?.cancel();
     _logSub = null;
+    for (final sub in _timeSubs) {
+      await sub.cancel();
+    }
+    _timeSubs.clear();
     _player = null;
     _video = null;
     alive.value = false;
+    _clearMarks();
     await _settleUi();
     try {
       await p.dispose();

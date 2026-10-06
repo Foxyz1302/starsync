@@ -113,6 +113,12 @@ void main() {
     final src = pi.primarySource!;
     expect(src.supportsDirectPlay, isTrue);
 
+    // 10.10+: the endpoint answers (often an empty list: segments need a
+    // provider plugin); ranges are well formed when present.
+    for (final seg in await client.mediaSegments(eps.first.id)) {
+      expect(seg.end, greaterThan(seg.start));
+    }
+
     final http = HttpClient();
     addTearDown(() => http.close(force: true));
     final req = await http.getUrl(client.streamUrl(eps.first.id, mediaSourceId: src.id));

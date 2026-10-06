@@ -272,6 +272,38 @@ void main() {
     });
   });
 
+  group('media segments', () {
+    // Shape from Jellyfin's MediaSegmentDto (the live 10.11 server answers
+    // 200 with an empty list: no segment provider installed).
+    test('parses and sorts the ranges by start', () async {
+      http.on('GET', '/MediaSegments/1c67aa9143ebcdcea7953aada4db543a', fixture: 'media_segments');
+      final s = await client.mediaSegments('1c67aa9143ebcdcea7953aada4db543a');
+      expect(http.last.method, 'GET');
+      expect(s.map((e) => e.type), [
+        JellyfinSegmentType.intro,
+        JellyfinSegmentType.outro,
+        JellyfinSegmentType.preview,
+      ]);
+      expect((s.first.start, s.first.end), (const Duration(seconds: 30), const Duration(minutes: 2)));
+      expect(s[1].start, const Duration(minutes: 21, seconds: 30));
+      expect(s.first.itemId, '1c67aa9143ebcdcea7953aada4db543a');
+    });
+
+    test('empty list, and none on servers without the endpoint', () async {
+      http.on('GET', '/MediaSegments/a', body: '{"Items":[],"TotalRecordCount":0,"StartIndex":0}');
+      expect(await client.mediaSegments('a'), isEmpty);
+      expect(await client.mediaSegments('missing'), isEmpty); // 404
+      http.on('GET', '/MediaSegments/x', status: 401);
+      await expectLater(client.mediaSegments('x'),
+          throwsA(isA<JellyfinException>().having((e) => e.isUnauthorized, 'unauthorized', true)));
+    });
+
+    test('unknown types stay unknown', () {
+      expect(JellyfinSegmentType.parse('Something'), JellyfinSegmentType.unknown);
+      expect(JellyfinSegmentType.parse(null), JellyfinSegmentType.unknown);
+    });
+  });
+
   group('playback', () {
     test('playbackInfo asks for direct play and parses the session', () async {
       http.on('POST', '/Items/1c67aa9143ebcdcea7953aada4db543a/PlaybackInfo', fixture: 'playback_info');

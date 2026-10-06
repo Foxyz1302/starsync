@@ -49,8 +49,6 @@ in a session"):
 - Queue: put several library items (a season, a pick list) up as a
   playlist that advances like a swap (shares `queue-add` / `queue-skip`
   with the backlog's Playlist item).
-- The "Next episode" prompt from the item's Outro / credits segment instead
-  of the last two minutes (`nextPromptStart`).
 - Auto-advance cancel for everyone: today Cancel is per screen (the
   designated swapper's Cancel stops the swap; a seek stops all). A shared
   cancel needs a wire message.

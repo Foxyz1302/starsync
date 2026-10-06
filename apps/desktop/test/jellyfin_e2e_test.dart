@@ -9,6 +9,7 @@ import 'package:sync_relay_server/server.dart';
 import 'package:watch_together/src/jellyfin/accounts.dart';
 import 'package:watch_together/src/jellyfin/session_media.dart';
 import 'package:watch_together/src/jellyfin/track_prefs.dart';
+import 'package:watch_together/src/playback/media_marks.dart';
 import 'package:watch_together/src/session/session_coordinator.dart';
 
 // Two account holders and a guest watch Jellyfin episodes together over a
@@ -133,6 +134,15 @@ class _FakeJellyfin {
     if (m != null) return json(_item(m.group(1)!));
     if (path == '/Shows/$_series/Episodes') {
       return json({'Items': [_item(_ep1), _item(_ep2)], 'TotalRecordCount': 2});
+    }
+    if (path == '/MediaSegments/$_ep1') {
+      return json({
+        'Items': [
+          {'Id': 'seg1', 'ItemId': _ep1, 'Type': 'Intro', 'StartTicks': 20000000, 'EndTicks': 60000000},
+        ],
+        'TotalRecordCount': 1,
+        'StartIndex': 0,
+      });
     }
     if (path.startsWith('/Sessions/Playing')) {
       res.statusCode = 204;
@@ -260,6 +270,13 @@ void main() {
         }, 'jf access in the member list');
         expect(a.nextEpisode.peek()?.item.id, _ep2);
         expect(b.nextEpisode.peek(), isNull, reason: 'guests cannot resolve the next one');
+        // MediaSegments with an account; the guest (relay) has none.
+        await _poll(() => a.playback.segments.peek().isNotEmpty, 'segments');
+        expect(a.playback.opening.peek()?.source, SkipSource.segment);
+        expect(a.playback.opening.peek()?.end, const Duration(seconds: 6));
+        expect(b.playback.segments.peek(), isEmpty);
+        expect(jelly.calls.where((c) => c.path.startsWith('/MediaSegments') && _FakeJellyfin.authFields(c.auth)['Token'] == 'CTOKEN'),
+            isNotEmpty);
 
         for (final x in all) {
           x.toggleReady();

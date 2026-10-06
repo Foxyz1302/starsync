@@ -12,7 +12,8 @@ import 'accounts.dart';
 const trackPrefsBoxName = 'track_prefs';
 const _keyGlobal = 'global';
 
-/// One mpv track as media_kit lists it ([id] is mpv's `aid` / `sid`).
+/// One audio or subtitle track of the open file as mpv's `track-list`
+/// has it ([id] is mpv's `aid` / `sid`; [selected] is mpv's choice).
 class MpvTrack {
   final int id;
   final JellyfinStreamType type;
@@ -21,6 +22,10 @@ class MpvTrack {
   final String? codec;
   final int? channels;
   final bool isDefault;
+  final bool isForced;
+  final bool isHearingImpaired;
+  final bool isExternal;
+  final bool selected;
   const MpvTrack({
     required this.id,
     required this.type,
@@ -29,6 +34,10 @@ class MpvTrack {
     this.codec,
     this.channels,
     this.isDefault = false,
+    this.isForced = false,
+    this.isHearingImpaired = false,
+    this.isExternal = false,
+    this.selected = false,
   });
 
   /// As a stream for [matchTrack]; its index is the mpv id.
@@ -39,16 +48,92 @@ class MpvTrack {
       title: title,
       codec: codec,
       channels: channels,
-      isDefault: isDefault);
+      isDefault: isDefault,
+      isForced: isForced,
+      isHearingImpaired: isHearingImpaired);
 
-  /// Menu text: "English (eac3 2ch)", "Track 2".
-  String get label {
-    final name = title ?? language ?? 'Track $id';
-    final extra = [?codec, if (channels != null) '${channels}ch'].join(' ');
-    final lang = title != null && language != null ? ' [$language]' : '';
-    return extra.isEmpty ? '$name$lang' : '$name$lang ($extra)';
-  }
+  /// Menu text: "Japanese · E-AC3 2.0 · Commentary", "Track 2 · ASS".
+  String get label => [
+        languageName(language) ?? 'Track $id',
+        [?codecName(codec), ?channelLayoutName(channels)].join(' '),
+        if (title != null && title != languageName(language)) title!,
+        if (isForced) 'Forced',
+        if (isHearingImpaired) 'SDH',
+      ].where((p) => p.isNotEmpty).join(' · ');
+
+  @override
+  bool operator ==(Object other) =>
+      other is MpvTrack &&
+      other.id == id &&
+      other.type == type &&
+      other.language == language &&
+      other.title == title &&
+      other.codec == codec &&
+      other.channels == channels &&
+      other.isDefault == isDefault &&
+      other.isForced == isForced &&
+      other.isHearingImpaired == isHearingImpaired &&
+      other.isExternal == isExternal &&
+      other.selected == selected;
+
+  @override
+  int get hashCode => Object.hash(id, type, language, title, codec, channels, isDefault, isForced,
+      isHearingImpaired, isExternal, selected);
+
+  @override
+  String toString() => 'MpvTrack(${type.name} $id ${selected ? '*' : ''}$label)';
 }
+
+const _languages = {
+  'jpn': 'Japanese', 'ja': 'Japanese', 'eng': 'English', 'en': 'English',
+  'ger': 'German', 'deu': 'German', 'de': 'German', 'fre': 'French', 'fra': 'French',
+  'fr': 'French', 'spa': 'Spanish', 'es': 'Spanish', 'ita': 'Italian', 'it': 'Italian',
+  'por': 'Portuguese', 'pt': 'Portuguese', 'rus': 'Russian', 'ru': 'Russian',
+  'chi': 'Chinese', 'zho': 'Chinese', 'zh': 'Chinese', 'kor': 'Korean', 'ko': 'Korean',
+  'ara': 'Arabic', 'ar': 'Arabic', 'pol': 'Polish', 'pl': 'Polish', 'dut': 'Dutch',
+  'nld': 'Dutch', 'nl': 'Dutch', 'swe': 'Swedish', 'sv': 'Swedish', 'fin': 'Finnish',
+  'fi': 'Finnish', 'nor': 'Norwegian', 'no': 'Norwegian', 'dan': 'Danish', 'da': 'Danish',
+  'tur': 'Turkish', 'tr': 'Turkish', 'hin': 'Hindi', 'hi': 'Hindi', 'tha': 'Thai',
+  'th': 'Thai', 'vie': 'Vietnamese', 'vi': 'Vietnamese', 'ind': 'Indonesian', 'id': 'Indonesian',
+  'may': 'Malay', 'msa': 'Malay', 'ms': 'Malay', 'heb': 'Hebrew', 'he': 'Hebrew',
+  'gre': 'Greek', 'ell': 'Greek', 'el': 'Greek', 'cze': 'Czech', 'ces': 'Czech', 'cs': 'Czech',
+  'hun': 'Hungarian', 'hu': 'Hungarian', 'ukr': 'Ukrainian', 'uk': 'Ukrainian',
+  'rum': 'Romanian', 'ron': 'Romanian', 'ro': 'Romanian', 'und': 'Undetermined',
+};
+
+/// "jpn" -> "Japanese"; other codes upper-cased, null for none.
+String? languageName(String? code) {
+  if (code == null || code.isEmpty) return null;
+  return _languages[code.toLowerCase()] ?? code.toUpperCase();
+}
+
+const _codecs = {
+  'eac3': 'E-AC3', 'ac3': 'AC3', 'aac': 'AAC', 'flac': 'FLAC', 'opus': 'Opus',
+  'vorbis': 'Vorbis', 'mp3': 'MP3', 'truehd': 'TrueHD', 'dts': 'DTS', 'mlp': 'MLP',
+  'alac': 'ALAC', 'ass': 'ASS', 'ssa': 'SSA', 'subrip': 'SRT', 'srt': 'SRT',
+  'webvtt': 'VTT', 'mov_text': 'TX3G', 'hdmv_pgs_subtitle': 'PGS', 'pgssub': 'PGS',
+  'dvd_subtitle': 'VobSub', 'dvdsub': 'VobSub', 'dvb_subtitle': 'DVB',
+};
+
+/// mpv / Jellyfin codec name for menus: "eac3" -> "E-AC3", "subrip" -> "SRT".
+String? codecName(String? codec) {
+  if (codec == null || codec.isEmpty) return null;
+  final c = codec.toLowerCase();
+  if (c.startsWith('pcm')) return 'PCM';
+  return _codecs[c] ?? codec.toUpperCase();
+}
+
+/// Channel count as a layout: 2 -> "2.0", 6 -> "5.1", 8 -> "7.1".
+String? channelLayoutName(int? channels) => switch (channels) {
+      null || <= 0 => null,
+      1 => '1.0',
+      2 => '2.0',
+      3 => '2.1',
+      6 => '5.1',
+      7 => '6.1',
+      8 => '7.1',
+      final n => '${n}ch',
+    };
 
 /// A viewer's audio/subtitle choice as traits (indices shift between
 /// files). [subtitlesOff] wins over [subtitle].

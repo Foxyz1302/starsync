@@ -106,8 +106,9 @@ Loosely modeled on Syncplay, with a different readiness design.
   over 5 s for more than 2 s seeks, ahead by more than 1.5 s sets rate 0.95
   until level, otherwise nothing.
 - **User seeks**: the player is a `SyncPlayer` whose public `seek` is the
-  user's: media_kit's seek bar (one `seek` per pointer move while dragging),
-  the arrow keys and `seekTo` all become explicit events. The player moves at
+  user's: the session's seek bar (`ChapterSeekBar`, one `seek` per pointer
+  move while dragging and one on release, like media_kit's), the arrow
+  keys, skips, chapter jumps and `seekTo` all become explicit events. The player moves at
   once (scrub preview); `UserSeekGate` sends one `seek` intent with a fresh
   `seq` after 300 ms without another request (`seekDebounceMs`). While the
   user is seeking, and until the echo of the last sent seq arrives (3 s at
@@ -259,6 +260,38 @@ freeze reloads the video with a toast. It fires once until the picture moves
 again for 10 s, so it cannot loop. Seeks, pause, buffering and a hidden window
 disarm it.
 
+Chapters, segments, tracks (`PlaybackController` signals, values from
+`playback/media_marks.dart`, no widgets; any controls UI reads them):
+- `chapters`: mpv `chapter-list` (observed through the same dynamic
+  `observeProperty` and read as JSON): `MediaChapter` index, title, start;
+  end = next start, the last one's = `duration`.
+- `segments`: the Jellyfin item's MediaSegments (`GET /MediaSegments/{id}`,
+  10.10+: Intro, Outro, Recap, Preview, Commercial), fetched by the
+  coordinator with `OwnPlay` only; relay and blocked viewers cannot call
+  Jellyfin and use chapters alone. Empty without a segment provider plugin
+  (the case on the owner's 10.11 server).
+- `tracks`: audio and subtitle `MpvTrack`s from mpv `track-list` (id,
+  language, title, codec, channels, default / forced / hearing-impaired /
+  external, `selected`), re-read after every selection.
+- `position` (250 ms steps), `duration`; computed `opening`, `ending`
+  (`SkipRange`) and `currentChapter`.
+
+Skip rules (pure, `media_marks.dart`):
+- Opening = first Intro segment, else the first chapter whose title has a
+  whole word OP / Opening / Intro (any case, digits allowed: "OP1").
+  Ending = first Outro segment, else ED / Ending / Credits / Outro.
+- `skipOfferAt` (the coordinator's `skipOffer`, null at `finished`): inside
+  the opening (up to its last second) "Skip OP" to its end; inside the
+  ending "Skip ED" to its end only (no guessing about previews: the viewer
+  decides). Without any opening and with media over 20 min, "Skip 1:30"
+  during the first 6 min.
+- +1:30 (`skipForward`: the pill, the controls' "1:30" button,
+  Shift+Right) is a `nudge`, so repeated presses add up.
+- Chapter steps (PgUp / PgDn, `chapterStepTarget`): forward to the next
+  start; back to the current start, or the previous one within 5 s of it
+  (mpv's `chapter-seek-threshold`).
+- Every skip and chapter jump is a user seek (debounced, everyone follows).
+
 Never unmount GPU-textured widgets (avatar images) on a transport-gated
 branch: teardown races mpv's frame upload and the window goes black. Keep them
 mounted and skip painting (`Visibility` with `maintainState`).
@@ -272,8 +305,8 @@ behind a `JellyfinHttp` interface (tests inject a fake). Plans:
 - `JellyfinClient`: one server + one user. Auth (Quick Connect, password,
   `/Users/Me` check, logout), browsing (views, Resume, NextUp, Latest, paged
   `/Items`, search, seasons, episodes), image URLs (tag + maxWidth, no token
-  needed), PlaybackInfo, stream URLs, Playing / Progress / Stopped reports,
-  played / unplayed / resume position.
+  needed), PlaybackInfo, stream URLs, MediaSegments (a 404 = none),
+  Playing / Progress / Stopped reports, played / unplayed / resume position.
 - `normalizeServerUrl`, `parseJellyfinLink`: pasted addresses and item links
   -> `(baseUrl, itemId)`; accounts are keyed by `ServerId`
   (`/System/Info/Public`).
@@ -360,9 +393,10 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
 - **Episodes**: with `OwnPlay` on an episode, `adjacentEpisodes` (one
   `/Shows/{id}/Episodes` call; `episodeBefore` / `episodeAfter`) gives the
   previous and next episode. The controls show previous / next buttons
-  (also `<` `>`, Shift+P / Shift+N); from `nextPromptStart` (last 2 min of
-  the runtime; the single place to switch to an outro segment later) a
-  floating "Next episode" pill shows outside the auto-hiding controls. Any
+  (also `<` `>`, Shift+P / Shift+N); from `nextPromptStart` (the ending's
+  start when one is known, see "Skip rules", else the last 2 min of the
+  runtime) a floating "Next episode" pill shows outside the auto-hiding
+  controls. Auto-advance still waits for `finished`. Any
   of them swaps to that episode's ref with the clicker's account. Guests
   (relay, blocked) see none of it.
 - **Auto-advance** (Settings, on by default): at `finished` with a known
@@ -375,8 +409,8 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   wire change. Cancel is local: it stops the countdown on that screen, and
   the swapper's Cancel stops the swap; a seek by anyone ends `finished`
   and with it every countdown.
-- **Tracks**: the controls' subtitles button lists mpv's audio and subtitle
-  tracks. A pick is applied, reported, and saved as a `TrackChoice`
+- **Tracks**: the controls' Audio and Subtitles buttons list
+  `PlaybackController.tracks`. A pick is applied, reported, and saved as a `TrackChoice`
   (language, title, codec, channels, forced/HI: from the Jellyfin streams
   with `OwnPlay`, else from mpv's track list) per series and as the global
   fallback in the `track_prefs` Hive box. On the next Jellyfin item it is
@@ -449,6 +483,17 @@ Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
   and the next start open where the browser was. A `BrowseStart` overrides
   it: the swap panel opens on the series of the episode playing, its
   season selected and the episode highlighted.
+
+Session controls: media_kit's `MaterialDesktopVideoControls` with our
+bars (`screens/session_screen.dart`, pieces in
+`screens/session/player_controls.dart`). Its seek bar is off; ours
+(`ChapterSeekBar`: chapter diamonds, hover time with the chapter title)
+sits in the bottom bar, which is taller by the bar's height (the top bar
+keeps its row at the top). A drag sends no hover events, so the bar keeps
+the controls up through a guarded dynamic `onHover()` on media_kit's
+private controls state (`keepVideoControlsAwake`). Pills (Skip OP / ED /
+1:30, Next episode) and cards live outside the auto-hiding controls, so
+they show in fullscreen (whose route renders only the video and controls).
 
 Window chrome is frameless (`window_manager`): every screen brings its own
 drag area and min/max/close buttons (Home's top bar; the session uses

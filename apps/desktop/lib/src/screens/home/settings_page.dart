@@ -14,10 +14,13 @@ import 'update_indicator.dart';
 const sessionShortcuts = [
   ('Space', 'Toggle ready'),
   ('← / →', 'Seek back / forward 10 s'),
+  ('Shift+→', 'Skip 1:30 (for everyone)'),
+  ('PgUp / PgDn', 'Previous / next chapter'),
   ('F', 'Toggle fullscreen'),
   ('Tab', 'Open / close the people & chat panel'),
   ('Ctrl+R', 'Reload the video'),
   ('> or Shift+N', 'Put up the next Jellyfin episode'),
+  ('< or Shift+P', 'Put up the previous Jellyfin episode'),
   ('Ctrl+1…6', 'Shaders: Anime4K mode A, B, C, A+A, B+B, C+A'),
   ('Ctrl+0', 'Shaders off'),
   ('Esc', 'Close panel or fullscreen, else ask to leave'),

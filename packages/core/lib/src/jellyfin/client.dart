@@ -499,6 +499,27 @@ class JellyfinClient {
   Map<String, String> get authHeaders =>
       {'Authorization': clientInfo.authorizationHeader(accessToken)};
 
+  /// `GET /MediaSegments/{itemId}` (Jellyfin 10.10+): the item's intro,
+  /// outro, recap, preview and commercial ranges, in start order. Empty when
+  /// no segment provider has marked it, and on servers without the
+  /// endpoint (404).
+  Future<List<JellyfinMediaSegment>> mediaSegments(String itemId) async {
+    final Object? j;
+    try {
+      j = await _json('GET', '/MediaSegments/$itemId');
+    } on JellyfinException catch (e) {
+      if (e.statusCode == 404) return const [];
+      rethrow;
+    }
+    final items = _map(j)['Items'];
+    final list = [
+      if (items is List)
+        for (final e in items)
+          if (e is Map) JellyfinMediaSegment.fromJson(e.cast<String, dynamic>())
+    ]..sort((a, b) => a.startTicks.compareTo(b.startTicks));
+    return list;
+  }
+
   // ------------------------------------------------------------ progress
 
   /// `POST /Sessions/Playing`: playback started (Jellyfin shows the session

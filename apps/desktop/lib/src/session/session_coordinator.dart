@@ -8,6 +8,7 @@ import '../jellyfin/accounts.dart';
 import '../jellyfin/progress.dart';
 import '../jellyfin/session_media.dart';
 import '../jellyfin/track_prefs.dart';
+import '../playback/media_marks.dart';
 import '../playback/playback_controller.dart';
 import '../screens/home/picked_media.dart';
 import '../sfx/sfx.dart';
@@ -135,6 +136,21 @@ class SessionCoordinator {
   final nextPromptVisible = signal(false);
   /// End-of-episode countdown; null when none runs here.
   final autoAdvance = signal<AutoAdvance?>(null);
+
+  /// The skip pill for the current position ([skipOfferAt]: Skip OP,
+  /// Skip ED, or Skip 1:30 without opening info); null while nothing
+  /// is open or at `finished`. Press it with [skip].
+  late final Computed<SkipOffer?> skipOffer = computed(() {
+    final r = serverState.value;
+    final duration = playback.duration.value;
+    if (r == null || r.transport == 'finished' || duration <= Duration.zero) return null;
+    return skipOfferAt(
+      position: playback.position.value,
+      duration: duration,
+      opening: playback.opening.value,
+      ending: playback.ending.value,
+    );
+  });
 
   late final Computed<MemberView?> selfMember = computed(() {
     final r = serverState.value;
@@ -767,6 +783,33 @@ class SessionCoordinator {
     _userSeek(target < 0 ? 0 : target);
   }
 
+  /// A skip pill: Skip OP / Skip ED seek to the range's end, Skip 1:30
+  /// is [skipForward]. Through the user-seek path, so everyone follows.
+  void skip(SkipOffer offer) {
+    if (offer.kind == SkipKind.fixed) {
+      skipForward();
+    } else {
+      seekTo(offer.target.inMicroseconds / 1e6);
+    }
+  }
+
+  /// +[fallbackSkip] (1:30): the controls' button, Shift+Right and the
+  /// fallback pill. Relative to a seek in flight, like the arrow keys.
+  void skipForward() => nudge(fallbackSkip.inMicroseconds / 1e6);
+
+  /// PgDn (+1) / PgUp (-1): next / previous chapter as mpv steps them
+  /// ([chapterStepTarget]). False when there is no chapter to go to.
+  bool stepChapter(int delta) {
+    final base = _seekGate.target;
+    final at = base == null
+        ? playback.position.peek()
+        : Duration(microseconds: (base * 1e6).round());
+    final target = chapterStepTarget(playback.chapters.peek(), at, delta);
+    if (target == null) return false;
+    seekTo(target.inMicroseconds / 1e6);
+    return true;
+  }
+
   void sendChat(String text) {
     // Enter in the chat field can fire both onSubmitted and the focused
     // send button's onPressed; the first send clears the field, so the
@@ -863,6 +906,7 @@ class SessionCoordinator {
     previousEpisode.value = null;
     nextEpisode.value = null;
     nextPromptVisible.value = false;
+    playback.segments.value = const [];
     _advanceTimer?.cancel();
     _advanceTimer = null;
     _advanceDoneFor = -1;
@@ -988,6 +1032,7 @@ class SessionCoordinator {
           },
         );
         unawaited(_findEpisodes(plan, gen));
+        unawaited(_loadSegments(plan, ref, gen));
         // Playing carries the tracks: wait (bounded) until the file is in.
         await playback.waitForTracks();
         if (gen != _jfGen) return;
@@ -1009,6 +1054,18 @@ class SessionCoordinator {
     if (r != null) _jellyfinTransport(r);
   }
 
+  /// The item's MediaSegments (own account only; a server without the
+  /// endpoint or without a segment provider gives none).
+  Future<void> _loadSegments(OwnPlay plan, JellyfinRef ref, int gen) async {
+    try {
+      final list = await plan.client.mediaSegments(ref.itemId).timeout(const Duration(seconds: 15));
+      if (gen != _jfGen) return;
+      playback.segments.value = [for (final s in list) MediaSegment.fromJellyfin(s)];
+    } catch (e) {
+      debugPrint('media segments for ${ref.itemId} failed: $e');
+    }
+  }
+
   Future<void> _applyTrackChoice(JellyfinPlan plan, int gen) async {
     final own = plan is OwnPlay ? plan : null;
     final choice = await trackPrefs.load(seriesId: own?.item?.seriesId);
@@ -1028,7 +1085,7 @@ class SessionCoordinator {
     final plan = jellyfinPlan.peek();
     final own = plan is OwnPlay ? plan : null;
     await trackPrefs.save(
-        TrackChoice.of(aid: ids.aid, sid: ids.sid, source: own?.source, tracks: playback.tracks),
+        TrackChoice.of(aid: ids.aid, sid: ids.sid, source: own?.source, tracks: playback.tracks.peek()),
         seriesId: own?.item?.seriesId);
     final snap = await _snapshot();
     if (snap != null) _reporter?.update(snap, force: true);
@@ -1047,7 +1104,8 @@ class SessionCoordinator {
     var show = false;
     if (next != null && duration > 0 && autoAdvance.peek() == null && r.transport != 'finished') {
       final item = (jellyfinPlan.peek() as OwnPlay?)?.item;
-      final at = nextPromptStart(item, Duration(milliseconds: (duration * 1000).round()));
+      final at = nextPromptStart(item, Duration(milliseconds: (duration * 1000).round()),
+          endingStart: playback.ending.peek()?.start);
       show = snap.position * 1000 >= at.inMilliseconds;
     }
     nextPromptVisible.value = show;

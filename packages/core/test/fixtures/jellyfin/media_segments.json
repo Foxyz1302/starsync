@@ -1,0 +1,27 @@
+{
+ "Items": [
+  {
+   "Id": "a493be6339c9a6d4ddff147526e43165",
+   "ItemId": "a43e1cfa5013da4ea9323c2ebdc22c3c",
+   "Type": "Outro",
+   "StartTicks": 12900000000,
+   "EndTicks": 13800000000
+  },
+  {
+   "Id": "b37e782510af07dc424261e9f9ea0062",
+   "ItemId": "a43e1cfa5013da4ea9323c2ebdc22c3c",
+   "Type": "Intro",
+   "StartTicks": 300000000,
+   "EndTicks": 1200000000
+  },
+  {
+   "Id": "e3942ee778a47d5ab82e85bef5ec5791",
+   "ItemId": "a43e1cfa5013da4ea9323c2ebdc22c3c",
+   "Type": "Preview",
+   "StartTicks": 13800000000,
+   "EndTicks": 14100000000
+  }
+ ],
+ "TotalRecordCount": 3,
+ "StartIndex": 0
+}

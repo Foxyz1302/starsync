@@ -88,10 +88,27 @@ updates, playing the next Jellyfin episode automatically, video shaders
 Integrations links Jellyfin servers (below). About shows the version.
 
 Keys in a session: Space = ready / unready, Tab = side panel (people, log,
-chat, change video), Left/Right = seek 10 s, F = fullscreen, Esc = close
-panel or ask to leave, Ctrl+R = reload video, `<` / `>` or Shift+P /
+chat, change video), Left/Right = seek 10 s, Shift+Right = skip 1:30,
+PgUp/PgDn = previous / next chapter (as in mpv), F = fullscreen, Esc =
+close panel or ask to leave, Ctrl+R = reload video, `<` / `>` or Shift+P /
 Shift+N = previous / next Jellyfin episode, Ctrl+1..6 = Anime4K mode A, B,
-C, A+A, B+B, C+A, Ctrl+0 = shaders off.
+C, A+A, B+B, C+A, Ctrl+0 = shaders off. Every seek, skip and chapter jump
+moves everyone.
+
+Controls: the seek bar marks chapter starts with a diamond; hovering it
+shows the time and the chapter title. The chapters button lists them
+(current one checked; click to jump). "1:30" skips ahead 1:30. Audio and
+Subtitles buttons (with the track count) list tracks as "Japanese · E-AC3
+2.0 · title"; subtitles have Off.
+
+Skipping: during the opening a "Skip OP" button floats in the corner (it
+jumps to the end of the opening), during the ending "Skip ED" (to the end
+of the ending only; what comes after is yours to skip). The opening and
+ending come from Jellyfin's intro / outro segments when your Jellyfin has
+them (needs a segment plugin, e.g. Intro Skipper), else from chapter names
+(OP, Opening, Intro / ED, Ending, Credits, Outro). Without an opening, on
+anything longer than 20 minutes, "Skip 1:30" floats there during the first
+6 minutes.
 
 ## Ports
 
@@ -145,15 +162,16 @@ Watching:
   a button to link one; it plays as soon as you are signed in.
 
 Episodes: the ⏮ / ⏭ buttons next to the controls (or `<` / `>`,
-Shift+P / Shift+N) put up the previous or next episode for everyone. In
-the last two minutes a "Next episode" button floats in the corner. When an
+Shift+P / Shift+N) put up the previous or next episode for everyone. From
+the ending (when it is known, see Skipping above; else in the last two
+minutes) a "Next episode" button floats in the corner. When an
 episode ends, a card shows what is next with Play next; with "Play the
 next episode automatically" (Settings, on by default) it counts down 10 s
 first, and Cancel stops it on your screen (seeking back stops it for
 everyone). Anyone with an account can put the next one up; friends
 watching via the host cannot.
 
-Audio and subtitles: the subtitles button in the controls picks tracks.
+Audio and subtitles: the Audio and Subtitles buttons in the controls pick tracks.
 Your choice is remembered per series (and as a default) and the closest
 match (language, then title, then codec and channels) is selected on the
 next episode. This is per person; nobody else is affected.

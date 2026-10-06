@@ -314,10 +314,14 @@ Future<({EpisodeLink? previous, EpisodeLink? next})> findAdjacentEpisodes(OwnPla
   }
 }
 
-/// When the floating "Next episode" pill appears: the last two minutes of
-/// [runtime] (all of it for shorter media). One place to switch it to the
-/// item's outro / credits segment later.
-Duration nextPromptStart(JellyfinItem? item, Duration runtime) {
+/// When the floating "Next episode" pill appears: at [endingStart] (the
+/// ED: Jellyfin Outro segment or ED-titled chapter, see `endingRange`)
+/// when one is known inside [runtime], else the last two minutes of
+/// [runtime] (all of it for shorter media).
+Duration nextPromptStart(JellyfinItem? item, Duration runtime, {Duration? endingStart}) {
+  if (endingStart != null && endingStart > Duration.zero && endingStart < runtime) {
+    return endingStart;
+  }
   const lead = Duration(minutes: 2);
   return runtime > lead ? runtime - lead : Duration.zero;
 }

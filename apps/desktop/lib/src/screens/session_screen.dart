@@ -4,6 +4,8 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
+import '../playback/media_marks.dart' show SkipOffer;
+
 import '../jellyfin/browse_scope.dart' show BrowseStart;
 import '../jellyfin/session_media.dart';
 import '../session/health.dart';
@@ -22,6 +24,7 @@ import '../widgets/window_drag_layer.dart';
 import 'home/integrations_page.dart';
 import 'home/media_picker.dart';
 import 'session/jellyfin_widgets.dart';
+import 'session/player_controls.dart';
 import 'session/swap_panel.dart';
 
 class SessionScreen extends StatefulWidget {
@@ -257,6 +260,17 @@ class _SessionScreenState extends State<SessionScreen> {
       coord.playPreviousEpisode();
       return true;
     }
+    // mpv's chapter keys.
+    if (event.logicalKey == LogicalKeyboardKey.pageDown ||
+        event.logicalKey == LogicalKeyboardKey.pageUp) {
+      _lastKeyAt = now;
+      return coord.stepChapter(event.logicalKey == LogicalKeyboardKey.pageDown ? 1 : -1);
+    }
+    if (shift && event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      _lastKeyAt = now;
+      coord.skipForward();
+      return true;
+    }
     if (event.logicalKey == LogicalKeyboardKey.tab) {
       _lastKeyAt = now;
       _sheetOpen.value = !_sheetOpen.peek();
@@ -320,56 +334,51 @@ class _SessionScreenState extends State<SessionScreen> {
       visibleOnMount: true,
       hideMouseOnControlsRemoval: true,
       controlsHoverDuration: const Duration(seconds: 3),
+      // Our seek bar (chapter marks, hover title) sits in the bottom bar,
+      // which grows by its height; the top bar keeps its row at the top.
+      displaySeekBar: false,
+      buttonBarHeight: _barHeight + ChapterSeekBar.height,
       topButtonBar: [
-        const Spacer(),
-        MaterialDesktopCustomButton(
-          icon: const Icon(Icons.group),
-          onPressed: () {
-            _sheetOpen.value = true;
-            coord.markInput();
-          },
-        ),
-        SignalBuilder(
-          builder: (context) => WindowButtons(focusNode: _noFocus, fullscreen: _isFullscreen.value, onToggleFullscreen: _toggleFullscreen),
+        Expanded(
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: SizedBox(
+              height: _barHeight,
+              child: Row(
+                children: [
+                  const Spacer(),
+                  MaterialDesktopCustomButton(
+                    icon: const Icon(Icons.group),
+                    onPressed: () {
+                      _sheetOpen.value = true;
+                      coord.markInput();
+                    },
+                  ),
+                  SignalBuilder(
+                    builder: (context) => WindowButtons(focusNode: _noFocus, fullscreen: _isFullscreen.value, onToggleFullscreen: _toggleFullscreen),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ],
       bottomButtonBar: [
-        SignalBuilder(
-          builder: (context) => EpisodeSkipButton(
-            focusNode: _noFocus,
-            episode: coord.previousEpisode.value,
-            next: false,
-            onPressed: coord.playPreviousEpisode,
+        Expanded(
+          child: Column(
+            children: [
+              SignalBuilder(
+                builder: (context) => PlayerSeekBar(
+                  player: coord.playback.player,
+                  chapters: coord.playback.chapters.value,
+                ),
+              ),
+              Expanded(
+                child: Row(children: _bottomButtons(coord)),
+              ),
+            ],
           ),
         ),
-        SignalBuilder(
-          builder: (context) => EpisodeSkipButton(
-            focusNode: _noFocus,
-            episode: coord.nextEpisode.value,
-            next: true,
-            onPressed: coord.playNextEpisode,
-          ),
-        ),
-        const MaterialDesktopVolumeButton(),
-        _ReadyControlButton(focusNode: _noFocus),
-        _MarkAllReadyControlButton(focusNode: _noFocus),
-        _ReloadVideoControlButton(focusNode: _noFocus, onPressed: _reloadVideo),
-        const MaterialDesktopPositionIndicator(),
-        const Spacer(),
-        TracksControlButton(
-          focusNode: _noFocus,
-          tracks: () => coord.playback.tracks,
-          current: coord.playback.currentTrackIds,
-          onPick: (p) => coord.selectTrack(aid: p.aid, sid: p.sid, subtitlesOff: p.subtitlesOff),
-          onMenuOpen: (open) => _shaderMenuOpen = open,
-        ),
-        ShaderControlButton(
-          focusNode: _noFocus,
-          renderMode: coord.playback.renderMode,
-          onPick: _pickShader,
-          onMenuOpen: (open) => _shaderMenuOpen = open,
-        ),
-        const MaterialDesktopFullscreenButton(),
       ],
     );
     return FocusTraversalGroup(
@@ -413,6 +422,73 @@ class _SessionScreenState extends State<SessionScreen> {
         ),
       ),
     );
+  }
+
+  static const _barHeight = 56.0;
+
+  List<Widget> _bottomButtons(SessionCoordinator coord) {
+    final playback = coord.playback;
+    void menuOpen(bool open) => _shaderMenuOpen = open;
+    void pickTrack(TrackPick p) => coord.selectTrack(aid: p.aid, sid: p.sid, subtitlesOff: p.subtitlesOff);
+    return [
+      SignalBuilder(
+        builder: (context) => EpisodeSkipButton(
+          focusNode: _noFocus,
+          episode: coord.previousEpisode.value,
+          next: false,
+          onPressed: coord.playPreviousEpisode,
+        ),
+      ),
+      SignalBuilder(
+        builder: (context) => EpisodeSkipButton(
+          focusNode: _noFocus,
+          episode: coord.nextEpisode.value,
+          next: true,
+          onPressed: coord.playNextEpisode,
+        ),
+      ),
+      const MaterialDesktopVolumeButton(),
+      _ReadyControlButton(focusNode: _noFocus),
+      _MarkAllReadyControlButton(focusNode: _noFocus),
+      _ReloadVideoControlButton(focusNode: _noFocus, onPressed: _reloadVideo),
+      const MaterialDesktopPositionIndicator(),
+      const Spacer(),
+      SkipForwardButton(focusNode: _noFocus, onPressed: coord.skipForward),
+      SignalBuilder(
+        builder: (context) => ChaptersControlButton(
+          focusNode: _noFocus,
+          chapters: playback.chapters.value,
+          current: playback.currentChapter.value,
+          onPick: (c) => coord.seekTo(c.start.inMicroseconds / 1e6),
+          onMenuOpen: menuOpen,
+        ),
+      ),
+      SignalBuilder(
+        builder: (context) => TrackMenuButton(
+          focusNode: _noFocus,
+          type: JellyfinStreamType.audio,
+          tracks: playback.tracks.value,
+          onPick: pickTrack,
+          onMenuOpen: menuOpen,
+        ),
+      ),
+      SignalBuilder(
+        builder: (context) => TrackMenuButton(
+          focusNode: _noFocus,
+          type: JellyfinStreamType.subtitle,
+          tracks: playback.tracks.value,
+          onPick: pickTrack,
+          onMenuOpen: menuOpen,
+        ),
+      ),
+      ShaderControlButton(
+        focusNode: _noFocus,
+        renderMode: playback.renderMode,
+        onPick: _pickShader,
+        onMenuOpen: menuOpen,
+      ),
+      const MaterialDesktopFullscreenButton(),
+    ];
   }
 
   Widget _sessionControls(VideoState state) {
@@ -575,8 +651,9 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   /// Jellyfin: the blocked card, the end-of-episode card (countdown) and
-  /// the "Next episode" pill. Outside the auto-hiding controls, so they
-  /// also show in fullscreen.
+  /// the "Next episode" pill; for any media the skip pill (Skip OP / ED /
+  /// 1:30) above it. Outside the auto-hiding controls, so they also show
+  /// in fullscreen.
   Widget _jellyfinOverlay() {
     final coord = SessionState.instance.coordinator;
     return Positioned.fill(
@@ -587,6 +664,8 @@ class _SessionScreenState extends State<SessionScreen> {
           final countdown = coord.autoAdvance.value;
           final finished = coord.serverState.value?.transport == 'finished';
           final pill = coord.nextPromptVisible.value;
+          final SkipOffer? skip = coord.skipOffer.value;
+          final showNext = next != null && pill;
           return Stack(
             children: [
               if (blocked != null)
@@ -600,7 +679,7 @@ class _SessionScreenState extends State<SessionScreen> {
               if (next != null && (finished || countdown != null))
                 Positioned(
                   right: 24,
-                  bottom: 110,
+                  bottom: 138,
                   child: EndOfEpisodeCard(
                     next: next,
                     countdown: countdown,
@@ -608,11 +687,18 @@ class _SessionScreenState extends State<SessionScreen> {
                     onCancel: coord.cancelAutoAdvance,
                   ),
                 )
-              else if (next != null && pill)
+              else if (showNext || skip != null)
                 Positioned(
                   right: 24,
-                  bottom: 96,
-                  child: NextEpisodePill(episode: next, onPressed: coord.playNextEpisode),
+                  bottom: 124,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    spacing: 10,
+                    children: [
+                      if (skip != null) SkipPill(offer: skip, onPressed: () => coord.skip(skip)),
+                      if (showNext) NextEpisodePill(episode: next, onPressed: coord.playNextEpisode),
+                    ],
+                  ),
                 ),
             ],
           );
