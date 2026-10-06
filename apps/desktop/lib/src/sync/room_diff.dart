@@ -39,6 +39,12 @@ bool localPlayAllowed(RoomBroadcast room, String memberId) {
   return false;
 }
 
+/// Self is ready but out of the set and fresh again: the server's stale
+/// sweep dropped it from the set during a signal gap and nothing puts it
+/// back. Re-sending ready restores it without the user pressing Space.
+bool shouldReassertReady(MemberView? self) =>
+    self != null && self.ready && !self.inSet && !self.stale;
+
 class RoomDiff {
   static const debounceWindow = Duration(seconds: 2);
 

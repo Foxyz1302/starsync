@@ -9,6 +9,8 @@ import '../state/session_state.dart';
 import '../update/updater.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/member_avatar.dart';
+import '../widgets/shown_frame_probe.dart';
+import '../widgets/text_focus.dart';
 import '../widgets/window_buttons.dart';
 import '../widgets/window_drag_layer.dart';
 
@@ -20,8 +22,12 @@ class SessionScreen extends StatefulWidget {
 }
 
 class _SessionScreenState extends State<SessionScreen> {
-  VideoController? _video;
-  final _videoKey = GlobalKey<VideoState>();
+  // One key per player generation: a reloaded player needs a fresh
+  // `Video` (it never swaps controllers in place).
+  var _videoGen = -1;
+  var _videoKey = GlobalKey<VideoState>();
+  bool _refullscreen = false;
+  final _frameProbe = ShownFrameProbe();
   final _sheetOpen = signal(false);
   final _confirmLeave = signal(false);
   final _isFullscreen = signal(false);
@@ -31,6 +37,7 @@ class _SessionScreenState extends State<SessionScreen> {
   final _swapLink = TextEditingController();
   late final void Function() _stopKickWatch;
   late final void Function() _stopSheetWatch;
+  late final void Function() _stopPlayerWatch;
   late final FocusNode _noFocus;
 
   @override
@@ -38,11 +45,11 @@ class _SessionScreenState extends State<SessionScreen> {
     super.initState();
     final session = SessionState.instance;
     _noFocus = FocusNode(skipTraversal: true, canRequestFocus: false);
-    _video = VideoController(session.coordinator.playback.player);
+    session.coordinator.playback.shownFrame = _frameProbe.sample;
     HardwareKeyboard.instance.addHandler(_globalKey);
     _stopKickWatch = effect(() {
       if (session.coordinator.kickReason.value != null) {
-        session.route.value = AppRoute.connect;
+        session.route.value = AppRoute.home;
       }
     });
     _stopSheetWatch = effect(() {
@@ -50,6 +57,35 @@ class _SessionScreenState extends State<SessionScreen> {
         FocusManager.instance.primaryFocus?.unfocus();
       }
     });
+    // The fullscreen route holds its own `Video` of the old player: leave
+    // it before the player goes away, re-enter once the new one is up.
+    _stopPlayerWatch = effect(() {
+      final alive = session.coordinator.playback.alive.value;
+      if (!alive && _isFullscreen.peek()) {
+        _refullscreen = true;
+        if (mounted) Navigator.of(context, rootNavigator: true).maybePop();
+      } else if (alive && _refullscreen) {
+        _refullscreen = false;
+        // Entering before the new output's first frame leaves the
+        // fullscreen copy blank for good (seen in a real run).
+        () async {
+          try {
+            await session.coordinator.playback.video.waitUntilFirstFrameRendered
+                .timeout(const Duration(seconds: 10));
+          } catch (_) {}
+          await Future.delayed(const Duration(milliseconds: 100));
+          if (mounted && !_isFullscreen.peek() && session.coordinator.playback.alive.peek()) {
+            _videoKey.currentState?.enterFullscreen();
+          }
+        }();
+      }
+    });
+  }
+
+  void _reloadVideo() {
+    final coord = SessionState.instance.coordinator;
+    coord.markInput();
+    coord.reloadVideo();
   }
 
   void _toggleFullscreen() {
@@ -65,8 +101,11 @@ class _SessionScreenState extends State<SessionScreen> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_globalKey);
+    final playback = SessionState.instance.coordinator.playback;
+    if (playback.shownFrame == _frameProbe.sample) playback.shownFrame = null;
     _stopKickWatch();
     _stopSheetWatch();
+    _stopPlayerWatch();
     _chat.dispose();
     _chatFocus.dispose();
     _swapLink.dispose();
@@ -74,25 +113,21 @@ class _SessionScreenState extends State<SessionScreen> {
     super.dispose();
   }
 
-  bool get _editing {
-    var n = FocusManager.instance.primaryFocus;
-    while (n != null) {
-      final w = n.context?.widget;
-      if (w is EditableText) return true;
-      n = n.parent;
-    }
-    return false;
-  }
-
   bool _globalKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
     if (SessionState.instance.route.peek() != AppRoute.session) return false;
-    if (_editing) return false;
+    if (textInputFocused()) return false;
     final now = DateTime.now().toUtc();
     if (_lastKeyAt != null && now.difference(_lastKeyAt!).inMilliseconds < 350) {
       return false;
     }
     final coord = SessionState.instance.coordinator;
+    if (event.logicalKey == LogicalKeyboardKey.keyR &&
+        HardwareKeyboard.instance.isControlPressed) {
+      _lastKeyAt = now;
+      _reloadVideo();
+      return true;
+    }
     if (event.logicalKey == LogicalKeyboardKey.space) {
       _lastKeyAt = now;
       coord.toggleReady();
@@ -174,6 +209,7 @@ class _SessionScreenState extends State<SessionScreen> {
         const MaterialDesktopVolumeButton(),
         _ReadyControlButton(focusNode: _noFocus),
         _MarkAllReadyControlButton(focusNode: _noFocus),
+        _ReloadVideoControlButton(focusNode: _noFocus, onPressed: _reloadVideo),
         const MaterialDesktopPositionIndicator(),
         const Spacer(),
         const MaterialDesktopFullscreenButton(),
@@ -183,16 +219,27 @@ class _SessionScreenState extends State<SessionScreen> {
       descendantsAreTraversable: false,
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: _video == null
-          ? const Center(
-              child: Text('player starting…', style: TextStyle(color: Colors.white)),
-            )
-          : MaterialDesktopVideoControlsTheme(
+        // Player lifetime = session (and each "Reload video"): no live
+        // player ⇒ no `Video`, so no texture outlives its player.
+        body: SignalBuilder(
+          builder: (context) {
+            final playback = coord.playback;
+            final gen = playback.generation.value;
+            if (!playback.alive.value) {
+              return const Center(
+                child: Text('player starting…', style: TextStyle(color: Colors.white)),
+              );
+            }
+            if (gen != _videoGen) {
+              _videoGen = gen;
+              _videoKey = GlobalKey<VideoState>();
+            }
+            return MaterialDesktopVideoControlsTheme(
               normal: controlsTheme,
               fullscreen: controlsTheme,
               child: Video(
                 key: _videoKey,
-                controller: _video!,
+                controller: playback.video,
                 subtitleViewConfiguration: const SubtitleViewConfiguration(visible: false),
                 controls: _sessionControls,
                 onEnterFullscreen: () async {
@@ -204,7 +251,9 @@ class _SessionScreenState extends State<SessionScreen> {
                   await defaultExitNativeFullscreen();
                 },
               ),
-            ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -212,6 +261,8 @@ class _SessionScreenState extends State<SessionScreen> {
   Widget _sessionControls(VideoState state) {
     return Stack(
       children: [
+        // Frozen-picture watchdog samples the route around this anchor.
+        _frameProbe.anchor(),
         MaterialDesktopVideoControls(state),
         _healthOverlay(),
         _waitingOverlay(),
@@ -453,7 +504,7 @@ class _SessionScreenState extends State<SessionScreen> {
                 child: GestureDetector(
                   onTap: () {},
                   child: AlertDialog(
-                    title: const Text('Leave room?'),
+                    title: const Text('Leave server?'),
                     content: const Text('You can rejoin right away.'),
                     actions: [
                       TextButton(onPressed: () => _confirmLeave.value = false, child: const Text('Cancel')),
@@ -515,6 +566,30 @@ class _MarkAllReadyControlButton extends StatelessWidget {
       ),
       onPressed: () => SessionState.instance.coordinator.forcePlayAll(),
       child: const Text('Mark everyone ready', style: TextStyle(fontSize: 12)),
+    );
+  }
+}
+
+class _ReloadVideoControlButton extends StatelessWidget {
+  final FocusNode focusNode;
+  final VoidCallback onPressed;
+  const _ReloadVideoControlButton({required this.focusNode, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Reload video (Ctrl+R) — fixes a frozen picture',
+      child: TextButton.icon(
+        focusNode: focusNode,
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        onPressed: onPressed,
+        icon: const Icon(Icons.refresh, size: 16),
+        label: const Text('Reload video', style: TextStyle(fontSize: 12)),
+      ),
     );
   }
 }
@@ -592,7 +667,7 @@ class _SheetPanel extends StatelessWidget {
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text('Room', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                              Text('Server', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                               const SizedBox(width: 8),
                               _StatusChip(playing: playing, hasRoom: r != null),
                             ],
@@ -663,11 +738,19 @@ class _SheetPanel extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    IconButton(
-                      icon: const Icon(Icons.swap_horiz),
-                      onPressed: () {
-                        coord.swapLink(swapLink.text.trim());
-                        swapLink.clear();
+                    ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: swapLink,
+                      builder: (context, value, _) {
+                        final link = value.text.trim();
+                        return IconButton(
+                          icon: const Icon(Icons.swap_horiz),
+                          onPressed: link.isEmpty
+                              ? null
+                              : () {
+                                  coord.swapLink(link);
+                                  swapLink.clear();
+                                },
+                        );
                       },
                     ),
                   ],
@@ -678,7 +761,7 @@ class _SheetPanel extends StatelessWidget {
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(foregroundColor: theme.colorScheme.error),
                     icon: const Icon(Icons.logout),
-                    label: const Text('Leave room'),
+                    label: const Text('Leave server'),
                     onPressed: onLeave,
                   ),
                 ),

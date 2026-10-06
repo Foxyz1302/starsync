@@ -7,10 +7,13 @@ import 'package:sync_relay_core/core.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
+import 'src/screens/home/ui.dart';
 import 'src/state/session_state.dart';
+import 'src/state/settings.dart';
 import 'src/update/updater.dart';
 
 Future<void> main(List<String> args) async {
+  launchArgs = List.unmodifiable(args);
   if (args.contains('--upgrade')) {
     exitCode = await runUpgrade();
     exit(exitCode);
@@ -39,19 +42,22 @@ Future<void> main(List<String> args) async {
       );
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
+  await windowManager.setPreventClose(true);
+  windowManager.addListener(_CloseGuard());
   const windowOptions = WindowOptions(
     size: Size(1280, 720),
     minimumSize: Size(160, 90),
     center: true,
     backgroundColor: Color(0xFF000000),
     titleBarStyle: TitleBarStyle.hidden,
-    title: 'Watch Together',
+    title: appName,
   );
   windowManager.waitUntilReadyToShow(windowOptions, () async {
     await windowManager.show();
     await windowManager.focus();
   });
   await Hive.initFlutter();
+  await AppSettings.instance.ensureLoaded();
   try {
     await SessionState.instance.loadForm();
   } catch (e, st) {
@@ -66,4 +72,23 @@ Future<void> runHeadless(List<String> args) async {
   await session.startHeadless(args);
   await ProcessSignal.sigint.watch().first;
   await session.stopServer();
+}
+
+/// Close button / Alt+F4: leave gracefully first (others see "left", a
+/// hosted server shuts down), bounded so a hung socket can't keep the
+/// window open.
+class _CloseGuard with WindowListener {
+  bool _closing = false;
+
+  @override
+  Future<void> onWindowClose() async {
+    if (_closing) return;
+    _closing = true;
+    try {
+      await SessionState.instance.leave().timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('leave on close failed: $e');
+    }
+    await windowManager.destroy();
+  }
 }

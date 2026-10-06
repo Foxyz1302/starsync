@@ -9,6 +9,30 @@ import '../sfx/sfx.dart';
 import '../sync/room_diff.dart';
 import '../sync/sync_client.dart';
 import 'health.dart';
+import 'idle.dart';
+
+/// Thrown when a connect is superseded by cancel/leave before it finished.
+class ConnectCancelled implements Exception {
+  const ConnectCancelled();
+  @override
+  String toString() => 'connection cancelled';
+}
+
+/// Display name for a link: last path segment, decoded, never the query
+/// (Jellyfin-style links carry api_key there and names are broadcast).
+String linkDisplayName(String url) {
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null) return 'link';
+  final segs = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+  if (segs.isNotEmpty) {
+    try {
+      return Uri.decodeComponent(segs.last);
+    } catch (_) {
+      return segs.last;
+    }
+  }
+  return uri.host.isNotEmpty ? uri.host : 'link';
+}
 
 class ConnectParams {
   final String host;
@@ -79,9 +103,17 @@ class SessionCoordinator {
 
   bool _manualClose = false;
   bool _playerReady = false;
-  bool _warnedIdle = false;
   bool _wasPlayAllowed = false;
+  // Last ready flag the server reported for self; restored after a
+  // reconnect (the server forgets dropped members).
   bool _lastReady = false;
+  // Set after a reconnect until the server echoes the restored ready, so
+  // the fresh member's ready=false doesn't overwrite [_lastReady].
+  bool _restoringReady = false;
+  DateTime? _reassertAt;
+  // Bumped by every connect/leave/cancel/retry: stale attempts no-op.
+  int _epoch = 0;
+  Timer? _reconnectTimer;
   int _mediaId = -1;
   String? _openUrl;
   String _wsHost = '';
@@ -91,16 +123,20 @@ class SessionCoordinator {
   DateTime? _pendingSeekAt;
   int _seekRetries = 0;
   DateTime? _lastRoomAt;
-  DateTime _lastInput = DateTime.now().toUtc();
+  final IdleTracker _idle = IdleTracker(DateTime.now().toUtc());
   int _toastId = 0;
   ConnectParams? _params;
   bool _everConnected = false;
 
   SessionCoordinator({this.sfx = const NoopSfxService()});
 
+  /// Player lifetime = one session: created here on connect, disposed by
+  /// [leave]. Never reused across sessions (a GPU-side video freeze sticks
+  /// to the player).
   Future<void> initPlayer() async {
     if (_playerReady) return;
     try {
+      playback.onFrozen = () => unawaited(reloadVideo(auto: true));
       await playback.init();
       _playerReady = true;
     } catch (e, st) {
@@ -111,13 +147,56 @@ class SessionCoordinator {
     }
   }
 
-  void markInput() {
-    _lastInput = DateTime.now().toUtc();
-    _warnedIdle = false;
+  bool _reloadingVideo = false;
+
+  /// "Reload video" (button, Ctrl+R, frozen-picture watchdog): fresh
+  /// player + video output, current media reopened. While it runs the
+  /// player counts as not ready, so reports/seek detection pause and the
+  /// next broadcast resyncs position and play/pause (diff reset + play
+  /// edge). The ready flag is never touched.
+  Future<void> reloadVideo({bool auto = false}) async {
+    // Also allowed after a failed reload (player gone, session still on).
+    if (_params == null || _reloadingVideo) return;
+    _reloadingVideo = true;
+    _playerReady = false;
+    try {
+      await playback.recreate();
+      final url = _openUrl;
+      _openUrl = null;
+      _pendingSeekTarget = null;
+      _pendingSeekAt = null;
+      _seekRetries = 0;
+      // New player starts at 0: without this the first tick would read
+      // the drop to 0 as a user seek and send everyone there.
+      _lastPos = 0;
+      if (url != null) await _openMedia(url);
+    } catch (e, st) {
+      debugPrint('video reload failed: $e\n$st');
+      health.value =
+          HealthStatus(HealthSeverity.error, 'video reload failed: $e');
+    } finally {
+      _playerReady = playback.alive.peek();
+      _reloadingVideo = false;
+    }
+    if (auto) {
+      _toastId++;
+      toasts.value = [
+        ...toasts.peek(),
+        ToastItem(
+            id: _toastId,
+            text: 'Video froze — reloaded',
+            at: DateTime.now().toUtc())
+      ];
+    }
   }
 
+  void markInput() => _idle.activity(DateTime.now().toUtc());
+
   Future<void> connect(ConnectParams params) async {
-    await leave(silent: true);
+    // Own epoch first: a cancel during any await below makes this stale.
+    final epoch = ++_epoch;
+    await _teardown(silent: true);
+    if (epoch != _epoch) throw const ConnectCancelled();
     _params = params;
     _manualClose = false;
     kickReason.value = null;
@@ -127,6 +206,7 @@ class SessionCoordinator {
     _mediaId = -1;
     _openUrl = null;
     _lastReady = false;
+    _restoringReady = false;
     _wasPlayAllowed = false;
     _everConnected = false;
     markInput();
@@ -134,6 +214,7 @@ class SessionCoordinator {
     feedLog.value = [];
     toasts.value = [];
     await initPlayer();
+    if (epoch != _epoch) throw const ConnectCancelled();
     health.value =
         const HealthStatus(HealthSeverity.info, 'connecting…');
     final wsUri = Uri.parse('ws://${params.host}:${params.port}/sync');
@@ -144,6 +225,8 @@ class SessionCoordinator {
         name: params.name,
         avatar: params.avatar,
       );
+      // Whoever bumped the epoch (cancel/leave) also closed the socket.
+      if (epoch != _epoch) throw const ConnectCancelled();
       reconnecting.value = false;
       _everConnected = true;
       health.value = const HealthStatus(HealthSeverity.ok, 'connected');
@@ -157,10 +240,14 @@ class SessionCoordinator {
       }
       if (params.linkUrl.isNotEmpty) {
         sync.sendSwap(HelloMedia(
-            name: params.linkUrl, size: 0, duration: 0, url: params.linkUrl));
+            name: linkDisplayName(params.linkUrl),
+            size: 0,
+            duration: 0,
+            url: params.linkUrl));
       }
       _startTicker();
     } catch (e) {
+      if (epoch != _epoch) throw const ConnectCancelled();
       debugPrint('connect failed: $e');
       health.value =
           HealthStatus(HealthSeverity.error, _friendlyError(e));
@@ -208,6 +295,7 @@ class SessionCoordinator {
     final now = DateTime.now().toUtc();
     _lastRoomAt = now;
     room.value = r;
+    _trackSelfReady(r, now);
     if (r.mediaId != _mediaId) {
       _mediaId = r.mediaId;
       var url = roomMediaUrl(r);
@@ -255,6 +343,25 @@ class SessionCoordinator {
     }
     await playback.apply(actions);
     _updateStarving(r, playback.bufferedSecsAhead);
+  }
+
+  /// Mirrors the server's ready flag for self into [_lastReady] (force
+  /// by others included) and re-enters the set after a stale spell.
+  void _trackSelfReady(RoomBroadcast r, DateTime now) {
+    final self = selfMember.peek();
+    if (self == null) return;
+    if (r.mediaId != _mediaId) _restoringReady = false;
+    if (_restoringReady) {
+      if (self.ready) _restoringReady = false;
+    } else {
+      _lastReady = self.ready;
+    }
+    if (shouldReassertReady(self) &&
+        (_reassertAt == null ||
+            now.difference(_reassertAt!) >= const Duration(seconds: 3))) {
+      _reassertAt = now;
+      sync.sendReady(true, source: 'auto');
+    }
   }
 
   void _updateStarving(RoomBroadcast r, double bufferedAhead) {
@@ -335,16 +442,22 @@ class SessionCoordinator {
   Future<void> _onKicked(String reason) async {
     kickReason.value = reason;
     _manualClose = true;
+    _epoch++;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     reconnecting.value = false;
     _ticker?.cancel();
     _ticker = null;
+    // Stop, not pause: a paused player keeps filling its cache from the
+    // host's media URL.
+    _openUrl = null;
     try {
-      await playback.apply(const [TransportAction(false)]);
+      await playback.stop();
     } catch (_) {}
     await sync.disconnect();
     health.value = HealthStatus(
         HealthSeverity.error,
-        reason.isEmpty ? 'kicked from room' : 'kicked: $reason');
+        reason.isEmpty ? 'kicked from server' : 'kicked: $reason');
   }
 
   void _startTicker() {
@@ -385,17 +498,14 @@ class SessionCoordinator {
         _scheduleReconnect();
       }
     }
-    final idleSecs = now.difference(_lastInput).inSeconds;
-    // Steady playback counts as activity: only warn/unready when HELD.
-    // While the room is PLAYING the ready flag gates nothing, so an
-    // idle viewer must never lose it mid-watch.
-    if (room.peek()?.transport != 'playing') {
-      // No warning when there is nothing to lose: the 10-min unready
-      // only fires while self is ready, so the 8-min warning must not
-      // fire while unready either.
-      final selfReady = selfMember.peek()?.ready ?? false;
-      if (selfReady && idleSecs >= 8 * 60 && !_warnedIdle) {
-        _warnedIdle = true;
+    // No warning when there is nothing to lose (unready), and none while
+    // PLAYING: the ready flag gates nothing then, and watching counts as
+    // activity so a pause after a long watch starts a fresh idle clock.
+    final event = _idle.tick(now,
+        playing: room.peek()?.transport == 'playing',
+        selfReady: selfMember.peek()?.ready ?? false);
+    switch (event) {
+      case IdleEvent.warn:
         _toastId++;
         toasts.value = [
           ...toasts.peek(),
@@ -405,15 +515,11 @@ class SessionCoordinator {
               at: now)
         ];
         unawaited(sfx.play(const SfxCue(SfxKind.warn)));
-      }
-      if (idleSecs >= 10 * 60) {
-        final self = selfMember.peek();
-        if (self != null && self.ready) {
-          _lastReady = false;
-          sync.sendReady(false, source: 'auto');
-          markInput();
-        }
-      }
+      case IdleEvent.unready:
+        _lastReady = false;
+        sync.sendReady(false, source: 'auto');
+      case IdleEvent.none:
+        break;
     }
   }
 
@@ -459,7 +565,9 @@ class SessionCoordinator {
 
   void toggleReady() {
     final self = selfMember.peek();
-    final next = !(self?.ready ?? false);
+    // Ready but out of the set (dropped out while stale) gates like
+    // unready, so Space puts self back in instead of unreadying.
+    final next = !((self?.ready ?? false) && (self?.inSet ?? false));
     markInput();
     _lastReady = next;
     sync.sendReady(next, source: 'manual');
@@ -506,8 +614,8 @@ class SessionCoordinator {
 
   Future<void> swapLink(String url) async {
     markInput();
-    sync.sendSwap(
-        HelloMedia(name: url, size: 0, duration: 0, url: url));
+    sync.sendSwap(HelloMedia(
+        name: linkDisplayName(url), size: 0, duration: 0, url: url));
   }
 
   void _scheduleReconnect({bool manual = false}) {
@@ -515,50 +623,79 @@ class SessionCoordinator {
     if (!manual && !_everConnected) return;
     if (reconnecting.peek()) return;
     reconnecting.value = true;
-    Future.delayed(const Duration(milliseconds: 1500), () async {
-      if (_manualClose || kickReason.peek() != null) {
-        reconnecting.value = false;
-        return;
+    final epoch = _epoch;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(
+        const Duration(milliseconds: 1500), () => _reconnect(epoch));
+  }
+
+  /// One reconnect attempt. Every cancel/retry/leave/connect bumps
+  /// [_epoch]; an attempt from an older epoch must not touch state (it
+  /// would kill the newer connection and leave a ghost member).
+  Future<void> _reconnect(int epoch) async {
+    _reconnectTimer = null;
+    bool stale() => epoch != _epoch || kickReason.peek() != null;
+    final params = _params;
+    if (stale() || params == null) return;
+    if (_manualClose) {
+      reconnecting.value = false;
+      return;
+    }
+    final wantReady = _lastReady;
+    try {
+      health.value = const HealthStatus(
+          HealthSeverity.info, 'reconnecting…');
+      final wsUri = Uri.parse('ws://${params.host}:${params.port}/sync');
+      final welcome = await sync.connect(
+        wsUri: wsUri,
+        secret: params.secret,
+        name: params.name,
+        avatar: params.avatar,
+      );
+      // Whoever bumped the epoch also closed (or replaced) the socket.
+      if (stale()) return;
+      reconnecting.value = false;
+      _everConnected = true;
+      _lastRoomAt = DateTime.now().toUtc();
+      health.value = const HealthStatus(HealthSeverity.ok, 'connected');
+      final url = welcome.mediaUrl;
+      if (url != null && url.isNotEmpty && url != _openUrl) {
+        await _openMedia(url);
       }
-      final params = _params;
-      if (params == null) {
-        reconnecting.value = false;
-        return;
+      if (stale()) return;
+      // The server forgot the dropped member; restore the ready flag it
+      // last reported (not a local guess: others may have forced it).
+      if (wantReady) {
+        _lastReady = true;
+        _restoringReady = true;
+        sync.sendReady(true, source: 'manual');
       }
-      try {
-        health.value = const HealthStatus(
-            HealthSeverity.info, 'reconnecting…');
-        final wsUri = Uri.parse('ws://${params.host}:${params.port}/sync');
-        final welcome = await sync.connect(
-          wsUri: wsUri,
-          secret: params.secret,
-          name: params.name,
-          avatar: params.avatar,
-        );
-        reconnecting.value = false;
-        _everConnected = true;
-        health.value = const HealthStatus(HealthSeverity.ok, 'connected');
-        final url = welcome.mediaUrl;
-        if (url != null && url.isNotEmpty && url != _openUrl) {
-          await _openMedia(url);
-        }
-        if (_lastReady) sync.sendReady(true, source: 'manual');
-        _startTicker();
-      } catch (e) {
-        debugPrint('reconnect failed: $e');
-        reconnecting.value = false;
-        _scheduleReconnect();
-      }
-    });
+      _startTicker();
+    } catch (e) {
+      if (stale()) return;
+      debugPrint('reconnect failed: $e');
+      reconnecting.value = false;
+      _scheduleReconnect();
+    }
+  }
+
+  void _invalidateAttempts() {
+    _epoch++;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
   }
 
   void cancelReconnect() {
     _manualClose = true;
+    _invalidateAttempts();
     reconnecting.value = false;
+    // Abort an attempt already dialling (no live session while retrying).
+    unawaited(sync.disconnect().catchError((_) {}));
   }
 
   Future<void> cancelConnect() async {
     _manualClose = true;
+    _invalidateAttempts();
     reconnecting.value = false;
     try {
       await sync.disconnect();
@@ -568,6 +705,7 @@ class SessionCoordinator {
 
   void retry() {
     if (kickReason.peek() != null || _params == null) return;
+    _invalidateAttempts();
     _manualClose = false;
     reconnecting.value = false;
     health.value =
@@ -578,7 +716,7 @@ class SessionCoordinator {
   String _friendlyError(Object e) {
     final msg = '$e';
     if (msg.contains('proto mismatch')) return 'host runs a different version — update the app';
-    if (msg.contains('wrong secret')) return 'wrong room password (401)';
+    if (msg.contains('wrong secret')) return 'wrong server password (401)';
     if (msg.contains('SocketException') || msg.contains('Connection refused')) {
       return 'host offline — check address and port';
     }
@@ -586,12 +724,20 @@ class SessionCoordinator {
   }
 
   Future<void> leave({bool silent = false}) async {
+    _invalidateAttempts();
+    await _teardown(silent: silent);
+  }
+
+  Future<void> _teardown({bool silent = false}) async {
     _manualClose = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _ticker?.cancel();
     _ticker = null;
     reconnecting.value = false;
+    _playerReady = false;
     try {
-      await playback.stop();
+      await playback.dispose();
     } catch (_) {}
     try {
       await sync.disconnect();
