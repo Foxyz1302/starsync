@@ -23,7 +23,7 @@ Download the latest `watch-together-<version>-linux-x64.tar.gz` from the
 Releases page of this repo, extract it, run `watch_together`.
 
 Update from the app: when a newer version exists, an update indicator
-appears on Home and opens the update card. "Update and restart" downloads,
+appears in Home's top bar and opens the update card. "Update and restart" downloads,
 verifies, applies in place and restarts; the install folder must be writable
 by you. Settings has Check now and an auto-check toggle. From a terminal:
 `watch_together --upgrade` or `update.sh` (shipped in the tarball). A
@@ -33,9 +33,11 @@ telling you to update.
 
 ## Host from the app
 
-Home, Host card. Pick a port, an optional password (blank = anyone can
-join), and optionally a video: a link or a file path. Your name and avatar
-come from your profile. The app starts a
+Home, Host tab. Pick what to watch (optional): Link (paste an http(s) URL;
+Ctrl+V outside a field pastes it in) or File (path or Browse). Jellyfin is
+coming. In the column beside it set a port and an optional password (blank =
+anyone can join), then Host. Your name and avatar come from your profile
+(the chip at the top left). The app starts a
 server inside itself and joins it; you are the host and nobody can kick you.
 Leaving or closing the app stops the server. Friends need to reach your machine: open
 the TCP port on your router (or use a LAN or VPN address). Friends open nothing.
@@ -70,9 +72,12 @@ To run it as a service, unpack the tarball to `/opt/watch-together` and use
 
 ## Join
 
-Home, Join card. Enter the host's address, port, and the password if there
-is one. Your name and avatar come from your profile (Home chip or Settings).
-Servers you got into appear as up to 6 Recent chips on Home: one click rejoins.
+Home, Join tab. Enter the host's address, port, and the password if there
+is one, then Enter or Join. Your name and avatar come from your profile (top
+bar chip or Settings). Servers you got into appear as up to 6 Recent server
+tiles with live status (online and how many are watching, or offline, plus
+"needs update" when the server runs another protocol): click one to rejoin,
+x to forget it. Ctrl+1 / Ctrl+2 switch between Join and Host.
 
 ## Settings
 

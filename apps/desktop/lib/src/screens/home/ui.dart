@@ -121,3 +121,43 @@ class PageScroll extends StatelessWidget {
     );
   }
 }
+
+/// Widest a single text field gets, however wide the window.
+const kFieldMaxWidth = 720.0;
+
+/// Inline failure under a connect form: bold title, selectable message.
+class ErrorBox extends StatelessWidget {
+  final String title;
+  final String message;
+  const ErrorBox({super.key, required this.title, required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.error_outline, size: 18, color: scheme.error),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SelectableText.rich(
+              TextSpan(children: [
+                TextSpan(
+                    text: '$title\n',
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+                TextSpan(text: message),
+              ]),
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

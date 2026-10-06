@@ -229,7 +229,11 @@ Future<void> showProfileDialog(BuildContext context) {
 
 /// Home's top-left: avatar + name, click to edit.
 class ProfileChip extends StatelessWidget {
-  const ProfileChip({super.key});
+  /// One line and a small avatar, for the Home top bar.
+  final bool dense;
+  /// Just the avatar, for very narrow windows.
+  final bool avatarOnly;
+  const ProfileChip({super.key, this.dense = false, this.avatarOnly = false});
 
   @override
   Widget build(BuildContext context) {
@@ -239,31 +243,42 @@ class ProfileChip extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(kRadius),
         onTap: () => showProfileDialog(context),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(6, 6, 14, 6),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const ProfileAvatar(radius: 20),
-              const SizedBox(width: 12),
-              SignalBuilder(builder: (context) {
-                final n = p.name.value;
-                final t = Theme.of(context).textTheme;
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        child: avatarOnly
+            ? const Padding(padding: EdgeInsets.all(4), child: ProfileAvatar(radius: 14))
+            : Padding(
+                padding: dense
+                    ? const EdgeInsets.fromLTRB(4, 4, 10, 4)
+                    : const EdgeInsets.fromLTRB(6, 6, 14, 6),
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(n.isEmpty ? 'Set your name' : n,
-                        style: t.titleMedium?.copyWith(
-                            color: n.isEmpty ? Colors.grey : null)),
-                    Text('Edit profile',
-                        style: t.bodySmall?.copyWith(color: Colors.grey)),
+                    ProfileAvatar(radius: dense ? 14 : 20),
+                    SizedBox(width: dense ? 8 : 12),
+                    SignalBuilder(builder: (context) {
+                      final n = p.name.value;
+                      final t = Theme.of(context).textTheme;
+                      final name = Text(n.isEmpty ? 'Set your name' : n,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: (dense ? t.titleSmall : t.titleMedium)
+                              ?.copyWith(color: n.isEmpty ? Colors.grey : null));
+                      if (dense) {
+                        return ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 200), child: name);
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          name,
+                          Text('Edit profile',
+                              style: t.bodySmall?.copyWith(color: Colors.grey)),
+                        ],
+                      );
+                    }),
                   ],
-                );
-              }),
-            ],
-          ),
-        ),
+                ),
+              ),
       ),
     );
   }
