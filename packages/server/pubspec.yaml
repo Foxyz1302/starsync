@@ -1,5 +1,5 @@
 name: sync_relay_server
-description: Pure-Dart room + media server. Embeddable, no Flutter.
+description: Pure-Dart sync + media server. Embeddable, no Flutter.
 publish_to: none
 version: 0.1.0
 environment:

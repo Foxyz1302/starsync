@@ -19,10 +19,6 @@ Future<void> main(List<String> args) async {
     exit(exitCode);
   }
   initLogging();
-  if (args.contains('--headless')) {
-    await runHeadless(args);
-    return;
-  }
   FlutterError.onError = (details) {
     debugPrint('FLUTTER ERROR: ${details.exceptionAsString()}\n${details.stack}');
     FlutterError.presentError(details);
@@ -65,13 +61,6 @@ Future<void> main(List<String> args) async {
   }
   MediaKit.ensureInitialized();
   runApp(const WatchTogetherApp());
-}
-
-Future<void> runHeadless(List<String> args) async {
-  final session = SessionState.instance;
-  await session.startHeadless(args);
-  await ProcessSignal.sigint.watch().first;
-  await session.stopServer();
 }
 
 /// Close button / Alt+F4: leave gracefully first (others see "left", a

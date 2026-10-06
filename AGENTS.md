@@ -15,9 +15,7 @@ AGENTS.md. Source of truth: the code, then the docs below.
 - Each fact lives in exactly one file; others link to it.
 - Code and its docs change in the same commit. A wire change also bumps
   `RelayConstants.protoVersion` and edits PROTOCOL.md.
-- User-facing wording says "server" (there is only one), never "room".
-  Code identifiers and wire names keep their real names until the rename
-  in ROADMAP item 1.
+- Say "server" (there is only one), never "room", in UI, code and docs.
 
 ## Wishlist drafts
 

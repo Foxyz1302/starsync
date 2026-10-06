@@ -25,11 +25,11 @@ Future<void> _poll(
 
 void main() {
   test(
-    'dead server clears room state and reconnects instead of freezing',
+    'dead server clears server state and reconnects instead of freezing',
     timeout: const Timeout(Duration(minutes: 2)),
     () async {
       MediaKit.ensureInitialized();
-      final server = RoomServer(
+      final server = SyncServer(
           const AppConfig(port: 0, secret: 'presence', name: 'presence'));
       await server.start();
       final coord = SessionCoordinator();
@@ -41,7 +41,7 @@ void main() {
           name: 'watcher',
         ));
         await coord.playback.player.setVolume(0);
-        await _poll(() => coord.room.peek() != null, 'room state to arrive');
+        await _poll(() => coord.serverState.peek() != null, 'server state to arrive');
         expect(coord.reconnecting.peek(), isFalse);
 
         await server.stop();
@@ -50,8 +50,8 @@ void main() {
           'reconnect loop to engage',
         );
         await _poll(
-          () => coord.room.peek() == null,
-          'stale room (ghost members) to clear',
+          () => coord.serverState.peek() == null,
+          'stale state (ghost members) to clear',
         );
         coord.cancelReconnect();
         expect(coord.reconnecting.peek(), isFalse);
@@ -66,12 +66,12 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
     () async {
       MediaKit.ensureInitialized();
-      final first = RoomServer(
+      final first = SyncServer(
           const AppConfig(port: 0, secret: 'race', name: 'race'));
       await first.start();
       final port = first.boundPort;
       final coord = SessionCoordinator();
-      RoomServer? second;
+      SyncServer? second;
       final observer = SyncClient();
       try {
         await coord.connect(ConnectParams(
@@ -79,7 +79,7 @@ void main() {
         await coord.playback.player.setVolume(0);
         await first.stop();
         await _poll(() => coord.reconnecting.peek(), 'reconnect to engage');
-        second = RoomServer(
+        second = SyncServer(
             AppConfig(port: port, secret: 'race', name: 'race'));
         await second.start();
         var joins = 0;
@@ -93,7 +93,7 @@ void main() {
         // Within the 1.5 s delay: the first attempt must die with Cancel.
         coord.cancelReconnect();
         coord.retry();
-        await _poll(() => !coord.reconnecting.peek() && coord.room.peek() != null,
+        await _poll(() => !coord.reconnecting.peek() && coord.serverState.peek() != null,
             'reconnect to land');
         await Future.delayed(const Duration(seconds: 4));
         await sub.cancel();
@@ -116,13 +116,13 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
     () async {
       MediaKit.ensureInitialized();
-      final first = RoomServer(
+      final first = SyncServer(
           const AppConfig(port: 0, secret: 'force', name: 'force'));
       await first.start();
       final port = first.boundPort;
       final coord = SessionCoordinator();
       final friend = SyncClient();
-      RoomServer? second;
+      SyncServer? second;
       try {
         await coord.connect(ConnectParams(
             host: '127.0.0.1', port: port, secret: 'force', name: 'watcher'));
@@ -138,7 +138,7 @@ void main() {
         await friend.disconnect();
         await first.stop();
         await _poll(() => coord.reconnecting.peek(), 'reconnect to engage');
-        second = RoomServer(
+        second = SyncServer(
             AppConfig(port: port, secret: 'force', name: 'force'));
         await second.start();
         await _poll(
@@ -158,7 +158,7 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
     () async {
       MediaKit.ensureInitialized();
-      final server = RoomServer(
+      final server = SyncServer(
           const AppConfig(port: 0, secret: '', name: 'cancel'));
       await server.start();
       final coord = SessionCoordinator();
@@ -185,7 +185,8 @@ void main() {
     timeout: const Timeout(Duration(minutes: 1)),
     () async {
       MediaKit.ensureInitialized();
-      Hive.init('/home/foxyz/.claude/jobs/4898998e/tmp/hive_coord_test');
+      Hive.init(
+          '${Platform.environment['WT_TEST_TMP'] ?? Directory.systemTemp.path}/hive_coord_test');
       final probe = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
       final port = probe.port;
       await probe.close();

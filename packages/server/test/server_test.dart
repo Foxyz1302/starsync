@@ -23,7 +23,7 @@ void main() {
   });
 
   test('server starts, answers /health, stops cleanly', () async {
-    final server = RoomServer(const AppConfig(port: 0, secret: 't', name: 'test'));
+    final server = SyncServer(const AppConfig(port: 0, secret: 't', name: 'test'));
     await server.start();
     expect(server.isRunning, isTrue);
     final port = server.boundPort;
@@ -45,7 +45,7 @@ void main() {
   });
 
   test('unknown path returns 404', () async {
-    final server = RoomServer(const AppConfig(port: 0, secret: 't', name: 'test'));
+    final server = SyncServer(const AppConfig(port: 0, secret: 't', name: 'test'));
     await server.start();
     final client = HttpClient();
     try {

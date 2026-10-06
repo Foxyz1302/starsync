@@ -33,6 +33,7 @@ class _HomePageState extends State<HomePage> {
   late final _media =
       TextEditingController(text: _f.linkUrl.isNotEmpty ? _f.linkUrl : _f.mediaPath);
   late final void Function() _stopKickWatch;
+  late final void Function() _stopCrashWatch;
   bool _dialogOpen = false;
   String? _lastKickShown;
 
@@ -49,11 +50,21 @@ class _HomePageState extends State<HomePage> {
       }
       WidgetsBinding.instance.addPostFrameCallback((_) => _showKickedDialog(kick));
     });
+    // Back from a session whose hosted server crashed: say so on the Host card.
+    _stopCrashWatch = effect(() {
+      final crash = SessionState.instance.serverCrash.value;
+      if (crash == null) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        SessionState.instance.serverCrash.value = null;
+        if (mounted) _flow.showError(ConnectMode.host, CardError('Server crashed', crash));
+      });
+    });
   }
 
   @override
   void dispose() {
     _stopKickWatch();
+    _stopCrashWatch();
     _flow.dispose();
     for (final c in [_joinHost, _joinPort, _joinSecret, _hostPort, _hostSecret, _media]) {
       c.dispose();

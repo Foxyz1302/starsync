@@ -37,10 +37,10 @@ void main() {
     timeout: const Timeout(Duration(minutes: 4)),
     () async {
       MediaKit.ensureInitialized();
-      final server = RoomServer(const AppConfig(
+      final server = SyncServer(const AppConfig(
         port: _port,
         secret: _secret,
-        name: 'room',
+        name: 'server',
         mediaPath: _mediaPath,
       ));
       await server.start();
@@ -67,10 +67,10 @@ void main() {
             reason: 'media must open paused, not autoplay');
         expect(viewer.playback.player.state.playing, isFalse);
 
-        await _poll(() => host.room.peek() != null, 'host room state');
+        await _poll(() => host.serverState.peek() != null, 'host server state');
         host.toggleReady();
         await Future.delayed(const Duration(seconds: 5));
-        expect(host.room.peek()?.transport, 'held',
+        expect(host.serverState.peek()?.transport, 'held',
             reason: 'one Space with company present must not solo-play');
         expect(host.playback.player.state.playing, isFalse);
         expect(viewer.playback.player.state.playing, isFalse);
@@ -78,7 +78,7 @@ void main() {
         viewer.toggleReady();
         await _poll(
           () =>
-              host.room.peek()?.transport == 'playing' &&
+              host.serverState.peek()?.transport == 'playing' &&
               viewer.playback.player.state.playing &&
               host.playback.player.state.playing,
           'both players playing once quorum readies',

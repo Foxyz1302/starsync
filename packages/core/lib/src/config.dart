@@ -15,6 +15,9 @@ class AppConfig {
   /// Optional explicit host for file-media URLs; empty means use the host the
   /// client dialled.
   final String advertiseHost;
+  /// Secret the hosting app's own client sends in hello to be marked host
+  /// (unkickable). Empty means no member is the host (dedicated server).
+  final String hostKey;
 
   const AppConfig({
     required this.port,
@@ -23,20 +26,22 @@ class AppConfig {
     this.mediaPath = '',
     this.logLevel = 'INFO',
     this.advertiseHost = '',
+    this.hostKey = '',
   });
 
   factory AppConfig.defaults() =>
-      const AppConfig(port: 8080, secret: '', name: 'room');
+      const AppConfig(port: 8080, secret: '', name: 'server');
 
   factory AppConfig.fromMap(Map<String, Object?> map) {
     try {
       return AppConfig(
         port: (map['port'] as num?)?.toInt() ?? 8080,
         secret: (map['secret'] as String?) ?? '',
-        name: (map['name'] as String?) ?? 'room',
+        name: (map['name'] as String?) ?? 'server',
         mediaPath: (map['mediaPath'] as String?) ?? '',
         logLevel: (map['logLevel'] as String?) ?? 'INFO',
         advertiseHost: (map['advertiseHost'] as String?) ?? '',
+        hostKey: (map['hostKey'] as String?) ?? '',
       );
     } catch (e) {
       throw ConfigException('invalid config map: $e');
@@ -50,6 +55,7 @@ class AppConfig {
         'mediaPath': mediaPath,
         'logLevel': logLevel,
         'advertiseHost': advertiseHost,
+        'hostKey': hostKey,
       };
 
   static Future<AppConfig> loadFile(String path) async {

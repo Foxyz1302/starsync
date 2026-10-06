@@ -354,7 +354,7 @@ class _SessionScreenState extends State<SessionScreen> {
     final coord = SessionState.instance.coordinator;
     return SignalBuilder(
       builder: (context) {
-        final r = coord.room.value;
+        final r = coord.serverState.value;
         final waiting = [
           for (final m in r?.members ?? [])
             if (!m.ready) m,
@@ -648,7 +648,7 @@ class _SheetPanel extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
         child: SignalBuilder(
           builder: (context) {
-            final r = coord.room.value;
+            final r = coord.serverState.value;
             final log = coord.feedLog.value;
             final theme = Theme.of(context);
             final sectionStyle = theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold);
@@ -669,7 +669,7 @@ class _SheetPanel extends StatelessWidget {
                             children: [
                               Text('Server', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                               const SizedBox(width: 8),
-                              _StatusChip(playing: playing, hasRoom: r != null),
+                              _StatusChip(playing: playing, hasState: r != null),
                             ],
                           ),
                           const SizedBox(height: 2),
@@ -780,14 +780,14 @@ class _SheetPanel extends StatelessWidget {
 
 class _StatusChip extends StatelessWidget {
   final bool playing;
-  final bool hasRoom;
-  const _StatusChip({required this.playing, required this.hasRoom});
+  final bool hasState;
+  const _StatusChip({required this.playing, required this.hasState});
 
   @override
   Widget build(BuildContext context) {
     final Color dot;
     final String label;
-    if (!hasRoom) {
+    if (!hasState) {
       dot = Colors.grey;
       label = '…';
     } else if (playing) {

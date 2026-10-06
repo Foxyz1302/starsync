@@ -36,7 +36,8 @@ telling you to update.
 Home, Host card. Pick a port, an optional password (blank = anyone can
 join), and optionally a video: a link or a file path. Your name and avatar
 come from your profile. The app starts a
-server inside itself and joins it. Friends need to reach your machine: open
+server inside itself and joins it; you are the host and nobody can kick you.
+Leaving or closing the app stops the server. Friends need to reach your machine: open
 the TCP port on your router (or use a LAN or VPN address). Friends open nothing.
 
 If you pick a local file, the server streams it to everyone from your disk.
@@ -44,9 +45,28 @@ Nothing is uploaded or stored anywhere.
 
 ## Dedicated server
 
-Being reworked: today the server is started by the app (host) and the
-standalone server is a dev tool. The planned dedicated server is a separate
-binary built from `packages/server`. See [docs/ROADMAP.md](docs/ROADMAP.md).
+For an always-on box (no display needed): the release tarball also contains
+`watch-together-server`, a small standalone server without the app. Run it,
+then everyone (you included) uses Join.
+
+```
+./watch-together-server --port 8080 --secret <password>
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--port`, `-p` | 8080 | TCP port, all IPv4 interfaces |
+| `--secret` | empty | password; empty = open server (a warning is printed) |
+| `--name` | `server` | name reported by `/health` |
+| `--media` | none | local file to serve as the starting video |
+| `--advertise-host` | none | host put in file URLs instead of the one each viewer dialled |
+| `--config` | none | YAML or JSON file with the same settings (`port`, `secret`, `name`, `mediaPath`, `advertiseHost`); replaces the flags |
+
+It prints `READY port=... name=...` once listening and stops cleanly on
+Ctrl+C or SIGTERM. A dedicated server has no host: anyone can kick anyone.
+To run it as a service, unpack the tarball to `/opt/watch-together` and use
+[deploy/watch-together.service](deploy/watch-together.service) (copy it to
+`/etc/systemd/system/`, edit the flags, `systemctl enable --now watch-together`).
 
 ## Join
 

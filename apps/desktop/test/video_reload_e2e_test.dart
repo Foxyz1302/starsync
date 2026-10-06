@@ -5,7 +5,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
 import 'package:watch_together/src/session/session_coordinator.dart';
-import 'package:watch_together/src/sync/room_diff.dart';
+import 'package:watch_together/src/sync/state_diff.dart';
 
 const _mediaPath = '/home/foxyz/Videos/chiyo.mp4';
 
@@ -29,7 +29,7 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
     () async {
       MediaKit.ensureInitialized();
-      final server = RoomServer(const AppConfig(
+      final server = SyncServer(const AppConfig(
           port: 0, secret: 'reload', name: 'reload', mediaPath: _mediaPath));
       await server.start();
       final c = SessionCoordinator();
@@ -40,7 +40,7 @@ void main() {
             secret: 'reload',
             name: 'solo'));
         await c.playback.player.setVolume(0);
-        await _poll(() => c.room.peek() != null, 'room state');
+        await _poll(() => c.serverState.peek() != null, 'server state');
         c.toggleReady();
         await _poll(
             () => c.playback.player.state.playing && c.playback.positionSecs > 2,
@@ -54,14 +54,14 @@ void main() {
         expect(c.selfMember.peek()?.ready, isTrue);
 
         await _poll(() {
-          final r = c.room.peek();
+          final r = c.serverState.peek();
           if (r == null || !c.playback.player.state.playing) return false;
-          final want = roomPositionAt(r, DateTime.now().toUtc());
+          final want = serverPositionAt(r, DateTime.now().toUtc());
           return (c.playback.positionSecs - want).abs() < 1.5 &&
               c.playback.positionSecs > 2;
         }, 'reloaded player playing at the synced position');
         expect(c.selfMember.peek()?.ready, isTrue);
-        expect(c.room.peek()?.transport, 'playing');
+        expect(c.serverState.peek()?.transport, 'playing');
 
         await c.leave();
         expect(c.playback.alive.peek(), isFalse);

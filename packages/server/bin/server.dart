@@ -1,47 +1,91 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:args/args.dart';
 import 'package:logging/logging.dart' as pkg_logging;
 import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
 
+/// Dedicated server: `dart compile exe` of this file is shipped as
+/// `watch-together-server`. Runs [serve] until SIGINT or SIGTERM.
 Future<void> main(List<String> args) async {
   final parser = ArgParser()
-    ..addOption('port', abbr: 'p', defaultsTo: '8080')
-    ..addOption('secret', defaultsTo: '')
-    ..addOption('name', defaultsTo: 'room')
-    ..addOption('media', defaultsTo: '')
-    ..addOption('advertise-host', defaultsTo: '')
-    ..addOption('config')
-    ..addFlag('help', abbr: 'h', negatable: false);
-  final parsed = parser.parse(args);
+    ..addOption('port', abbr: 'p', defaultsTo: '8080', help: 'TCP port to listen on (all IPv4 interfaces).')
+    ..addOption('secret', defaultsTo: '', help: 'Shared password. Empty means an open server: anyone who can reach it can join.')
+    ..addOption('name', defaultsTo: 'server', help: 'Server name, reported by /health.')
+    ..addOption('media', defaultsTo: '', help: 'Local file to serve as the starting media.')
+    ..addOption('advertise-host', defaultsTo: '', help: 'Host put in file-media URLs instead of the one each client dialled.')
+    ..addOption('config', help: 'YAML or JSON config file (keys as in AppConfig); overrides the other flags.')
+    ..addFlag('help', abbr: 'h', negatable: false, help: 'Show this help.');
+  final ArgResults parsed;
+  try {
+    parsed = parser.parse(args);
+  } on FormatException catch (e) {
+    stderr.writeln('${e.message}\n\n${parser.usage}');
+    exitCode = 64;
+    return;
+  }
   if (parsed['help'] as bool) {
     // ignore: avoid_print
-    print(parser.usage);
+    print('watch-together-server (proto ${RelayConstants.protoVersion})\n\n${parser.usage}');
     return;
   }
 
   initLogging(level: pkg_logging.Level.INFO);
   AppConfig config;
   final configPath = parsed['config'] as String?;
-  if (configPath != null) {
-    config = await AppConfig.loadFile(configPath);
-  } else {
-    config = AppConfig(
-      port: int.tryParse('${parsed['port']}') ?? 8080,
-      secret: '${parsed['secret']}',
-      name: '${parsed['name']}',
-      mediaPath: '${parsed['media']}',
-      advertiseHost: '${parsed['advertise-host']}',
-    );
+  try {
+    if (configPath != null) {
+      config = await AppConfig.loadFile(configPath);
+    } else {
+      final port = int.tryParse('${parsed['port']}');
+      if (port == null || port < 0 || port > 65535) {
+        throw ConfigException('bad --port: ${parsed['port']}');
+      }
+      config = AppConfig(
+        port: port,
+        secret: '${parsed['secret']}',
+        name: '${parsed['name']}',
+        mediaPath: '${parsed['media']}',
+        advertiseHost: '${parsed['advertise-host']}',
+      );
+    }
+  } on ConfigException catch (e) {
+    stderr.writeln(e.message);
+    exitCode = 64;
+    return;
+  }
+  if (config.secret.isEmpty) {
+    stderr.writeln(
+        'WARNING: no --secret set: this is an open server, anyone who can reach port ${config.port} can join.');
   }
 
-  final server = RoomServer(config);
-  await server.start();
-
-  // ignore: avoid_print
-  print('READY port=${server.boundPort} room=${config.name}');
-
-  await ProcessSignal.sigint.watch().first;
-  await server.stop();
+  final events = ReceivePort('server events');
+  final done = serve(config.toMap(), events: events.sendPort);
+  final signals = <StreamSubscription<ProcessSignal>>[];
+  await for (final msg in events) {
+    if (msg is! Map) continue;
+    if (msg['t'] == 'error') {
+      stderr.writeln('server failed to start: ${msg['message']}');
+      exitCode = 1;
+      break;
+    }
+    if (msg['t'] == 'ready') {
+      final stop = msg['stop'] as SendPort;
+      // ignore: avoid_print
+      print('READY port=${msg['port']} name=${config.name}');
+      void onSignal(ProcessSignal _) => stop.send({'t': 'stop'});
+      signals.add(ProcessSignal.sigint.watch().listen(onSignal));
+      if (!Platform.isWindows) {
+        signals.add(ProcessSignal.sigterm.watch().listen(onSignal));
+      }
+      break;
+    }
+  }
+  await done;
+  events.close();
+  for (final s in signals) {
+    await s.cancel();
+  }
 }

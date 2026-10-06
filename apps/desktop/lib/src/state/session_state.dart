@@ -1,16 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/widgets.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:sync_relay_server/server.dart';
 
 import '../sfx/sfx.dart';
 import '../session/health.dart';
 import '../session/session_coordinator.dart';
 import '../widgets/avatar_pipeline.dart';
 import 'connect_prefs.dart';
+import 'server_isolate.dart';
 
 enum AppRoute {
   home,
@@ -128,6 +129,21 @@ List<RecentServer> migrateRecents(
   return [RecentServer(hosted: false, host: host.trim(), port: port, secret: secret)];
 }
 
+/// The hosted server died during setup; shown on the Host card.
+class ServerCrashed implements Exception {
+  final String cause;
+  const ServerCrashed(this.cause);
+  @override
+  String toString() => 'server crashed: $cause';
+}
+
+/// A fresh per-hosting key: the app's own client sends it in hello to be
+/// recognised as the (unkickable) host.
+String newHostKey() {
+  final r = Random.secure();
+  return base64Url.encode([for (var i = 0; i < 24; i++) r.nextInt(256)]);
+}
+
 class SessionState {
   static final SessionState instance = SessionState._();
   SessionState._();
@@ -135,11 +151,17 @@ class SessionState {
   final route = signal(AppRoute.home);
   final recents = signal<List<RecentServer>>(const []);
   final status = signal(const HealthStatus(HealthSeverity.info, 'idle'));
-  final room = signal<RoomBroadcast?>(null);
   final SfxService sfx = const NoopSfxService();
   late final SessionCoordinator coordinator = SessionCoordinator(sfx: sfx);
   final lastForm = ConnectForm();
-  RoomServer? _server;
+  /// Set when the hosted server died mid-session; Home shows it on the
+  /// Host card and clears it.
+  final serverCrash = signal<String?>(null);
+  ServerIsolate? _server;
+  String? _setupCrash;
+
+  @visibleForTesting
+  ServerIsolate? get hostedServer => _server;
   void Function()? _stopKickWatch;
   // Bumped by host/join/cancelPending: a cancelled setup notices at its
   // next step and unwinds instead of connecting.
@@ -208,18 +230,25 @@ class SessionState {
           const HealthStatus(HealthSeverity.info, 'starting server…');
       await stopServer();
       if (op != _op) throw const ConnectCancelled();
-      final server = RoomServer(AppConfig(
-        port: params.port,
-        secret: params.secret,
-        name: 'room',
-        mediaPath: params.mediaPath,
-      ));
+      final hostKey = newHostKey();
+      _setupCrash = null;
+      late final ServerIsolate server;
       try {
-        await server.start();
+        server = await ServerIsolate.start(
+          AppConfig(
+            port: params.port,
+            secret: params.secret,
+            name: 'server',
+            mediaPath: params.mediaPath,
+            hostKey: hostKey,
+          ),
+          onLog: (line) => debugPrint('[server] $line'),
+          onCrash: (cause) => _onServerCrash(server, cause),
+        );
       } catch (e, st) {
         debugPrint('server start failed: $e\n$st');
         status.value = HealthStatus(
-            HealthSeverity.error, 'cannot bind port ${params.port}: $e');
+            HealthSeverity.error, 'cannot start server on port ${params.port}: $e');
         rethrow;
       }
       if (op != _op) {
@@ -228,20 +257,23 @@ class SessionState {
       }
       _server = server;
       status.value =
-          HealthStatus(HealthSeverity.ok, 'hosting on port ${server.boundPort}');
+          HealthStatus(HealthSeverity.ok, 'hosting on port ${server.port}');
       try {
         await coordinator.connect(ConnectParams(
           host: '127.0.0.1',
-          port: server.boundPort,
+          port: server.port,
           secret: params.secret,
           name: params.name,
           avatar: params.avatar,
           linkUrl: params.linkUrl,
+          hostKey: hostKey,
         ));
         if (op != _op) throw const ConnectCancelled();
-      } catch (_) {
+      } catch (e) {
         // Own join failed or was cancelled: don't leave the port open.
         if (identical(_server, server)) await stopServer();
+        final crash = _setupCrash;
+        if (crash != null && e is! ConnectCancelled) throw ServerCrashed(crash);
         rethrow;
       }
       _watchKick();
@@ -249,6 +281,21 @@ class SessionState {
     } finally {
       await _saveFormQuietly();
     }
+  }
+
+  /// The server isolate died without being stopped. In a session: show it
+  /// and leave. During setup the own join fails and [host] reports it.
+  void _onServerCrash(ServerIsolate server, String cause) {
+    if (!identical(_server, server)) return;
+    final message = 'server crashed: $cause';
+    debugPrint('[server] $message');
+    if (route.peek() != AppRoute.session) {
+      _setupCrash = cause;
+      return;
+    }
+    coordinator.health.value = HealthStatus(HealthSeverity.error, message);
+    serverCrash.value = message;
+    unawaited(leave().catchError((Object e) => debugPrint('leave after crash failed: $e')));
   }
 
   Future<void> join(ConnectParams params, ConnectForm form) async {
@@ -303,15 +350,6 @@ class SessionState {
       ..avatarPath = form.avatarPath
       ..mediaPath = form.mediaPath
       ..linkUrl = form.linkUrl;
-  }
-
-  Future<void> startHeadless(List<String> args) async {
-    int port = 8080;
-    for (var i = 0; i < args.length - 1; i++) {
-      if (args[i] == '--port') port = int.tryParse(args[i + 1]) ?? port;
-    }
-    _server = RoomServer(AppConfig(port: port, secret: '', name: 'room'));
-    await _server!.start();
   }
 
   Future<void> stopServer() async {

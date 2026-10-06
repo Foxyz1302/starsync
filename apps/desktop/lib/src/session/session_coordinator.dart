@@ -6,7 +6,7 @@ import 'package:sync_relay_core/core.dart';
 
 import '../playback/playback_controller.dart';
 import '../sfx/sfx.dart';
-import '../sync/room_diff.dart';
+import '../sync/state_diff.dart';
 import '../sync/sync_client.dart';
 import 'health.dart';
 import 'idle.dart';
@@ -42,6 +42,8 @@ class ConnectParams {
   final String avatar;
   final String mediaPath;
   final String linkUrl;
+  /// Sent in hello by the hosting app's own client (see AppConfig.hostKey).
+  final String hostKey;
   const ConnectParams({
     required this.host,
     required this.port,
@@ -50,6 +52,7 @@ class ConnectParams {
     this.avatar = '',
     this.mediaPath = '',
     this.linkUrl = '',
+    this.hostKey = '',
   });
 }
 
@@ -62,8 +65,8 @@ class ToastItem {
 
 const _toastActions = {'join', 'leave', 'kick', 'swap', 'chat'};
 
-String? roomMediaUrl(RoomBroadcast room) {
-  final media = room.media;
+String? stateMediaUrl(StateBroadcast state) {
+  final media = state.media;
   if (media == null) return null;
   final url = media['url'];
   if (url is String && url.isNotEmpty) return url;
@@ -74,11 +77,11 @@ class SessionCoordinator {
   final SfxService sfx;
   final SyncClient sync = SyncClient();
   final PlaybackController playback = PlaybackController();
-  final RoomDiff diff = RoomDiff();
+  final StateDiff diff = StateDiff();
 
   final health =
       signal(const HealthStatus(HealthSeverity.info, 'idle'));
-  final room = signal<RoomBroadcast?>(null);
+  final serverState = signal<StateBroadcast?>(null);
   final feedLog = signal<List<FeedMessage>>([]);
   final toasts = signal<List<ToastItem>>([]);
   final reconnecting = signal(false);
@@ -86,7 +89,7 @@ class SessionCoordinator {
   final starving = signal<String?>(null);
 
   late final Computed<MemberView?> selfMember = computed(() {
-    final r = room.value;
+    final r = serverState.value;
     if (r == null || sync.memberId.isEmpty) return null;
     for (final m in r.members) {
       if (m.id == sync.memberId) return m;
@@ -95,7 +98,7 @@ class SessionCoordinator {
   });
 
   Timer? _ticker;
-  StreamSubscription? _roomSub;
+  StreamSubscription? _stateSub;
   StreamSubscription? _feedSub;
   StreamSubscription? _kickSub;
   StreamSubscription? _errSub;
@@ -122,7 +125,7 @@ class SessionCoordinator {
   double? _pendingSeekTarget;
   DateTime? _pendingSeekAt;
   int _seekRetries = 0;
-  DateTime? _lastRoomAt;
+  DateTime? _lastStateAt;
   final IdleTracker _idle = IdleTracker(DateTime.now().toUtc());
   int _toastId = 0;
   ConnectParams? _params;
@@ -224,13 +227,14 @@ class SessionCoordinator {
         secret: params.secret,
         name: params.name,
         avatar: params.avatar,
+        hostKey: params.hostKey,
       );
       // Whoever bumped the epoch (cancel/leave) also closed the socket.
       if (epoch != _epoch) throw const ConnectCancelled();
       reconnecting.value = false;
       _everConnected = true;
       health.value = const HealthStatus(HealthSeverity.ok, 'connected');
-      _lastRoomAt = DateTime.now().toUtc();
+      _lastStateAt = DateTime.now().toUtc();
       final url = welcome.mediaUrl;
       if (url != null && url.isNotEmpty) {
         await _openMedia(url);
@@ -257,7 +261,7 @@ class SessionCoordinator {
   }
 
   void _subscribe() {
-    _roomSub ??= sync.rooms.listen(_onRoom);
+    _stateSub ??= sync.states.listen(_onState);
     _feedSub ??= sync.feeds.listen(_onFeed);
     _kickSub ??= sync.kicked.listen(_onKicked);
     _errSub ??= sync.errors.listen((msg) {
@@ -291,14 +295,14 @@ class SessionCoordinator {
     return 'http://$_wsHost:$_wsPort/m/default/${sync.token}/${Uri.encodeComponent(name)}';
   }
 
-  Future<void> _onRoom(RoomBroadcast r) async {
+  Future<void> _onState(StateBroadcast r) async {
     final now = DateTime.now().toUtc();
-    _lastRoomAt = now;
-    room.value = r;
+    _lastStateAt = now;
+    serverState.value = r;
     _trackSelfReady(r, now);
     if (r.mediaId != _mediaId) {
       _mediaId = r.mediaId;
-      var url = roomMediaUrl(r);
+      var url = stateMediaUrl(r);
       if ((url == null || url.isEmpty) && sync.token.isNotEmpty) {
         final name = (r.media?['name'] as String?) ?? '';
         if (name.isNotEmpty) url = _fileUrlFor(name);
@@ -325,7 +329,7 @@ class SessionCoordinator {
       ];
     }
     if (allowed && !_wasPlayAllowed && r.transport == 'playing') {
-      final edge = roomPositionAt(r, now);
+      final edge = serverPositionAt(r, now);
       actions = [
         for (final a in actions) if (a is! TransportAction) a,
         SeekAction(edge),
@@ -347,7 +351,7 @@ class SessionCoordinator {
 
   /// Mirrors the server's ready flag for self into [_lastReady] (force
   /// by others included) and re-enters the set after a stale spell.
-  void _trackSelfReady(RoomBroadcast r, DateTime now) {
+  void _trackSelfReady(StateBroadcast r, DateTime now) {
     final self = selfMember.peek();
     if (self == null) return;
     if (r.mediaId != _mediaId) _restoringReady = false;
@@ -364,7 +368,7 @@ class SessionCoordinator {
     }
   }
 
-  void _updateStarving(RoomBroadcast r, double bufferedAhead) {
+  void _updateStarving(StateBroadcast r, double bufferedAhead) {
     if (r.transport == 'playing') {
       starving.value = null;
       return;
@@ -418,7 +422,7 @@ class SessionCoordinator {
     if (kind != null) {
       var readyIndex = 0;
       if (f.action == 'ready') {
-        readyIndex = room.peek()?.members.where((m) => m.ready).length ?? 0;
+        readyIndex = serverState.peek()?.members.where((m) => m.ready).length ?? 0;
       }
       unawaited(sfx.play(SfxCue(kind, readyIndex: readyIndex)));
     }
@@ -469,7 +473,7 @@ class SessionCoordinator {
     final now = DateTime.now().toUtc();
     toasts.value =
         toasts.peek().where((t) => now.difference(t.at).inSeconds < 4).toList();
-    final r = room.peek();
+    final r = serverState.peek();
     if (sync.token.isNotEmpty && r != null && _playerReady) {
       sync.sendReport(
         position: playback.positionSecs,
@@ -481,10 +485,10 @@ class SessionCoordinator {
     }
     if (!_manualClose &&
         kickReason.peek() == null &&
-        _lastRoomAt != null &&
-        now.difference(_lastRoomAt!).inSeconds >= 5) {
-      if (room.peek() != null) {
-        room.value = null;
+        _lastStateAt != null &&
+        now.difference(_lastStateAt!).inSeconds >= 5) {
+      if (serverState.peek() != null) {
+        serverState.value = null;
         starving.value = null;
         _wasPlayAllowed = false;
         _mediaId = -1;
@@ -502,7 +506,7 @@ class SessionCoordinator {
     // PLAYING: the ready flag gates nothing then, and watching counts as
     // activity so a pause after a long watch starts a fresh idle clock.
     final event = _idle.tick(now,
-        playing: room.peek()?.transport == 'playing',
+        playing: serverState.peek()?.transport == 'playing',
         selfReady: selfMember.peek()?.ready ?? false);
     switch (event) {
       case IdleEvent.warn:
@@ -523,7 +527,7 @@ class SessionCoordinator {
     }
   }
 
-  void _detectUserSeek(RoomBroadcast r) {
+  void _detectUserSeek(StateBroadcast r) {
     if (_openUrl == null) {
       _lastPos = playback.positionSecs;
       return;
@@ -533,7 +537,7 @@ class SessionCoordinator {
     final jumped = (pos - _lastPos).abs();
     _lastPos = pos;
     if (jumped <= 2.0) return;
-    if ((pos - roomPositionAt(r, now)).abs() < 2.0) return;
+    if ((pos - serverPositionAt(r, now)).abs() < 2.0) return;
     final recentSync = _pendingSeekAt != null &&
         now.difference(_pendingSeekAt!).inMilliseconds < 1000;
     if (recentSync) return;
@@ -541,7 +545,7 @@ class SessionCoordinator {
     sync.sendSeek(pos);
   }
 
-  Future<void> _checkSeekLanded(RoomBroadcast r) async {
+  Future<void> _checkSeekLanded(StateBroadcast r) async {
     final target = _pendingSeekTarget;
     final at = _pendingSeekAt;
     if (target == null || at == null) return;
@@ -589,10 +593,10 @@ class SessionCoordinator {
   }
 
   void nudge(double deltaSecs) {
-    final r = room.peek();
+    final r = serverState.peek();
     if (r == null || _openUrl == null) return;
     final target =
-        roomPositionAt(r, DateTime.now().toUtc()) + deltaSecs;
+        serverPositionAt(r, DateTime.now().toUtc()) + deltaSecs;
     if (target.isNaN || target < 0) return;
     markInput();
     sync.sendSeek(target);
@@ -651,12 +655,13 @@ class SessionCoordinator {
         secret: params.secret,
         name: params.name,
         avatar: params.avatar,
+        hostKey: params.hostKey,
       );
       // Whoever bumped the epoch also closed (or replaced) the socket.
       if (stale()) return;
       reconnecting.value = false;
       _everConnected = true;
-      _lastRoomAt = DateTime.now().toUtc();
+      _lastStateAt = DateTime.now().toUtc();
       health.value = const HealthStatus(HealthSeverity.ok, 'connected');
       final url = welcome.mediaUrl;
       if (url != null && url.isNotEmpty && url != _openUrl) {
@@ -743,7 +748,7 @@ class SessionCoordinator {
       await sync.disconnect();
     } catch (_) {}
     if (!silent) {
-      room.value = null;
+      serverState.value = null;
       starving.value = null;
       health.value = const HealthStatus(HealthSeverity.info, 'idle');
     }
@@ -751,7 +756,7 @@ class SessionCoordinator {
 
   Future<void> dispose() async {
     await leave(silent: true);
-    await _roomSub?.cancel();
+    await _stateSub?.cancel();
     await _feedSub?.cancel();
     await _kickSub?.cancel();
     await _errSub?.cancel();

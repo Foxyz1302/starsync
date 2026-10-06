@@ -12,11 +12,14 @@ mpv libraries come from `media_kit_libs_video`.
 cd apps/desktop && flutter pub get && flutter run -d linux
 cd apps/desktop && flutter build linux --release --dart-define=APP_VERSION=<x.y.z>
 tool/package_linux.sh [--skip-build] [--noupload]    # dist/*.tar.gz
+cd packages/server && dart compile exe bin/server.dart -o watch-together-server
 ```
 
 `APP_VERSION` defaults to `0.0.0-dev`; `package_linux.sh` stamps it from the
 desktop pubspec. Setting `DISCORD_WEBHOOK_URL` makes the packager post the
-tarball to Discord (never commit it).
+tarball to Discord (never commit it). The packager always compiles the
+dedicated server (with the Flutter SDK's `dart`) into the tarball as
+`watch-together-server`, also with `--skip-build`.
 
 ## Dev loop
 
@@ -26,8 +29,10 @@ Run a server without the app, then point apps at it:
 dart run packages/server/bin/server.dart --port 8080 --secret x [--media FILE]
 ```
 
-Prints `READY port=... room=...` and stops on SIGINT. Then Join from one or
-more apps at `127.0.0.1:8080`. Or just Host from the app. mpv env override:
+This is the same `serve()` the app runs when hosting and the same code as
+the dedicated binary. Prints `READY port=... name=...` and stops on SIGINT
+or SIGTERM. Then Join from one or more apps at `127.0.0.1:8080`. Or just
+Host from the app. mpv env override:
 `SYNC_RELAY_HWDEC` (wins over the Settings choice). `SYNC_RELAY_VO` has no
 effect with embedded video: media_kit forces `vo=libmpv`.
 
@@ -43,13 +48,18 @@ and `e2e_check` (simulated viewers against a live server).
 - `sync_playback_e2e_test.dart` and `coord_presence_test.dart` use real mpv;
   the e2e one also expects `~/Videos/chiyo.mp4`. Run only tests related to
   what you changed.
-- CI (`.gitea/workflows/ci.yml`): analyze + test for core and server only.
-  Desktop tests are not in CI.
+- CI (`.gitea/workflows/ci.yml`): analyze + test for core and server, plus
+  `dart compile exe` of the dedicated server (fails if Flutter creeps into
+  `packages/server`). Desktop tests are not in CI.
+- `packages/server/test/serve_isolate_test.dart` runs `serve` in a real
+  isolate; `apps/desktop/test/server_isolate_test.dart` covers the app's
+  host path (isolate server, raw WebSocket join, crash, rehost).
+- Desktop tests that write files use `WT_TEST_TMP` (default: system temp).
 
 Traps:
 - Never pump the session screen or media_kit `Video` in `flutter test`: the
   runner hangs (kill the `flutter_tester` by PID). Test pure logic
-  (`RoomDiff`, coordinator without widgets) instead.
+  (`StateDiff`, coordinator without widgets) instead.
 - Never depend on a server-side WebSocket `onDone`; assert presence with
   deadline polling.
 - `sub.asFuture()` can resolve before `onDone`; poll with a deadline.
@@ -73,9 +83,24 @@ Tokens come from the environment (`RELEASE_TOKEN`, or Actions-provided
 updater skips the check when absent. Workflows live in `.gitea/workflows`
 (the forge reads `.gitea` before `.github`).
 
+## Debugging the hosted server
+
+When hosting, the server runs on its own isolate (`ServerIsolate`,
+`apps/desktop/lib/src/state/server_isolate.dart`), in the same process.
+Breakpoints in `packages/server` work under `flutter run`: the debugger
+attaches to spawned isolates too (it shows as `server`). Its log lines are
+printed with a `[server]` prefix. Hot reload reloads the server isolate's
+code too, but its state (members, clock, sockets) survives until hosting
+restarts; changes to startup code (`SyncServer.start`, routes) need a new
+Host. Without the app: `dart run packages/server/bin/server.dart`.
+
 ## Gotchas
 
 - Relic gives Range as a typed `RangeHeader`; convert from unit + first range.
+- A killed isolate (`Isolate.kill`) does not close its listening socket:
+  the port stays bound in the process until exit. `SyncServer` binds with
+  `shared: true` so a new hosted server in the same process can take it
+  over; a normal stop closes it.
 - Relic server-side `onDone` does not fire for dead peers. Presence is the
   `isClosed` sweep + `onError` forget + `lastSeen` timeouts.
 - `web_socket_channel` 3.x: `channel.ready` errors are unhandled on refused

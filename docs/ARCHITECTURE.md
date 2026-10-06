@@ -7,40 +7,56 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 
 | Path | What | Rule |
 |---|---|---|
-| `packages/core` | protocol messages, sync engine (`RoomEngine`), constants, config, Range parsing, logging | pure Dart, no Flutter |
-| `packages/server` | Relic HTTP + WebSocket server (`RoomServer`, `RoomHub`, `Session`, media endpoint), `bin/server.dart` | pure Dart, no Flutter |
-| `apps/desktop` | Flutter app: UI, `SyncClient`, `SessionCoordinator`, `PlaybackController` (media_kit/mpv), updater | the only shipped binary |
+| `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging | pure Dart, no Flutter |
+| `packages/server` | Relic HTTP + WebSocket server (`SyncServer`, `ServerHub`, `Session`, media endpoint), the `serve()` entrypoint, `bin/server.dart` (dedicated server) | pure Dart, no Flutter |
+| `apps/desktop` | Flutter app: UI, `SyncClient`, `SessionCoordinator`, `PlaybackController` (media_kit/mpv), `ServerIsolate`, updater | ships with `watch-together-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
-| `deploy` | systemd unit for the standalone server (stale until the dedicated server exists) | |
+| `deploy` | systemd unit for the dedicated server | |
 
 Guard: `packages/core/test/flutter_free_test.dart` fails if anything under
 `core/lib` imports Flutter, `dart:ui` or `signals_flutter`; CI runs
 analyze + tests for core and server on every push. Server has no such test but
-the same rule; it is checked by CI building without Flutter. The client
+the same rule; CI checks it with `dart compile exe` of `bin/server.dart`. The client
 WebSocket (`web_socket_channel`) lives in `apps/desktop`; Relic has no client.
 
 ## Server lifecycle
 
-Today (in-process): `SessionState.host()` creates a `RoomServer`, starts it
-on the chosen port (bound to all IPv4 interfaces), then the app joins it over
-`127.0.0.1` like any other client. Leaving or closing the window stops it.
-`RoomServer` runs a 1 s heartbeat: stale sweep, closed-socket sweep, silent
-socket drop, room + feed broadcast. There is one session, id `default`.
+One entrypoint: `serve(config, events:)` in `packages/server`. `config` is
+an `AppConfig.toMap()` (primitives only, so it crosses isolates). It starts a
+`SyncServer` (bound to all IPv4 interfaces) and reports on the `events` port:
+`ready` (with the port and a `stop` SendPort), `error` (start failed), and
+every log record as `log`. Sending `{'t':'stop'}` to the `stop` port closes
+all sockets and returns, and the isolate exits.
 
-`--headless` does not work: the Flutter binary needs a display and exits with
-"cannot open display" on a headless box. `packages/server/bin/server.dart` is
-the only working standalone server (flags `--port`, `--secret`, `--name`,
-`--media`, `--advertise-host`, `--config`; default port 8080).
+- **Hosting from the app**: `SessionState.host()` spawns an isolate running
+  `serve` (`ServerIsolate`), waits for `ready`, then joins it over
+  `127.0.0.1` like any other client. Server logs go to the app's log with a
+  `[server]` prefix. The isolate runs with `errorsAreFatal: false`: an
+  uncaught async error is logged and the server keeps going. If the isolate
+  dies anyway, the session shows "server crashed: ..." and leaves; Home
+  shows it on the Host card (during setup the host attempt fails with it).
+  Stop (leave, close, cancel during setup, a failed own join, being kicked)
+  sends `stop`, waits up to 3 s for exit, then kills the isolate.
+- **Dedicated server**: `bin/server.dart` compiled with `dart compile exe`
+  and shipped next to the app as `watch-together-server`. It parses flags
+  (`--port`, `--secret`, `--name`, `--media`, `--advertise-host`,
+  `--config`; default port 8080) into the same map and calls `serve`;
+  SIGINT and SIGTERM stop it. A Flutter binary cannot run without a
+  display, which is why the server is its own build.
 
-Planned: hosting from the app runs the server on a Dart isolate (ports and
-sockets stay in the same process, UI stays responsive); the dedicated server
-is a separate `dart compile exe` of `packages/server`. See [ROADMAP.md](ROADMAP.md).
+`SyncServer` runs a 1 s heartbeat: stale sweep, closed-socket sweep, silent
+socket drop, state + feed broadcast. There is one session, id `default`.
 
 Passwords: the default secret is empty, which means an open server (a
 warning is logged). Otherwise one shared secret, compared at hello.
-The host is the member that connected from a loopback address; it cannot be
-kicked. Kick = revoke token, send `kicked`, close; the
-person may rejoin at once with a new token.
+
+Host: when hosting, the app generates a random `hostKey` per hosting, puts
+it in the server config and sends it in its own `hello`. The member whose
+key matches is the host and cannot be kicked. The address a connection
+comes from plays no part (so a reverse proxy or tunnel on the same machine
+does not make everyone the host). The dedicated server has no key, so it
+has no host. Kick = revoke token, send `kicked`, close; the person may
+rejoin at once with a new token.
 
 ## Sync model
 
@@ -63,20 +79,20 @@ Loosely modeled on Syncplay, with a different readiness design.
   4 s buffered or stale flips the server to HELD (feed action `pause` by `server`).
   Recovery resumes by itself when the gate passes.
 - **Seek**: allowed from any member in any transport; the server writes the
-  position and bumps `eventId`; flags are untouched. Clients diff each `room`
-  broadcast by `eventId` (`RoomDiff`): new event means seek to the computed
-  room position, transport change means play/pause. Between events: drift
+  position and bumps `eventId`; flags are untouched. Clients diff each `state`
+  broadcast by `eventId` (`StateDiff`): new event means seek to the computed
+  server position, transport change means play/pause. Between events: drift
   over 5 s for more than 2 s seeks, ahead by more than 1.5 s sets rate 0.95
   until level, otherwise nothing. Local seeks are detected by the coordinator
   polling mpv position once per second (`_detectUserSeek`, jump over 2 s and
-  more than 2 s from the room) and sent as a `seek` intent; a retry
-  (`_checkSeekLanded`) re-applies a room seek that has not landed after 1.5 s.
+  more than 2 s from the server position) and sent as a `seek` intent; a retry
+  (`_checkSeekLanded`) re-applies a server seek that has not landed after 1.5 s.
   Known roughness: see ROADMAP.
 - **Liveness**: WS ping every 5 s; silent over 15 s means stale (out of the
   gate, `stale` feed); over 30 s the socket is closed and the member removed.
   Closed sockets are polled with `isClosed` every second: Relic's server-side
   `onDone` does not fire for dead peers, so presence never relies on it.
-- **Client policies**: no room broadcast for 5 s means connection lost, clear
+- **Client policies**: no state broadcast for 5 s means connection lost, clear
   the server state and reconnect every 1.5 s until cancelled (an epoch counter makes
   a cancelled attempt stale) or kicked. After a reconnect the ready flag is
   restored from the server's state. Cancel during setup aborts the join.
@@ -96,14 +112,14 @@ Additive wire changes only; bump `proto` and PROTOCOL.md in the same commit.
 Two sources, same sync.
 
 - **Link**: the media field holds an http(s) URL. It travels as `media.url`
-  in `swap` and `room`, and as `mediaUrl` in `welcome`. Each app plays it
+  in `swap` and `state`, and as `mediaUrl` in `welcome`. Each app plays it
   directly; the server is only the clock.
-- **Host local file**: `RoomServer.setLocalFile` / `mediaPath` makes the file
+- **Host local file**: `SyncServer.setLocalFile` / `mediaPath` makes the file
   the session media. `GET /m/<sid>/<token>/<name>` serves it with a Range
   table, gated by the viewer's token. The server builds the URL per viewer
   (`http://<host>:<port>/m/default/<token>/<name>`), so tokens never reach
   other viewers. `<host>` is the authority the client dialled; `advertiseHost`
-  (default empty) only overrides it when set explicitly. When a `room`
+  (default empty) only overrides it when set explicitly. When a `state`
   broadcast has no `media.url`, the client builds the URL itself from the host
   it connected to. Bytes stream file to socket and are counted as streamed
   (`bytesServed`); nothing is stored. The host plays through loopback like
@@ -146,10 +162,10 @@ Reload video.
 Player lifecycle: the `Player` and its `VideoController` live for one
 session: created on join, disposed on leave, replaced by `recreate()` for
 "Reload video" (button or Ctrl+R; volume kept). `openUrl` opens with `play: false`; play/pause/seek/rate come only from
-`RoomDiff` actions or the play gate (`localPlayAllowed`: self in-set and
-ready). A room seek within 0.5 s of the current position is skipped. `leave()`
+`StateDiff` actions or the play gate (`localPlayAllowed`: self in-set and
+ready). A server seek within 0.5 s of the current position is skipped. `leave()`
 stops the player (otherwise audio keeps playing). On media change
-(`mediaId` bump) the coordinator opens the new URL and `RoomDiff` seeks to 0,
+(`mediaId` bump) the coordinator opens the new URL and `StateDiff` seeks to 0,
 holds and resets rate.
 
 Frozen picture: `FrameWatchdog` samples about once a second. It hashes a
@@ -186,7 +202,7 @@ stalls silently. The app has a `HealthStatus` signal (severity + message)
 for connecting, reconnecting, wrong password, version mismatch, kicked,
 host offline, and starvation ("waiting for X - N.N s buffered").
 Errors are logged with a stack trace at the boundary, then turned into a
-displayable state. The server's `GET /health` returns JSON (`ok`, `room`,
+displayable state. The server's `GET /health` returns JSON (`ok`, `name`,
 `proto`, `viewers`, `bytesServed`, `uptimeSecs`); it is unauthenticated and
 the app does not read it.
 
@@ -217,9 +233,12 @@ this repo, written by `tool/release.sh`.
 - No roles, friends trust model: simplest thing that fits the use.
 - Blank password = open server: the owner chooses between open and private.
 - The host cannot be kicked: the server dies with the host anyway.
-- Server ships inside the app (and, planned, as a separate compiled server):
-  a Flutter binary cannot run headless, so a dedicated server needs its own
-  build of `packages/server`.
+- Server runs inside the app on an isolate, and ships as a separate compiled
+  server: a Flutter binary cannot run headless, so a dedicated server needs
+  its own build of `packages/server`. An isolate keeps the UI responsive and
+  shares the process (sockets, file paths) without a second executable.
+- Host by key, not by address: loopback detection broke behind a
+  same-machine reverse proxy or tunnel.
 - Server owns the clock; reports never move it: avoids ping-pong between clients.
 - Quorum gate: a lone viewer must be able to watch; two or more must start together.
 - Relic for the server, `web_socket_channel` for the client; packages are
@@ -228,5 +247,5 @@ this repo, written by `tool/release.sh`.
   (e.g. a reverse proxy) is a documentation item.
 - One session per server, id `default`: the map is keyed for later but unused.
 - No server storage: config and logs only; media never touches the server disk.
-- Avatars ride in the 1 Hz `room` broadcast (cap 256 KiB base64 per avatar):
+- Avatars ride in the 1 Hz `state` broadcast (cap 256 KiB base64 per avatar):
   simple, costs host uplink; hash-based serving is on the roadmap.

@@ -1,4 +1,5 @@
 export 'src/media_endpoint.dart';
-export 'src/room_hub.dart';
-export 'src/room_server.dart';
+export 'src/serve.dart';
+export 'src/server_hub.dart';
 export 'src/session.dart';
+export 'src/sync_server.dart';

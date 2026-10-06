@@ -1,10 +1,22 @@
+# Dedicated watch-together server (no display needed).
+# Install: unpack the release tarball to /opt/watch-together (the unit only
+# uses the watch-together-server binary in it), copy this file to
+# /etc/systemd/system/, then `systemctl enable --now watch-together`.
+# Flags: --port <n> (default 8080), --secret <password> (empty = open
+# server, anyone who can reach the port can join), --name, --media <file>,
+# --advertise-host <host>, --config <file.yaml|json>. See README.
+# Prefer --config with a root-only file over --secret here: unit files and
+# process lists are readable by other users.
+
 [Unit]
-Description=watch-together headless server
-After=network.target
+Description=watch-together dedicated server
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-ExecStart=/opt/watch-together/server --port 8080
+ExecStart=/opt/watch-together/watch-together-server --port 8080 --secret change-me
 Restart=on-failure
+DynamicUser=true
 NoNewPrivileges=true
 
 [Install]

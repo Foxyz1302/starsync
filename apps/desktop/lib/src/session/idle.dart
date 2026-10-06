@@ -19,7 +19,7 @@ class IdleTracker {
   }
 
   /// Called once per tick. Warn and unready only matter while self is
-  /// ready; while the room plays the ready flag gates nothing.
+  /// ready; while playing the ready flag gates nothing.
   IdleEvent tick(DateTime now, {required bool playing, required bool selfReady}) {
     if (playing) {
       activity(now);

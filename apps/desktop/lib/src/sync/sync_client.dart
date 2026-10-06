@@ -9,13 +9,13 @@ enum SyncStatus { idle, connecting, open, kicked, closed, error }
 class SyncClient {
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
-  final StreamController<RoomBroadcast> _rooms = StreamController.broadcast();
+  final StreamController<StateBroadcast> _states = StreamController.broadcast();
   final StreamController<FeedMessage> _feeds = StreamController.broadcast();
   final StreamController<String> _kicked = StreamController.broadcast();
   final StreamController<String> _errors = StreamController.broadcast();
   final StreamController<SyncStatus> _status = StreamController.broadcast();
 
-  Stream<RoomBroadcast> get rooms => _rooms.stream;
+  Stream<StateBroadcast> get states => _states.stream;
   Stream<FeedMessage> get feeds => _feeds.stream;
   Stream<String> get kicked => _kicked.stream;
   Stream<String> get errors => _errors.stream;
@@ -24,7 +24,7 @@ class SyncClient {
   String token = '';
   String memberId = '';
   String? mediaUrl;
-  RoomBroadcast? lastRoom;
+  StateBroadcast? lastState;
   Completer<WelcomeMessage>? _pendingWelcome;
 
   Future<WelcomeMessage> connect({
@@ -33,6 +33,7 @@ class SyncClient {
     required String name,
     String avatar = '',
     HelloMedia? media,
+    String hostKey = '',
   }) async {
     await disconnect();
     _status.add(SyncStatus.connecting);
@@ -61,6 +62,7 @@ class SyncClient {
       secret: secret,
       user: HelloUser(name: name, avatar: avatar),
       media: media ?? const HelloMedia(name: '', size: 0, duration: 0),
+      hostKey: hostKey,
     );
     ch.sink.add(jsonEncode(hello.toJson()));
     _pendingWelcome = welcomeCompleter;
@@ -74,8 +76,8 @@ class SyncClient {
       mediaUrl = welcome.mediaUrl;
       if (welcome.state != null) {
         try {
-          lastRoom = RoomBroadcast.fromJson(welcome.state!);
-          _rooms.add(lastRoom!);
+          lastState = StateBroadcast.fromJson(welcome.state!);
+          _states.add(lastState!);
         } catch (_) {}
       }
       _status.add(SyncStatus.open);
@@ -113,11 +115,11 @@ class SyncClient {
       return;
     }
     switch (t) {
-      case 'room':
+      case 'state':
         try {
-          final room = RoomBroadcast.fromJson(decoded);
-          lastRoom = room;
-          _rooms.add(room);
+          final state = StateBroadcast.fromJson(decoded);
+          lastState = state;
+          _states.add(state);
         } catch (_) {}
       case 'feed':
         try {
@@ -219,12 +221,12 @@ class SyncClient {
     token = '';
     memberId = '';
     mediaUrl = null;
-    lastRoom = null;
+    lastState = null;
   }
 
   Future<void> dispose() async {
     await disconnect();
-    await _rooms.close();
+    await _states.close();
     await _feeds.close();
     await _kicked.close();
     await _errors.close();

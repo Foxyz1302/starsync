@@ -7,20 +7,25 @@ import 'package:web_socket/web_socket.dart';
 
 import 'session.dart';
 
-final _hubLog = createLogger('room_hub');
+final _hubLog = createLogger('server_hub');
 
-class RoomHub {
+class ServerHub {
   final SessionMap sessions;
   final String expectedSecret;
-  final RoomEngine engine;
+  /// See [AppConfig.hostKey]; empty means nobody is the host.
+  final String hostKey;
+  final SyncEngine engine;
   final Map<String, RelicWebSocket> sockets = {};
 
-  RoomHub(this.sessions, this.expectedSecret, {RoomEngine? engine})
-      : engine = engine ?? RoomEngine();
+  ServerHub(this.sessions, this.expectedSecret,
+      {SyncEngine? engine, this.hostKey = ''})
+      : engine = engine ?? SyncEngine();
+
+  bool isHostKey(String key) => hostKey.isNotEmpty && key == hostKey;
 
   Session get session => sessions.getOrCreate('default', expectedSecret);
 
-  void broadcastRoom() {
+  void broadcastState() {
     final raw = jsonEncode(engine.broadcast().toJson());
     for (final ws in sockets.values.toList()) {
       ws.trySendText(raw);
@@ -81,7 +86,7 @@ class RoomHub {
   }
 
   void changed() {
-    broadcastRoom();
+    broadcastState();
     broadcastFeed();
   }
 
@@ -114,18 +119,13 @@ String sanitizeMediaName(String name) {
   return 'media';
 }
 
-bool _isLoopback(String address) =>
-    address == '::1' ||
-    address.startsWith('127.') ||
-    address.startsWith('::ffff:127.');
-
 void wsErr(RelicWebSocket ws, String message) {
   ws.trySendText(jsonEncode({'t': 'err', 'message': message}));
 }
 
 void mountSyncRoute(
   RelicApp app,
-  RoomHub hub,
+  ServerHub hub,
   String Function(String sid, String token, SessionMedia? media, String host)
       urlBuilder,
 ) {
@@ -134,7 +134,6 @@ void mountSyncRoute(
     final dialledHost = req.url.hasPort
         ? '${req.url.host.contains(':') ? '[${req.url.host}]' : req.url.host}:${req.url.port}'
         : (req.url.host.contains(':') ? '[${req.url.host}]' : req.url.host);
-    final fromLoopback = _isLoopback(req.connectionInfo.remote.address.toString());
     return WebSocketUpgrade((final ws) async {
       ws.pingInterval = Duration(seconds: RelayConstants.pingIntervalSecs);
       final firstText = Completer<String>();
@@ -221,7 +220,7 @@ void mountSyncRoute(
               final report = ReportMessage.fromJson(decoded);
               hub.engine.applyReport(
                   token, report.position, report.buffered, report.eventId);
-              hub.broadcastRoom();
+              hub.broadcastState();
             case 'chat':
               final chat = ChatMessage.fromJson(decoded);
               hub.broadcastChat(viewer?.name ?? '?', chat.text);
@@ -309,7 +308,7 @@ void mountSyncRoute(
         await close();
         return;
       }
-      session.tokens[token]!.isHost = fromLoopback;
+      session.tokens[token]!.isHost = hub.isHostKey(hello.hostKey);
       final memberId = hub.engine.applyJoin(token, hello.user.name, hello.user.avatar);
       final activeToken = token;
       hub.sockets[activeToken] = ws;

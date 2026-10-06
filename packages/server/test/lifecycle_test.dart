@@ -60,10 +60,10 @@ Future<void> _pollBool(
 
 void main() {
   group('presence lifecycle live', () {
-    late RoomServer server;
+    late SyncServer server;
 
     setUp(() async {
-      server = RoomServer(
+      server = SyncServer(
           const AppConfig(port: 0, secret: 'cycle', name: 'cycle'));
       await server.start();
     });

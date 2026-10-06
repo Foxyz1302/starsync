@@ -15,7 +15,7 @@ void main() {
     test('fromMap tolerates missing keys', () {
       final c = AppConfig.fromMap({});
       expect(c.port, 8080);
-      expect(c.name, 'room');
+      expect(c.name, 'server');
     });
 
     test('round-trips through map', () {
@@ -24,8 +24,10 @@ void main() {
           secret: 's',
           name: 'n',
           mediaPath: 'm',
-          advertiseHost: '1.2.3.4');
+          advertiseHost: '1.2.3.4',
+          hostKey: 'hk');
       final back = AppConfig.fromMap(c.toMap());
+      expect(back.hostKey, 'hk');
       expect(back.port, 1234);
       expect(back.secret, 's');
       expect(back.mediaPath, 'm');
@@ -64,15 +66,29 @@ void main() {
       final back = HelloMessage.fromJson(Map<String, Object?>.from(msg.toJson()));
       expect(back.user.name, 'alice');
       expect(back.media.size, 1500000000);
+      expect(back.hostKey, isEmpty);
+      expect(msg.toJson().containsKey('hostKey'), isFalse);
+    });
+
+    test('hello carries hostKey when set', () {
+      const msg = HelloMessage(
+        proto: 1,
+        secret: '',
+        user: HelloUser(name: 'host'),
+        media: HelloMedia(name: '', size: 0, duration: 0),
+        hostKey: 'hk',
+      );
+      final back = HelloMessage.fromJson(Map<String, Object?>.from(msg.toJson()));
+      expect(back.hostKey, 'hk');
     });
 
     test('hello rejects wrong type', () {
       expect(() => HelloMessage.fromJson({'t': 'bye'}), throwsA(isA<ProtocolException>()));
     });
 
-    test('room state round-trips', () {
-      final s = RoomState(position: 12.5, paused: false, mediaId: 3, serverTime: DateTime.utc(2026, 1, 1));
-      final back = RoomState.fromJson(Map<String, Object?>.from(s.toJson()));
+    test('sync state round-trips', () {
+      final s = SyncState(position: 12.5, paused: false, mediaId: 3, serverTime: DateTime.utc(2026, 1, 1));
+      final back = SyncState.fromJson(Map<String, Object?>.from(s.toJson()));
       expect(back.position, 12.5);
       expect(back.paused, isFalse);
       expect(back.mediaId, 3);

@@ -6,17 +6,7 @@ off by deleting it in the same commit as the code. Wire changes also edit
 
 ## Backlog
 
-1. **Isolate server + dedicated server.** Replace host detection by loopback
-   peer (breaks behind a same-machine reverse proxy or tunnel) with an explicit
-   host token. Run the server on a Dart isolate
-   when hosting from the app; build the dedicated server as a separate
-   `dart compile exe` of `packages/server` (a Flutter binary cannot be
-   headless); drop `--headless`; rename "room" to "server" in code
-   (`RoomServer`, `RoomHub`, `RoomBroadcast`, wire `t:'room'`, `room` in
-   `/health`, config defaults) with the proto bump that implies; refresh
-   `deploy/` and the packaging.
-
-2. **Sync fixes.**
+1. **Sync fixes.**
    - Jumpy seek. Root cause: the media_kit seek bar calls `player.seek`
      continuously while dragging; the coordinator only notices through its
      1 s position poll (`_detectUserSeek`), so it fights the server echo and
@@ -34,22 +24,23 @@ off by deleting it in the same commit as the code. Wire changes also edit
      a workaround (remove it then).
    - Ghost member after an unclean drop until `dropAfter`.
 
-3. **Rendering, then shaders.** media_kit falls back to software rendering
+2. **Rendering, then shaders.** media_kit falls back to software rendering
    on the dev machine. Suspect Impeller on Linux against media_kit's GL
    texture path; investigate first, since shaders need hardware rendering and
    it may also cause the video freeze. Then shaders: per-viewer local setting
    using mpv `glsl-shaders`, shipping Anime4K presets (bloc97, MIT).
 
-4. **Windows build + CI.** There is no Windows runner. Try
+3. **Windows build + CI.** There is no Windows runner. Try
    `ubuntu2610/flutter_build` (LLVM-MinGW + Wine `gen_snapshot`) on the Linux
    runner, fallback a GitHub Actions mirror. The manifest needs per-platform
    URLs and `release_publish.sh` must handle a second platform. The updater's
-   Windows apply path exists but is untested. Desktop tests are not in CI
-   either.
+   Windows apply path exists but is untested. The tarball's
+   `watch-together-server` needs a Windows `dart compile exe` too. Desktop
+   tests are not in CI either.
 
-5. **Jellyfin** (epic, below).
+4. **Jellyfin** (epic, below).
 
-6. **Smaller items**
+5. **Smaller items**
    - Link conveniences: Ctrl+V pastes into the media field; a link swap in
      session updates the remembered media; show the open link with an
      open-in-browser button.
@@ -63,8 +54,8 @@ off by deleting it in the same commit as the code. Wire changes also edit
      OOM, no stuck session, drift recovers.
    - Chat history pane (today: activity log only).
    - Avatar caching: serve avatar bytes once by hash instead of base64 in
-     every `room` broadcast.
-   - The `room` broadcast carries the full media URL, which can include an
+     every `state` broadcast.
+   - The `state` broadcast carries the full media URL, which can include an
      `api_key`.
    - TLS: document a reverse proxy in front of the server.
    - Playlist: `queue-add`, `queue-skip`, auto-advance like a swap.

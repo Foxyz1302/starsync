@@ -1,5 +1,5 @@
 abstract class RelayConstants {
-  static const int protoVersion = 4;
+  static const int protoVersion = 5;
 
   static const int chunkBytes = 256 * 1024;
   static const int creditWindowChunks = 8;
@@ -19,7 +19,7 @@ abstract class RelayConstants {
   // leaves wide headroom over any 128x128 pipeline PNG (raw bitmap
   // <= 64 KiB, worst-case base64 ~95 KiB chars) — deliberate over-size
   // for private-server use. PNG keeps transparency; JPEG did not.
-  // Trade: avatars ride in the 1 Hz room broadcast, so worst-case host
+  // Trade: avatars ride in the 1 Hz state broadcast, so worst-case host
   // uplink scales with this cap. Follow-up (not now): send avatar bytes
   // once, reference by hash afterwards.
   static const int maxAvatarBytes = 256 * 1024;

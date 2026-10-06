@@ -1,14 +1,14 @@
 import 'constants.dart';
 import 'protocol.dart';
 
-typedef RoomClock = DateTime Function();
+typedef SyncClock = DateTime Function();
 
 enum Transport { playing, held }
 
 enum Correction { none, slowDown, seek }
 
-Correction correctionFor({required double ownPosition, required double roomPosition}) {
-  final drift = ownPosition - roomPosition;
+Correction correctionFor({required double ownPosition, required double serverPosition}) {
+  final drift = ownPosition - serverPosition;
   if (drift.abs() > RelayConstants.driftSeekThresholdSecs) return Correction.seek;
   if (drift > RelayConstants.slowDownThresholdSecs) return Correction.slowDown;
   return Correction.none;
@@ -52,8 +52,8 @@ class EngineFeed {
   }
 }
 
-class RoomEngine {
-  final RoomClock clock;
+class SyncEngine {
+  final SyncClock clock;
   final Duration staleAfter;
   final Duration dropAfter;
   final EngineFeed feed = EngineFeed();
@@ -67,7 +67,7 @@ class RoomEngine {
   HelloMedia? media;
   int _nextId = 1;
 
-  RoomEngine({RoomClock? clock, Duration? staleAfter, Duration? dropAfter})
+  SyncEngine({SyncClock? clock, Duration? staleAfter, Duration? dropAfter})
       : clock = clock ?? (() => DateTime.now().toUtc()),
         staleAfter = staleAfter ?? const Duration(seconds: 15),
         dropAfter = dropAfter ?? const Duration(seconds: 30),
@@ -249,7 +249,7 @@ class RoomEngine {
     }
   }
 
-  RoomBroadcast broadcast() => RoomBroadcast(
+  StateBroadcast broadcast() => StateBroadcast(
         eventId: eventId,
         transport: transport == Transport.playing ? 'playing' : 'held',
         position: position,

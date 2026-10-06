@@ -7,7 +7,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../state/settings.dart';
-import '../sync/room_diff.dart';
+import '../sync/state_diff.dart';
 import 'frame_watchdog.dart';
 
 /// Owns one mpv [Player] (and its [VideoController]) per session: created

@@ -4,7 +4,9 @@
 # Usage: tool/package_linux.sh [--skip-build] [--noupload|--no-upload]
 # Output: dist/watch-together-<version>-linux-x64.tar.gz containing one
 # top-level folder with the executable, lib/ and data/ as built, plus
-# update.sh (runs the binary with --upgrade). The in-app updater strips
+# update.sh (runs the binary with --upgrade) and watch-together-server (the
+# dedicated server, `dart compile exe` of packages/server/bin/server.dart,
+# built every run, also with --skip-build). The in-app updater strips
 # that top-level folder — keep the layout in sync with updater_test.dart.
 # Upload: set DISCORD_WEBHOOK_URL in the environment (never commit it).
 # The tarball must stay under Discord's upload limit (25 MB free tier).
@@ -46,6 +48,14 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/$FOLDER" "$DIST"
 cp -r "$BUNDLE/." "$STAGE/$FOLDER/"
 install -m 755 "$APP/lib/src/update/bundle/update.sh" "$STAGE/$FOLDER/update.sh"
+# Prefer the dart bundled with the Flutter SDK that builds the app.
+DART="dart"
+if FLUTTER="$(command -v flutter)"; then
+  CANDIDATE="$(dirname "$(readlink -f "$FLUTTER")")/dart"
+  [[ -x "$CANDIDATE" ]] && DART="$CANDIDATE"
+fi
+(cd "$ROOT/packages/server" && "$DART" pub get >/dev/null &&
+  "$DART" compile exe bin/server.dart -o "$STAGE/$FOLDER/watch-together-server")
 tar -czf "$TARBALL" -C "$STAGE" "$FOLDER"
 rm -rf "$STAGE"
 ls -la "$TARBALL"

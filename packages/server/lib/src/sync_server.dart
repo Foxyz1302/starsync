@@ -7,22 +7,22 @@ import 'package:relic/relic.dart';
 import 'package:sync_relay_core/core.dart';
 
 import 'media_endpoint.dart';
-import 'room_hub.dart';
+import 'server_hub.dart';
 import 'session.dart';
 
-class RoomServer {
+class SyncServer {
   final AppConfig config;
-  final pkg_logging.Logger _log = createLogger('room_server');
+  final pkg_logging.Logger _log = createLogger('sync_server');
   final RelicApp _app = RelicApp();
   final SessionMap sessions = SessionMap();
-  late final RoomHub hub;
+  late final ServerHub hub;
   RelicServer? _server;
   DateTime? _startedAt;
   Timer? _heartbeat;
   bool _routesMounted = false;
 
-  RoomServer(this.config) {
-    hub = RoomHub(sessions, config.secret);
+  SyncServer(this.config) {
+    hub = ServerHub(sessions, config.secret, hostKey: config.hostKey);
   }
 
   bool get isRunning => _server != null;
@@ -50,7 +50,7 @@ class RoomServer {
       return Response.ok(
         body: Body.fromString(jsonEncode({
           'ok': true,
-          'room': config.name,
+          'name': config.name,
           'proto': RelayConstants.protoVersion,
           'viewers': viewers,
           'bytesServed': bytes,
@@ -93,16 +93,21 @@ class RoomServer {
     _server = await _app.serve(
       address: InternetAddress.anyIPv4,
       port: config.port,
+      // A killed isolate never closes its listening socket, so the port stays
+      // bound in this process. Shared lets the next server in the same
+      // process bind it again (it then gets all connections); another
+      // process is still refused.
+      shared: true,
     );
     _startedAt = DateTime.now();
     _heartbeat = Timer.periodic(const Duration(seconds: 1), (_) {
       hub.engine.sweepStale();
       hub.sweepClosedSockets();
       hub.dropSilentSockets();
-      hub.broadcastRoom();
+      hub.broadcastState();
       hub.broadcastFeed();
     });
-    _log.info('room "${config.name}" listening on $boundPort');
+    _log.info('server "${config.name}" listening on $boundPort');
   }
 
   Future<void> stop() async {
@@ -112,6 +117,6 @@ class RoomServer {
     await hub.closeAllSockets();
     await _app.close();
     _server = null;
-    _log.info('room "${config.name}" stopped');
+    _log.info('server "${config.name}" stopped');
   }
 }

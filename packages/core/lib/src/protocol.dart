@@ -67,7 +67,15 @@ class HelloMessage {
   final String secret;
   final HelloUser user;
   final HelloMedia media;
-  const HelloMessage({required this.proto, required this.secret, required this.user, required this.media});
+  /// The hosting app's own client proves it is the host with this; empty
+  /// for everyone else.
+  final String hostKey;
+  const HelloMessage(
+      {required this.proto,
+      required this.secret,
+      required this.user,
+      required this.media,
+      this.hostKey = ''});
 
   Map<String, Object?> toJson() => {
         't': 'hello',
@@ -75,6 +83,7 @@ class HelloMessage {
         'secret': secret,
         'user': user.toJson(),
         'media': media.toJson(),
+        if (hostKey.isNotEmpty) 'hostKey': hostKey,
       };
 
   factory HelloMessage.fromJson(Map<String, Object?> json) {
@@ -87,16 +96,17 @@ class HelloMessage {
       secret: (json['secret'] as String?) ?? '',
       user: HelloUser.fromJson(Map<String, Object?>.from(user)),
       media: HelloMedia.fromJson(Map<String, Object?>.from(media)),
+      hostKey: (json['hostKey'] as String?) ?? '',
     );
   }
 }
 
-class RoomState {
+class SyncState {
   final double position;
   final bool paused;
   final int mediaId;
   final DateTime serverTime;
-  const RoomState({required this.position, required this.paused, required this.mediaId, required this.serverTime});
+  const SyncState({required this.position, required this.paused, required this.mediaId, required this.serverTime});
 
   Map<String, Object?> toJson() => {
         'position': position,
@@ -105,7 +115,7 @@ class RoomState {
         'serverTime': serverTime.toIso8601String(),
       };
 
-  factory RoomState.fromJson(Map<String, Object?> json) => RoomState(
+  factory SyncState.fromJson(Map<String, Object?> json) => SyncState(
         position: finiteDouble(json['position'], 'position'),
         paused: (json['paused'] as bool?) ?? true,
         mediaId: finiteInt(json['mediaId'], 'mediaId', fallback: 0),
@@ -296,7 +306,7 @@ class MemberView {
       );
 }
 
-class RoomBroadcast {
+class StateBroadcast {
   final int eventId;
   final String transport;
   final double position;
@@ -304,7 +314,7 @@ class RoomBroadcast {
   final int mediaId;
   final Map<String, Object?>? media;
   final List<MemberView> members;
-  const RoomBroadcast({
+  const StateBroadcast({
     required this.eventId,
     required this.transport,
     required this.position,
@@ -315,7 +325,7 @@ class RoomBroadcast {
   });
 
   Map<String, Object?> toJson() => {
-        't': 'room',
+        't': 'state',
         'eventId': eventId,
         'transport': transport,
         'position': position,
@@ -325,11 +335,11 @@ class RoomBroadcast {
         'members': members.map((m) => m.toJson()).toList(),
       };
 
-  factory RoomBroadcast.fromJson(Map<String, Object?> json) {
-    if (json['t'] != 'room') throw const ProtocolException('not a room broadcast');
+  factory StateBroadcast.fromJson(Map<String, Object?> json) {
+    if (json['t'] != 'state') throw const ProtocolException('not a state broadcast');
     final members = json['members'];
     final media = json['media'];
-    return RoomBroadcast(
+    return StateBroadcast(
       eventId: finiteInt(json['eventId'], 'eventId', fallback: 0),
       transport: (json['transport'] as String?) ?? 'held',
       position: finiteDouble(json['position'], 'position'),

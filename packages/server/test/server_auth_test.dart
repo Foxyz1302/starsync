@@ -8,28 +8,19 @@ import 'package:sync_relay_server/server.dart';
 import 'package:test/test.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-Future<String?> _lanAddress() async {
-  for (final i in await NetworkInterface.list(type: InternetAddressType.IPv4)) {
-    for (final a in i.addresses) {
-      if (!a.isLoopback) return a.address;
-    }
-  }
-  return null;
-}
-
 void main() {
-  group('room auth live', () {
+  group('server auth live', () {
     late File file;
     late Uint8List bytes;
-    late RoomServer server;
+    late SyncServer server;
     late HttpClient http;
 
     setUp(() async {
       bytes = Uint8List.fromList(List<int>.generate(8192, (i) => i % 251));
       file = File(
-          '${Directory.systemTemp.path}/room_test_${DateTime.now().microsecondsSinceEpoch}.bin');
+          '${Directory.systemTemp.path}/server_test_${DateTime.now().microsecondsSinceEpoch}.bin');
       await file.writeAsBytes(bytes);
-      server = RoomServer(AppConfig(
+      server = SyncServer(AppConfig(
           port: 0, secret: 'shh', name: 'test', mediaPath: file.path));
       await server.start();
       http = HttpClient();
@@ -71,14 +62,14 @@ void main() {
       }
     }
 
-    test('health reports room, proto, viewers, bytes', () async {
+    test('health reports name, proto, viewers, bytes', () async {
       final req = await http.get('127.0.0.1', server.boundPort, '/health');
       final resp = await req.close();
       expect(resp.statusCode, 200);
       final body = await resp.transform(utf8.decoder).join();
       final decoded = jsonDecode(body) as Map;
       expect(decoded['ok'], isTrue);
-      expect(decoded['room'], 'test');
+      expect(decoded['name'], 'test');
       expect(decoded['proto'], RelayConstants.protoVersion);
       expect(decoded['viewers'], 0);
       expect(decoded['bytesServed'], 0);
@@ -247,12 +238,6 @@ void main() {
     });
 
     test('kick via socket: peer kicked, unknown target errors', () async {
-      final lan = await _lanAddress();
-      if (lan == null) {
-        markTestSkipped('no non-loopback IPv4 to act as a non-host peer');
-        return;
-      }
-      // Loopback peers are the host and unkickable, so bob dials the LAN address.
       Future<(WebSocketChannel, String, String, List<String>)> join(String who,
           [String host = '127.0.0.1']) async {
         final ch = WebSocketChannel.connect(
@@ -304,7 +289,7 @@ void main() {
       }
 
       final (a, _, _, messagesA) = await join('alice');
-      final (b, tokenB, idB, messagesB) = await join('bob', lan);
+      final (b, tokenB, idB, messagesB) = await join('bob');
       try {
         a.sink.add(jsonEncode(
             KickRequest(target: idB, reason: 'afk?').toJson()));

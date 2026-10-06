@@ -33,8 +33,8 @@ A five-minute tour. Details: [ARCHITECTURE.md](ARCHITECTURE.md), wire format:
 
 - **Host from the app**: the app you click Host in also runs the server.
   Simplest. The server lives as long as that app.
-- **Dedicated server**: a separate server program on an always-on box.
-  Planned, see [ROADMAP.md](ROADMAP.md).
+- **Dedicated server**: `watch-together-server`, a separate program in the
+  release tarball, for an always-on box. See the README.
 
 Friends join either way with the Join card on Home.
 

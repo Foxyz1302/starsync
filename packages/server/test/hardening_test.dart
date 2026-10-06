@@ -16,14 +16,15 @@ class _Peer {
   }
 
   static Future<_Peer> join(String host, int port, String name,
-      {String secret = ''}) async {
+      {String secret = '', String hostKey = ''}) async {
     final ws = await WebSocket.connect('ws://$host:$port/sync');
     final p = _Peer(ws);
     ws.add(jsonEncode(HelloMessage(
             proto: RelayConstants.protoVersion,
             secret: secret,
             user: HelloUser(name: name),
-            media: const HelloMedia(name: '', size: 0, duration: 0))
+            media: const HelloMedia(name: '', size: 0, duration: 0),
+            hostKey: hostKey)
         .toJson()));
     await p.next('welcome');
     return p;
@@ -57,13 +58,13 @@ Future<String?> _lan() async {
 }
 
 void main() {
-  late RoomServer server;
+  late SyncServer server;
   late File file;
 
   setUp(() async {
     file = File('${Directory.systemTemp.path}/hard_${DateTime.now().microsecondsSinceEpoch}.bin')
       ..writeAsBytesSync(List.filled(64, 1));
-    server = RoomServer(AppConfig(port: 0, secret: '', name: 't', mediaPath: file.path));
+    server = SyncServer(AppConfig(port: 0, secret: '', name: 't', mediaPath: file.path));
     await server.start();
   });
 
@@ -122,22 +123,37 @@ void main() {
     await a.ws.close();
   });
 
-  test('host (loopback) cannot be kicked; others can', () async {
-    final lan = await _lan();
-    if (lan == null) {
-      markTestSkipped('no LAN address');
-      return;
-    }
-    final host = await _Peer.join('127.0.0.1', server.boundPort, 'host');
-    final friend = await _Peer.join(lan, server.boundPort, 'friend');
-    final hostId = server.hub.engine.members.values.firstWhere((m) => m.name == 'host').id;
-    friend.send(jsonEncode(KickRequest(target: hostId).toJson()));
+  test('host (hostKey) cannot be kicked; loopback without it can', () async {
+    await server.stop();
+    server = SyncServer(AppConfig(port: 0, secret: '', name: 't', hostKey: 'hk'));
+    await server.start();
+    final host =
+        await _Peer.join('127.0.0.1', server.boundPort, 'host', hostKey: 'hk');
+    final friend = await _Peer.join('127.0.0.1', server.boundPort, 'friend');
+    final guesser =
+        await _Peer.join('127.0.0.1', server.boundPort, 'guesser', hostKey: 'nope');
+    String idOf(String name) =>
+        server.hub.engine.members.values.firstWhere((m) => m.name == name).id;
+    friend.send(jsonEncode(KickRequest(target: idOf('host')).toJson()));
     final err = await friend.next('err');
     expect(err['message'], "can't kick the host");
     expect(host.closed, isFalse);
-    await expectLater(server.hub.kickById(hostId, 'x'), throwsA(isA<AuthException>()));
+    await expectLater(
+        server.hub.kickById(idOf('host'), 'x'), throwsA(isA<AuthException>()));
+    // Same machine, no key (or a wrong one): an ordinary member.
+    host.send(jsonEncode(KickRequest(target: idOf('guesser')).toJson()));
+    await guesser.next('kicked');
+    await server.hub.kickById(idOf('friend'), 'x');
+    await friend.next('kicked');
     await host.ws.close();
-    await friend.ws.close();
+  });
+
+  test('no hostKey configured: nobody is the host', () async {
+    final a = await _Peer.join('127.0.0.1', server.boundPort, 'a', hostKey: '');
+    final b = await _Peer.join('127.0.0.1', server.boundPort, 'b', hostKey: 'x');
+    expect(server.session.tokens.values.where((t) => t.isHost), isEmpty);
+    await a.ws.close();
+    await b.ws.close();
   });
 
   test('empty secret accepts any hello secret', () async {

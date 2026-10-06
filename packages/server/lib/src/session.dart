@@ -10,7 +10,7 @@ class ViewerToken {
   final String name;
   final String avatar;
   bool kicked = false;
-  /// Connected from a loopback address: the host's own in-process client.
+  /// Sent the server's host key in hello: the hosting app's own client.
   bool isHost = false;
   int bytesServed = 0;
   DateTime lastSeen;

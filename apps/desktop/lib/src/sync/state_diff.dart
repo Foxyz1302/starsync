@@ -19,9 +19,9 @@ class RateAction extends PlayerAction {
   const RateAction(this.rate);
 }
 
-double roomPositionAt(RoomBroadcast room, DateTime now) {
-  if (room.transport != 'playing') return room.position;
-  return room.position + now.difference(room.serverTime).inMilliseconds / 1000.0;
+double serverPositionAt(StateBroadcast state, DateTime now) {
+  if (state.transport != 'playing') return state.position;
+  return state.position + now.difference(state.serverTime).inMilliseconds / 1000.0;
 }
 
 bool seekLanded({required double ownPosition, required double target}) {
@@ -31,9 +31,9 @@ bool seekLanded({required double ownPosition, required double target}) {
   return true;
 }
 
-bool localPlayAllowed(RoomBroadcast room, String memberId) {
+bool localPlayAllowed(StateBroadcast state, String memberId) {
   if (memberId.isEmpty) return false;
-  for (final m in room.members) {
+  for (final m in state.members) {
     if (m.id == memberId) return m.inSet && m.ready;
   }
   return false;
@@ -45,7 +45,7 @@ bool localPlayAllowed(RoomBroadcast room, String memberId) {
 bool shouldReassertReady(MemberView? self) =>
     self != null && self.ready && !self.inSet && !self.stale;
 
-class RoomDiff {
+class StateDiff {
   static const debounceWindow = Duration(seconds: 2);
 
   int _lastEventId = -1;
@@ -57,14 +57,14 @@ class RoomDiff {
 
   bool get slowing => _slowing;
 
-  List<PlayerAction> diff(RoomBroadcast room, double ownPosition, DateTime now) {
+  List<PlayerAction> diff(StateBroadcast state, double ownPosition, DateTime now) {
     final out = <PlayerAction>[];
-    final roomPos = roomPositionAt(room, now);
+    final serverPos = serverPositionAt(state, now);
 
-    if (room.mediaId != _lastMediaId && _lastMediaId != -1) {
-      _lastEventId = room.eventId;
-      _lastTransport = room.transport;
-      _lastMediaId = room.mediaId;
+    if (state.mediaId != _lastMediaId && _lastMediaId != -1) {
+      _lastEventId = state.eventId;
+      _lastTransport = state.transport;
+      _lastMediaId = state.mediaId;
       _slowing = false;
       _deviatingSince = null;
       out.add(const SeekAction(0));
@@ -74,39 +74,39 @@ class RoomDiff {
     }
 
     if (_lastEventId == -1) {
-      _lastEventId = room.eventId;
-      _lastTransport = room.transport;
-      _lastMediaId = room.mediaId;
+      _lastEventId = state.eventId;
+      _lastTransport = state.transport;
+      _lastMediaId = state.mediaId;
       _deviatingSince = null;
-      out.add(SeekAction(roomPos));
-      out.add(TransportAction(room.transport == 'playing'));
+      out.add(SeekAction(serverPos));
+      out.add(TransportAction(state.transport == 'playing'));
       return out;
     }
 
-    if (room.eventId != _lastEventId) {
-      _lastEventId = room.eventId;
+    if (state.eventId != _lastEventId) {
+      _lastEventId = state.eventId;
       _slowing = false;
       _deviatingSince = null;
       out.add(const RateAction(1.0));
-      out.add(SeekAction(roomPos));
-      if (room.transport != _lastTransport) {
-        _lastTransport = room.transport;
-        out.add(TransportAction(room.transport == 'playing'));
+      out.add(SeekAction(serverPos));
+      if (state.transport != _lastTransport) {
+        _lastTransport = state.transport;
+        out.add(TransportAction(state.transport == 'playing'));
       }
       return out;
     }
 
-    if (room.transport != _lastTransport) {
-      _lastTransport = room.transport;
+    if (state.transport != _lastTransport) {
+      _lastTransport = state.transport;
       _slowing = false;
       _deviatingSince = null;
       out.add(const RateAction(1.0));
-      out.add(TransportAction(room.transport == 'playing'));
-      out.add(SeekAction(roomPos));
+      out.add(TransportAction(state.transport == 'playing'));
+      out.add(SeekAction(serverPos));
       return out;
     }
 
-    final drift = ownPosition - roomPos;
+    final drift = ownPosition - serverPos;
     if (_slowing) {
       if (drift.abs() < 0.1) {
         _slowing = false;
@@ -114,10 +114,10 @@ class RoomDiff {
       }
       return out;
     }
-    switch (correctionFor(ownPosition: ownPosition, roomPosition: roomPos)) {
+    switch (correctionFor(ownPosition: ownPosition, serverPosition: serverPos)) {
       case Correction.seek:
-        if (_deviatingEvent != room.eventId || _deviatingSince == null) {
-          _deviatingEvent = room.eventId;
+        if (_deviatingEvent != state.eventId || _deviatingSince == null) {
+          _deviatingEvent = state.eventId;
           _deviatingSince = now;
           break;
         }
@@ -125,7 +125,7 @@ class RoomDiff {
           break;
         }
         _deviatingSince = null;
-        out.add(SeekAction(roomPos));
+        out.add(SeekAction(serverPos));
       case Correction.slowDown:
         _deviatingSince = null;
         _slowing = true;

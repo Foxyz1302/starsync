@@ -5,12 +5,12 @@ import 'package:test/test.dart';
 
 void main() {
   late DateTime t;
-  late RoomEngine engine;
+  late SyncEngine engine;
   DateTime clock() => t;
 
   setUp(() {
     t = DateTime.utc(2026, 1, 1);
-    engine = RoomEngine(clock: clock);
+    engine = SyncEngine(clock: clock);
   });
 
   String join(String token, String name) => engine.applyJoin(token, name, '');
@@ -37,12 +37,12 @@ void main() {
   });
 
   group('membership + gate', () {
-    test('join lands out-of-set, room stays held', () {
+    test('join lands out-of-set, playback stays held', () {
       join('a', 'alice');
       expect(engine.transport, Transport.held);
       expect(engine.members['a']!.inSet, isFalse);
-      final room = engine.broadcast();
-      expect(room.members.single.inSet, isFalse);
+      final state = engine.broadcast();
+      expect(state.members.single.inSet, isFalse);
     });
 
     test('single ready + buffered auto-plays', () {
@@ -54,7 +54,7 @@ void main() {
       expect(engine.transport, Transport.playing);
     });
 
-    test('late joiner does not halt a playing room', () {
+    test('late joiner does not halt playback', () {
       join('a', 'alice');
       engine.applyReady('a', true);
       buffer('a', 4.0);
@@ -77,7 +77,7 @@ void main() {
       expect(engine.members['b']!.inSet, isTrue);
     });
 
-    test('disconnect removes from quorum, room resumes', () {
+    test('disconnect removes from quorum, playback resumes', () {
       join('a', 'alice');
       join('b', 'bob');
       engine.applyReady('a', true);
@@ -218,7 +218,7 @@ void main() {
       expect(engine.members['a']!.ready, isTrue);
     });
 
-    test('unpause uses room clock, laggards seek forward', () {
+    test('unpause uses server clock, laggards seek forward', () {
       join('a', 'alice');
       join('b', 'bob');
       engine.applyReady('a', true);
@@ -355,29 +355,29 @@ void main() {
 
   group('tiered correction', () {
     test('big drift seeks either direction', () {
-      expect(correctionFor(ownPosition: 100, roomPosition: 0), Correction.seek);
-      expect(correctionFor(ownPosition: 0, roomPosition: 100), Correction.seek);
+      expect(correctionFor(ownPosition: 100, serverPosition: 0), Correction.seek);
+      expect(correctionFor(ownPosition: 0, serverPosition: 100), Correction.seek);
     });
 
     test('ahead beyond 1.5s slows to 0.95x', () {
-      expect(correctionFor(ownPosition: 3, roomPosition: 0), Correction.slowDown);
-      expect(correctionFor(ownPosition: 1.6, roomPosition: 0), Correction.slowDown);
+      expect(correctionFor(ownPosition: 3, serverPosition: 0), Correction.slowDown);
+      expect(correctionFor(ownPosition: 1.6, serverPosition: 0), Correction.slowDown);
     });
 
     test('deadzone does nothing', () {
-      expect(correctionFor(ownPosition: 1.0, roomPosition: 0), Correction.none);
-      expect(correctionFor(ownPosition: 0, roomPosition: 3.0), Correction.none);
-      expect(correctionFor(ownPosition: 5.1, roomPosition: 0), Correction.seek);
-      expect(correctionFor(ownPosition: 5.0, roomPosition: 0), Correction.slowDown);
+      expect(correctionFor(ownPosition: 1.0, serverPosition: 0), Correction.none);
+      expect(correctionFor(ownPosition: 0, serverPosition: 3.0), Correction.none);
+      expect(correctionFor(ownPosition: 5.1, serverPosition: 0), Correction.seek);
+      expect(correctionFor(ownPosition: 5.0, serverPosition: 0), Correction.slowDown);
     });
   });
 
   group('broadcast shape', () {
-    test('room JSON round-trips with member views', () {
+    test('state JSON round-trips with member views', () {
       join('a', 'alice');
-      final room = engine.broadcast();
+      final state = engine.broadcast();
       final back =
-          RoomBroadcast.fromJson(Map<String, Object?>.from(room.toJson()));
+          StateBroadcast.fromJson(Map<String, Object?>.from(state.toJson()));
       expect(back.transport, 'held');
       expect(back.members.single.name, 'alice');
       expect(back.members.single.id, 'm1');

@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:watch_together/src/session/idle.dart';
 import 'package:watch_together/src/session/session_coordinator.dart';
-import 'package:watch_together/src/sync/room_diff.dart';
+import 'package:watch_together/src/sync/state_diff.dart';
 
 MemberView _self({bool ready = true, bool inSet = true, bool stale = false}) =>
     MemberView(

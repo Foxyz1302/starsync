@@ -39,6 +39,12 @@ class ConnectFlow extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  void showError(ConnectMode mode, CardError error) {
+    errors[mode] = error;
+    notices[mode] = null;
+    _notify();
+  }
+
   void clearError(ConnectMode mode) {
     if (errors[mode] == null && notices[mode] == null) return;
     errors[mode] = null;

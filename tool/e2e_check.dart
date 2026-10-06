@@ -11,7 +11,7 @@ void check(String name, bool ok, [String detail = '']) {
 }
 
 class FakeViewer {
-  final RoomEngine engine;
+  final SyncEngine engine;
   final String token;
   double ownPosition;
   double buffered;
@@ -37,7 +37,7 @@ class FakeViewer {
 
 Future<void> main(List<String> args) async {
   var simTime = DateTime.utc(2026, 1, 1);
-  final engine = RoomEngine(clock: () => simTime);
+  final engine = SyncEngine(clock: () => simTime);
   engine.media = const HelloMedia(name: 'Movie.mkv', size: 4000000000, duration: 7200.0);
 
   void step([int seconds = 1]) => simTime = simTime.add(Duration(seconds: seconds));
@@ -49,7 +49,7 @@ Future<void> main(List<String> args) async {
     engine.applyReady(t, true);
     engine.applyReport(t, 0, 6.0, engine.eventId);
   }
-  check('room playing after all ready+buffered', engine.transport == Transport.playing);
+  check('playing after all ready+buffered', engine.transport == Transport.playing);
 
   final alice = FakeViewer(engine, 'a');
   final bob = FakeViewer(engine, 'b');
@@ -83,7 +83,7 @@ Future<void> main(List<String> args) async {
   }
 
   engine.applyJoin('d', 'dan', '');
-  check('mid-play join does not halt room', engine.transport == Transport.playing);
+  check('mid-play join does not halt playback', engine.transport == Transport.playing);
   final dan = FakeViewer(engine, 'd');
   dan.ownPosition = engine.positionAt();
   dan.tick();
@@ -101,7 +101,7 @@ Future<void> main(List<String> args) async {
   }
   engine.applyReady('b', false);
   final frozen = engine.positionAt();
-  check('unready pauses room', engine.transport == Transport.held);
+  check('unready pauses playback', engine.transport == Transport.held);
   for (var s = 0; s < 30; s++) {
     step();
     engine.applyReport('a', frozen, 6.0, engine.eventId);
@@ -122,7 +122,7 @@ Future<void> main(List<String> args) async {
     engine.applyReady('c', true);
     engine.applyReport('c', engine.positionAt(), 6.0, engine.eventId);
   }
-  check('post-flap room converges to playing', engine.transport == Transport.playing);
+  check('post-flap converges to playing', engine.transport == Transport.playing);
 
   engine.applySwap('a', const HelloMedia(name: 'Ep02.mkv', size: 100, duration: 1200.0));
   check('swap holds + resets edge', engine.transport == Transport.held && engine.positionAt() == 0);
