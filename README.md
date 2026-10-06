@@ -33,9 +33,9 @@ telling you to update.
 
 ## Host from the app
 
-Home, Host tab. Pick what to watch (optional): Link (paste an http(s) URL;
-Ctrl+V outside a field pastes it in) or File (path or Browse). Jellyfin is
-coming. In the column beside it set a port and an optional password (blank =
+Home, Host tab. Pick what to watch (optional): Jellyfin (browse your linked
+servers, see below), Link (paste an http(s) URL; Ctrl+V outside a field
+pastes it in) or File (path or Browse). In the column beside it set a port and an optional password (blank =
 anyone can join), then Host. Your name and avatar come from your profile
 (the chip at the top left). The app starts a
 server inside itself and joins it; you are the host and nobody can kick you.
@@ -84,7 +84,7 @@ x to forget it. Ctrl+1 / Ctrl+2 switch between Join and Host.
 Profile, hardware decoding (auto, off or custom; the env var
 `SYNC_RELAY_HWDEC` overrides it; applies on the next join or Reload video),
 updates, video shaders (see below), and the keyboard shortcuts (read-only).
-Integrations (Jellyfin) shows "coming soon". About shows the version.
+Integrations links Jellyfin servers (below). About shows the version.
 
 Keys in a session: Space = ready / unready, Tab = side panel (people, log,
 chat, change video), Left/Right = seek 10 s, F = fullscreen, Esc = close
@@ -102,9 +102,31 @@ Only the host needs the port reachable.
 
 ## Jellyfin
 
-Pasting a Jellyfin direct-play link works today like any link. Proper
-Jellyfin support (per-person login, watched status, library browsing) is
-planned: see [docs/ROADMAP.md](docs/ROADMAP.md).
+Integrations > Jellyfin > Add server: type the address, then sign in with
+Quick Connect (the app shows a code; approve it in Jellyfin under Profile >
+Quick Connect) or your username and password. Several servers can be
+linked; each shows its status, and a star picks the default. Sign out
+revokes the app's sign-in on the server. If a sign-in expires the server
+shows "Reconnect" instead of disappearing.
+
+The Host tab's Jellyfin source is a library browser: Continue watching (with
+time left), Next up and the latest per library on the start page; library
+grids with sort (name, date added, release date, rating, random) and
+Unwatched / Favorites filters; series pages with seasons, episode progress
+and a "Next up" button; details with the file's tracks; search. Clicking a
+movie or episode picks it; the button in the top right enlarges the browser
+and moves port, password and Host into a bar below it. On wide windows a
+side pane shows details of whatever is under the mouse.
+
+Keys in the browser: arrows move, Enter picks or opens, I = details,
+Esc / Backspace / Alt+Left = back (Esc first clears a search), / or Ctrl+F =
+search.
+
+For now a hosted Jellyfin pick is shared as a stream link carrying the
+host's sign-in, so everyone watches through the host's account. Per-person
+playback, watched status and progress sync are planned: see
+[docs/ROADMAP.md](docs/ROADMAP.md). Pasting a Jellyfin direct-play link
+still works like any link.
 
 ## Video quality and shaders
 

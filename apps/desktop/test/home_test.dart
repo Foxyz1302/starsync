@@ -85,12 +85,12 @@ void main() {
     expect(c.source, MediaKind.file);
     c.pasteText(' https://example.com/a.mkv ');
     expect(c.source, MediaKind.link);
-    expect(c.selection, (mediaPath: '', linkUrl: 'https://example.com/a.mkv'));
+    expect(c.selection, const LinkMedia('https://example.com/a.mkv'));
     c.pasteText('/home/me/b.mkv');
     expect(c.source, MediaKind.file);
-    expect(c.selection, (mediaPath: '/home/me/b.mkv', linkUrl: ''));
+    expect(c.selection, const FileMedia('/home/me/b.mkv'));
     c.source = MediaKind.jellyfin;
-    expect(c.selection, (mediaPath: '', linkUrl: ''));
+    expect(c.selection, isNull);
     c.dispose();
   });
 
@@ -238,10 +238,11 @@ void main() {
     expect(find.text('Paste'), findsOneWidget);
     await tester.tap(find.text('Jellyfin'));
     await tester.pumpAndSettle();
-    expect(find.text('Link your Jellyfin in Integrations — coming soon'), findsOneWidget);
+    // No linked server: sign-in right in the picker.
+    expect(find.text('Add a Jellyfin server'), findsOneWidget);
     await tester.tap(find.text('Open Integrations'));
     await tester.pumpAndSettle();
-    expect(find.text('Link account'), findsOneWidget);
+    expect(find.text('Add server'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

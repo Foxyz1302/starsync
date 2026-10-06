@@ -330,17 +330,50 @@ Recent server tiles in a grid that adds columns as the window widens. While
 the Join tab is visible each tile polls the server's `GET /health` every
 10 s (`health_probe.dart`) for online, name, viewer count and a "needs
 update" badge when `proto` differs from ours. Host (`host_tab.dart`): the
-media picker (`media_picker.dart`: Jellyfin placeholder, Link, File; a
-reusable widget driven by a `MediaPickerController`) fills the main area;
-port, password and Host sit in a 340 px column on the right, below the
-picker under 860 px. Text fields have fixed or capped widths (720 px max) so
+media picker (`media_picker.dart`: Jellyfin, Link, File; a reusable widget
+driven by a `MediaPickerController` whose `selection` is a sealed
+`PickedMedia`: `LinkMedia`, `FileMedia` or `JellyfinMedia`, see
+`picked_media.dart`) fills the main area; port, password and Host sit in a
+340 px column on the right, below the picker under 860 px. With the
+Jellyfin source the browser fills the height and can be enlarged, which
+turns the column into a one-row bar under it. Text fields have fixed or capped widths (720 px max) so
 they stay compact on ultrawide screens. Submit state (busy, cancel,
 per-tab errors, server crash) is `ConnectFlow`. Settings (profile, hardware
 decoding, updates, video shaders, shortcuts), Integrations
-(Jellyfin "coming soon") and About open in the same body. Settings persist
+(linked Jellyfin servers) and About open in the same body. Settings persist
 in two Hive boxes: `connect_form` (last form and recents; saved even when a
 join fails) and `settings`. Link media names are derived from the URL path
 and never contain a query string.
+
+Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
+- `accounts.dart`: `JellyfinAccounts` (singleton `instance`), one
+  `JellyfinAccount` per ServerId (address list, user, token) in the
+  `jellyfin` Hive box with a random per-install DeviceId; Client = app name,
+  Version = app version, Device = hostname. Only tokens obtained by
+  `sign_in.dart` (Quick Connect or password) are stored. Tokens are checked
+  on start (`/Users/Me`, each known address in turn): online, offline, or
+  expired (kept, shown as Reconnect; never dropped silently). A 401 while
+  browsing also marks it expired. `clientFor(serverId)` gives the shared
+  signed-in client; `cached()` memoises browse calls for 3 min.
+- `sign_in.dart` + `sign_in_panel.dart`: address -> `/System/Info/Public`
+  -> Quick Connect (code, poll, cancel) or password; reconnect must hit the
+  same ServerId. `accounts_panel.dart` is the Integrations card.
+- `browser.dart`: back stack of `BrowseRoute`s (Home rows, library grid,
+  series, detail) kept alive under `Visibility(maintainState)` so back keeps
+  scroll and loaded pages; search (300 ms debounce) overlays them. Cards
+  (`cards.dart`) fill the width with whole columns (`fitColumns`); rows and
+  grids are lazy builders; library grids page 100 at a time with skeletons
+  up to the total count. Images (`images.dart`) are `Image.network` at
+  width steps (160..2560) with the image tag in the URL, so the image cache
+  key changes only when the image does. An inspector pane follows
+  hover/focus from 1400 px browser width.
+- Picking an item gives a `JellyfinMedia` (serverId, baseUrl, itemId,
+  mediaSourceId?, title, subtitle, runtime; no credentials). The Host tab
+  remembers the last pick in the `jellyfin` box. Interim until the protocol
+  carries Jellyfin items: `interimJellyfinLink` in `host_tab.dart`
+  (`INTERIM(jellyfin-protocol)`) hosts it as a link to the host's
+  authorised static stream URL; `ConnectFlow.submit(linkOverride:)` keeps
+  that token-bearing URL out of the saved form.
 
 Window chrome is frameless (`window_manager`): every screen brings its own
 drag area and min/max/close buttons (Home's top bar; the session uses

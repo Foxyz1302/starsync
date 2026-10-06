@@ -91,8 +91,11 @@ class ConnectFlow extends ChangeNotifier {
   }
 
   /// [edit] fills the card's fields into a copy of the last form, so the
-  /// other card's saved values survive.
-  Future<void> submit(ConnectMode mode, void Function(ConnectForm f) edit) async {
+  /// other card's saved values survive. [linkOverride] (host only) is played
+  /// as the link but never stored in the form: the interim Jellyfin stream
+  /// URL carries a token.
+  Future<void> submit(ConnectMode mode, void Function(ConnectForm f) edit,
+      {String? linkOverride}) async {
     if (busy != null) return;
     final myAttempt = ++_attempt;
     final form = _session.lastForm.copy();
@@ -112,7 +115,13 @@ class ConnectFlow extends ChangeNotifier {
 
     final ConnectParams params;
     try {
-      params = await buildParams(mode, form);
+      params = await buildParams(
+          mode,
+          linkOverride == null || mode != ConnectMode.host
+              ? form
+              : (form.copy()
+                ..mediaPath = ''
+                ..linkUrl = linkOverride));
     } catch (e) {
       if (myAttempt != _attempt) return;
       busy = null;

@@ -2,23 +2,32 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../jellyfin/accounts.dart';
+import '../../jellyfin/picker_source.dart';
 import '../../widgets/media_input.dart';
+import 'picked_media.dart';
 import 'ui.dart';
+
+export 'picked_media.dart';
 
 const videoExtensions = ['mp4', 'mkv', 'webm', 'avi', 'mov', 'm4v', 'ts'];
 
 enum MediaKind { jellyfin, link, file }
 
-/// What to play: at most one of the two is non-empty; both empty = none.
-typedef MediaSelection = ({String mediaPath, String linkUrl});
-
 /// State of a [MediaPicker], owned by whoever hosts it (Home's Host tab,
 /// later the session's swap panel) so it survives rebuilds.
 class MediaPickerController extends ChangeNotifier {
-  MediaPickerController({String mediaPath = '', String linkUrl = '', MediaKind? source})
+  MediaPickerController(
+      {String mediaPath = '', String linkUrl = '', JellyfinMedia? jellyfin, MediaKind? source})
       : link = TextEditingController(text: linkUrl),
         file = TextEditingController(text: mediaPath),
-        _source = source ?? (linkUrl.isNotEmpty ? MediaKind.link : MediaKind.file) {
+        _jellyfin = jellyfin,
+        _source = source ??
+            (linkUrl.isNotEmpty
+                ? MediaKind.link
+                : mediaPath.isEmpty && jellyfin != null
+                    ? MediaKind.jellyfin
+                    : MediaKind.file) {
     link.addListener(notifyListeners);
     file.addListener(notifyListeners);
   }
@@ -27,6 +36,19 @@ class MediaPickerController extends ChangeNotifier {
   final TextEditingController file;
   MediaKind _source;
   String? _notice;
+  JellyfinMedia? _jellyfin;
+
+  /// The Jellyfin item picked in the browser (kept while another source
+  /// is shown).
+  JellyfinMedia? get jellyfin => _jellyfin;
+
+  /// Picks a Jellyfin item and switches to the Jellyfin source.
+  void pickJellyfin(JellyfinMedia? media) {
+    _jellyfin = media;
+    _source = MediaKind.jellyfin;
+    _notice = null;
+    notifyListeners();
+  }
 
   MediaKind get source => _source;
   set source(MediaKind v) {
@@ -43,11 +65,19 @@ class MediaPickerController extends ChangeNotifier {
     notifyListeners();
   }
 
-  MediaSelection get selection => switch (_source) {
-        MediaKind.link => (mediaPath: '', linkUrl: link.text.trim()),
-        MediaKind.file => (mediaPath: file.text.trim(), linkUrl: ''),
-        MediaKind.jellyfin => (mediaPath: '', linkUrl: ''),
-      };
+  /// What the visible source has selected; null = nothing.
+  PickedMedia? get selection {
+    switch (_source) {
+      case MediaKind.link:
+        final url = link.text.trim();
+        return url.isEmpty ? null : LinkMedia(url);
+      case MediaKind.file:
+        final path = file.text.trim();
+        return path.isEmpty ? null : FileMedia(path);
+      case MediaKind.jellyfin:
+        return _jellyfin;
+    }
+  }
 
   /// Drops pasted text where it belongs: http(s) into Link, else File.
   void pasteText(String text) {
@@ -73,12 +103,17 @@ class MediaPickerController extends ChangeNotifier {
 /// Ctrl+V anywhere in the picker outside a text field pastes a link or path.
 class MediaPicker extends StatefulWidget {
   final MediaPickerController controller;
-  final ValueChanged<MediaSelection>? onChanged;
+  final ValueChanged<PickedMedia?>? onChanged;
   /// Enter in a field.
   final VoidCallback? onSubmit;
   final VoidCallback? onOpenIntegrations;
   final bool enabled;
   final bool autofocus;
+  /// Defaults to [JellyfinAccounts.instance].
+  final JellyfinAccounts? jellyfin;
+  /// Jellyfin source only: the browser's "bigger" toggle.
+  final VoidCallback? onToggleExpanded;
+  final bool expanded;
   const MediaPicker({
     super.key,
     required this.controller,
@@ -87,6 +122,9 @@ class MediaPicker extends StatefulWidget {
     this.onOpenIntegrations,
     this.enabled = true,
     this.autofocus = false,
+    this.jellyfin,
+    this.onToggleExpanded,
+    this.expanded = false,
   });
 
   @override
@@ -175,79 +213,99 @@ class _MediaPickerState extends State<MediaPicker> {
   @override
   Widget build(BuildContext context) {
     final source = _c.source;
+    final Widget content = switch (source) {
+      MediaKind.jellyfin => JellyfinPickerSource(
+          accounts: widget.jellyfin ?? JellyfinAccounts.instance,
+          selected: _c.jellyfin,
+          onPick: _c.pickJellyfin,
+          onOpenIntegrations: widget.onOpenIntegrations,
+          onToggleExpanded: widget.onToggleExpanded,
+          expanded: widget.expanded,
+        ),
+      MediaKind.link => _FieldRow(
+          key: const ValueKey('media-link'),
+          field: TextField(
+            controller: _c.link,
+            autofocus: widget.autofocus,
+            decoration: fieldDecoration('Video link', hint: 'https://…/movie.mkv'),
+            keyboardType: TextInputType.url,
+            onSubmitted: (_) => widget.onSubmit?.call(),
+          ),
+          button: OutlinedButton.icon(
+            onPressed: _pasteLink,
+            icon: const Icon(Icons.content_paste, size: 18),
+            label: const Text('Paste'),
+          ),
+          help: 'A direct http(s) link to a video file; everyone streams it from there.',
+          notice: _c.notice,
+        ),
+      MediaKind.file => _FieldRow(
+          key: const ValueKey('media-file'),
+          field: TextField(
+            controller: _c.file,
+            decoration: fieldDecoration('Video file', hint: 'Path to a video on this computer'),
+            onSubmitted: (_) => widget.onSubmit?.call(),
+          ),
+          button: OutlinedButton.icon(
+            onPressed: _browse,
+            icon: const Icon(Icons.folder_open, size: 18),
+            label: const Text('Browse'),
+          ),
+          help: 'Friends stream it from you while you watch. Optional — you can host without media.',
+          notice: _c.notice,
+        ),
+    };
+    final segments = Align(
+      alignment: Alignment.centerLeft,
+      child: SegmentedButton<MediaKind>(
+        key: const ValueKey('media-source'),
+        showSelectedIcon: false,
+        segments: const [
+          ButtonSegment(
+              value: MediaKind.jellyfin,
+              icon: Icon(Icons.video_library_outlined),
+              label: Text('Jellyfin')),
+          ButtonSegment(value: MediaKind.link, icon: Icon(Icons.link), label: Text('Link')),
+          ButtonSegment(
+              value: MediaKind.file,
+              icon: Icon(Icons.insert_drive_file_outlined),
+              label: Text('File')),
+        ],
+        selected: {source},
+        onSelectionChanged: (s) => _c.source = s.first,
+      ),
+    );
     return Focus(
       autofocus: widget.autofocus,
       onKeyEvent: _onKey,
       child: AbsorbPointer(
         absorbing: !widget.enabled,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: SegmentedButton<MediaKind>(
-                key: const ValueKey('media-source'),
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(
-                      value: MediaKind.jellyfin,
-                      icon: Icon(Icons.video_library_outlined),
-                      label: Text('Jellyfin')),
-                  ButtonSegment(
-                      value: MediaKind.link, icon: Icon(Icons.link), label: Text('Link')),
-                  ButtonSegment(
-                      value: MediaKind.file,
-                      icon: Icon(Icons.insert_drive_file_outlined),
-                      label: Text('File')),
-                ],
-                selected: {source},
-                onSelectionChanged: (s) => _c.source = s.first,
-              ),
-            ),
-            const SizedBox(height: kGap),
-            switch (source) {
-              MediaKind.jellyfin =>
-                _JellyfinPlaceholder(onOpenIntegrations: widget.onOpenIntegrations),
-              MediaKind.link => _FieldRow(
-                  key: const ValueKey('media-link'),
-                  field: TextField(
-                    controller: _c.link,
-                    autofocus: widget.autofocus,
-                    decoration: fieldDecoration('Video link', hint: 'https://…/movie.mkv'),
-                    keyboardType: TextInputType.url,
-                    onSubmitted: (_) => widget.onSubmit?.call(),
-                  ),
-                  button: OutlinedButton.icon(
-                    onPressed: _pasteLink,
-                    icon: const Icon(Icons.content_paste, size: 18),
-                    label: const Text('Paste'),
-                  ),
-                  help: 'A direct http(s) link to a video file; everyone streams it from there.',
-                  notice: _c.notice,
-                ),
-              MediaKind.file => _FieldRow(
-                  key: const ValueKey('media-file'),
-                  field: TextField(
-                    controller: _c.file,
-                    decoration: fieldDecoration('Video file', hint: 'Path to a video on this computer'),
-                    onSubmitted: (_) => widget.onSubmit?.call(),
-                  ),
-                  button: OutlinedButton.icon(
-                    onPressed: _browse,
-                    icon: const Icon(Icons.folder_open, size: 18),
-                    label: const Text('Browse'),
-                  ),
-                  help: 'Friends stream it from you while you watch. Optional — you can host without media.',
-                  notice: _c.notice,
-                ),
-            },
-          ],
-        ),
+        // The browser fills the height it is given; in an unbounded
+        // (scrolling) parent it gets a fixed one.
+        child: LayoutBuilder(builder: (context, box) {
+          final fill = source == MediaKind.jellyfin;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: fill && box.hasBoundedHeight ? MainAxisSize.max : MainAxisSize.min,
+            children: [
+              segments,
+              const SizedBox(height: kGap),
+              if (!fill)
+                content
+              else if (box.hasBoundedHeight)
+                Expanded(child: content)
+              else
+                SizedBox(height: jellyfinPickerHeight, child: content),
+            ],
+          );
+        }),
       ),
     );
   }
 }
+
+/// Height of the Jellyfin browser when the picker sits in a scroll view.
+const jellyfinPickerHeight = 640.0;
 
 class _FieldRow extends StatelessWidget {
   final Widget field;
@@ -281,72 +339,5 @@ class _FieldRow extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-/// Where the Jellyfin library grid will go: ghost posters that fill the
-/// width, dimmed, with the "coming soon" note on top.
-class _JellyfinPlaceholder extends StatelessWidget {
-  final VoidCallback? onOpenIntegrations;
-  const _JellyfinPlaceholder({this.onOpenIntegrations});
-
-  static const _posterWidth = 140.0;
-  static const _rows = 2;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final t = Theme.of(context).textTheme;
-    return LayoutBuilder(builder: (context, box) {
-      final cols = ((box.maxWidth + 12) / (_posterWidth + 12)).floor().clamp(1, 40);
-      return Stack(
-        key: const ValueKey('media-jellyfin'),
-        alignment: Alignment.center,
-        children: [
-          Opacity(
-            opacity: 0.35,
-            child: Column(
-              spacing: 12,
-              children: [
-                for (var r = 0; r < _rows; r++)
-                  Row(
-                    spacing: 12,
-                    children: [
-                      for (var c = 0; c < cols; c++)
-                        Expanded(
-                          child: AspectRatio(
-                            aspectRatio: 2 / 3,
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: scheme.surfaceContainerHigh,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-              ],
-            ),
-          ),
-          Panel(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.video_library_outlined, size: 32, color: scheme.primary),
-                const SizedBox(height: 8),
-                Text('Link your Jellyfin in Integrations — coming soon',
-                    textAlign: TextAlign.center, style: t.titleSmall),
-                if (onOpenIntegrations != null) ...[
-                  const SizedBox(height: 8),
-                  TextButton(
-                      onPressed: onOpenIntegrations, child: const Text('Open Integrations')),
-                ],
-              ],
-            ),
-          ),
-        ],
-      );
-    });
   }
 }

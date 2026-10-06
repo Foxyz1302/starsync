@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:signals/signals_flutter.dart';
 
+import '../../jellyfin/accounts.dart';
 import '../../state/session_state.dart';
 import '../../state/settings.dart';
 import '../../update/update_controller.dart';
@@ -34,12 +35,15 @@ class HomeShell extends StatefulWidget {
   final bool autoUpdateCheck;
   final bool windowControls;
   final HealthGetter healthGet;
+  /// Linked Jellyfin servers; defaults to [JellyfinAccounts.instance].
+  final JellyfinAccounts? jellyfin;
   const HomeShell({
     super.key,
     this.updates,
     this.autoUpdateCheck = true,
     this.windowControls = false,
     this.healthGet = defaultHealthGet,
+    this.jellyfin,
   });
 
   @override
@@ -50,7 +54,8 @@ class _HomeShellState extends State<HomeShell> {
   HomeView _view = HomeView.join;
   final _flow = ConnectFlow();
   late final _join = JoinFields(SessionState.instance.lastForm);
-  late final _host = HostFields(SessionState.instance.lastForm);
+  late final _jellyfin = widget.jellyfin ?? JellyfinAccounts.instance;
+  late final _host = HostFields(SessionState.instance.lastForm, jellyfin: _jellyfin);
   late final void Function() _stopKickWatch;
   late final void Function() _stopCrashWatch;
   bool _dialogOpen = false;
@@ -60,6 +65,8 @@ class _HomeShellState extends State<HomeShell> {
   void initState() {
     super.initState();
     Profile.instance.ensureLoaded();
+    // Reads linked servers and checks their tokens in the background.
+    _jellyfin.ensureLoaded();
     if (widget.autoUpdateCheck) _autoCheck();
     _flow.onKicked = _showKickedDialog;
     // Back from a session that ended in a kick: say so.
@@ -134,7 +141,7 @@ class _HomeShellState extends State<HomeShell> {
           onOpenIntegrations: () => _select(HomeView.integrations),
         ),
       HomeView.settings => SettingsPage(updates: widget.updates),
-      HomeView.integrations => const IntegrationsPage(),
+      HomeView.integrations => IntegrationsPage(jellyfin: _jellyfin),
       HomeView.about => AboutPage(updates: widget.updates),
     };
     return CallbackShortcuts(
