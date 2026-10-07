@@ -35,15 +35,22 @@ else
 fi
 export REL_TAG="$TAG" REL_VER="$VER" REL_NOTES="$NOTES"
 
-echo "creating release $TAG on $REPO ..."
-REL_ID="$(curl -fsS -H "Authorization: token $TOKEN" -H 'Content-Type: application/json' \
-  -d "$(python3 -c 'import json,os; print(json.dumps({"tag_name": os.environ["REL_TAG"], "name": os.environ["REL_TAG"], "body": "Watch together " + os.environ["REL_VER"] + "\n\n" + os.environ["REL_NOTES"], "draft": False, "prerelease": False}))')" \
-  "$SERVER/api/v1/repos/$REPO/releases" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+API="$SERVER/api/v1/repos/$REPO"
+# Re-runs reuse the release for this tag instead of failing on a duplicate.
+REL_ID="$(curl -fsS -H "Authorization: token $TOKEN" "$API/releases/tags/$TAG" 2>/dev/null \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null || true)"
+if [[ -z "$REL_ID" ]]; then
+  echo "creating release $TAG on $REPO ..."
+  REL_ID="$(curl -fsS -H "Authorization: token $TOKEN" -H 'Content-Type: application/json' \
+    -d "$(python3 -c 'import json,os; print(json.dumps({"tag_name": os.environ["REL_TAG"], "name": os.environ["REL_TAG"], "body": "Watch together " + os.environ["REL_VER"] + "\n\n" + os.environ["REL_NOTES"], "draft": False, "prerelease": False}))')" \
+    "$API/releases" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+fi
 echo "release id: $REL_ID"
 
 echo "uploading $ASSET ..."
-curl -fsS -H "Authorization: token $TOKEN" -H 'Content-Type: application/gzip' \
-  --data-binary "@$TARBALL" \
-  "$SERVER/api/v1/repos/$REPO/releases/$REL_ID/assets?name=$ASSET" > /dev/null
+# Gitea's asset API takes a multipart form with an `attachment` field.
+curl -fsS -H "Authorization: token $TOKEN" \
+  -F "attachment=@$TARBALL;type=application/gzip" \
+  "$API/releases/$REL_ID/assets?name=$ASSET" > /dev/null
 echo "published $TAG."

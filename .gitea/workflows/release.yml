@@ -14,15 +14,17 @@ jobs:
           fetch-depth: 0
 
       - name: Install Linux build deps
+        # media_kit_video links libmpv + epoxy via pkg-config. Runner images
+        # differ: some run as root without sudo.
         run: |
-          if command -v apt-get >/dev/null; then
-            sudo apt-get update
-            sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
-          fi
+          SUDO=sudo; [ "$(id -u)" = 0 ] && SUDO=
+          $SUDO apt-get update
+          $SUDO apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev \
+            liblzma-dev g++ libmpv-dev libepoxy-dev xz-utils unzip curl python3
 
-      - name: Setup Flutter (beta)
+      - name: Setup Flutter (stable)
         run: |
-          git clone https://github.com/flutter/flutter.git -b beta --depth 1 ~/flutter
+          git clone https://github.com/flutter/flutter.git -b stable --depth 1 ~/flutter
           echo "$HOME/flutter/bin" >> $GITHUB_PATH
 
       - name: Build tarball
