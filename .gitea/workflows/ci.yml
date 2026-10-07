@@ -32,7 +32,7 @@ jobs:
       - run: dart test
         working-directory: packages/server
       # Compiling the dedicated server proves it stays Flutter-free.
-      - run: dart compile exe bin/server.dart -o build/watch-together-server
+      - run: mkdir -p build && dart compile exe bin/server.dart -o build/watch-together-server
         working-directory: packages/server
       - run: build/watch-together-server --help
         working-directory: packages/server
