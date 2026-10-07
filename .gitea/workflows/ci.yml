@@ -36,3 +36,24 @@ jobs:
         working-directory: packages/server
       - run: build/watch-together-server --help
         working-directory: packages/server
+
+  # The updater's Windows apply path (running exe parked as .old) only
+  # means something on real NTFS. Runner notes: see release.yml.
+  updater-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        shell: powershell
+        run: |
+          git init -q .
+          git remote add origin "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY.git"
+          git fetch -q origin "$env:GITHUB_SHA"
+          if ($LASTEXITCODE) { exit 1 }
+          git checkout -q --force FETCH_HEAD
+      - name: Setup Flutter
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tool/setup_flutter_windows.ps1
+      - name: Updater tests
+        shell: powershell
+        working-directory: apps/desktop
+        run: flutter test test/updater_test.dart

@@ -52,7 +52,6 @@ ORIGIN="$(git -C "$ROOT" remote get-url origin)"
 SERVER="$(echo "$ORIGIN" | sed -E 's#(https?://[^/]+)/.*#\1#')"
 REPO="$(echo "${ORIGIN%.git}" | sed -E 's#.*[:/]([^/]+/[^/]+)$#\1#')"
 PROTO="$(sed -n 's/.*protoVersion = \([0-9]*\).*/\1/p' "$ROOT/packages/core/lib/src/constants.dart")"
-ASSET="watch-together-$VER-linux-x64.tar.gz"
 if [[ -n "$LATEST" && "$LATEST" != "v$VER" ]]; then
   NOTES="$(git -C "$ROOT" log "$LATEST..HEAD" --format='- %s' | head -n 20)"
 else
@@ -60,7 +59,7 @@ else
 fi
 export MANIFEST_FILE="$ROOT/updates/manifest.json" MANIFEST_VER="$VER" \
   MANIFEST_PROTO="$PROTO" MANIFEST_NOTES="$NOTES" \
-  MANIFEST_URL="$SERVER/$REPO/releases/download/v$VER/$ASSET"
+  MANIFEST_BASE="$SERVER/$REPO/releases/download/v$VER/watch-together-$VER"
 python3 - <<'EOF'
 import json, os
 path = os.environ['MANIFEST_FILE']
@@ -69,10 +68,18 @@ try:
         manifest = json.load(f)
 except (FileNotFoundError, ValueError):
     manifest = {}
+base = os.environ['MANIFEST_BASE']
+# Asset names must match tool/package_linux.sh / package_windows.ps1.
+# `url` stays the Linux tarball for builds that predate `assets` (<= 0.2.1).
+assets = {
+    'linux-x64': base + '-linux-x64.tar.gz',
+    'windows-x64': base + '-windows-x64.zip',
+}
 manifest.update({
     'version': os.environ['MANIFEST_VER'],
     'protocol': int(os.environ['MANIFEST_PROTO']),
-    'url': os.environ['MANIFEST_URL'],
+    'url': assets['linux-x64'],
+    'assets': assets,
     'notes': os.environ['MANIFEST_NOTES'].splitlines()[0] if os.environ['MANIFEST_NOTES'] else '',
 })
 manifest.pop('sha256', None)

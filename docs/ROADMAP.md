@@ -6,13 +6,12 @@ off by deleting it in the same commit as the code. Wire changes also edit
 
 ## Backlog
 
-1. **Windows build + CI.** There is no Windows runner. Try
-   `ubuntu2610/flutter_build` (LLVM-MinGW + Wine `gen_snapshot`) on the Linux
-   runner, fallback a GitHub Actions mirror. The manifest needs per-platform
-   URLs and `release_publish.sh` must handle a second platform. The updater's
-   Windows apply path exists but is untested. The tarball's
-   `watch-together-server` needs a Windows `dart compile exe` too. Desktop
-   tests are not in CI either.
+1. **Windows: first real install.** CI builds and publishes
+   `watch-together-<ver>-windows-x64.zip` (libmpv bundled) and runs the
+   updater tests on NTFS, but nobody has launched the app on Windows yet.
+   Check: playback, fullscreen controls, hosting (firewall prompt), in-app
+   update from one release to the next. The rest of the desktop tests are
+   not in CI.
 
 2. **Jellyfin** (epic, below).
 

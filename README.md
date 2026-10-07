@@ -11,7 +11,7 @@ Name: `watch-together` is a placeholder and the final name is undecided
 (`sync-relay` is the working name). It appears in file names and the
 update manifest until that is settled.
 
-- Desktop only (Linux now, Windows planned), always mpv. No web clients.
+- Desktop only (Linux and Windows), always mpv. No web clients.
 - No transcoding. Everyone plays the original file.
 - Friends trust model: no accounts, no roles. A blank password means an open server.
 
@@ -19,14 +19,19 @@ How it fits together: [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md).
 
 ## Install and update
 
-Download the latest `watch-together-<version>-linux-x64.tar.gz` from the
-Releases page of this repo, extract it, run `watch_together`.
+From the Releases page of this repo:
+
+- Linux: `watch-together-<version>-linux-x64.tar.gz`. Extract, run
+  `watch_together`. Needs mpv's library installed (`mpv` or `libmpv2`).
+- Windows: `watch-together-<version>-windows-x64.zip`. Extract, run
+  `watch_together.exe`. mpv is bundled. New and not yet tried on a real
+  Windows desktop; reports welcome.
 
 Update from the app: when a newer version exists, an update indicator
 appears in Home's top bar and opens the update card. "Update and restart" downloads,
 verifies, applies in place and restarts; the install folder must be writable
 by you. Settings has Check now and an auto-check toggle. From a terminal:
-`watch_together --upgrade` or `update.sh` (shipped in the tarball). A
+`watch_together --upgrade`, or the shipped `update.sh` / `update.bat`. A
 release with a newer protocol is a required update: everyone on a server
 must run the same protocol version, and a mismatch is refused with a message
 telling you to update.
@@ -214,7 +219,7 @@ fails to load shows a toast and switches shaders off.
 - "host runs a different version": update the app on both sides.
 - Picture frozen but sound fine: Ctrl+R reloads the video; the app also does it automatically.
 - Everyone waits at "waiting for X": X has not buffered 4 seconds yet or has not pressed Space.
-- No Windows build yet.
+- Windows: the build is new; if something is off there, say so.
 
 For contributors: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md),
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PROTOCOL.md](docs/PROTOCOL.md).

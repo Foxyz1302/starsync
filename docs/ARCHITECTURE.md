@@ -547,7 +547,9 @@ with rollback on failure (writing the running executable fails with ETXTBSY;
 rename works). A packaged install is detected by `data/` and `lib/` next to
 the binary; anything else exits with "update manually". A manifest whose
 protocol is newer than the local one is a required update. Windows apply
-(`*.old` rename, swept on next start) exists but is untested. The version is
+renames in-use files to `*.old` (swept on next start); CI tests it against a
+running exe on NTFS. The manifest's `assets` maps `linux-x64` /
+`windows-x64` to archive URLs; top-level `url` (Linux) is for builds <= 0.2.1. The version is
 stamped with `--dart-define=APP_VERSION` (dev runs report `0.0.0-dev` and skip
 checks). `watch_together --upgrade` (or the shipped `update.sh`) runs it from
 the CLI; `UpdateController` runs the same code for Home's update indicator,

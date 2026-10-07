@@ -12,6 +12,7 @@ mpv libraries come from `media_kit_libs_video`.
 cd apps/desktop && flutter pub get && flutter run -d linux
 cd apps/desktop && flutter build linux --release --dart-define=APP_VERSION=<x.y.z>
 tool/package_linux.sh [--skip-build] [--noupload]    # dist/*.tar.gz
+powershell -File tool/package_windows.ps1 [-SkipBuild]  # dist/*.zip (on Windows)
 cd packages/server && dart compile exe bin/server.dart -o watch-together-server
 ```
 
@@ -77,12 +78,16 @@ User pushes tags; CI does the rest.
 
 1. `tool/release.sh [patch|minor|major] [--dry-run]`: derives the next
    version from the latest tag, bumps the three pubspecs in lockstep, writes
-   `updates/manifest.json` (asset URL is predictable), commits `Release vX.Y.Z`,
+   `updates/manifest.json` (per-platform `assets` URLs are predictable; `url`
+   stays the Linux tarball for builds <= 0.2.1), commits `Release vX.Y.Z`,
    makes an annotated tag.
 2. Review, then `git push --follow-tags`.
-3. `.gitea/workflows/release.yml` builds the Linux tarball and runs
-   `tool/release_publish.sh vX.Y.Z`, which creates the release and uploads it.
-   By hand: `tool/package_linux.sh` then `tool/release_publish.sh vX.Y.Z`.
+3. `.gitea/workflows/release.yml` runs one job per platform: Linux builds
+   with `tool/package_linux.sh`, Windows (runner `yuuka-windows`, host mode,
+   PowerShell only) with `tool/package_windows.ps1`. Each then runs
+   `dart tool/release_publish.dart vX.Y.Z <archive>`, which creates the
+   release if the other job hasn't yet and uploads (or replaces) its asset.
+   By hand: package, then the same `dart tool/release_publish.dart` line.
 
 Tokens come from the environment (`RELEASE_TOKEN`, or Actions-provided
 `GITHUB_TOKEN`/`GITEA_TOKEN`). The manifest has no `sha256` by default; the

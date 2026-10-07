@@ -1,0 +1,174 @@
+// Publish one platform's archive to the Gitea release for a tag: create
+// the release if it doesn't exist yet, then upload (or replace) the asset.
+// The Linux and Windows CI jobs both run this, possibly at the same time,
+// so a lost create race falls back to the release the other job made.
+// The manifest is written by tool/release.sh at release time (predictable
+// asset URLs), so this never touches git history beyond reading notes.
+// Usage: dart tool/release_publish.dart vX.Y.Z <archive>
+//   (run after tool/package_linux.sh or tool/package_windows.ps1)
+// Env: RELEASE_TOKEN (preferred) or the Actions-provided GITHUB_TOKEN /
+// GITEA_TOKEN. dart: imports only — runs without `pub get`.
+import 'dart:convert';
+import 'dart:io';
+
+Future<void> main(List<String> args) async {
+  if (args.length != 2) {
+    _die('usage: dart tool/release_publish.dart vX.Y.Z <archive>');
+  }
+  final tag = args[0];
+  final archive = File(args[1]);
+  final ver = tag.startsWith('v') ? tag.substring(1) : tag;
+  if (!RegExp(r'^\d+\.\d+\.\d+$').hasMatch(ver)) {
+    _die('tag must look like v0.2.0, got $tag');
+  }
+  if (!archive.existsSync()) _die('archive missing: ${archive.path}');
+
+  final root = File.fromUri(Platform.script).parent.parent.path;
+  final pubspec = File('$root/apps/desktop/pubspec.yaml').readAsStringSync();
+  final pub = RegExp(r'^version: ([0-9.]+)', multiLine: true)
+      .firstMatch(pubspec)
+      ?.group(1);
+  if (pub != ver) {
+    _die('tag $tag != desktop pubspec $pub (run tool/release.sh first)');
+  }
+
+  final env = Platform.environment;
+  final token = [env['RELEASE_TOKEN'], env['GITHUB_TOKEN'], env['GITEA_TOKEN']]
+      .firstWhere((t) => t != null && t.isNotEmpty,
+          orElse: () => _die('set RELEASE_TOKEN (or run in Actions)'))!;
+
+  final origin = _git(root, ['remote', 'get-url', 'origin']);
+  final server = RegExp(r'^(https?://[^/]+)/').firstMatch(origin)?.group(1) ??
+      env['GITHUB_SERVER_URL'] ??
+      _die('cannot derive server from origin $origin');
+  final repo =
+      RegExp(r'([^/:]+/[^/]+?)(\.git)?$').firstMatch(origin)!.group(1)!;
+  final api = '$server/api/v1/repos/$repo';
+
+  final prev = _git(root, ['describe', '--tags', '--abbrev=0', '$tag^'],
+      allowFail: true);
+  final notes = prev.isEmpty
+      ? 'Watch together $ver.'
+      : _git(root, [
+          'log',
+          '$prev..$tag',
+          '--format=- %s',
+          '--invert-grep',
+          '--grep=^Release v'
+        ]).split('\n').take(20).join('\n');
+
+  final http = HttpClient();
+  try {
+    final c = _Api(http, token);
+    var rel = await c.get('$api/releases/tags/$tag');
+    if (rel == null) {
+      stdout.writeln('creating release $tag on $repo ...');
+      rel = await c.post('$api/releases', {
+        'tag_name': tag,
+        'name': tag,
+        'body': 'Watch together $ver\n\n$notes',
+        'draft': false,
+        'prerelease': false,
+      });
+      // The other platform's job won the race.
+      rel ??= await c.get('$api/releases/tags/$tag') ??
+          _die('could not create or find release $tag');
+    }
+    final id = rel['id'];
+    stdout.writeln('release id: $id');
+
+    final name = archive.uri.pathSegments.last;
+    for (final a in (rel['assets'] as List? ?? const [])) {
+      if (a is Map && a['name'] == name) {
+        stdout.writeln('replacing existing $name ...');
+        await c.delete('$api/releases/$id/assets/${a['id']}');
+      }
+    }
+    stdout.writeln('uploading $name ...');
+    await c.upload(
+        '$api/releases/$id/assets?name=${Uri.encodeQueryComponent(name)}',
+        archive,
+        name);
+    stdout.writeln('published $name to $tag.');
+  } finally {
+    http.close();
+  }
+}
+
+Never _die(String msg) {
+  stderr.writeln('error: $msg');
+  exit(1);
+}
+
+String _git(String root, List<String> args, {bool allowFail = false}) {
+  final r = Process.runSync('git', ['-C', root, ...args]);
+  if (r.exitCode != 0) {
+    if (allowFail) return '';
+    _die('git ${args.join(' ')}: ${r.stderr}'.trim());
+  }
+  return (r.stdout as String).trim();
+}
+
+class _Api {
+  final HttpClient http;
+  final String token;
+  _Api(this.http, this.token);
+
+  Future<(int, String)> _send(String method, String url,
+      {List<int>? body, String? type}) async {
+    final req = await http.openUrl(method, Uri.parse(url));
+    req.headers.set('Authorization', 'token $token');
+    req.headers.set('Accept', 'application/json');
+    if (body != null) {
+      req.headers.set('Content-Type', type!);
+      req.contentLength = body.length;
+      req.add(body);
+    }
+    final res = await req.close();
+    return (res.statusCode, await res.transform(utf8.decoder).join());
+  }
+
+  // null on 404.
+  Future<Map<String, Object?>?> get(String url) async {
+    final (code, text) = await _send('GET', url);
+    if (code == 404) return null;
+    _check('GET', url, code, text);
+    return jsonDecode(text) as Map<String, Object?>;
+  }
+
+  // null on 409 (already exists).
+  Future<Map<String, Object?>?> post(String url, Object json) async {
+    final (code, text) = await _send('POST', url,
+        body: utf8.encode(jsonEncode(json)), type: 'application/json');
+    if (code == 409) return null;
+    _check('POST', url, code, text);
+    return jsonDecode(text) as Map<String, Object?>;
+  }
+
+  Future<void> delete(String url) async {
+    final (code, text) = await _send('DELETE', url);
+    _check('DELETE', url, code, text);
+  }
+
+  // Gitea's asset API takes a multipart form with an `attachment` field.
+  Future<void> upload(String url, File file, String name) async {
+    final boundary = 'wt-${DateTime.now().microsecondsSinceEpoch}';
+    final body = <int>[
+      ...utf8.encode('--$boundary\r\n'
+          'Content-Disposition: form-data; name="attachment"; filename="$name"\r\n'
+          'Content-Type: application/octet-stream\r\n\r\n'),
+      ...await file.readAsBytes(),
+      ...utf8.encode('\r\n--$boundary--\r\n'),
+    ];
+    final (code, text) = await _send('POST', url,
+        body: body, type: 'multipart/form-data; boundary=$boundary');
+    _check('upload', url, code, text);
+  }
+
+  void _check(String what, String url, int code, String text) {
+    if (code < 200 || code >= 300) {
+      _die(
+          '$what $url → HTTP $code: ${text.length > 300 ? text.substring(0, 300) : text}');
+    }
+  }
+}
