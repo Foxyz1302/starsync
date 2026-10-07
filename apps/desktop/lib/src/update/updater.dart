@@ -15,10 +15,10 @@ import 'package:sync_relay_core/core.dart';
 // Linux: unlinking/renaming files under a running process is fine, only
 // opening the running binary for writing is refused (ETXTBSY), so the
 // swap moves each top-level bundle entry aside, moves the new one in,
-// and rolls everything back on any failure. Windows (UNTESTED — no
-// Windows runner yet): a running exe/dll can be renamed but not deleted,
-// so in-use files go to `*.old`, new files move in, and `*.old` is swept
-// on the next start (cleanupUpdateLeftovers).
+// and rolls everything back on any failure. Windows: a running exe/dll
+// can be renamed but not deleted, so in-use files go to `*.old`, new
+// files move in, and `*.old` is swept on the next start
+// (cleanupUpdateLeftovers). CI runs that against a live exe on NTFS.
 
 final _log = createLogger('update');
 
@@ -30,6 +30,9 @@ const appVersion = String.fromEnvironment('APP_VERSION',
 
 // Process args as main() received them — restart relaunches with these.
 List<String> launchArgs = const [];
+
+// Key into the manifest's `assets` map, e.g. linux-x64, windows-x64.
+final updatePlatform = '${Platform.operatingSystem}-x64';
 
 const _stagingDir = '.update-staging';
 const _backupDir = '.update-backup';
@@ -48,16 +51,23 @@ class UpdateManifest {
       this.sha256,
       required this.notes});
 
-  factory UpdateManifest.fromJson(Map<String, Object?> json) {
+  // `assets` maps platform → archive URL. Top-level `url` is the Linux
+  // tarball, kept for builds from before `assets` existed (<= 0.2.1).
+  factory UpdateManifest.fromJson(Map<String, Object?> json,
+      {String? platform}) {
     final version = json['version'];
     final protocol = json['protocol'];
-    final url = json['url'];
+    final assets = json['assets'];
+    final url =
+        assets is Map ? assets[platform ?? updatePlatform] : json['url'];
     if (version is! String ||
         version.isEmpty ||
         protocol is! int ||
         url is! String ||
         url.isEmpty) {
-      throw const FormatException('update manifest missing version/protocol/url');
+      throw FormatException(assets is Map && version is String
+          ? 'release $version has no ${platform ?? updatePlatform} build'
+          : 'update manifest missing version/protocol/url');
     }
     final sha = json['sha256'];
     return UpdateManifest(
@@ -434,7 +444,7 @@ Future<void> _swapPosix(Directory stage, Directory root, ApplyHook? hook) async 
   await _deleteQuietly(backup.path);
 }
 
-// UNTESTED on Windows. File-level: a running exe/dll can be renamed but
+// File-level: a running exe/dll can be renamed but
 // not deleted or overwritten, so every existing file goes to `<f>.old`
 // first; leftovers are swept by cleanupUpdateLeftovers on next start.
 Future<void> _swapWindows(Directory stage, Directory root, ApplyHook? hook) async {

@@ -20,13 +20,20 @@ Future<Directory> _work() async {
   return base.createTemp('wt-up-test');
 }
 
+// Linux-layout tests check exec bits and symlinks, which NTFS lacks.
+final _posixOnly = Platform.isWindows ? 'POSIX install layout' : null;
+
 bool _isExec(String path) => File(path).statSync().mode & 0x40 != 0;
 
 // Builds the release archive exactly like tool/package_linux.sh:
 // bundle copied into <stage>/watch-together-<ver>/, then
-// `tar -czf out -C <stage> watch-together-<ver>`.
+// `tar -czf out -C <stage> watch-together-<ver>`. [zip]: like
+// tool/package_windows.ps1 (`tar -a -c -f out.zip`, bsdtar — Windows only).
 Future<List<int>> _releaseTarball(Directory work,
-    {String version = '0.2.0', bool windows = false, bool bundle = true}) async {
+    {String version = '0.2.0',
+    bool windows = false,
+    bool bundle = true,
+    bool zip = false}) async {
   final stage = Directory('${work.path}/pkg-$version-${windows ? 'win' : 'lin'}');
   final folder = Directory('${stage.path}/watch-together-$version');
   await Directory('${folder.path}/data/flutter_assets').create(recursive: true);
@@ -44,13 +51,15 @@ Future<List<int>> _releaseTarball(Directory work,
     }
     await File('${folder.path}/update.sh')
         .writeAsString('#!/bin/sh\nexec ./watch_together --upgrade\n');
-    final r = await Process.run('chmod',
-        ['755', '${folder.path}/watch_together', '${folder.path}/update.sh']);
-    expect(r.exitCode, 0);
+    if (!Platform.isWindows) {
+      final r = await Process.run('chmod',
+          ['755', '${folder.path}/watch_together', '${folder.path}/update.sh']);
+      expect(r.exitCode, 0);
+    }
   }
-  final out = File('${work.path}/out-$version.tar.gz');
+  final out = File('${work.path}/out-$version.${zip ? 'zip' : 'tar.gz'}');
   final r = await Process.run('tar', [
-    '-czf',
+    ...zip ? ['-a', '-c', '-f'] : ['-czf'],
     out.path,
     '-C',
     stage.path,
@@ -71,7 +80,9 @@ Future<Directory> _fakeRoot(Directory work, {bool windows = false}) async {
     await Directory('${root.path}/lib').create();
     await File('${root.path}/lib/libgone.so').writeAsString('lib-v1');
     await File('${root.path}/watch_together').writeAsString('binary-v1');
-    await Process.run('chmod', ['755', '${root.path}/watch_together']);
+    if (!Platform.isWindows) {
+      await Process.run('chmod', ['755', '${root.path}/watch_together']);
+    }
   }
   await File('${root.path}/user-notes.txt').writeAsString('mine');
   return root;
@@ -166,6 +177,24 @@ void main() {
         isTrue);
   });
 
+  test('manifest picks the asset for this platform', () {
+    final json = {
+      'version': '0.2.2',
+      'protocol': RelayConstants.protoVersion,
+      'url': 'https://x/linux.tar.gz',
+      'assets': {
+        'linux-x64': 'https://x/linux.tar.gz',
+        'windows-x64': 'https://x/windows.zip',
+      },
+    };
+    expect(UpdateManifest.fromJson(json, platform: 'windows-x64').url,
+        'https://x/windows.zip');
+    expect(UpdateManifest.fromJson(json, platform: 'linux-x64').url,
+        'https://x/linux.tar.gz');
+    expect(() => UpdateManifest.fromJson(json, platform: 'macos-x64'),
+        throwsFormatException);
+  });
+
   test('findInstallRoot honors bundle layout', () async {
     final work = await _work();
     try {
@@ -219,7 +248,7 @@ void main() {
       expect(File('$p/data/old.cfg').existsSync(), isFalse);
       expect(await File('$p/user-notes.txt').readAsString(), 'mine');
       expect(_leftovers(root), isEmpty);
-    });
+    }, skip: _posixOnly);
 
     test('up to date downloads nothing', () async {
       final root = await _fakeRoot(work);
@@ -256,7 +285,7 @@ void main() {
       expect(rc, 0);
       expect(await File('${root.path}/watch_together').readAsString(),
           'binary-v2');
-    });
+    }, skip: _posixOnly);
 
     test('unknown layout asks for manual update', () async {
       final rc = await runUpgrade(
@@ -323,7 +352,7 @@ void main() {
             }),
             throwsA(isA<FileSystemException>()));
         await expectUntouched(root);
-      });
+      }, skip: _posixOnly);
     }
 
     test('stages next to the install, never in the system temp', () async {
@@ -354,7 +383,7 @@ void main() {
           applyUpdate(f, root, windows: false), throwsFormatException);
       expect(File('${work.path}/escape').existsSync(), isFalse);
       await expectUntouched(root);
-    });
+    }, skip: _posixOnly);
 
     test('leftovers from an interrupted run are swept', () async {
       final root = await _fakeRoot(work);
@@ -399,6 +428,37 @@ void main() {
       expect(File('$p/flutter_windows.dll.old').existsSync(), isFalse);
       expect(_leftovers(root), isEmpty);
     });
+
+    // The real thing: the release zip (bsdtar, like package_windows.ps1)
+    // applied over an install whose exe is running. Windows refuses to
+    // delete a running image but allows renaming it, so it is parked as
+    // .old and swept on the next start.
+    test('windows: zip over a running exe', () async {
+      final root = await _fakeRoot(work, windows: true);
+      final exe = '${root.path}/watch_together.exe';
+      await File(r'C:\Windows\System32\PING.EXE').copy(exe);
+      final zip = File('${work.path}/u.zip')
+        ..writeAsBytesSync(
+            await _releaseTarball(work, windows: true, zip: true));
+      final running = await Process.start(exe, ['-n', '60', '127.0.0.1']);
+      try {
+        expect(() => File(exe).deleteSync(), throwsA(isA<FileSystemException>()),
+            reason: 'precondition: a running exe is locked');
+        await applyUpdate(zip, root, windows: true);
+        expect(await File(exe).readAsString(), 'binary-v2');
+        expect(File('$exe.old').existsSync(), isTrue);
+        expect(
+            await File('${root.path}/data/flutter_assets/fresh.cfg')
+                .readAsString(),
+            'fresh-config');
+        expect(_leftovers(root), isEmpty);
+      } finally {
+        running.kill();
+        await running.exitCode;
+      }
+      await cleanupUpdateLeftovers(root);
+      expect(File('$exe.old').existsSync(), isFalse);
+    }, skip: Platform.isWindows ? null : 'needs Windows');
   });
 
   group('in-app controller', () {
@@ -443,7 +503,7 @@ void main() {
       expect(_isExec('${root.path}/watch_together'), isTrue);
       expect(restarts.single.$1, '${root.path}/watch_together');
       expect(restarts.single.$2, ['--some-flag']);
-    });
+    }, skip: _posixOnly);
 
     test('newer protocol is a required update, cannot be dismissed',
         () async {
@@ -496,6 +556,6 @@ void main() {
       expect(restarted, isFalse);
       expect(await File('${root.path}/watch_together').readAsString(),
           'binary-v1');
-    });
+    }, skip: _posixOnly);
   });
 }
