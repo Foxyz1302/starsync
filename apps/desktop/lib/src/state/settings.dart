@@ -17,6 +17,7 @@ const _keyShaderPreset = 'shaderPreset';
 const _keyShaderQuality = 'shaderQuality';
 const _keyCustomShaders = 'customShaders';
 const _keyAutoAdvance = 'autoAdvance';
+const _keyMpvControls = 'mpvControls';
 
 enum HwdecMode { auto, off, custom }
 
@@ -28,6 +29,9 @@ class AppSettings {
   final autoCheckUpdates = signal(true);
   /// Jellyfin episodes: at the end, count down 10 s and put up the next.
   final autoAdvance = signal(true);
+  /// Experimental: the session uses the mpv-style (uosc) controls
+  /// (`controls/uosc/`) instead of media_kit's. Applies live.
+  final mpvControls = signal(false);
 
   /// Video shaders: one choice, used on join and changed both here and
   /// in the session (Ctrl+0..6, the shader button).
@@ -64,6 +68,8 @@ class AppSettings {
       if (auto is bool) autoCheckUpdates.value = auto;
       final advance = box.get(_keyAutoAdvance);
       if (advance is bool) autoAdvance.value = advance;
+      final mpv = box.get(_keyMpvControls);
+      if (mpv is bool) mpvControls.value = mpv;
       final preset = box.get(_keyShaderPreset);
       shaderPreset.value =
           ShaderPreset.values.where((p) => p.name == preset).firstOrNull ??
@@ -99,6 +105,11 @@ class AppSettings {
   void setAutoAdvance(bool on) {
     autoAdvance.value = on;
     _put(_keyAutoAdvance, on);
+  }
+
+  void setMpvControls(bool on) {
+    mpvControls.value = on;
+    _put(_keyMpvControls, on);
   }
 
   void setShaderPreset(ShaderPreset preset) {

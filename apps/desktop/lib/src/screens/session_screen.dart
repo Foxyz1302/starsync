@@ -4,6 +4,9 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
+import '../controls/uosc/buttons.dart';
+import '../controls/uosc/controls.dart';
+import '../controls/uosc/timeline.dart';
 import '../playback/media_marks.dart' show SkipOffer;
 
 import '../jellyfin/browse_scope.dart' show BrowseStart;
@@ -496,7 +499,11 @@ class _SessionScreenState extends State<SessionScreen> {
       children: [
         // Frozen-picture watchdog samples the route around this anchor.
         _frameProbe.anchor(),
-        MaterialDesktopVideoControls(state),
+        // Settings → "Experimental: mpv-style controls" swaps them live.
+        SessionControlsSwitch(
+          material: (_) => MaterialDesktopVideoControls(state),
+          mpv: (_) => _mpvControls(),
+        ),
         _healthOverlay(),
         _waitingOverlay(),
         _jellyfinOverlay(),
@@ -517,6 +524,133 @@ class _SessionScreenState extends State<SessionScreen> {
                 ],
               );
             },
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _openSheet() {
+    _sheetOpen.value = true;
+    SessionState.instance.coordinator.markInput();
+  }
+
+  /// The experimental uosc-style controls: same actions as the bars above,
+  /// all through the coordinator (seeks via `player.seek`, the user path).
+  Widget _mpvControls() {
+    final coord = SessionState.instance.coordinator;
+    final playback = coord.playback;
+    void menuOpen(bool open) => _shaderMenuOpen = open;
+    void pickTrack(TrackPick p) => coord.selectTrack(aid: p.aid, sid: p.sid, subtitlesOff: p.subtitlesOff);
+    Widget episode(bool next) => SignalBuilder(builder: (context) {
+          final e = next ? coord.nextEpisode.value : coord.previousEpisode.value;
+          if (e == null) return const SizedBox.shrink();
+          return UoscButton(
+            key: ValueKey(next ? 'episode-next' : 'episode-previous'),
+            icon: next ? Icons.skip_next_rounded : Icons.skip_previous_rounded,
+            tooltip: '${next ? 'Next' : 'Previous'}: ${e.label}  (${next ? '> or Shift+N' : '< or Shift+P'})',
+            onPressed: next ? coord.playNextEpisode : coord.playPreviousEpisode,
+          );
+        });
+    return UoscControls(
+      onDoubleTap: _toggleFullscreen,
+      top: SignalBuilder(
+        builder: (context) =>
+            WindowButtons(focusNode: _noFocus, fullscreen: _isFullscreen.value, onToggleFullscreen: _toggleFullscreen),
+      ),
+      timeline: (context, expanded) => SignalBuilder(
+        builder: (context) => UoscTimeline(
+          position: playback.position.value,
+          duration: playback.duration.value,
+          buffered: playback.buffered.value,
+          chapters: playback.chapters.value,
+          expanded: expanded,
+          onSeek: (d) => playback.player.seek(d),
+        ),
+      ),
+      left: [
+        UoscMainMenuButton(
+          onMenuOpen: menuOpen,
+          actions: [
+            (title: 'Change video', hint: null, run: _openSwap),
+            (title: 'People & chat', hint: 'Tab', run: _openSheet),
+            (title: 'Reload video', hint: 'Ctrl+R', run: _reloadVideo),
+            (title: 'Mark everyone ready', hint: null, run: coord.forcePlayAll),
+            (title: 'Fullscreen', hint: 'F', run: _toggleFullscreen),
+            (title: 'Leave server', hint: 'Esc', run: () => _confirmLeave.value = true),
+          ],
+        ),
+        SignalBuilder(
+          builder: (context) => UoscTracksButton(
+            type: JellyfinStreamType.subtitle,
+            tracks: playback.tracks.value,
+            onPick: pickTrack,
+            onMenuOpen: menuOpen,
+          ),
+        ),
+        SignalBuilder(
+          builder: (context) => UoscTracksButton(
+            type: JellyfinStreamType.audio,
+            tracks: playback.tracks.value,
+            onPick: pickTrack,
+            onMenuOpen: menuOpen,
+          ),
+        ),
+        UoscShaderButton(renderMode: playback.renderMode, onPick: _pickShader, onMenuOpen: menuOpen),
+        const SizedBox(width: 12),
+        SignalBuilder(builder: (context) {
+          final ready = coord.selfMember.value?.ready ?? false;
+          return UoscButton(
+            key: const ValueKey('uosc-ready'),
+            icon: ready ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+            label: ready ? 'Ready' : 'Not ready',
+            color: ready ? Colors.greenAccent : null,
+            tooltip: 'Ready / not ready (Space)',
+            onPressed: coord.toggleReady,
+          );
+        }),
+        UoscButton(icon: Icons.done_all_rounded, tooltip: 'Mark everyone ready', onPressed: coord.forcePlayAll),
+        UoscButton(
+          icon: Icons.refresh_rounded,
+          tooltip: 'Reload video (Ctrl+R) — fixes a frozen picture',
+          onPressed: _reloadVideo,
+        ),
+      ],
+      right: [
+        UoscButton(
+          key: const ValueKey('uosc-skip-forward'),
+          icon: Icons.fast_forward_rounded,
+          label: '1:30',
+          tooltip: 'Skip 1:30 for everyone (Shift+Right)',
+          onPressed: coord.skipForward,
+        ),
+        SignalBuilder(
+          builder: (context) => UoscChaptersButton(
+            chapters: playback.chapters.value,
+            current: playback.currentChapter.value,
+            duration: playback.duration.value,
+            onPick: (c) => coord.seekTo(c.start.inMicroseconds / 1e6),
+            onMenuOpen: menuOpen,
+          ),
+        ),
+        episode(false),
+        episode(true),
+        const SizedBox(width: 12),
+        UoscButton(icon: Icons.video_library_outlined, tooltip: 'Change video', onPressed: _openSwap),
+        UoscButton(icon: Icons.group_outlined, tooltip: 'People & chat (Tab)', onPressed: _openSheet),
+        StreamBuilder<double>(
+          stream: playback.player.stream.volume,
+          initialData: playback.player.state.volume,
+          builder: (context, v) => UoscVolumeButton(
+            volume: v.data ?? 100,
+            onChanged: (x) => playback.player.setVolume(x),
+          ),
+        ),
+        SignalBuilder(
+          builder: (context) => UoscButton(
+            icon: _isFullscreen.value ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+            tooltip: 'Fullscreen (F)',
+            onPressed: _toggleFullscreen,
           ),
         ),
       ],

@@ -273,8 +273,9 @@ Chapters, segments, tracks (`PlaybackController` signals, values from
 - `tracks`: audio and subtitle `MpvTrack`s from mpv `track-list` (id,
   language, title, codec, channels, default / forced / hearing-impaired /
   external, `selected`), re-read after every selection.
-- `position` (250 ms steps), `duration`; computed `opening`, `ending`
-  (`SkipRange`) and `currentChapter`.
+- `position` (250 ms steps), `duration`, `buffered` (end of the cached
+  range: mpv `demuxer-cache-time`, media_kit's `buffer`, 250 ms steps);
+  computed `opening`, `ending` (`SkipRange`) and `currentChapter`.
 
 Skip rules (pure, `media_marks.dart`):
 - Opening = first Intro segment, else the first chapter whose title has a
@@ -442,7 +443,8 @@ Jellyfin source the browser fills the height and can be enlarged, which
 turns the column into a one-row bar under it. Text fields have fixed or capped widths (720 px max) so
 they stay compact on ultrawide screens. Submit state (busy, cancel,
 per-tab errors, server crash) is `ConnectFlow`. Settings (profile, hardware
-decoding, Jellyfin auto-advance, updates, video shaders, shortcuts), Integrations
+decoding, experimental mpv-style controls, Jellyfin auto-advance, updates,
+video shaders, shortcuts), Integrations
 (linked Jellyfin servers) and About open in the same body. Settings persist
 in two Hive boxes: `connect_form` (last form and recents; saved even when a
 join fails) and `settings`. Link media names are derived from the URL path
@@ -494,6 +496,28 @@ the controls up through a guarded dynamic `onHover()` on media_kit's
 private controls state (`keepVideoControlsAwake`). Pills (Skip OP / ED /
 1:30, Next episode) and cards live outside the auto-hiding controls, so
 they show in fullscreen (whose route renders only the video and controls).
+
+Experimental mpv-style controls (`controls/uosc/`, after mpv's uosc theme;
+Settings toggle `AppSettings.mpvControls`, default off): the `Video`'s
+controls builder wraps both sets in `SessionControlsSwitch`, which follows
+the setting live, in the window and in fullscreen. `UoscControls` is our
+own frame (no media_kit controls state): mouse movement shows it, 3 s
+without any hides it and the cursor; `hold` keeps it up during a timeline
+drag and while a menu route is open, double-click toggles fullscreen.
+`UoscTimeline` runs the full width at the bottom: played part filled,
+`cacheRect` (position to `buffered`) hatched (`hatchLines`), chapter
+diamonds on the top edge, current time and duration in boxes inside it, a
+hover tip with the chapter title over the hover time; hidden, it shrinks
+to a 3 px line with chapter ticks. Above it a row of flat buttons: menu (≡:
+change video, people, reload, mark everyone ready, fullscreen, leave),
+subtitles and audio with track counts, a shader badge ("A HQ", opening the
+shared `showShaderMenu`), ready, mark everyone ready, reload; 1:30,
+chapters, previous / next episode, change video, people, volume,
+fullscreen. Menus (`showUoscMenu`: a popup route above the button, the
+current row highlighted) list tracks and chapters with start times. All
+actions are the coordinator's (seeks through `player.seek`, the user path;
+`selectTrack`, `skipForward`, `seekTo`); keys and the floating pills are
+the same in both sets.
 
 Window chrome is frameless (`window_manager`): every screen brings its own
 drag area and min/max/close buttons (Home's top bar; the session uses

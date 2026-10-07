@@ -37,7 +37,13 @@ class SettingsPage extends StatelessWidget {
       children: [
         const PageTitle('Settings'),
         const _Section(title: 'Profile', child: ProfileEditor()),
-        const _Section(title: 'Player', child: _HwdecSetting()),
+        const _Section(
+          title: 'Player',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [_HwdecSetting(), SizedBox(height: 12), _MpvControlsSetting()],
+          ),
+        ),
         const _Section(title: 'Jellyfin', child: _AutoAdvanceSetting()),
         _Section(title: 'Updates', child: _UpdateSettings(controller: updates)),
         const _Section(title: 'Keyboard shortcuts', child: _ShortcutList()),
@@ -291,6 +297,26 @@ class _UpdateSettings extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _MpvControlsSetting extends StatelessWidget {
+  const _MpvControlsSetting();
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppSettings.instance;
+    return SignalBuilder(
+      builder: (context) => SwitchListTile(
+        key: const ValueKey('mpv-controls'),
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Experimental: mpv-style controls'),
+        subtitle: const Text('Video controls modeled on mpv\'s uosc theme: a thick timeline with '
+            'chapters and the cached range, flat buttons and menus. Applies right away.'),
+        value: s.mpvControls.value,
+        onChanged: s.setMpvControls,
+      ),
     );
   }
 }

@@ -89,6 +89,12 @@ void main() {
         expect(a.playback.ending.peek()!.start, const Duration(minutes: 20));
         expect(a.playback.segments.peek(), isEmpty, reason: 'not a Jellyfin item');
 
+        // buffered signal: mpv's demuxer cache (the timeline's hatching)
+        // runs ahead of the position.
+        await _poll(() => a.playback.buffered.peek() > a.playback.position.peek() + const Duration(seconds: 5),
+            'cache ahead');
+        expect(a.playback.buffered.peek(), lessThanOrEqualTo(a.playback.duration.peek()));
+
         // tracks signal: two audio, one subtitle; mpv's choice marked.
         await _poll(() => a.playback.tracks.peek().length == 3, 'tracks');
         final tracks = a.playback.tracks.peek();

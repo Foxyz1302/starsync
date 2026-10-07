@@ -83,8 +83,9 @@ x to forget it. Ctrl+1 / Ctrl+2 switch between Join and Host.
 
 Profile, hardware decoding (auto, off or custom; the env var
 `SYNC_RELAY_HWDEC` overrides it; applies on the next join or Reload video),
-updates, playing the next Jellyfin episode automatically, video shaders
-(see below), and the keyboard shortcuts (read-only).
+"Experimental: mpv-style controls" (below), updates, playing the next
+Jellyfin episode automatically, video shaders (see below), and the
+keyboard shortcuts (read-only).
 Integrations links Jellyfin servers (below). About shows the version.
 
 Keys in a session: Space = ready / unready, Tab = side panel (people, log,
@@ -100,6 +101,16 @@ shows the time and the chapter title. The chapters button lists them
 (current one checked; click to jump). "1:30" skips ahead 1:30. Audio and
 Subtitles buttons (with the track count) list tracks as "Japanese · E-AC3
 2.0 · title"; subtitles have Off.
+
+Experimental mpv-style controls (Settings → Player, off by default,
+switches right away): video controls modeled on mpv's uosc theme. A thick
+timeline across the bottom shows the played part, the cached part ahead
+(hatched), chapter starts as diamonds and the time; hovering it shows the
+chapter title and the time there. With the controls hidden it stays as a
+thin line. Above it flat buttons: ≡ menu, Subtitles and Audio (with the
+track count), the shader badge (the active Anime4K mode, e.g. "A HQ"),
+ready, chapters, 1:30, previous / next episode, change video, people,
+volume and fullscreen. Keys and skip buttons work the same.
 
 Skipping: during the opening a "Skip OP" button floats in the corner (it
 jumps to the end of the opening), during the ending "Skip ED" (to the end

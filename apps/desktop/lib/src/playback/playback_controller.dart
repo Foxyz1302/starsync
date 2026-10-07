@@ -101,6 +101,10 @@ class PlaybackController {
   /// Duration of the open file (zero until known).
   final duration = signal(Duration.zero);
 
+  /// End of the cached range ahead of the position (mpv
+  /// `demuxer-cache-time`, media_kit's `buffer`), in 250 ms steps.
+  final buffered = signal(Duration.zero);
+
   /// The opening ([openingRange]: Intro segment, else an OP-titled
   /// chapter) and the ending ([endingRange]: Outro, else ED-titled).
   late final Computed<SkipRange?> opening =
@@ -409,6 +413,7 @@ class PlaybackController {
       _chapterJson = '';
       chapters.value = const [];
       tracks.value = const [];
+      buffered.value = Duration.zero;
       // An empty map, not null: media_kit caches headers per URI.
       await player.open(Media(url, httpHeaders: headers ?? const {}), play: false);
     } catch (e, st) {
@@ -423,6 +428,10 @@ class PlaybackController {
     _timeSubs.add(p.stream.position.listen((d) {
       final ms = d.inMilliseconds;
       position.value = Duration(milliseconds: ms - ms % 250);
+    }));
+    _timeSubs.add(p.stream.buffer.listen((d) {
+      final ms = d.inMilliseconds;
+      buffered.value = Duration(milliseconds: ms - ms % 250);
     }));
     _timeSubs.add(p.stream.duration.listen((d) {
       duration.value = d;
@@ -469,6 +478,7 @@ class PlaybackController {
     tracks.value = const [];
     position.value = Duration.zero;
     duration.value = Duration.zero;
+    buffered.value = Duration.zero;
   }
 
   /// Waits (bounded) until the open file's tracks are listed and mpv has
