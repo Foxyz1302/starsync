@@ -15,8 +15,8 @@ const videoExtensions = ['mp4', 'mkv', 'webm', 'avi', 'mov', 'm4v', 'ts'];
 
 enum MediaKind { jellyfin, link, file }
 
-/// State of a [MediaPicker], owned by whoever hosts it (Home's Host tab,
-/// later the session's swap panel) so it survives rebuilds.
+/// State of a [MediaPicker], owned by whoever hosts it (the shell, for the
+/// Library tab) so it survives rebuilds and tab switches.
 class MediaPickerController extends ChangeNotifier {
   MediaPickerController(
       {String mediaPath = '', String linkUrl = '', JellyfinMedia? jellyfin, MediaKind? source})

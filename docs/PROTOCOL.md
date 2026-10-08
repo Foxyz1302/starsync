@@ -1,4 +1,4 @@
-# Protocol (proto = 8)
+# Protocol (proto = 9)
 
 Wire format only. Behavior (gate, clock, timeouts) is in
 [ARCHITECTURE.md](ARCHITECTURE.md). Source of truth:
@@ -23,12 +23,13 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
   serves the host's file (Range table in ARCHITECTURE.md).
   `GET /j/<sid>/<token>/<itemId>` relays the current Jellyfin media (see
   "Jellyfin media" below). `/r/<sid>/<token>/...` is the relay of a
-  member's media (see "Relay" below).
+  member's media (see "Relay" below). `GET /a/<sid>/<token>/<hash>` serves
+  a member's picture (see "Avatars" below).
 
 ## Client to server
 
 ```
-{"t":"hello","proto":7,"secret":"","user":{"name":"","avatar":""},
+{"t":"hello","proto":9,"secret":"","user":{"name":"","avatar":""},
  "media":{"name":"","size":0,"duration":0,"url":null},"hostKey":"...",
  "resume":"<token>"}
 {"t":"ready","ready":true,"source":"manual"}      source: manual | auto
@@ -42,6 +43,7 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
 {"t":"ping","c":1767225600000}
 {"t":"chat","text":"..."}
 {"t":"kick","target":"<memberId>","reason":""}
+{"t":"profile","name":"...","avatar":"<base64>"}
 ```
 
 Field notes:
@@ -68,8 +70,13 @@ Field notes:
   Sticky: a report without `jf` keeps the last one. At most 8 entries, keys
   up to 64 characters; others are dropped.
 - `ping.c`: the client's clock in epoch ms; answered with `pong`.
-- `user.avatar`: base64 image, at most 256 KiB of characters. `name` is
-  trimmed, empty becomes `?`, cut to 32 characters.
+- `user.avatar`: base64 PNG, at most 256 KiB of characters (else
+  `rejected: ...`). `name` is trimmed, empty becomes `?`, cut to 32
+  characters.
+- `profile`: changes this member's name and/or picture mid-session. A field
+  that is absent (or null) stays as it is; `avatar: ""` removes the picture.
+  Same rules as `hello.user`; a too large avatar gets `err`
+  `rejected: avatar too large` (the socket stays open, nothing changes).
 - `chat.text` is cut to 500 characters.
 - `swap.media.url` is the link; `name`, `size`, `duration` are informational.
   `swap.media.jellyfin` makes it Jellyfin media (see below); then `url` is
@@ -85,7 +92,7 @@ Field notes:
 {"t":"state","eventId":7,"transport":"playing"|"held"|"finished","position":12.3,
  "serverTime":"<ISO-8601 UTC>","mediaId":1,
  "media":{name,size,duration,url?,jellyfin?}|absent,
- "members":[{"id","name","avatar","ready","inSet","buffered","stale","jf"?}],
+ "members":[{"id","name","avatarHash"?,"ready","inSet","buffered","stale","jf"?}],
  "seekBy":"m1","seekSeq":3,"relay":true}
 {"t":"pong","c":1767225600000,"s":1767225600012}
 {"t":"feed","actor":"","action":"","target":"","reason":"","at":"<ISO-8601>"}
@@ -111,18 +118,35 @@ Field notes:
   it. `seekBy` (member id) and `seekSeq` are present only while the current
   `eventId` came from a seek. `relay` (omitted when false): the server can
   relay the current Jellyfin media. `members[].jf` is the member's last
-  `report.jf`, omitted when it never sent one.
+  `report.jf`, omitted when it never sent one. `members[].avatarHash`
+  (omitted when the member has no picture) names the picture's bytes (see
+  "Avatars").
 - `pong.c` echoes the ping's `c`; `pong.s` is the server's clock in epoch ms
   (the clock `serverTime` uses). With `t3` the local receive time, the offset
   is `s - (c + t3) / 2`, accurate to half the round trip.
 - `feed.action` values: `ready`, `unready`, `force-ready`, `force-unready`,
   `force-play`, `force-hold`, `kick`, `join`, `leave`, `stale`, `swap`,
-  `seek`, `pause`, `resume`, `finished`, `chat`. `target` and `reason` are optional;
-  `reason` carries `auto`/`manual` for ready and `silent too long` or
-  `no signal` for leave/stale.
+  `seek`, `pause`, `resume`, `finished`, `chat`, `rename`, `avatar`. `target`
+  and `reason` are optional; `reason` carries `auto`/`manual` for ready and
+  `silent too long` or `no signal` for leave/stale. `rename`: `actor` is the
+  new name, `target` the old one. `avatar`: the actor changed only the
+  picture.
 - Chat is delivered twice: a `chat` frame with the text and a textless
   `feed` with `action:"chat"`. Render the `chat` frame only; the reference
   client drops the textless feed entry.
+
+## Avatars
+
+- The picture is sent as base64 in `hello.user.avatar` or `profile.avatar`;
+  `state` carries only its hash: the first 16 hex characters of the sha256
+  of the decoded bytes. An avatar that is not valid base64, or whose bytes
+  are not a PNG, JPEG, WebP or GIF (by magic bytes), counts as none.
+- `GET /a/<sid>/<token>/<hash>`: the bytes with their image content type,
+  `cache-control: private, max-age=31536000, immutable` (a hash names fixed
+  bytes; clients fetch each hash once, from the host they dialled).
+  Errors: 401 bad token, 403 kicked, 404 no current member has that
+  picture, 410 unknown session. Pictures go with their member (leave,
+  change, removal).
 
 ## Jellyfin media
 

@@ -6,11 +6,10 @@ import 'package:signals/signals_flutter.dart';
 import '../../state/settings.dart';
 
 // The experimental mpv-style (uosc) controls frame: a full-width timeline
-// at the bottom with a row of flat buttons above it, window buttons top
+// at the bottom with a row of flat buttons above it, a corner widget top
 // right. Mouse movement shows them; after [UoscControls.hideAfter] without
 // any they fade out, the timeline shrinks to a thin line and the cursor
-// hides. Everything lives here because media_kit's fullscreen route
-// renders only the video and its controls.
+// hides. Our own frame: no media_kit controls state to reach into.
 
 class UoscControls extends StatefulWidget {
   /// The timeline; [expanded] is false while the controls are hidden.
@@ -18,7 +17,7 @@ class UoscControls extends StatefulWidget {
   /// Buttons left and right of the row above the timeline.
   final List<Widget> left;
   final List<Widget> right;
-  /// Top-right corner (window buttons), shown with the controls.
+  /// Top-right corner (chat, back to the library), shown with the controls.
   final Widget? top;
   final VoidCallback? onDoubleTap;
   final Duration hideAfter;

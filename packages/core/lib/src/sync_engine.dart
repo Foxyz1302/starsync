@@ -1,3 +1,8 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
+
 import 'constants.dart';
 import 'protocol.dart';
 
@@ -14,11 +19,34 @@ Correction correctionFor({required double ownPosition, required double serverPos
   return Correction.none;
 }
 
+/// Content hash of a picture: the first 16 hex chars of its sha256.
+String avatarHashOf(List<int> bytes) => sha256.convert(bytes).toString().substring(0, 16);
+
+/// `(type, subtype)` of a picture by its magic bytes; null for anything
+/// that is not PNG, JPEG, WebP or GIF (those are never stored or served).
+(String, String)? avatarImageType(List<int> b) {
+  bool at(int i, List<int> sig) {
+    if (b.length < i + sig.length) return false;
+    for (var k = 0; k < sig.length; k++) {
+      if (b[i + k] != sig[k]) return false;
+    }
+    return true;
+  }
+
+  if (at(0, const [0x89, 0x50, 0x4E, 0x47])) return ('image', 'png');
+  if (at(0, const [0xFF, 0xD8, 0xFF])) return ('image', 'jpeg');
+  if (at(0, const [0x52, 0x49, 0x46, 0x46]) && at(8, const [0x57, 0x45, 0x42, 0x50])) return ('image', 'webp');
+  if (at(0, const [0x47, 0x49, 0x46, 0x38])) return ('image', 'gif');
+  return null;
+}
+
 class EngineMember {
   final String id;
   final String token;
   String name;
-  String avatar;
+  /// Picture bytes, served at `/a/...`; only [avatarHash] is broadcast.
+  Uint8List? avatarBytes;
+  String avatarHash = '';
   bool ready = false;
   bool inSet = false;
   double buffered = 0;
@@ -29,14 +57,35 @@ class EngineMember {
     required this.id,
     required this.token,
     required this.name,
-    this.avatar = '',
+    String avatar = '',
     required DateTime now,
-  }) : lastSeen = now;
+  }) : lastSeen = now {
+    setAvatar(avatar);
+  }
+
+  /// Sets the picture from base64 (empty or undecodable: none). Returns
+  /// whether it changed.
+  bool setAvatar(String base64) {
+    Uint8List? bytes;
+    if (base64.isNotEmpty) {
+      try {
+        bytes = base64Decode(base64);
+      } on FormatException {
+        bytes = null;
+      }
+    }
+    if (bytes != null && avatarImageType(bytes) == null) bytes = null;
+    final hash = bytes == null || bytes.isEmpty ? '' : avatarHashOf(bytes);
+    if (hash == avatarHash) return false;
+    avatarHash = hash;
+    avatarBytes = hash.isEmpty ? null : bytes;
+    return true;
+  }
 
   MemberView view({required bool stale}) => MemberView(
         id: id,
         name: name,
-        avatar: avatar,
+        avatarHash: avatarHash,
         ready: ready,
         inSet: inSet,
         buffered: buffered,
@@ -127,6 +176,32 @@ class SyncEngine {
         EngineMember(id: id, token: token, name: name, avatar: avatar, now: now);
     feed.add(FeedMessage(actor: name, action: 'join', at: now));
     return id;
+  }
+
+  /// Name and/or picture change ([ProfileIntent]); null leaves it, an
+  /// empty [avatar] removes the picture. [name] is already cleaned.
+  void applyProfile(String token, {String? name, String? avatar}) {
+    final member = members[token];
+    if (member == null) return;
+    _seen(member);
+    final oldName = member.name;
+    final renamed = name != null && name != oldName;
+    if (renamed) member.name = name;
+    final pictured = avatar != null && member.setAvatar(avatar);
+    if (renamed) {
+      feed.add(FeedMessage(actor: name, action: 'rename', target: oldName, at: now));
+    } else if (pictured) {
+      feed.add(FeedMessage(actor: member.name, action: 'avatar', at: now));
+    }
+  }
+
+  /// Picture bytes of a current member by [EngineMember.avatarHash].
+  Uint8List? avatarFor(String hash) {
+    if (hash.isEmpty) return null;
+    for (final member in members.values) {
+      if (member.avatarHash == hash) return member.avatarBytes;
+    }
+    return null;
   }
 
   /// A reconnect took over [token]'s member (see `hello.resume`).

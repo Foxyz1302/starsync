@@ -1,12 +1,8 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
-import 'package:sync_relay_core/core.dart' show HelloMedia;
 
 import '../../session/session_coordinator.dart';
 import '../../state/session_state.dart';
-import '../../widgets/avatar_pipeline.dart';
-import '../../widgets/media_input.dart';
+import 'profile.dart';
 
 /// What a card shows under its fields after a failed attempt.
 class CardError {
@@ -15,7 +11,7 @@ class CardError {
   const CardError(this.title, this.message);
 }
 
-/// Host/Join submit state for the two Home cards. One attempt at a time;
+/// Host/Join submit state for the strip's two connect cards. One attempt at a time;
 /// [cancel] abandons it via [SessionState.cancelPending].
 class ConnectFlow extends ChangeNotifier {
   ConnectFlow({SessionState? session}) : _session = session ?? SessionState.instance;
@@ -27,7 +23,8 @@ class ConnectFlow extends ChangeNotifier {
   int _attempt = 0;
   bool _disposed = false;
 
-  /// Set when an attempt ends in a kick, so Home shows the removal dialog.
+  /// Set when an attempt ends in a kick, so the shell shows the removal
+  /// dialog.
   void Function(String reason)? onKicked;
 
   @override
@@ -54,31 +51,19 @@ class ConnectFlow extends ChangeNotifier {
   }
 
   /// Validates and builds the params; throws [FormatException] with a
-  /// user-facing message.
-  static Future<ConnectParams> buildParams(ConnectMode mode, ConnectForm f) async {
+  /// user-facing message. [avatar] is the base64 picture (the profile's).
+  /// Hosting puts nothing up: what to watch is picked in the library.
+  static ConnectParams buildParams(ConnectMode mode, ConnectForm f, {String avatar = ''}) {
     final rawPort = mode == ConnectMode.host ? f.hostPort : f.port;
     final port = int.tryParse(rawPort.trim());
     if (port == null || port <= 0 || port > 65535) {
       throw const FormatException('port must be 1–65535');
     }
     if (f.name.trim().isEmpty) {
-      throw const FormatException('set your display name first (click your profile at the top)');
+      throw const FormatException('set your display name first (click your avatar at the top left)');
     }
     if (mode == ConnectMode.join && f.host.trim().isEmpty) {
       throw const FormatException('enter the server address');
-    }
-    String avatar = '';
-    try {
-      avatar = await encodeAvatar(f.avatarPath);
-    } on FormatException catch (e) {
-      throw FormatException(e.message);
-    } catch (_) {
-      throw const FormatException('could not process that avatar — pick a PNG, JPG or WebP photo');
-    }
-    if (mode == ConnectMode.host &&
-        f.mediaPath.isNotEmpty &&
-        !await File(f.mediaPath).exists()) {
-      throw const FormatException('media file not found — check the path or pick again with Browse');
     }
     return ConnectParams(
       host: f.host.trim(),
@@ -86,29 +71,18 @@ class ConnectFlow extends ChangeNotifier {
       secret: mode == ConnectMode.host ? f.hostSecret : f.secret,
       name: f.name.trim(),
       avatar: avatar,
-      mediaPath: mode == ConnectMode.host ? f.mediaPath : '',
-      linkUrl: mode == ConnectMode.host ? f.linkUrl : '',
     );
   }
 
   /// [edit] fills the card's fields into a copy of the last form, so the
-  /// other card's saved values survive. [media] (host only) is put up
-  /// instead of the form's link or file (a Jellyfin ref; the pick itself is
-  /// remembered in the Jellyfin box, not the form).
-  Future<void> submit(ConnectMode mode, void Function(ConnectForm f) edit,
-      {HelloMedia? media}) async {
+  /// other card's saved values survive.
+  Future<void> submit(ConnectMode mode, void Function(ConnectForm f) edit) async {
     if (busy != null) return;
     final myAttempt = ++_attempt;
     final form = _session.lastForm.copy();
     edit(form);
     form.name = form.name.trim();
     form.host = form.host.trim();
-    if (mode == ConnectMode.host) {
-      final parsed = parseMediaInput(form.linkUrl.isNotEmpty ? form.linkUrl : form.mediaPath);
-      form
-        ..mediaPath = parsed.mediaPath
-        ..linkUrl = parsed.linkUrl;
-    }
     busy = mode;
     errors[mode] = null;
     notices[mode] = null;
@@ -116,8 +90,9 @@ class ConnectFlow extends ChangeNotifier {
 
     ConnectParams params;
     try {
-      params = await buildParams(mode, form);
-      if (media != null && mode == ConnectMode.host) params = params.withMedia(media);
+      final profile = Profile.instance;
+      await profile.ensureLoaded();
+      params = buildParams(mode, form, avatar: profile.avatarBase64());
     } catch (e) {
       if (myAttempt != _attempt) return;
       busy = null;

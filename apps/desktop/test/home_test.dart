@@ -2,11 +2,11 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:watch_together/src/schedule/ui/schedule_page.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:watch_together/src/screens/home/health_probe.dart';
-import 'package:watch_together/src/screens/home/home_screen.dart';
 import 'package:watch_together/src/screens/home/media_picker.dart';
-import 'package:watch_together/src/screens/home/ui.dart';
+import 'package:watch_together/src/shell/app_shell.dart';
 import 'package:watch_together/src/state/session_state.dart';
 import 'package:watch_together/src/state/settings.dart';
 import 'package:watch_together/src/update/update_controller.dart';
@@ -107,64 +107,87 @@ void main() {
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(
       theme: ThemeData.dark(),
-      home: Scaffold(
-        body: HomeShell(
-          updates: UpdateController(currentVersion: '0.0.0-dev'),
-          autoUpdateCheck: false,
-          healthGet: health ?? fakeHealth(const {}),
-        ),
+      home: AppShell(
+        updates: UpdateController(currentVersion: '0.0.0-dev'),
+        autoUpdateCheck: false,
+        windowControls: false,
+        healthGet: health ?? fakeHealth(const {}),
       ),
     ));
     await tester.pump();
   }
 
-  setUp(() => SessionState.instance.recents.value = const []);
-
-  testWidgets('tabs and page buttons switch the body', (tester) async {
-    await pumpShell(tester, const Size(1280, 900));
-    expect(find.byKey(const ValueKey('join-row')), findsOneWidget);
-    expect(find.byKey(const ValueKey('host-picker')), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('tab-host')));
+  Future<void> openCard(WidgetTester tester, String key) async {
+    await tester.tap(find.byKey(ValueKey(key)));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('host-picker')), findsOneWidget);
-    expect(find.byKey(const ValueKey('join-row')), findsNothing);
-    expect(find.text('No password — anyone can join'), findsOneWidget);
-    await tester.tap(find.byTooltip('Settings'));
+  }
+
+  setUp(() {
+    SessionState.instance.recents.value = const [];
+    SessionState.instance.route.value = AppRoute.home;
+  });
+
+  testWidgets('tabs and settings pages switch the body', (tester) async {
+    await pumpShell(tester, const Size(1280, 900));
+    expect(find.byKey(const ValueKey('swap-panel')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('tab-schedule')));
+    // The schedule shows a spinner while it loads: pump frames, not settle.
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(find.byKey(const ValueKey('swap-panel')), findsNothing);
+    expect(find.byType(SchedulePage), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('tab-settings')));
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await tester.pumpAndSettle();
+    expect(find.text('Name, picture and colour: click your avatar in the top left'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('settings-player')));
     await tester.pumpAndSettle();
     expect(find.text('Hardware decoding'), findsOneWidget);
-    expect(find.text('Check automatically on start'), findsOneWidget);
-    expect(find.text('Toggle ready'), findsOneWidget);
-    await tester.tap(find.byTooltip('Integrations'));
+    await tester.tap(find.byKey(const ValueKey('settings-updates')));
     await tester.pumpAndSettle();
-    expect(find.text('Jellyfin'), findsOneWidget);
-    await tester.tap(find.byTooltip('About'));
+    expect(find.text('Check automatically on start'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('settings-shortcuts')));
+    await tester.pumpAndSettle();
+    expect(find.text('Toggle ready'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('settings-integrations')));
+    await tester.pumpAndSettle();
+    expect(find.text('Play the next episode automatically'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('settings-about')));
     await tester.pumpAndSettle();
     expect(find.text('Dev build — update checks are off'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('tab-join')));
+    await tester.tap(find.byKey(const ValueKey('tab-library')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('join-row')), findsOneWidget);
+    expect(find.byKey(const ValueKey('swap-panel')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Enter in the join row submits; errors show under it', (tester) async {
+  testWidgets('Enter in the join card submits; errors show under it', (tester) async {
     SessionState.instance.lastForm.name = '';
     await pumpShell(tester, const Size(1280, 720));
+    await openCard(tester, 'strip-join');
     await tester.enterText(find.byKey(const ValueKey('join-address')), 'friend.example');
     await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pump();
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(find.textContaining('display name', findRichText: true), findsOneWidget);
     // The button submits too, and typing in the address clears the error.
     await tester.enterText(find.byKey(const ValueKey('join-address')), 'friend.example2');
     await tester.pump();
     expect(find.textContaining('display name', findRichText: true), findsNothing);
-    await tester.tap(find.widgetWithText(FilledButton, 'Join'));
-    await tester.pump();
-    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Join').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('display name', findRichText: true), findsOneWidget);
+    // A click outside closes the card; the error is still there on reopen.
+    await tester.tapAt(const Offset(20, 700));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('join-address')), findsNothing);
+    await openCard(tester, 'strip-join');
     expect(find.textContaining('display name', findRichText: true), findsOneWidget);
   });
 
-  testWidgets('recent tiles show live status from /health', (tester) async {
+  testWidgets('recent rows show live status from /health', (tester) async {
     SessionState.instance.recents.value = [
       join('alpha.example', '8080'),
       join('beta.example', '9000', 'pw'),
@@ -181,54 +204,34 @@ void main() {
           },
           'gamma.example': {'ok': true, 'name': '', 'proto': -1, 'viewers': 0},
         }));
-    await tester.pump();
-    Finder inTile(String key, Finder f) =>
+    await openCard(tester, 'strip-join');
+    Finder inRow(String key, Finder f) =>
         find.descendant(of: find.byKey(ValueKey('recent-$key')), matching: f);
-    expect(inTile('alpha.example:8080', find.text('Movie night')), findsOneWidget);
-    expect(inTile('alpha.example:8080', find.text('● online · 3 watching')), findsOneWidget);
-    expect(inTile('alpha.example:8080', find.text('needs update')), findsNothing);
-    expect(inTile('beta.example:9000', find.text('○ offline')), findsOneWidget);
-    expect(inTile('beta.example:9000', find.text('beta.example')), findsOneWidget);
-    expect(inTile('gamma.example:7000', find.text('needs update')), findsOneWidget);
-    // Hosted entries live on the Host tab, not in the join grid.
+    expect(inRow('alpha.example:8080', find.text('Movie night')), findsOneWidget);
+    expect(inRow('alpha.example:8080', find.text('● online · 3 watching')), findsOneWidget);
+    expect(inRow('alpha.example:8080', find.text('needs update')), findsNothing);
+    expect(inRow('beta.example:9000', find.text('○ offline')), findsOneWidget);
+    expect(inRow('beta.example:9000', find.text('beta.example')), findsOneWidget);
+    expect(inRow('gamma.example:7000', find.text('needs update')), findsOneWidget);
+    // Hosted entries live on the Host card, not in the join list.
     expect(find.byKey(const ValueKey('recent-host:8181')), findsNothing);
-    // Tiles share a row on a wide window.
-    final a = tester.getRect(find.byKey(const ValueKey('recent-alpha.example:8080')));
-    final b = tester.getRect(find.byKey(const ValueKey('recent-beta.example:9000')));
-    expect(a.top, b.top);
     // x forgets.
-    await tester.tap(inTile('beta.example:9000', find.byTooltip('Forget')));
+    await tester.tap(inRow('beta.example:9000', find.byTooltip('Forget')));
     await tester.pump();
     expect(find.byKey(const ValueKey('recent-beta.example:9000')), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('no recents shows the empty state', (tester) async {
+  testWidgets('no recents: the join card is just the form', (tester) async {
     await pumpShell(tester, const Size(1280, 720));
-    expect(find.byKey(const ValueKey('recents-empty')), findsOneWidget);
+    await openCard(tester, 'strip-join');
+    expect(find.text('Recent'), findsNothing);
+    expect(find.byKey(const ValueKey('join-row')), findsOneWidget);
   });
 
-  testWidgets('wide windows: grid fills the width, fields stay compact', (tester) async {
-    SessionState.instance.recents.value = [
-      for (var i = 0; i < 6; i++) join('10.0.0.$i', '8080'),
-    ];
-    await pumpShell(tester, const Size(3440, 1440));
-    final first = tester.getRect(find.byKey(const ValueKey('recent-10.0.0.0:8080')));
-    final last = tester.getRect(find.byKey(const ValueKey('recent-10.0.0.5:8080')));
-    expect(first.top, last.top);
-    expect(tester.getSize(find.byKey(const ValueKey('join-address'))).width, 280);
-    await tester.tap(find.byKey(const ValueKey('tab-host')));
-    await tester.pumpAndSettle();
-    expect(tester.getSize(find.byKey(const ValueKey('host-column'))).width, 340);
-    final file = find.descendant(
-        of: find.byKey(const ValueKey('media-file')), matching: find.byType(TextField));
-    expect(tester.getSize(file).width, lessThanOrEqualTo(kFieldMaxWidth));
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('media picker segments switch the input', (tester) async {
+  testWidgets('library: picker segments switch the input; Integrations opens Settings', (tester) async {
     await pumpShell(tester, const Size(1280, 900));
-    await tester.tap(find.byKey(const ValueKey('tab-host')));
+    await tester.tap(find.text('File'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('media-file')), findsOneWidget);
     expect(find.text('Browse'), findsOneWidget);
@@ -236,6 +239,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('media-link')), findsOneWidget);
     expect(find.text('Paste'), findsOneWidget);
+    // Offline nothing goes up.
+    expect(find.text('Join or host to watch together'), findsOneWidget);
     await tester.tap(find.text('Jellyfin'));
     await tester.pumpAndSettle();
     // No linked server: sign-in right in the picker.
@@ -246,44 +251,29 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('host column sits right when wide, below when narrow', (tester) async {
-    await pumpShell(tester, const Size(1280, 900));
-    await tester.tap(find.byKey(const ValueKey('tab-host')));
-    await tester.pumpAndSettle();
-    var picker = tester.getRect(find.byKey(const ValueKey('host-picker')));
-    var column = tester.getRect(find.byKey(const ValueKey('host-column')));
-    expect(picker.right, lessThan(column.left));
-    expect(picker.top, column.top);
-
-    await pumpShell(tester, const Size(640, 1000));
-    picker = tester.getRect(find.byKey(const ValueKey('host-picker')));
-    column = tester.getRect(find.byKey(const ValueKey('host-column')));
-    expect(picker.bottom, lessThan(column.top));
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('host without a name errors in the server column', (tester) async {
+  testWidgets('host without a name errors in the host card', (tester) async {
     SessionState.instance.lastForm.name = '';
+    SessionState.instance.recents.value = [const RecentServer(hosted: true, host: '', port: '8181', secret: 's')];
     await pumpShell(tester, const Size(1280, 900));
-    await tester.tap(find.byKey(const ValueKey('tab-host')));
+    await openCard(tester, 'strip-host');
+    expect(find.text('No password — anyone can join'), findsOneWidget);
+    expect(find.text('You pick what to watch afterwards, in the library.'), findsOneWidget);
+    // A hosted port refills the fields.
+    await tester.tap(find.byKey(const ValueKey('recent-host:8181')));
+    await tester.pump();
+    expect(find.text('No password — anyone can join'), findsNothing);
+    await tester.tap(find.widgetWithText(FilledButton, 'Host').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Host'));
-    await tester.pump();
-    await tester.pump();
-    expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('host-column')),
-        matching: find.textContaining('display name', findRichText: true),
-      ),
-      findsOneWidget,
-    );
+    expect(find.textContaining('display name', findRichText: true), findsOneWidget);
   });
 
-  testWidgets('narrow window: bar, join row and host tab fit', (tester) async {
+  testWidgets('narrow window: strip, cards and library fit', (tester) async {
     await pumpShell(tester, const Size(480, 800));
+    expect(tester.takeException(), isNull);
+    await openCard(tester, 'strip-join');
     expect(find.byKey(const ValueKey('join-row')), findsOneWidget);
     expect(tester.takeException(), isNull);
-    await tester.tap(find.byKey(const ValueKey('tab-host')));
+    await tester.tapAt(const Offset(5, 790));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Jellyfin'));
     await tester.pumpAndSettle();

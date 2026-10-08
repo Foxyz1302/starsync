@@ -537,4 +537,58 @@ void main() {
       expect(s.seekBy, isNull);
     });
   });
+
+  group('profile + avatars', () {
+    // Real magic bytes: anything that is not PNG/JPEG/WebP/GIF is dropped.
+    final png = base64Encode([0x89, 0x50, 0x4E, 0x47, ...List<int>.generate(60, (i) => i)]);
+    final other = base64Encode([0xFF, 0xD8, 0xFF, ...List<int>.generate(61, (i) => 255 - i)]);
+
+    test('join keeps bytes, state carries only the hash', () {
+      engine.applyJoin('a', 'alice', png);
+      final hash = engine.members['a']!.avatarHash;
+      expect(hash, hasLength(16));
+      expect(engine.avatarFor(hash), base64Decode(png));
+      final view = engine.broadcast().members.single;
+      expect(view.avatarHash, hash);
+      expect(jsonEncode(engine.broadcast().toJson()), isNot(contains(png)));
+      join('b', 'bob');
+      expect(engine.members['b']!.avatarHash, isEmpty);
+      engine.applyLeave('a');
+      expect(engine.avatarFor(hash), isNull, reason: 'dropped with the member');
+    });
+
+    test('a picture that is not an image is dropped', () {
+      final e = SyncEngine();
+      e.applyJoin('x', 'x', base64Encode(List<int>.generate(64, (i) => i)));
+      expect(e.members['x']!.avatarHash, isEmpty);
+      expect(avatarImageType([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]), ('image', 'webp'));
+    });
+
+    test('rename feeds rename (actor new, target old); picture only feeds avatar', () {
+      engine.applyJoin('a', 'alice', png);
+      engine.feed.drain();
+      engine.applyProfile('a', name: 'bob');
+      var feed = engine.feed.drain().single;
+      expect(feed.action, 'rename');
+      expect(feed.actor, 'bob');
+      expect(feed.target, 'alice');
+
+      engine.applyProfile('a', avatar: other);
+      feed = engine.feed.drain().single;
+      expect(feed.action, 'avatar');
+      expect(feed.actor, 'bob');
+      expect(engine.members['a']!.avatarHash, avatarHashOf(base64Decode(other)));
+
+      engine.applyProfile('a', name: 'carol', avatar: '');
+      feed = engine.feed.drain().single;
+      expect(feed.action, 'rename');
+      expect(engine.members['a']!.avatarHash, isEmpty);
+      expect(engine.members['a']!.avatarBytes, isNull);
+
+      engine.applyProfile('a', name: 'carol', avatar: '');
+      expect(engine.feed.drain(), isEmpty, reason: 'nothing changed');
+      engine.applyProfile('a', avatar: 'not base64!');
+      expect(engine.members['a']!.avatarHash, isEmpty);
+    });
+  });
 }

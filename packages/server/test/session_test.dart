@@ -47,7 +47,7 @@ void main() {
       final s = Session(id: 'default', secret: 'shh');
       final png = 'x' * (64 * 1024);
       expect(s.issueToken('alice', png), isNotEmpty);
-      expect(s.tokens.values.single.avatar, hasLength(64 * 1024));
+      expect(s.tokens, hasLength(1));
     });
 
     test('names truncated to cap, blank becomes ?', () {
@@ -80,8 +80,21 @@ void main() {
   });
 
   group('core welcome + proto', () {
-    test('proto 8: relayed media', () {
-      expect(RelayConstants.protoVersion, 8);
+    test('proto 9: avatars by hash, profile intent', () {
+      expect(RelayConstants.protoVersion, 9);
+      const v = MemberView(id: 'm1', name: 'a', ready: false, inSet: false, buffered: 0, stale: false);
+      expect(v.toJson().containsKey('avatarHash'), isFalse);
+      expect(v.toJson().containsKey('avatar'), isFalse);
+      const h = MemberView(
+          id: 'm1', name: 'a', avatarHash: 'abc', ready: false, inSet: false, buffered: 0, stale: false);
+      expect(MemberView.fromJson(Map<String, Object?>.from(h.toJson())).avatarHash, 'abc');
+      expect(const ProfileIntent(name: 'b').toJson(), {'t': 'profile', 'name': 'b'});
+      final p = ProfileIntent.fromJson({'t': 'profile', 'avatar': ''});
+      expect(p.name, isNull);
+      expect(p.avatar, '');
+    });
+
+    test('relayed media', () {
       const m = HelloMedia(name: 'a', size: 1, duration: 0, relay: MediaRelay(source: 'm1', live: true));
       final back = HelloMedia.fromJson(Map<String, Object?>.from(m.toJson()));
       expect(back.relay!.source, 'm1');

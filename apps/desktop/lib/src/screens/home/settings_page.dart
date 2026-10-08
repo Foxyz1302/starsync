@@ -6,57 +6,31 @@ import '../../playback/playback_controller.dart';
 import '../../shaders/shader_presets.dart';
 import '../../state/settings.dart';
 import '../../update/update_controller.dart';
-import 'profile.dart';
 import 'ui.dart';
 import 'update_indicator.dart';
 
-/// In-session keys, as handled by the session screen's global key handler.
+/// Player keys, as handled by the session player's key handler (while
+/// the player fills the window).
 const sessionShortcuts = [
   ('Space', 'Toggle ready'),
   ('← / →', 'Seek back / forward 10 s'),
   ('Shift+→', 'Skip 1:30 (for everyone)'),
   ('PgUp / PgDn', 'Previous / next chapter'),
   ('F', 'Toggle fullscreen'),
-  ('Tab', 'Open / close the people & chat panel'),
+  ('Tab', 'Open / close chat & activity'),
   ('Ctrl+R', 'Reload the video'),
   ('> or Shift+N', 'Put up the next Jellyfin episode'),
   ('< or Shift+P', 'Put up the previous Jellyfin episode'),
   ('Ctrl+1…6', 'Shaders: Anime4K mode A, B, C, A+A, B+B, C+A'),
   ('Ctrl+0', 'Shaders off'),
-  ('Esc', 'Close panel or fullscreen, else ask to leave'),
+  ('Esc', 'Close the panel or fullscreen, else ask to leave'),
 ];
 
-class SettingsPage extends StatelessWidget {
-  final UpdateController? updates;
-  const SettingsPage({super.key, this.updates});
-
-  @override
-  Widget build(BuildContext context) {
-    return PageScroll(
-      maxWidth: 680,
-      children: [
-        const PageTitle('Settings'),
-        const _Section(title: 'Profile', child: ProfileEditor()),
-        const _Section(
-          title: 'Player',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [_HwdecSetting(), SizedBox(height: 12), _MpvControlsSetting()],
-          ),
-        ),
-        const _Section(title: 'Jellyfin', child: _AutoAdvanceSetting()),
-        _Section(title: 'Updates', child: _UpdateSettings(controller: updates)),
-        const _Section(title: 'Keyboard shortcuts', child: _ShortcutList()),
-        const _Section(title: 'Video quality & shaders', child: _ShaderSettings()),
-      ],
-    );
-  }
-}
-
-class _Section extends StatelessWidget {
+/// One titled panel of the Settings tab.
+class SettingsPanel extends StatelessWidget {
   final String title;
   final Widget child;
-  const _Section({required this.title, required this.child});
+  const SettingsPanel({super.key, required this.title, required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -72,14 +46,14 @@ class _Section extends StatelessWidget {
   }
 }
 
-class _HwdecSetting extends StatefulWidget {
-  const _HwdecSetting();
+class HwdecSetting extends StatefulWidget {
+  const HwdecSetting({super.key});
 
   @override
-  State<_HwdecSetting> createState() => _HwdecSettingState();
+  State<HwdecSetting> createState() => _HwdecSettingState();
 }
 
-class _HwdecSettingState extends State<_HwdecSetting> {
+class _HwdecSettingState extends State<HwdecSetting> {
   final _s = AppSettings.instance;
   late final _custom = TextEditingController(text: _s.hwdecCustom.peek());
 
@@ -130,8 +104,8 @@ class _HwdecSettingState extends State<_HwdecSetting> {
   }
 }
 
-class _ShaderSettings extends StatelessWidget {
-  const _ShaderSettings();
+class ShaderSettings extends StatelessWidget {
+  const ShaderSettings({super.key});
 
   Future<void> _addFiles() async {
     final List<PlatformFile> files;
@@ -249,9 +223,9 @@ class _ShaderSettings extends StatelessWidget {
   }
 }
 
-class _UpdateSettings extends StatelessWidget {
+class UpdateSettings extends StatelessWidget {
   final UpdateController? controller;
-  const _UpdateSettings({this.controller});
+  const UpdateSettings({super.key, this.controller});
 
   @override
   Widget build(BuildContext context) {
@@ -301,8 +275,8 @@ class _UpdateSettings extends StatelessWidget {
   }
 }
 
-class _MpvControlsSetting extends StatelessWidget {
-  const _MpvControlsSetting();
+class MpvControlsSetting extends StatelessWidget {
+  const MpvControlsSetting({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -321,8 +295,8 @@ class _MpvControlsSetting extends StatelessWidget {
   }
 }
 
-class _AutoAdvanceSetting extends StatelessWidget {
-  const _AutoAdvanceSetting();
+class AutoAdvanceSetting extends StatelessWidget {
+  const AutoAdvanceSetting({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -341,8 +315,8 @@ class _AutoAdvanceSetting extends StatelessWidget {
   }
 }
 
-class _ShortcutList extends StatelessWidget {
-  const _ShortcutList();
+class ShortcutList extends StatelessWidget {
+  const ShortcutList({super.key});
 
   @override
   Widget build(BuildContext context) {

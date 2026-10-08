@@ -11,9 +11,9 @@ import 'package:watch_together/src/controls/uosc/timeline.dart';
 import 'package:watch_together/src/jellyfin/track_prefs.dart';
 import 'package:watch_together/src/playback/media_marks.dart';
 import 'package:watch_together/src/playback/playback_controller.dart' show RenderMode;
-import 'package:watch_together/src/screens/home/settings_page.dart';
 import 'package:watch_together/src/screens/session/player_controls.dart' show TrackPick;
 import 'package:watch_together/src/shaders/shader_presets.dart';
+import 'package:watch_together/src/shell/settings_tab.dart';
 import 'package:watch_together/src/state/settings.dart';
 import 'package:watch_together/src/update/update_controller.dart';
 
@@ -456,7 +456,13 @@ void main() {
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(
       theme: ThemeData.dark(),
-      home: Scaffold(body: SettingsPage(updates: UpdateController(currentVersion: '0.0.0-dev'))),
+      home: Scaffold(
+        body: SettingsTab(
+          section: SettingsSection.player,
+          onSection: (_) {},
+          updates: UpdateController(currentVersion: '0.0.0-dev'),
+        ),
+      ),
     ));
     final toggle = find.byKey(const ValueKey('mpv-controls'));
     expect(find.text('Experimental: mpv-style controls'), findsOneWidget);

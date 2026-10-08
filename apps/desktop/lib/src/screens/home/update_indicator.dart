@@ -4,7 +4,7 @@ import '../../update/update_controller.dart';
 import '../../widgets/update_banner.dart';
 import 'ui.dart';
 
-/// Compact "Update vX" pill for Home's top-right; hidden until there is
+/// Compact "Update vX" pill for the party strip; hidden until there is
 /// something to install. Click opens the full [UpdateBanner].
 class UpdateIndicator extends StatelessWidget {
   final UpdateController? controller;

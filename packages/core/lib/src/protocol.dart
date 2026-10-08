@@ -18,6 +18,14 @@ int finiteInt(Object? value, String field, {int fallback = 0}) {
   return n.toInt();
 }
 
+/// A member name as shown to everyone: trimmed, cut to
+/// [RelayConstants.maxNameLength], `?` when empty.
+String cleanMemberName(String name) {
+  final trimmed = name.trim();
+  if (trimmed.isEmpty) return '?';
+  return trimmed.substring(0, trimmed.length.clamp(0, RelayConstants.maxNameLength));
+}
+
 class HelloUser {
   final String name;
   final String avatar;
@@ -450,10 +458,32 @@ class ChatMessage {
   }
 }
 
+/// Changes this member's name and/or picture mid-session. Null fields stay
+/// as they are; an empty [avatar] removes the picture.
+class ProfileIntent {
+  final String? name;
+  /// Base64 PNG, like `hello.user.avatar`.
+  final String? avatar;
+  const ProfileIntent({this.name, this.avatar});
+
+  Map<String, Object?> toJson() => {
+        't': 'profile',
+        if (name != null) 'name': name,
+        if (avatar != null) 'avatar': avatar,
+      };
+
+  factory ProfileIntent.fromJson(Map<String, Object?> json) {
+    if (json['t'] != 'profile') throw const ProtocolException('not a profile intent');
+    return ProfileIntent(name: json['name'] as String?, avatar: json['avatar'] as String?);
+  }
+}
+
 class MemberView {
   final String id;
   final String name;
-  final String avatar;
+  /// Content hash of the member's picture, fetched at `/a/...`; empty when
+  /// none.
+  final String avatarHash;
   final bool ready;
   final bool inSet;
   final double buffered;
@@ -463,7 +493,7 @@ class MemberView {
   const MemberView({
     required this.id,
     required this.name,
-    this.avatar = '',
+    this.avatarHash = '',
     required this.ready,
     required this.inSet,
     required this.buffered,
@@ -474,7 +504,7 @@ class MemberView {
   Map<String, Object?> toJson() => {
         'id': id,
         'name': name,
-        'avatar': avatar,
+        if (avatarHash.isNotEmpty) 'avatarHash': avatarHash,
         'ready': ready,
         'inSet': inSet,
         'buffered': buffered,
@@ -485,7 +515,7 @@ class MemberView {
   factory MemberView.fromJson(Map<String, Object?> json) => MemberView(
         id: (json['id'] as String?) ?? '',
         name: (json['name'] as String?) ?? '',
-        avatar: (json['avatar'] as String?) ?? '',
+        avatarHash: (json['avatarHash'] as String?) ?? '',
         ready: (json['ready'] as bool?) ?? false,
         inSet: (json['inSet'] as bool?) ?? false,
         buffered: finiteDouble(json['buffered'], 'buffered'),

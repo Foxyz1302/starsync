@@ -9,12 +9,12 @@ import 'package:watch_together/src/jellyfin/browse_scope.dart';
 import 'package:watch_together/src/jellyfin/progress.dart';
 import 'package:watch_together/src/jellyfin/session_media.dart';
 import 'package:watch_together/src/jellyfin/track_prefs.dart';
-import 'package:watch_together/src/screens/home/host_tab.dart' show hostJellyfinMedia;
 import 'package:watch_together/src/screens/home/media_picker.dart';
 import 'package:watch_together/src/screens/session/jellyfin_widgets.dart';
 import 'package:watch_together/src/screens/session/swap_panel.dart';
-import 'package:watch_together/src/screens/session_screen.dart' show viaHostOf;
 import 'package:watch_together/src/session/session_coordinator.dart' show AutoAdvance;
+import 'package:watch_together/src/shell/library_tab.dart' show putUpJellyfinMedia;
+import 'package:watch_together/src/shell/party_strip.dart' show viaHostOf;
 
 import 'jellyfin_accounts_test.dart';
 import 'jellyfin_browser_test.dart' show app, setSize, settle;
@@ -125,16 +125,16 @@ void main() {
           title: 'Rice and Thieves and Heroes',
           subtitle: 'Black Summoner · S1E6',
           runtime: Duration(minutes: 23));
-      final media = hostJellyfinMedia(accounts, pick);
+      final media = putUpJellyfinMedia(accounts, pick);
       expect(media.url, isNull);
       expect(media.jellyfin!.itemId, episodeId);
       expect(media.jellyfin!.subtitle, 'Black Summoner · S1E6');
       expect(media.jellyfin!.runtimeSecs, 23 * 60);
       expect(jsonEncode(SwapIntent(media: media).toJson()), isNot(contains('TEST_ACCESS_TOKEN')));
-      expect(() => hostJellyfinMedia(accounts, const JellyfinMedia(serverId: 'gone', baseUrl: 'x', itemId: 'i', title: 't')),
+      expect(() => putUpJellyfinMedia(accounts, const JellyfinMedia(serverId: 'gone', baseUrl: 'x', itemId: 'i', title: 't')),
           throwsFormatException);
       accounts.markExpired(fixtureServerId);
-      expect(() => hostJellyfinMedia(accounts, pick), throwsFormatException);
+      expect(() => putUpJellyfinMedia(accounts, pick), throwsFormatException);
     });
 
     test('a pasted Jellyfin link becomes a ref (ServerId from /System/Info/Public, no api_key)',
@@ -532,7 +532,7 @@ void main() {
           swapped.add(m);
           return null;
         },
-        onClose: () => closed++,
+        onDone: () => closed++,
       )));
       await settle(tester);
       // A guest's file goes through the server's relay.
@@ -553,7 +553,7 @@ void main() {
       expect(find.byKey(const ValueKey('media-jellyfin')), findsOneWidget);
 
       await tester.pumpWidget(app(SwapPanel(
-          controller: c, accounts: accounts, isHost: true, onSwap: (_) async => 'x', onClose: () {})));
+          controller: c, accounts: accounts, isHost: true, onSwap: (_) async => 'x')));
       await settle(tester);
       expect(find.text('File'), findsOneWidget);
       await tester.tap(find.text('File'));
@@ -580,7 +580,6 @@ void main() {
         isHost: false,
         jellyfinStart: BrowseStart.seriesOf(fixtureServerId, ep),
         onSwap: (_) async => null,
-        onClose: () {},
       )));
       await settle(tester, 10);
       expect(tester.widget<ChoiceChip>(find.byKey(const ValueKey('season-$season2Id'))).selected,

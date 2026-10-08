@@ -159,6 +159,37 @@ class ServerHub {
   }
 }
 
+/// `GET /a/<sid>/<token>/<hash>`: a current member's picture by its
+/// content hash, for members (valid, unkicked token) only. The bytes for a
+/// hash never change, so clients may cache them for good.
+void mountAvatarRoute(RelicApp app, ServerHub hub) {
+  Response status(int code) => Response(code, body: Body.fromString('status $code'));
+  app.get('/a/:sid/:token/:hash', (final req) {
+    final sid = req.pathParameters.raw[#sid] ?? '';
+    final token = req.pathParameters.raw[#token] ?? '';
+    final hash = req.pathParameters.raw[#hash] ?? '';
+    final session = hub.sessions.get(sid);
+    if (session == null) return status(410);
+    switch (session.gate(token)) {
+      case MediaGate.unauthorized:
+        return status(401);
+      case MediaGate.forbidden:
+        return status(403);
+      default:
+        break;
+    }
+    final bytes = hub.engine.avatarFor(hash);
+    final type = bytes == null ? null : avatarImageType(bytes);
+    if (bytes == null || type == null) return status(404);
+    return Response.ok(
+      body: Body.fromData(bytes, mimeType: MimeType(type.$1, type.$2)),
+      headers: Headers.build((h) {
+        h['cache-control'] = ['private, max-age=31536000, immutable'];
+      }),
+    );
+  });
+}
+
 /// Media names are shown to everyone and must never carry a URL (api_key etc.).
 /// A URL-looking name is reduced to its last path segment, no query/fragment.
 String sanitizeMediaName(String name) {
@@ -358,6 +389,19 @@ void mountSyncRoute(
                     mediaId: hub.engine.mediaId);
               }
               hub.changed();
+            case 'profile':
+              if (token == null || viewer == null) return;
+              final intent = ProfileIntent.fromJson(decoded);
+              final avatar = intent.avatar;
+              if (avatar != null && avatar.length > RelayConstants.maxAvatarBytes) {
+                wsErr(ws, 'rejected: avatar too large');
+                return;
+              }
+              final name = intent.name == null ? null : cleanMemberName(intent.name!);
+              // Chat and kick name the sender by its token's name.
+              if (name != null) viewer.name = name;
+              hub.engine.applyProfile(token, name: name, avatar: avatar);
+              hub.changed();
             case 'report':
               if (token == null) return;
               final report = ReportMessage.fromJson(decoded);
@@ -470,7 +514,7 @@ void mountSyncRoute(
           await close();
           return;
         }
-        memberId = hub.engine.applyJoin(token, hello.user.name, hello.user.avatar);
+        memberId = hub.engine.applyJoin(token, session.tokens[token]!.name, hello.user.avatar);
       }
       session.tokens[token]!.isHost = hub.isHostKey(hello.hostKey);
       final activeToken = token;

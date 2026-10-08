@@ -1,5 +1,5 @@
 abstract class RelayConstants {
-  static const int protoVersion = 8;
+  static const int protoVersion = 9;
 
   // Relay (`/r/...`): a member's bytes through the server's buffer.
   static const int relaySliceBytes = 1 << 20;
@@ -32,13 +32,11 @@ abstract class RelayConstants {
   static const int stateHeartbeatSecs = 1;
   static const int pingIntervalSecs = 5;
 
-  // Base64-char count of the avatar string, enforced at hello. 256 KiB
-  // leaves wide headroom over any 128x128 pipeline PNG (raw bitmap
-  // <= 64 KiB, worst-case base64 ~95 KiB chars) — deliberate over-size
-  // for private-server use. PNG keeps transparency; JPEG did not.
-  // Trade: avatars ride in the 1 Hz state broadcast, so worst-case host
-  // uplink scales with this cap. Follow-up (not now): send avatar bytes
-  // once, reference by hash afterwards.
+  // Base64-char count of the avatar string, enforced at hello and
+  // profile. 256 KiB leaves wide headroom over any 128x128 pipeline PNG
+  // (raw bitmap <= 64 KiB, worst-case base64 ~95 KiB chars) — deliberate
+  // over-size for private-server use. PNG keeps transparency; JPEG did
+  // not. Only the hash rides in `state`; the bytes are fetched once.
   static const int maxAvatarBytes = 256 * 1024;
   static const int maxNameLength = 32;
   static const int maxChatLength = 500;

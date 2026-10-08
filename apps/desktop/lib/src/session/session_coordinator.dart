@@ -14,6 +14,7 @@ import '../playback/playback_controller.dart';
 import '../screens/home/picked_media.dart';
 import '../sfx/sfx.dart';
 import '../state/settings.dart';
+import '../sync/avatar_cache.dart';
 import '../sync/state_diff.dart';
 import '../sync/sync_client.dart';
 import '../sync/user_seek.dart';
@@ -140,6 +141,8 @@ class SessionCoordinator {
   /// null when this app is not the host.
   Future<({String name, int size})?> Function(String path)? hostFile;
   final SyncClient sync = SyncClient();
+  /// Member pictures by `avatarHash`, fetched from the server.
+  late final AvatarCache avatars = AvatarCache(sync);
   final PlaybackController playback = PlaybackController();
   final StateDiff diff = StateDiff();
 
@@ -953,6 +956,26 @@ class SessionCoordinator {
     sync.sendChat(text);
   }
 
+  /// Name and/or picture (base64 PNG, empty removes it) change for
+  /// everyone now; a later fresh join sends them too.
+  void updateProfile({String? name, String? avatar}) {
+    final p = _params;
+    if (p != null) {
+      _params = ConnectParams(
+        host: p.host,
+        port: p.port,
+        secret: p.secret,
+        name: name ?? p.name,
+        avatar: avatar ?? p.avatar,
+        mediaPath: p.mediaPath,
+        linkUrl: p.linkUrl,
+        hostKey: p.hostKey,
+        media: p.media,
+      );
+    }
+    sync.sendProfile(name: name, avatar: avatar);
+  }
+
   void kick(String memberId, {String reason = ''}) {
     markInput();
     sync.sendKick(memberId, reason: reason);
@@ -1059,6 +1082,10 @@ class SessionCoordinator {
   }
 
   // ------------------------------------------------------------- jellyfin
+
+  /// A toast from outside the session (e.g. the Schedule tab's request
+  /// results), shown like the session's own.
+  void showToast(String text) => _pushToast(text);
 
   void _pushToast(String text) {
     _toastId++;

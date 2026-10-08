@@ -6,10 +6,9 @@ import 'package:flutter/widgets.dart';
 import '../playback/frame_watchdog.dart';
 
 /// Fingerprints what the compositor really shows of the video. Place
-/// [anchor] in the video controls (built in the window and again in the
-/// fullscreen route); [sample] captures the route around the newest
-/// mounted anchor at ~200 px wide — the texture included — and hashes its
-/// centre. This is the only per-presented-frame signal: mpv's own
+/// [anchor] under a `RepaintBoundary` around the video (the session player
+/// does); [sample] captures that boundary around the newest mounted anchor
+/// at ~200 px wide — the texture included — and hashes its centre. This is the only per-presented-frame signal: mpv's own
 /// counters keep ticking when the Flutter texture is stuck.
 class ShownFrameProbe {
   final _anchors = <_AnchorState>[];

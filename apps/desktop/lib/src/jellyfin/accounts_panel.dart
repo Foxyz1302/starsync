@@ -74,7 +74,7 @@ class _JellyfinAccountsPanelState extends State<JellyfinAccountsPanel> {
                         Text('Jellyfin', style: t.titleMedium),
                         const SizedBox(height: 4),
                         const Text(
-                          'Browse your libraries in the Host tab and put up movies and episodes. '
+                          'Browse your libraries in the Library tab and put up movies and episodes. '
                           'Sign in with Quick Connect or your password; several servers are fine.',
                           style: TextStyle(color: Colors.grey),
                         ),

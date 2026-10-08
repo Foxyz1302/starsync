@@ -7,7 +7,6 @@ import 'package:sync_relay_core/core.dart';
 import 'package:watch_together/src/jellyfin/accounts.dart';
 import 'package:watch_together/src/jellyfin/format.dart';
 import 'package:watch_together/src/jellyfin/sign_in.dart';
-import 'package:watch_together/src/screens/home/host_tab.dart' show mediaSummary;
 import 'package:watch_together/src/screens/home/media_picker.dart';
 
 /// Captured Jellyfin 10.11 answers shared with packages/core's client tests.
@@ -327,9 +326,8 @@ void main() {
       expect(back, m);
       expect(back.runtime, const Duration(minutes: 23));
       expect(back.subtitle, 'Black Summoner · S1E6');
-      expect(mediaSummary(m), 'Playing: Rice and Thieves and Heroes — Black Summoner · S1E6');
-      expect(mediaSummary(const FileMedia('/a/b/movie.mkv')), 'Playing: movie.mkv');
-      expect(mediaSummary(null), 'No media selected (optional).');
+      expect(m.label, 'Rice and Thieves and Heroes — Black Summoner · S1E6');
+      expect(const FileMedia('/a/b/movie.mkv').label, 'movie.mkv');
       expect(JellyfinMedia.fromJson({'serverId': 1}), isNull);
     });
 

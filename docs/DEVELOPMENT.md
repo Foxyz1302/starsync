@@ -64,9 +64,10 @@ and `e2e_check` (simulated viewers against a live server).
 - Desktop tests that write files use `WT_TEST_TMP` (default: system temp).
 
 Traps:
-- Never pump the session screen or media_kit `Video` in `flutter test`: the
-  runner hangs (kill the `flutter_tester` by PID). Test pure logic
-  (`StateDiff`, coordinator without widgets) instead.
+- Never pump media_kit's `Video` in `flutter test`: the runner hangs (kill
+  the `flutter_tester` by PID). `AppShell(videoBuilder:)` takes a stand-in,
+  so shell tests run the real player layout without it; otherwise test pure
+  logic (`StateDiff`, coordinator without widgets).
 - Never depend on a server-side WebSocket `onDone`; assert presence with
   deadline polling.
 - `sub.asFuture()` can resolve before `onDone`; poll with a deadline.
@@ -125,14 +126,19 @@ Host. Without the app: `dart run packages/server/bin/server.dart`.
 - Overlays that are hidden but mounted keep focus (Space falls into a hidden
   button). Use `ExcludeFocus` on closed subtrees and unfocus on close; reuse
   the shared no-focus node for overlay buttons.
-- `modifyVolumeOnScroll: false` on the session controls is load-bearing for
-  window drag (volume is the speaker button only). A `GestureDetector` below
-  media_kit's overlay loses the gesture arena; the drag layer is a raw pointer
-  observer on top.
-- New screens must bring their own drag area and window buttons (frameless
-  window).
+- `toggleFullscreenOnDoublePress: false` on the session controls is
+  load-bearing: media_kit's double-click pushes its own fullscreen route with
+  a second `Video`. A `GestureDetector` below media_kit's overlay never sees
+  the click (its `MouseRegion` takes the hit) and one around it would delay
+  every button click (double-tap holds the arena), so the double-click is a
+  raw pointer observer (`DoubleClickListener`).
+- The window is frameless: the party strip is the only drag area and holds
+  the window buttons.
+- Signal-backed singletons (`Profile`, `SessionState`) live across tests;
+  never cache a `Future` in them (each test runs in its own zone, and a
+  Future from an earlier test never completes in the next).
 - Chat arrives twice from the server (see PROTOCOL.md); the client drops the
   textless feed copy.
-- Tab traversal is disabled on the session screen on purpose; Tab toggles the
-  side panel.
+- Tab traversal is disabled in the session player on purpose; Tab toggles
+  chat & activity.
 - After editing constants (ports, thresholds), grep to confirm the value landed.

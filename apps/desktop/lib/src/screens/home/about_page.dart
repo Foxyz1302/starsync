@@ -25,9 +25,10 @@ Future<bool> openInBrowser(String url) async {
   }
 }
 
-class AboutPage extends StatelessWidget {
+/// Name, version, update state and the source link (Settings → About).
+class AboutPanel extends StatelessWidget {
   final UpdateController? updates;
-  const AboutPage({super.key, this.updates});
+  const AboutPanel({super.key, this.updates});
 
   Future<void> _open(BuildContext context) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
@@ -40,11 +41,7 @@ class AboutPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    return PageScroll(
-      maxWidth: 680,
-      children: [
-        const PageTitle('About'),
-        Panel(
+    return Panel(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -73,8 +70,6 @@ class AboutPage extends StatelessWidget {
               ),
             ],
           ),
-        ),
-      ],
-    );
+        );
   }
 }

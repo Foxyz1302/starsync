@@ -33,6 +33,8 @@ class SyncClient {
   Stream<String> get errors => _errors.stream;
   Stream<SyncStatus> get status => _status.stream;
 
+  /// The `/sync` URL last dialled; its host serves `/a/...` and the media.
+  Uri? wsUri;
   String token = '';
   String memberId = '';
   String? mediaUrl;
@@ -53,6 +55,7 @@ class SyncClient {
   }) async {
     await disconnect();
     clockSync.reset();
+    this.wsUri = wsUri;
     _status.add(SyncStatus.connecting);
     final ch = WebSocketChannel.connect(wsUri);
     unawaited(ch.ready.then((_) {}, onError: (_) {}));
@@ -238,6 +241,13 @@ class SyncClient {
         ? text.substring(0, RelayConstants.maxChatLength)
         : text;
     _send(ChatMessage(text: clean).toJson());
+  }
+
+  /// Mid-session name/picture change; null leaves it, an empty [avatar]
+  /// (base64 PNG) removes the picture.
+  void sendProfile({String? name, String? avatar}) {
+    if (name == null && avatar == null) return;
+    _send(ProfileIntent(name: name, avatar: avatar).toJson());
   }
 
   void sendKick(String target, {String reason = ''}) {

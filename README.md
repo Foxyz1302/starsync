@@ -28,7 +28,7 @@ From the Releases page of this repo:
   Windows desktop; reports welcome.
 
 Update from the app: when a newer version exists, an update indicator
-appears in Home's top bar and opens the update card. "Update and restart" downloads,
+appears in the strip at the top of the window and opens the update card. "Update and restart" downloads,
 verifies, applies in place and restarts; the install folder must be writable
 by you. Settings has Check now and an auto-check toggle. From a terminal:
 `watch_together --upgrade`, or the shipped `update.sh` / `update.bat`. A
@@ -36,19 +36,51 @@ release with a newer protocol is a required update: everyone on a server
 must run the same protocol version, and a mismatch is refused with a message
 telling you to update.
 
+## The window
+
+One window. Along the top, the strip: your avatar (click it for your
+profile: name, picture with a crop editor, colour, and links to the
+settings), the Library / Schedule / Settings tabs, and the party. Offline
+the party side has Join and Host; in a server it shows everyone's avatar
+with a ring for their state (green ready, amber buffering, grey not ready,
+dimmed reconnecting; a crown on yours when you host, a tower on whoever
+passes the video on). Click the avatars for the member list (force ready,
+kick). Beside them the server and "ready n/m", the chat button with unread
+count, and Leave. Empty strip space drags the window.
+
+The player fills the window under the strip. Pick a tab and it shrinks to
+a mini player in a corner: drag it anywhere and it snaps to the nearest
+corner; double-click or ⤢ makes it big again, × stops watching (you stay in
+the server, muted) and the strip's screen button brings it back. F or
+double-click on the picture goes fullscreen (the strip hides, the party
+shows in a corner while paused), Esc leaves it. While playback waits, a
+pill under the picture says for whom ("Waiting for you · press Space when
+ready"). Chat and activity open in a panel on the right (chat button or
+Tab); joins, leaves, chat and other news also pop up bottom left with the
+person's avatar.
+
+Your name and picture change for everyone in the server right away; the
+colour is yours only.
+
 ## Host from the app
 
-Home, Host tab. Pick what to watch (optional): Jellyfin (browse your linked
-servers, see below), Link (paste an http(s) URL; Ctrl+V outside a field
-pastes it in) or File (path or Browse). In the column beside it set a port and an optional password (blank =
-anyone can join), then Host. Your name and avatar come from your profile
-(the chip at the top left). The app starts a
-server inside itself and joins it; you are the host and nobody can kick you.
-Leaving or closing the app stops the server. Friends need to reach your machine: open
-the TCP port on your router (or use a LAN or VPN address). Friends open nothing.
+Host in the strip: set a port and an optional password (blank = anyone can
+join), then Host. The app starts a server inside itself and joins it; you
+are the host and nobody can kick you. Nothing is up yet: pick what to
+watch in the Library tab (below) and "Put it up for everyone". Leaving or
+closing the app stops the server. Friends need to reach your machine: open
+the TCP port on your router (or use a LAN or VPN address). Friends open
+nothing. Ports you hosted on before are one click away in the Host card.
 
-If you pick a local file, the server streams it to everyone from your disk.
-Nothing is uploaded or stored anywhere.
+If you put up a local file, the server streams it to everyone from your
+disk. Nothing is uploaded or stored anywhere.
+
+## Library
+
+What to watch: Jellyfin (browse your linked servers, see below), Link
+(paste an http(s) URL; Ctrl+V outside a field pastes it in) or File (path
+or Browse), then "Put it up for everyone" and the player opens. Offline the
+library browses but nothing goes up until you join or host.
 
 ## Dedicated server
 
@@ -77,29 +109,30 @@ To run it as a service, unpack the tarball to `/opt/watch-together` and use
 
 ## Join
 
-Home, Join tab. Enter the host's address, port, and the password if there
-is one, then Enter or Join. Your name and avatar come from your profile (top
-bar chip or Settings). Servers you got into appear as up to 6 Recent server
-tiles with live status (online and how many are watching, or offline, plus
-"needs update" when the server runs another protocol): click one to rejoin,
-x to forget it. Ctrl+1 / Ctrl+2 switch between Join and Host.
+Join in the strip. Servers you got into are listed first (up to 6), with
+live status (online and how many are watching, or offline, plus "needs
+update" when the server runs another protocol): click one to rejoin, x to
+forget it. Or enter the host's address, port, and the password if there
+is one, then Enter or Join. Your name and picture come from your profile
+(your avatar at the top left).
 
 ## Settings
 
-Profile, hardware decoding (auto, off or custom; the env var
-`SYNC_RELAY_HWDEC` overrides it; applies on the next join or Reload video),
-"Experimental: mpv-style controls" (below), updates, playing the next
-Jellyfin episode automatically, video shaders (see below), and the
-keyboard shortcuts (read-only).
-Integrations links Jellyfin servers (below). About shows the version.
+The Settings tab (Ctrl+,) has a page per topic: Profile; Player (hardware
+decoding: auto, off or custom, the env var `SYNC_RELAY_HWDEC` overrides
+it, applies on the next join or Reload video; "Experimental: mpv-style
+controls", below; video shaders, see below); Jellyfin & integrations
+(linked Jellyfin servers, below, and playing the next episode
+automatically); Updates; Keyboard shortcuts (read-only); About (the
+version).
 
-Keys in a session: Space = ready / unready, Tab = side panel (people, log,
-chat, change video), Left/Right = seek 10 s, Shift+Right = skip 1:30,
+Keys while the player fills the window: Space = ready / unready, Tab =
+chat & activity, Left/Right = seek 10 s, Shift+Right = skip 1:30,
 PgUp/PgDn = previous / next chapter (as in mpv), F = fullscreen, Esc =
-close panel or ask to leave, Ctrl+R = reload video, `<` / `>` or Shift+P /
-Shift+N = previous / next Jellyfin episode, Ctrl+1..6 = Anime4K mode A, B,
-C, A+A, B+B, C+A, Ctrl+0 = shaders off. Every seek, skip and chapter jump
-moves everyone.
+close the chat or fullscreen, else ask to leave, Ctrl+R = reload video,
+`<` / `>` or Shift+P / Shift+N = previous / next Jellyfin episode,
+Ctrl+1..6 = Anime4K mode A, B, C, A+A, B+B, C+A, Ctrl+0 = shaders off.
+Every seek, skip and chapter jump moves everyone.
 
 Controls: the seek bar marks chapter starts with a diamond; hovering it
 shows the time and the chapter title. The chapters button lists them
@@ -114,8 +147,9 @@ timeline across the bottom shows the played part, the cached part ahead
 chapter title and the time there. With the controls hidden it stays as a
 thin line. Above it flat buttons: ≡ menu, Subtitles and Audio (with the
 track count), the shader badge (the active Anime4K mode, e.g. "A HQ"),
-ready, chapters, 1:30, previous / next episode, change video, people,
-volume and fullscreen. Keys and skip buttons work the same.
+ready, chapters, 1:30, previous / next episode, change video, volume and
+fullscreen; chat and back-to-library top right. Keys and skip buttons work
+the same.
 
 Skipping: during the opening a "Skip OP" button floats in the corner (it
 jumps to the end of the opening), during the ending "Skip ED" (to the end
@@ -137,29 +171,27 @@ Only the host needs the port reachable.
 
 ## Jellyfin
 
-Integrations > Jellyfin > Add server: type the address, then sign in with
+Settings > Jellyfin & integrations > Add server: type the address, then sign in with
 Quick Connect (the app shows a code; approve it in Jellyfin under Profile >
 Quick Connect) or your username and password. Several servers can be
 linked; each shows its status, and a star picks the default. Sign out
 revokes the app's sign-in on the server. If a sign-in expires the server
 shows "Reconnect" instead of disappearing.
 
-The Host tab's Jellyfin source is a library browser: Continue watching (with
+The Library's Jellyfin source is a library browser: Continue watching (with
 time left), Next up and the latest per library on the start page; library
 grids with sort (name, date added, release date, rating, random) and
 Unwatched / Favorites filters; series pages with seasons, episode progress
 and a "Next up" button; details with the file's tracks; search. Clicking a
-movie or episode picks it; the button in the top right enlarges the browser
-and moves port, password and Host into a bar below it. On wide windows a
-side pane shows details of whatever is under the mouse.
+movie or episode picks it. On wide windows a side pane shows details of
+whatever is under the mouse.
 
 Keys in the browser: arrows move, Enter picks or opens, I = details,
 Esc / Backspace / Alt+Left = back (Esc first clears a search), / or Ctrl+F =
 search.
 
-Host from the library: pick a movie or episode and Host. Only the item
-goes to the server (which Jellyfin server and which item), never a link or
-your sign-in. Pasting a Jellyfin link (web page or stream link) does the
+Putting up a movie or episode sends only the item to the server (which
+Jellyfin server and which item), never a link or your sign-in. Pasting a Jellyfin link (web page or stream link) does the
 same when the app can reach that Jellyfin; otherwise it is shared as a
 plain link.
 
@@ -172,7 +204,7 @@ Watching:
 - Friends without an account watch through the server: whoever put the
   item up passes it on automatically, with their own sign-in, which never
   leaves their computer (only the current item, only to people in the
-  session). They show "via host" in the member list. When the app hosts,
+  session). They show "via host" in the member list (click the avatars). When the app hosts,
   or a dedicated server has its own login (`--jellyfin <file>`, see
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), Jellyfin relay), the server
   fetches it itself instead.
@@ -195,9 +227,9 @@ Your choice is remembered per series (and as a default) and the closest
 match (language, then title, then codec and channels) is selected on the
 next episode. This is per person; nobody else is affected.
 
-"Change video" in the session panel (Tab) opens the same picker as the Host
-tab: the library starts on the series you are watching with the current
-season, else where you left it.
+"Change video" in the player's controls opens the Library tab (the player
+goes mini): the library starts on the series you are watching with the
+current season, else where you left it.
 
 Anyone can put up a file from their own computer, also on a dedicated
 server: it streams from your computer through the server to everyone (the
@@ -226,7 +258,7 @@ C (480p), A+A, B+B, C+A, each as HQ (strong GPUs, GTX 1080 and up) or Fast
 
 Pick one with the ✨ button in the player's control bar (also in
 fullscreen) or Ctrl+0..6; the change applies live and is saved, so the next
-session starts with it. Settings → Video quality & shaders sets the default,
+session starts with it. Settings → Player sets the default,
 HQ or Fast (used by Ctrl+1..6) and the custom files. Shaders cost GPU time
 every frame and need hardware video rendering: on media_kit's software
 fallback they do nothing, and the app says so. A shader that is missing or

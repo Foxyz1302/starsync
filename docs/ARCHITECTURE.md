@@ -36,8 +36,8 @@ size (`ServerIsolate.setFile`): the host's in-session File swap then sends a
   `127.0.0.1` like any other client. Server logs go to the app's log with a
   `[server]` prefix. The isolate runs with `errorsAreFatal: false`: an
   uncaught async error is logged and the server keeps going. If the isolate
-  dies anyway, the session shows "server crashed: ..." and leaves; Home
-  shows it on the Host card (during setup the host attempt fails with it).
+  dies anyway, the session shows "server crashed: ..." and leaves; the
+  shell says so in a dialog (during setup the host attempt fails with it).
   Stop (leave, close, cancel during setup, a failed own join, being kicked)
   sends `stop`, waits up to 3 s for exit, then kills the isolate.
 - **Dedicated server**: `bin/server.dart` compiled with `dart compile exe`
@@ -500,37 +500,95 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   matched with `matchTrack` against the source's streams (mapped to mpv ids
   with `mpvTrackId`) or mpv's track list, and selected locally. Nothing goes
   on the wire.
-- **Swap panel**: "Change video" in the side panel opens the shared
-  `MediaPicker` over the video (`screens/session/swap_panel.dart`); Link
+- **Change video**: the player's "Change video" opens the Library tab
+  (the shared `MediaPicker`, `screens/session/swap_panel.dart`); Link
   goes through `mediaForLink`, a Jellyfin pick as a ref, File (host only)
   through `ServerIsolate.setFile` and a matching `swap`.
 
 ## Desktop UI
 
-One `HomeScreen` (`screens/home/`) with a single top bar (`top_bar.dart`):
-profile chip, Join and Host tabs, the update indicator, Settings /
-Integrations / About buttons, and the window drag area and buttons. Only the
-selected view is mounted; form state lives in `HomeShell`. Join
-(`join_tab.dart`): one compact address/port/password row, then up to 6
-Recent server tiles in a grid that adds columns as the window widens. While
-the Join tab is visible each tile polls the server's `GET /health` every
-10 s (`health_probe.dart`) for online, name, viewer count and a "needs
-update" badge when `proto` differs from ours. Host (`host_tab.dart`): the
-media picker (`media_picker.dart`: Jellyfin, Link, File; a reusable widget
-driven by a `MediaPickerController` whose `selection` is a sealed
-`PickedMedia`: `LinkMedia`, `FileMedia` or `JellyfinMedia`, see
-`picked_media.dart`) fills the main area; port, password and Host sit in a
-340 px column on the right, below the picker under 860 px. With the
-Jellyfin source the browser fills the height and can be enlarged, which
-turns the column into a one-row bar under it. Text fields have fixed or capped widths (720 px max) so
-they stay compact on ultrawide screens. Submit state (busy, cancel,
-per-tab errors, server crash) is `ConnectFlow`. Settings (profile, hardware
-decoding, experimental mpv-style controls, Jellyfin auto-advance, updates,
-video shaders, shortcuts), Integrations
-(linked Jellyfin servers) and About open in the same body. Settings persist
-in two Hive boxes: `connect_form` (last form and recents; saved even when a
-join fails) and `settings`. Link media names are derived from the URL path
-and never contain a query string.
+One window, `AppShell` (`lib/src/shell/`), whatever the connection state
+(online = `SessionState.route` is `session`). Motion is shared
+(`motion.dart`): one curve (`fastEaseInToSlowEaseOut`, 320 ms), a fade
+through for views that replace each other (the old one gone after 35%, the
+new one fading and scaling in from 0.985), `showPopover` (cards that fade
+and scale in from where they open; they scroll when the window is short)
+and `HScroll` (horizontal rows: mouse drag, the vertical wheel scrolls them
+sideways until an end, then the page).
+
+- **Party strip** (`party_strip.dart`, 60 px): your avatar (profile card),
+  the Library / Schedule / Settings tabs with a growing underline (an
+  `HScroll` when narrow), the update indicator, then offline Join and Host
+  (connect cards), online the party: `AvatarStack` (host first, then
+  ready; spreads on hover; 5 shown, 3 under 1100 px), the server name and
+  "ready n/m" (hidden under 1100 px), chat with an unread badge, and Leave
+  (asks first). The stack opens the members card (status, host / relay
+  pills, "via host", force ready, kick). Empty strip space is the window
+  drag area; the window buttons sit at its end. Debug builds add a button
+  that opens the layout mock (`screens/demo/`).
+- **Avatars** (`avatar.dart`): `StatusAvatar` draws a ring outside the
+  picture with a gap in the background colour (both scale with the size):
+  green ready, amber buffering (with a spinner), grey not ready, dimmed
+  stale; a crown for the host (only your own app knows it hosts: the
+  state has no host flag) and a tower for the member passing the video
+  on. `memberAvatarImage` is the one picture lookup: yours from the
+  profile, anyone else's from `coordinator.avatars` by `avatarHash`.
+  Colours are local: yours is picked in the profile, others' come from
+  their name.
+- **Connect cards** (`connect_cards.dart`): Join lists recent servers as
+  one-click rows that poll `GET /health` every 10 s while the card is open
+  (`health_probe.dart`: online, name, viewer count, "needs update" when
+  `proto` differs from ours), then address, port and password. Host takes
+  a port and a password (hosted ports as chips) and puts nothing up: what
+  to watch is picked in the library afterwards. Submit state (busy,
+  cancel, per-card errors) is `ConnectFlow`, owned by the shell so an
+  attempt and its error outlive the card; a card closes itself once
+  online.
+- **Profile** (`profile_card.dart`, `screens/home/profile.dart`): a card
+  tinted with your colour: picture (hover "Change" opens `CropPicker`:
+  drag, wheel or slider zoom, previews at 88/42/24 px, exports a 256 px
+  PNG), name edited in place, colour swatches, links to the Settings pages.
+  `Profile` stores the name in the connect form and the PNG and colour in
+  the `connect_form` box (an old picture path is shrunk once and kept as
+  bytes). Online, a name change (once typing settles) or picture change
+  goes out through `Profile.push` (`coordinator.updateProfile`).
+- **Tabs**: Library (`library_tab.dart`) is the media picker
+  (`media_picker.dart`: Jellyfin, Link, File; a `MediaPickerController`
+  whose `selection` is a sealed `PickedMedia`, see `picked_media.dart`)
+  with "Put it up for everyone" (`screens/session/swap_panel.dart`); it
+  starts on what was last put up. Offline it only browses. Schedule is a
+  placeholder. Settings (`settings_tab.dart`) has a left nav (chips under
+  760 px) over the settings panels (`screens/home/settings_page.dart`):
+  profile, player (hardware decoding, mpv-style controls, shaders),
+  Jellyfin & integrations (linked servers, auto-advance), updates,
+  shortcuts, about.
+- **Player** (`session_player.dart`): `SessionPlayer` holds the one
+  `Video` of the current player (a new `GlobalKey` per player generation).
+  The shell keeps it in one layer of the body at one place in the element
+  tree: full it fills the body, mini it is 384x216 in a corner (drag it, it
+  snaps to the nearest corner with the shared curve). A mode change fades
+  the layer out, moves it while invisible and fades it in (with the tabs
+  when the full player comes or goes), so the video is never mounted twice
+  nor remounted. A tab sends the full player to mini; × on the mini closes
+  it (muted, still in the server) and the strip brings it back. Fullscreen
+  is `windowManager.setFullScreen` with the strip hidden (party avatars in
+  a corner while paused); F, Esc and double-click on the picture toggle it.
+  The player keys (Settings → Keyboard shortcuts) work while the player is
+  full and nothing is in front of it. Something coming up while the player
+  is closed opens it: full right after joining or after putting it up
+  here, else mini. While held, a pill under the picture names who
+  everyone waits for, or says "Waiting for you · press Space" (a click
+  marks you ready); the mini shows it in its hover bar.
+- **Chat** (`chat_panel.dart`): a 340 px panel sliding in at the right
+  (strip button or Tab): chat with avatars, other activity as quiet lines.
+  **Toasts** (`toasts.dart`): the coordinator's toasts bottom left, with
+  the actor's avatar when the text starts with a member's name; each
+  slides in, stays 5 s, then slides out and collapses its gap.
+
+Settings persist in two Hive boxes: `connect_form` (last form, recents and
+the profile picture and colour; saved even when a join fails) and
+`settings`. Link media names are derived from the URL path and never
+contain a query string.
 
 Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
 - `accounts.dart`: `JellyfinAccounts` (singleton `instance`), one
@@ -555,34 +613,37 @@ Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
   key changes only when the image does. An inspector pane follows
   hover/focus from 1400 px browser width.
 - Picking an item gives a `JellyfinMedia` (serverId, baseUrl, itemId,
-  mediaSourceId?, title, subtitle, runtime; no credentials). The Host tab
-  remembers the last pick in the `jellyfin` box and hosts it as a ref
-  (`hostJellyfinMedia`, `ConnectFlow.submit(media:)`); the hosted server
-  gets the relay credential (`relayCredentialFor`: the account of the
+  mediaSourceId?, title, subtitle, runtime; no credentials). The library
+  remembers the last pick in the `jellyfin` box and puts it up as a ref
+  (`putUpJellyfinMedia`, `swapPicked`); a hosted server gets the relay
+  credential (`relayCredentialFor`: the account of the
   item's server, else the default one, not expired; its token with
   exactly `JellyfinAccounts.clientInfo`'s device fields).
 - Browser location: every navigation saves the route stack per server
   (`browse:<serverId>` in the `jellyfin` box, `encodeBrowseStack`: ids,
-  names and the fields pages start from), so the Host tab, the swap panel
-  and the next start open where the browser was. A `BrowseStart` overrides
-  it: the swap panel opens on the series of the episode playing, its
+  names and the fields pages start from), so the library and the next
+  start open where the browser was. A `BrowseStart` overrides it: "Change
+  video" opens the library on the series of the episode playing, its
   season selected and the episode highlighted.
 
 Session controls: media_kit's `MaterialDesktopVideoControls` with our
-bars (`screens/session_screen.dart`, pieces in
-`screens/session/player_controls.dart`). Its seek bar is off; ours
+bars (`shell/session_player.dart`, pieces in
+`screens/session/player_controls.dart`); its own double-click and keys are
+off (its double-click pushes a fullscreen route with a second `Video`), the
+picture's double-click is a raw pointer observer (`DoubleClickListener`).
+The top bar holds the title, Change video, chat and back-to-library. Its seek bar is off; ours
 (`ChapterSeekBar`: chapter diamonds, hover time with the chapter title)
 sits in the bottom bar, which is taller by the bar's height (the top bar
 keeps its row at the top). A drag sends no hover events, so the bar keeps
 the controls up through a guarded dynamic `onHover()` on media_kit's
 private controls state (`keepVideoControlsAwake`). Pills (Skip OP / ED /
 1:30, Next episode) and cards live outside the auto-hiding controls, so
-they show in fullscreen (whose route renders only the video and controls).
+they stay up when the controls hide.
 
 Experimental mpv-style controls (`controls/uosc/`, after mpv's uosc theme;
 Settings toggle `AppSettings.mpvControls`, default off): the `Video`'s
 controls builder wraps both sets in `SessionControlsSwitch`, which follows
-the setting live, in the window and in fullscreen. `UoscControls` is our
+the setting live. `UoscControls` is our
 own frame (no media_kit controls state): mouse movement shows it, 3 s
 without any hides it and the cursor; `hold` keeps it up during a timeline
 drag and while a menu route is open, double-click toggles fullscreen.
@@ -591,19 +652,20 @@ drag and while a menu route is open, double-click toggles fullscreen.
 diamonds on the top edge, current time and duration in boxes inside it, a
 hover tip with the chapter title over the hover time; hidden, it shrinks
 to a 3 px line with chapter ticks. Above it a row of flat buttons: menu (≡:
-change video, people, reload, mark everyone ready, fullscreen, leave),
+change video, chat & activity, reload, mark everyone ready, fullscreen,
+leave),
 subtitles and audio with track counts, a shader badge ("A HQ", opening the
 shared `showShaderMenu`), ready, mark everyone ready, reload; 1:30,
-chapters, previous / next episode, change video, people, volume,
-fullscreen. Menus (`showUoscMenu`: a popup route above the button, the
+chapters, previous / next episode, change video, volume, fullscreen; chat
+and back-to-library (fullscreen: exit) top right. Menus (`showUoscMenu`: a popup route above the button, the
 current row highlighted) list tracks and chapters with start times. All
 actions are the coordinator's (seeks through `player.seek`, the user path;
 `selectTrack`, `skipForward`, `seekTo`); keys and the floating pills are
 the same in both sets.
 
-Window chrome is frameless (`window_manager`): every screen brings its own
-drag area and min/max/close buttons (Home's top bar; the session uses
-`widgets/window_chrome_bar.dart`; both use `window_buttons.dart`); the session drag layer is `window_drag_layer.dart`.
+Window chrome is frameless (`window_manager`): the party strip is the drag
+area and holds the min/max/close buttons (`widgets/window_buttons.dart`);
+fullscreen has neither.
 
 ## Health reporting
 
@@ -614,7 +676,7 @@ host offline, and starvation ("waiting for X - N.N s buffered").
 Errors are logged with a stack trace at the boundary, then turned into a
 displayable state. The server's `GET /health` returns JSON (`ok`, `name`,
 `proto`, `viewers`, `bytesServed`, `uptimeSecs`); it is unauthenticated, so
-it carries nothing sensitive. Home's recent-server tiles poll it for live
+it carries nothing sensitive. The Join card's recent servers poll it for live
 status.
 
 ## Updater
@@ -634,7 +696,7 @@ running exe on NTFS. The manifest's `assets` maps `linux-x64` /
 `windows-x64` to archive URLs; top-level `url` (Linux) is for builds <= 0.2.1. The version is
 stamped with `--dart-define=APP_VERSION` (dev runs report `0.0.0-dev` and skip
 checks). `watch_together --upgrade` (or the shipped `update.sh`) runs it from
-the CLI; `UpdateController` runs the same code for Home's update indicator,
+the CLI; `UpdateController` runs the same code for the strip's update indicator,
 which opens the update card, and restarts the app ("Update and restart").
 Settings has Check now and an auto-check toggle. The manifest is `updates/manifest.json` in
 this repo, written by `tool/release.sh`.
@@ -667,5 +729,7 @@ this repo, written by `tool/release.sh`.
   their machine. Prior art (Plex Relay, Tailscale DERP) relays as a
   bandwidth-capped fallback on someone else's servers; here the server is
   the owner's, so it carries full quality.
-- Avatars ride in the 1 Hz `state` broadcast (cap 256 KiB base64 per avatar):
-  simple, costs host uplink; hash-based serving is on the roadmap.
+- Avatars by content hash: `state` carries only `avatarHash`; the server keeps
+  the bytes of current members in memory and serves them at `/a/...`, which
+  clients fetch once per hash (`AvatarCache`). Uplink per broadcast stays
+  small whatever the picture size (cap 256 KiB base64 per avatar).

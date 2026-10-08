@@ -5,10 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_together/src/jellyfin/accounts.dart';
 import 'package:watch_together/src/jellyfin/accounts_panel.dart';
 import 'package:watch_together/src/jellyfin/browser.dart';
-import 'package:watch_together/src/screens/home/connect_flow.dart';
-import 'package:watch_together/src/screens/home/host_tab.dart';
 import 'package:watch_together/src/screens/home/media_picker.dart';
-import 'package:watch_together/src/state/session_state.dart';
+import 'package:watch_together/src/shell/library_tab.dart';
 
 import 'jellyfin_accounts_test.dart'
     show FakeJellyfin, arifuretaId, fixtureServerId, linkedAccounts, season2Id;
@@ -270,7 +268,7 @@ void main() {
     expect(find.byType(JellyfinBrowser), findsOneWidget);
   });
 
-  testWidgets('Host tab: browser beside the server column, enlarged with a host bar, stacked when narrow',
+  testWidgets('Library tab: the last pick comes back; offline it only browses',
       (tester) async {
     await setSize(tester, const Size(1800, 1000));
     final (accounts, _) = await linkedAccounts();
@@ -281,32 +279,41 @@ void main() {
         title: 'Rice and Thieves and Heroes',
         subtitle: 'Black Summoner · S1E6');
     await accounts.rememberPick(pick);
-    final fields = HostFields(ConnectForm(), jellyfin: accounts);
-    final flow = ConnectFlow();
-    addTearDown(() {
-      fields.dispose();
-      flow.dispose();
-    });
-    await tester.pumpWidget(MaterialApp(
-        theme: ThemeData.dark(), home: Scaffold(body: HostTab(flow: flow, fields: fields))));
+    final c = MediaPickerController();
+    addTearDown(c.dispose);
+    await restoreLastPick(c, accounts, () => true);
+    final put = <PickedMedia>[];
+    Future<void> pump({required bool online}) => tester.pumpWidget(MaterialApp(
+        theme: ThemeData.dark(),
+        home: Scaffold(
+          body: LibraryTab(
+            controller: c,
+            accounts: accounts,
+            online: online,
+            isHost: false,
+            onPutUp: (m) async {
+              put.add(m);
+              return null;
+            },
+          ),
+        )));
+    await pump(online: false);
     await settle(tester);
     // The saved pick comes back on the Jellyfin source.
-    expect(fields.media.selection, pick);
+    expect(c.selection, pick);
     expect(find.byType(JellyfinBrowser), findsOneWidget);
-    expect(find.byKey(const ValueKey('host-column')), findsOneWidget);
-    expect(find.text('Playing: Rice and Thieves and Heroes — Black Summoner · S1E6'), findsOneWidget);
+    expect(find.text('Join or host to watch together'), findsOneWidget);
+    final go = find.byKey(const ValueKey('swap-go'));
+    expect(tester.widget<ButtonStyleButton>(go).onPressed, isNull);
 
-    await tester.tap(find.byKey(const ValueKey('jf-expand')));
-    await settle(tester, 2);
-    expect(find.byKey(const ValueKey('host-column')), findsNothing);
-    expect(find.byKey(const ValueKey('host-bar')), findsOneWidget);
-    expect(tester.takeException(), isNull);
-
-    await tester.tap(find.byKey(const ValueKey('jf-expand')));
-    await settle(tester, 2);
+    await pump(online: true);
+    await settle(tester);
+    expect(find.text('Put up: Rice and Thieves and Heroes — Black Summoner · S1E6'), findsOneWidget);
+    await tester.tap(go);
+    await settle(tester);
+    expect(put, [pick]);
     tester.view.physicalSize = const Size(800, 900);
     await settle(tester, 2);
-    expect(find.byKey(const ValueKey('host-picker')), findsOneWidget);
     expect(find.byType(JellyfinBrowser), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

@@ -91,7 +91,7 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
       const [HomeRoute()];
 
   /// Every navigation is saved per server (Hive), so the next browser
-  /// (Host tab, swap panel, next start) opens where this one was.
+  /// (the Library tab, next start) opens where this one was.
   void _remember() {
     final id = _account?.serverId;
     if (id != null) unawaited(_accounts.saveBrowseLocation(id, encodeBrowseStack(_stack)));

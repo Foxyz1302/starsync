@@ -4,7 +4,7 @@ import '../../jellyfin/session_media.dart';
 import '../../session/session_coordinator.dart' show AutoAdvance, autoAdvanceSecs;
 import 'player_controls.dart' show FloatingPill;
 
-// Jellyfin pieces of the session screen. Plain widgets fed by the
+// Jellyfin pieces of the session player. Plain widgets fed by the
 // coordinator's signals, so tests can pump them without the player.
 
 /// Previous / next episode in the video controls. Nothing when there is

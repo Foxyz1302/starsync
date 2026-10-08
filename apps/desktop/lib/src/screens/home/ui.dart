@@ -7,9 +7,8 @@ const repoUrl = 'https://git.example.org/Foxyz/sync_replay_project';
 
 const kRadius = 12.0;
 const kGap = 16.0;
-const kPagePadding = EdgeInsets.fromLTRB(28, 20, 28, 28);
 
-/// Rounded panel used by every Home/Settings section.
+/// Rounded panel used by every Settings section.
 class Panel extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -38,33 +37,6 @@ class Panel extends StatelessWidget {
   }
 }
 
-/// Page heading + optional subtitle, same spacing everywhere.
-class PageTitle extends StatelessWidget {
-  final String title;
-  final String? subtitle;
-  const PageTitle(this.title, {super.key, this.subtitle});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: kGap),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: t.headlineSmall),
-          if (subtitle != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(subtitle!,
-                  style: t.bodyMedium?.copyWith(color: Colors.grey)),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Small grey heading inside a panel.
 class SectionLabel extends StatelessWidget {
   final String text;
@@ -87,7 +59,7 @@ class SectionLabel extends StatelessWidget {
   }
 }
 
-/// Text field style shared by the connect cards.
+/// Outlined text field style (settings, Jellyfin sign-in).
 InputDecoration fieldDecoration(String label, {String? hint, Widget? suffix}) =>
     InputDecoration(
       labelText: label,
@@ -96,31 +68,6 @@ InputDecoration fieldDecoration(String label, {String? hint, Widget? suffix}) =>
       suffixIcon: suffix,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
     );
-
-/// Single-item scrollable page body, width-capped so it doesn't sprawl
-/// on wide windows.
-class PageScroll extends StatelessWidget {
-  final List<Widget> children;
-  final double maxWidth;
-  const PageScroll({super.key, required this.children, this.maxWidth = 920});
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: kPagePadding,
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: maxWidth),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: children,
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 /// Widest a single text field gets, however wide the window.
 const kFieldMaxWidth = 720.0;

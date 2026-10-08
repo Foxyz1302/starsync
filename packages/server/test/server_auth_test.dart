@@ -389,5 +389,93 @@ void main() {
         await ch.sink.close();
       } catch (_) {}
     });
+
+    test('profile: rename + avatar feed, state carries hash, /a gated', () async {
+      final png = Uint8List.fromList([0x89, 0x50, 0x4E, 0x47, ...List<int>.generate(296, (i) => (i * 7) % 256)]);
+      final ch = WebSocketChannel.connect(
+          Uri.parse('ws://127.0.0.1:${server.boundPort}/sync'));
+      final messages = <Map<String, Object?>>[];
+      final sub = ch.stream.listen(
+          (m) => messages.add(Map<String, Object?>.from(jsonDecode('$m') as Map)));
+      Future<Map<String, Object?>> waitFor(bool Function(Map<String, Object?>) test) async {
+        final deadline = DateTime.now().add(const Duration(seconds: 5));
+        while (DateTime.now().isBefore(deadline)) {
+          for (final m in messages) {
+            if (test(m)) return m;
+          }
+          await Future.delayed(const Duration(milliseconds: 20));
+        }
+        fail('timed out; got $messages');
+      }
+
+      Map<String, Object?> member(Map<String, Object?> state) =>
+          Map<String, Object?>.from((state['members'] as List).single as Map);
+      Future<HttpClientResponse> avatarGet(String token, String hash) async =>
+          (await http.get('127.0.0.1', server.boundPort, '/a/default/$token/$hash')).close();
+
+      try {
+        ch.sink.add(jsonEncode(HelloMessage(
+            proto: RelayConstants.protoVersion,
+            secret: 'shh',
+            user: HelloUser(name: 'alice', avatar: base64Encode(png)),
+            media: const HelloMedia(name: 'f.bin', size: 8192, duration: 10.0)).toJson()));
+        final welcome = await waitFor((m) => m['t'] == 'welcome');
+        final token = welcome['token'] as String;
+        final first = member(Map<String, Object?>.from(welcome['state'] as Map));
+        expect(first.containsKey('avatar'), isFalse, reason: 'no base64 in state');
+        final hash = first['avatarHash'] as String;
+        expect(hash, avatarHashOf(png));
+
+        final ok = await avatarGet(token, hash);
+        expect(ok.statusCode, 200);
+        expect(ok.headers.contentType?.mimeType, 'image/png');
+        expect(ok.headers.value('cache-control'), contains('max-age'));
+        expect(await ok.expand((c) => c).toList(), png);
+        final unknown = await avatarGet(token, '0123456789abcdef');
+        expect(unknown.statusCode, 404);
+        await unknown.drain();
+        final noToken = await avatarGet('nope', hash);
+        expect(noToken.statusCode, 401);
+        await noToken.drain();
+
+        // Rename: feed rename (actor new, target old); chat uses the new name.
+        messages.clear();
+        ch.sink.add(jsonEncode(const ProfileIntent(name: '  bob  ').toJson()));
+        final rename = await waitFor((m) => m['t'] == 'feed' && m['action'] == 'rename');
+        expect(rename['actor'], 'bob');
+        expect(rename['target'], 'alice');
+        final renamed = await waitFor((m) => m['t'] == 'state' && member(m)['name'] == 'bob');
+        expect(member(renamed)['avatarHash'], hash, reason: 'picture unchanged');
+        ch.sink.add(jsonEncode(const ChatMessage(text: 'hi').toJson()));
+        expect((await waitFor((m) => m['t'] == 'chat'))['from'], 'bob');
+
+        // Picture only: feed avatar; removing it drops the hash and the bytes.
+        messages.clear();
+        ch.sink.add(jsonEncode(const ProfileIntent(avatar: '').toJson()));
+        final pic = await waitFor((m) => m['t'] == 'feed' && m['action'] == 'avatar');
+        expect(pic['actor'], 'bob');
+        await waitFor((m) => m['t'] == 'state' && !member(m).containsKey('avatarHash'));
+        final gone = await avatarGet(token, hash);
+        expect(gone.statusCode, 404);
+        await gone.drain();
+
+        // Too large: rejected, nothing changes.
+        messages.clear();
+        ch.sink.add(jsonEncode(
+            ProfileIntent(avatar: 'x' * (RelayConstants.maxAvatarBytes + 1)).toJson()));
+        final err = await waitFor((m) => m['t'] == 'err');
+        expect(err['message'], 'rejected: avatar too large');
+
+        await server.session.kick(token);
+        final kicked = await avatarGet(token, hash);
+        expect(kicked.statusCode, 403);
+        await kicked.drain();
+      } finally {
+        await sub.cancel();
+        try {
+          await ch.sink.close();
+        } catch (_) {}
+      }
+    });
   });
 }

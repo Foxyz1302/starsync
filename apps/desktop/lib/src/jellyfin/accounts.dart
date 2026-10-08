@@ -207,7 +207,7 @@ class JellyfinAccounts extends ChangeNotifier {
   /// Last failure text for an offline account.
   String? errorOf(String serverId) => _errors[serverId];
 
-  /// The Host tab's last Jellyfin pick, restored on the next start.
+  /// The last Jellyfin pick put up, restored in the Library on the next start.
   JellyfinMedia? get lastPick => _lastPick;
 
   /// Stable per install: Jellyfin keys devices and tokens by it.

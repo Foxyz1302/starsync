@@ -66,7 +66,7 @@ class PlaybackController {
   /// Seeks from the video controls (seek bar) go here instead of to mpv.
   void Function(Duration position)? onUserSeek;
 
-  /// Latest shader message for the user (the session screen toasts it).
+  /// Latest shader message for the user (the session player toasts it).
   final shaderNotice = signal<ShaderNotice?>(null);
 
   /// How media_kit renders the current player's video (shaders need

@@ -42,8 +42,6 @@ off by deleting it in the same commit as the code. Wire changes also edit
      outage with cache exhaustion (`tool/shaper.dart --kill-after`); assert no
      OOM, no stuck session, drift recovers.
    - Chat history pane (today: activity log only).
-   - Avatar caching: serve avatar bytes once by hash instead of base64 in
-     every `state` broadcast.
    - The `state` broadcast carries the full media URL, which can include an
      `api_key` (recognised Jellyfin links become refs; other links do not).
    - TLS: document a reverse proxy in front of the server.

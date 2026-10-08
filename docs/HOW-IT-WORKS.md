@@ -44,7 +44,7 @@ A five-minute tour. Details: [ARCHITECTURE.md](ARCHITECTURE.md), wire format:
 - **Dedicated server**: `watch-together-server`, a separate program in the
   release tarball, for an always-on box. See the README.
 
-Friends join either way with the Join card on Home.
+Friends join either way with Join in the strip at the top of the window.
 
 ## One session, start to finish
 
