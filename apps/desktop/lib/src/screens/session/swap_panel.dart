@@ -6,8 +6,9 @@ import '../home/media_picker.dart';
 
 /// "Change video" in a session: the same [MediaPicker] as Home's Host tab
 /// (Jellyfin browser, Link, File) and a button that puts the pick up for
-/// everyone. File is offered to the host only (the file streams from the
-/// host's disk). [onSwap] returns an error text, or null when sent.
+/// everyone. A file streams from this computer: the host's app serves it,
+/// anyone else's goes through the server's relay. [onSwap] returns an
+/// error text, or null when sent.
 class SwapPanel extends StatefulWidget {
   final MediaPickerController controller;
   final JellyfinAccounts accounts;
@@ -34,13 +35,6 @@ class SwapPanel extends StatefulWidget {
 class _SwapPanelState extends State<SwapPanel> {
   bool _busy = false;
   String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    final c = widget.controller;
-    if (!widget.isHost && c.source == MediaKind.file) c.source = MediaKind.link;
-  }
 
   Future<void> _swap() async {
     final media = widget.controller.selection;
@@ -91,7 +85,10 @@ class _SwapPanelState extends State<SwapPanel> {
                   controller: widget.controller,
                   jellyfin: widget.accounts,
                   enabled: !_busy,
-                  allowFile: widget.isHost,
+                  linkRelayChoice: true,
+                  fileHelp: widget.isHost
+                      ? 'Friends stream it from your computer.'
+                      : 'Streams from your computer through the server. Keep the app open while it plays.',
                   jellyfinStart: widget.jellyfinStart,
                   onOpenIntegrations: widget.onOpenIntegrations,
                   onSubmit: _swap,

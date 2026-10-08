@@ -723,14 +723,14 @@ packages:
       path: "../../packages/core"
       relative: true
     source: path
-    version: "0.2.1"
+    version: "0.2.2"
   sync_relay_server:
     dependency: "direct main"
     description:
       path: "../../packages/server"
       relative: true
     source: path
-    version: "0.2.1"
+    version: "0.2.2"
   synchronized:
     dependency: transitive
     description:

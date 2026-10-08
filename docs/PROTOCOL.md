@@ -1,4 +1,4 @@
-# Protocol (proto = 7)
+# Protocol (proto = 8)
 
 Wire format only. Behavior (gate, clock, timeouts) is in
 [ARCHITECTURE.md](ARCHITECTURE.md). Source of truth:
@@ -22,7 +22,8 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
   `uptimeSecs`; unauthenticated). `GET /m/<sid>/<token>/<name>`
   serves the host's file (Range table in ARCHITECTURE.md).
   `GET /j/<sid>/<token>/<itemId>` relays the current Jellyfin media (see
-  "Jellyfin media" below).
+  "Jellyfin media" below). `/r/<sid>/<token>/...` is the relay of a
+  member's media (see "Relay" below).
 
 ## Client to server
 
@@ -35,6 +36,7 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
 {"t":"seek","position":123.4,"seq":3}
 {"t":"swap","media":{"name":"","size":0,"duration":0,"url":"..."}}
 {"t":"swap","media":{"name":"","size":0,"duration":0,"jellyfin":{<ref>}}}
+{"t":"swap","media":{"name":"","size":123,"duration":0,"url":"...","relay":{}}}
 {"t":"report","position":123.1,"buffered":6.2,"eventId":41,
  "duration":1440.5,"mediaId":2,"jf":{"<serverId>":true}}
 {"t":"ping","c":1767225600000}
@@ -71,7 +73,7 @@ Field notes:
 - `chat.text` is cut to 500 characters.
 - `swap.media.url` is the link; `name`, `size`, `duration` are informational.
   `swap.media.jellyfin` makes it Jellyfin media (see below); then `url` is
-  dropped.
+  dropped. `swap.media.relay` makes it relayed media (see "Relay").
 - Frames before `welcome` (other than `hello`) are ignored; unparsable or
   unknown frames are ignored silently.
 
@@ -104,7 +106,8 @@ Field notes:
   `playing`, on the server's clock (see `pong`). `finished`: the media
   reached its end (`position` = duration); it stays until a seek or swap.
   `eventId` increases on seek, swap and transport changes.
-  `mediaId` increases on swap. `media.duration` is 0 until a client reports
+  `mediaId` increases on swap. `media.relay` is present for relayed media
+  (see "Relay"). `media.duration` is 0 until a client reports
   it. `seekBy` (member id) and `seekSeq` are present only while the current
   `eventId` came from a seek. `relay` (omitted when false): the server can
   relay the current Jellyfin media. `members[].jf` is the member's last
@@ -152,6 +155,55 @@ Field notes:
   credential. Bytes count toward `bytesServed`.
 - Pasted Jellyfin links sent as plain `url` stay plain links.
 
+## Relay
+
+Media whose bytes go through the server's buffer: a file on a member's
+computer, a link passed on by a member, a link the server fetches itself,
+or a Jellyfin item for viewers without an account. Behavior (buffer,
+flow control, cases) is in [ARCHITECTURE.md](ARCHITECTURE.md), "Relay".
+
+```
+swap  media.relay = {}               the swapper's machine serves the bytes
+      media.relay = {"fetch":true}   the server reads media.url itself
+state media.relay = {"source":"m2","live":true}   or {"fetch":true,"live":true}
+```
+
+- `swap`: `relay` with `jellyfin` keeps the ref (the swapper serves it to
+  viewers without an account; `fetch` is ignored there). `relay` without
+  `jellyfin`: no URL is stored or broadcast; `fetch` needs an http(s)
+  `url` (else `relay fetch needs an http(s) url`), which the server keeps
+  to itself, and a server with a password (else `server fetch needs a
+  server password`: an open server would fetch any address it can reach
+  for anyone). Any later swap ends the relay.
+- `state.media.relay.source`: member id of the source (absent with
+  `fetch`). `live` (omitted when false): bytes can flow (the source's
+  channel is connected, or the server could read the link).
+- `welcome.mediaUrl` for relayed media without `jellyfin`: this member's
+  `/r/` URL; absent for the source itself (it plays its own copy). Clients build it after a swap like the `/m` one:
+  `http://<host>/r/default/<token>/<mediaId>/<name>` (name URL-encoded).
+- `GET /r/<sid>/<token>/<mediaId>/<name>`: the media, Range table as for
+  `/m`. Errors: 401 bad token, 403 kicked, 404 not the current relayed
+  media (a player still on an older `mediaId` gets 404, never the new
+  bytes), 410 unknown session, 503 + `retry-after` the source never
+  connected (60 s). A request whose bytes do not arrive within 60 s ends
+  early. Bytes count toward `bytesServed`.
+- `GET /r/<sid>/<token>/source` (WebSocket): the source's relay channel,
+  dialled by the source (works behind NAT). Only the current source's
+  token is accepted; anyone else, or the source after the next swap, is
+  closed with code 4001 (the source stops instead of reconnecting).
+  Frames:
+
+```
+source -> server  {"t":"info","size":<bytes>}            first frame
+                  binary: [u32 big-endian pull id][bytes]  in order per pull
+                  {"t":"end","id":1}  {"t":"fail","id":1,"reason":"..."}
+server -> source  {"t":"pull","id":1,"start":0,"end":1048575}  inclusive
+                  {"t":"ack","id":1,"n":65536}             bytes arrived
+                  {"t":"cancel","id":1}                    stop that pull
+```
+
+  A `size` different from the one before (a reconnect) drops the buffer.
+
 ## Join and reconnect
 
 `hello` then `welcome`, then the app opens `mediaUrl`, seeks to the server
@@ -164,6 +216,3 @@ drop), `resume` takes it over and the token and media URL stay the same.
 ## Reserved, not implemented
 
 Server-held queue (`queue-add`, `queue-skip`) would auto-advance like a swap.
-`RelayConstants.chunkBytes`, `creditWindowChunks`, `maxConcurrentOpen` and the
-`open`, `ack`, `cancel`, `eof`, `buffered`, `state`, `event` kinds in
-`MessageKind` are unused leftovers (the `state` frame does not use the enum).

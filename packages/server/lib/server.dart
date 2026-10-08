@@ -4,3 +4,5 @@ export 'src/server_hub.dart';
 export 'src/session.dart';
 export 'src/sync_server.dart';
 export 'src/jellyfin_relay.dart';
+export 'src/relay_buffer.dart';
+export 'src/relay_routes.dart';

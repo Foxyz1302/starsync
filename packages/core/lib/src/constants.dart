@@ -1,9 +1,22 @@
 abstract class RelayConstants {
-  static const int protoVersion = 7;
+  static const int protoVersion = 8;
 
-  static const int chunkBytes = 256 * 1024;
-  static const int creditWindowChunks = 8;
-  static const int maxConcurrentOpen = 16;
+  // Relay (`/r/...`): a member's bytes through the server's buffer.
+  static const int relaySliceBytes = 1 << 20;
+  static const int relayFrameBytes = 64 * 1024;
+  /// Defaults for the buffer; they mirror a viewer's mpv buffer (150 s /
+  /// 256 MiB ahead, 64 MiB back), so whatever a viewer may seek to soon is
+  /// already on the server.
+  static const int relayAheadBytes = 256 << 20;
+  static const int relayBackBytes = 64 << 20;
+  /// Kept regardless of position: containers keep their index at the start
+  /// or the end, and players read both on open and on seeks.
+  static const int relayPinBytes = 2 << 20;
+  static const int relayMinWindowBytes = 256 * 1024;
+  static const int relayMaxWindowBytes = 8 << 20;
+  /// A viewer request waits this long for its bytes (source away) before
+  /// the server gives up on it.
+  static const int relayWaitSecs = 60;
 
   static const int seekDebounceMs = 300;
   static const double driftSeekThresholdSecs = 5.0;

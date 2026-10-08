@@ -19,8 +19,11 @@ A five-minute tour. Details: [ARCHITECTURE.md](ARCHITECTURE.md), wire format:
  video bytes come from somewhere else:
    - a link (any http/https URL): each app fetches it directly
    - a Jellyfin item: each app plays it with its own Jellyfin account,
-     friends without one through the server (/j/... endpoint)
+     friends without one through the server
    - a file on the host's disk: the server streams it (/m/... endpoint)
+   - the relay (/r/...): a member's computer passes a file, a link or a
+     Jellyfin item on to the server, which keeps a few minutes in memory
+     and streams it to everyone who needs it
 ```
 
 - **App**: the desktop window. It draws the video with mpv, shows who is
@@ -31,7 +34,8 @@ A five-minute tour. Details: [ARCHITECTURE.md](ARCHITECTURE.md), wire format:
 - **Jellyfin** (or any web host): where the video lives. For a Jellyfin
   item the server only knows which item it is; each app signs in with its
   own account and reports what it watched. For friends without an account
-  the server fetches the item with the host's sign-in and passes it on.
+  the member who put it up passes it on through the server (their sign-in
+  stays on their computer).
 
 ## Ways to run
 

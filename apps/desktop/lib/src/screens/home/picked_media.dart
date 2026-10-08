@@ -7,10 +7,16 @@ sealed class PickedMedia {
   String get label;
 }
 
-/// A direct http(s) link everyone streams from.
+/// How the others get a link: each fetches it ([direct]), the server
+/// fetches it once for everyone ([server]), or this computer does and
+/// passes it on through the server ([me]; for links only you can reach).
+enum LinkRelay { direct, server, me }
+
+/// An http(s) link.
 final class LinkMedia extends PickedMedia {
   final String url;
-  const LinkMedia(this.url);
+  final LinkRelay relay;
+  const LinkMedia(this.url, {this.relay = LinkRelay.direct});
 
   @override
   String get label {
@@ -25,14 +31,15 @@ final class LinkMedia extends PickedMedia {
   }
 
   @override
-  bool operator ==(Object other) => other is LinkMedia && other.url == url;
+  bool operator ==(Object other) => other is LinkMedia && other.url == url && other.relay == relay;
   @override
-  int get hashCode => url.hashCode;
+  int get hashCode => Object.hash(url, relay);
   @override
   String toString() => 'LinkMedia($url)';
 }
 
-/// A file on this computer; friends stream it from the host.
+/// A file on this computer; the others stream it from here (the host's
+/// app serves it itself, anyone else's goes through the server's relay).
 final class FileMedia extends PickedMedia {
   final String path;
   const FileMedia(this.path);

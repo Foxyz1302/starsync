@@ -201,7 +201,8 @@ final class OwnPlay extends JellyfinPlan {
   bool get jfAccess => true;
 }
 
-/// Through the sync server's relay (`/j/...`).
+/// Through the server: its own Jellyfin login (`/j/...`) or the member
+/// who put it up (`/r/...`).
 final class RelayPlay extends JellyfinPlan {
   final String url;
   const RelayPlay(this.url);
@@ -210,7 +211,7 @@ final class RelayPlay extends JellyfinPlan {
   bool get jfAccess => false;
 }
 
-/// Neither: no (usable) account here and the server cannot relay.
+/// Neither: no (usable) account here and nothing relays it.
 final class BlockedPlay extends JellyfinPlan {
   final String serverId;
   /// Known only when this install has (had) an account there.
@@ -224,20 +225,22 @@ final class BlockedPlay extends JellyfinPlan {
 
   String get message {
     final where = serverName == null || serverName!.isEmpty ? 'that Jellyfin server' : serverName!;
-    final base = 'This needs a Jellyfin account on $where (or the host can relay)';
-    return problem == null ? base : '$base — $problem';
+    final base = 'No Jellyfin account here for $where, and nobody is passing it on';
+    return problem == null ? base : '$base ($problem)';
   }
 }
 
 /// Picks how to play [ref]: this install's account first (PlaybackInfo
-/// with its own user; a 401 marks the account expired), else the relay
-/// when the server offers it ([relay] = `state.relay`, [relayUrl] this
-/// member's `/j/...` URL), else [BlockedPlay].
+/// with its own user; a 401 marks the account expired), else the server's
+/// own Jellyfin login ([relay] = `state.relay`, [relayUrl] this member's
+/// `/j/...` URL), else the member who put it up ([memberRelayUrl], the
+/// `/r/...` URL when `media.relay` is set), else [BlockedPlay].
 Future<JellyfinPlan> resolveJellyfinRef(
   JellyfinAccounts accounts,
   JellyfinRef ref, {
   required bool relay,
   required String? relayUrl,
+  String? memberRelayUrl,
   Duration timeout = const Duration(seconds: 15),
 }) async {
   await accounts.ensureLoaded();
@@ -282,6 +285,7 @@ Future<JellyfinPlan> resolveJellyfinRef(
     }
   }
   if (relay && relayUrl != null && relayUrl.isNotEmpty) return RelayPlay(relayUrl);
+  if (memberRelayUrl != null && memberRelayUrl.isNotEmpty) return RelayPlay(memberRelayUrl);
   return BlockedPlay(serverId: ref.serverId, serverName: account?.displayName, problem: problem);
 }
 

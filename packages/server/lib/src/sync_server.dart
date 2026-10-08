@@ -8,6 +8,7 @@ import 'package:sync_relay_core/core.dart';
 
 import 'jellyfin_relay.dart';
 import 'media_endpoint.dart';
+import 'relay_routes.dart';
 import 'server_hub.dart';
 import 'session.dart';
 
@@ -62,6 +63,7 @@ class SyncServer {
       );
     });
     mountSessionMediaRoute(_app, sessions);
+    mountRelayRoutes(_app, sessions, () => hub.relay);
     mountJellyfinRelayRoute(
         _app, sessions, () => hub.jellyfin, () => _relayClient ??= HttpClient());
     // advertiseHost is only an explicit override; otherwise echo what the client dialled.
@@ -72,7 +74,9 @@ class SyncServer {
       final name = Uri.encodeComponent(media?.name ?? 'file');
       return 'http://${authority(dialledHost)}/m/$sid/$token/$name';
     }, relayUrlBuilder: (sid, token, itemId, dialledHost) =>
-        'http://${authority(dialledHost)}/j/$sid/$token/${Uri.encodeComponent(itemId)}');
+        'http://${authority(dialledHost)}/j/$sid/$token/${Uri.encodeComponent(itemId)}',
+        relayMediaUrlBuilder: (sid, token, mediaId, name, dialledHost) =>
+            'http://${authority(dialledHost)}/r/$sid/$token/$mediaId/${Uri.encodeComponent(name)}');
     _app.fallback = (final req) => Response.notFound(
           body: Body.fromString('not found'),
         );
@@ -143,6 +147,7 @@ class SyncServer {
     _heartbeat = null;
     _relayClient?.close(force: true);
     _relayClient = null;
+    hub.setRelay(null);
     await hub.closeAllSockets();
     await _app.close();
     _server = null;

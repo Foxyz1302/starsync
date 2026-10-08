@@ -5,6 +5,7 @@ import 'package:relic/relic.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:web_socket/web_socket.dart';
 
+import 'relay_routes.dart';
 import 'session.dart';
 
 final _hubLog = createLogger('server_hub');
@@ -31,6 +32,29 @@ class ServerHub {
   }
 
   StateBroadcast stateBroadcast() => engine.broadcast(relay: relayAvailable);
+
+  /// The relay of the current media (`/r/...`), if it is relayed.
+  ActiveRelay? relay;
+
+  /// Replaces the relay (null: the new media is not relayed). The old
+  /// buffer is dropped with it.
+  void setRelay(ActiveRelay? next) {
+    relay?.dispose();
+    relay = next;
+  }
+
+  /// `media.relay` for a relayed swap by [token]: who serves the bytes.
+  MediaRelay relayFor(String token, MediaRelay requested) => MediaRelay(
+      source: requested.fetch ? '' : (engine.members[token]?.id ?? ''), fetch: requested.fetch);
+
+  /// The relay's channel came up or went down: `media.relay.live` follows.
+  void relayLiveChanged(ActiveRelay r) {
+    final m = engine.media;
+    if (!identical(relay, r) || m?.relay == null) return;
+    if (m!.relay!.live == r.live) return;
+    engine.media = m.copyWith(relay: m.relay!.copyWith(live: r.live));
+    changed();
+  }
 
   bool isHostKey(String key) => hostKey.isNotEmpty && key == hostKey;
 
@@ -177,6 +201,7 @@ void mountSyncRoute(
   String Function(String sid, String token, SessionMedia? media, String host)
       urlBuilder, {
   String Function(String sid, String token, String itemId, String host)? relayUrlBuilder,
+  String Function(String sid, String token, int mediaId, String name, String host)? relayMediaUrlBuilder,
 }) {
   app.get('/sync', (final req) {
     // Host the client dialled (Host header), so file URLs work for remote joiners.
@@ -233,13 +258,17 @@ void mountSyncRoute(
                 // By reference only: no URL (it could carry a token) is
                 // stored or broadcast for Jellyfin media.
                 final ref = sanitizeJellyfinRef(parsed.jellyfin!);
+                // Relayed for viewers without access: from the swapper's
+                // machine (its own sign-in never leaves it).
+                final relayReq = parsed.relay == null || parsed.relay!.fetch ? null : parsed.relay;
                 final media = ref == null
                     ? null
                     : HelloMedia(
                         name: sanitizeMediaName(parsed.name.isEmpty ? ref.title : parsed.name),
                         size: parsed.size,
                         duration: parsed.duration,
-                        jellyfin: ref);
+                        jellyfin: ref,
+                        relay: relayReq == null ? null : hub.relayFor(token, relayReq));
                 if (media == null || !hub.engine.applySwap(token, media)) {
                   wsErr(ws, 'bad swap media');
                   return;
@@ -250,6 +279,46 @@ void mountSyncRoute(
                     duration: media.duration,
                     jellyfin: ref,
                     mediaId: hub.engine.mediaId);
+                hub.setRelay(relayReq == null ? null : _memberRelay(hub, token, media.name));
+                hub.changed();
+                return;
+              }
+              final relayReq = parsed.relay;
+              if (relayReq != null) {
+                // Relayed file or link: no URL is stored or broadcast (a
+                // link may be private to the swapper; the server keeps a
+                // fetched one to itself).
+                final name = sanitizeMediaName(parsed.name.isEmpty ? 'media' : parsed.name);
+                final link = Uri.tryParse(parsed.url ?? '');
+                if (relayReq.fetch &&
+                    (link == null || !(link.isScheme('http') || link.isScheme('https')) || link.host.isEmpty)) {
+                  wsErr(ws, 'relay fetch needs an http(s) url');
+                  return;
+                }
+                // The server would fetch any address it can reach (its own
+                // network, a VPN) for whoever asks: only for members who
+                // know the password.
+                if (relayReq.fetch && session.secret.isEmpty) {
+                  wsErr(ws, 'server fetch needs a server password');
+                  return;
+                }
+                final media = HelloMedia(
+                    name: name,
+                    size: parsed.size,
+                    duration: parsed.duration,
+                    relay: hub.relayFor(token, relayReq));
+                if (!hub.engine.applySwap(token, media)) {
+                  wsErr(ws, 'bad swap media');
+                  return;
+                }
+                session.media = SessionMedia(
+                    name: name, size: parsed.size, duration: parsed.duration, mediaId: hub.engine.mediaId);
+                late final ActiveRelay active;
+                active = relayReq.fetch
+                    ? ActiveRelay.fetch(hub.engine.mediaId, name, link!,
+                        onLiveChanged: () => hub.relayLiveChanged(active))
+                    : _memberRelay(hub, token, name);
+                hub.setRelay(active);
                 hub.changed();
                 return;
               }
@@ -271,6 +340,7 @@ void mountSyncRoute(
                 wsErr(ws, 'bad swap media');
                 return;
               }
+              hub.setRelay(null);
               if (matchesFile) {
                 session.media = SessionMedia(
                     name: current.name,
@@ -406,6 +476,7 @@ void mountSyncRoute(
       final activeToken = token;
       hub.sockets[activeToken] = ws;
       session.tokens[activeToken]!.onKick = (reason) async {
+        if (hub.relay?.sourceToken == activeToken) hub.relay!.dropChannel();
         ws.trySendText(jsonEncode(KickedMessage(reason: reason).toJson()));
         await Future.delayed(const Duration(milliseconds: 200));
         await ws.tryClose();
@@ -413,10 +484,23 @@ void mountSyncRoute(
       };
       final media = session.media;
       final relay = hub.relayAvailable;
+      final relayed = hub.relay;
       final welcome = WelcomeMessage(
         token: activeToken,
         memberId: memberId,
-        mediaUrl: media?.file != null ? urlBuilder('default', activeToken, media, dialledHost) : media?.url,
+        // Jellyfin media resolves per member (own account first); only
+        // relayed files and links start from the /r/ URL, and never for
+        // the source itself (it plays its own copy).
+        mediaUrl: relayed != null &&
+                media != null &&
+                media.jellyfin == null &&
+                relayed.sourceToken != activeToken &&
+                relayed.mediaId == media.mediaId &&
+                relayMediaUrlBuilder != null
+            ? relayMediaUrlBuilder('default', activeToken, relayed.mediaId, relayed.name, dialledHost)
+            : media?.file != null
+                ? urlBuilder('default', activeToken, media, dialledHost)
+                : media?.url,
         relayUrl: relay && relayUrlBuilder != null
             ? relayUrlBuilder('default', activeToken, media!.jellyfin!.itemId, dialledHost)
             : null,
@@ -436,4 +520,10 @@ void mountSyncRoute(
       } catch (_) {}
     });
   });
+}
+
+ActiveRelay _memberRelay(ServerHub hub, String token, String name) {
+  late final ActiveRelay r;
+  r = ActiveRelay.fromMember(hub.engine.mediaId, name, token, onLiveChanged: () => hub.relayLiveChanged(r));
+  return r;
 }

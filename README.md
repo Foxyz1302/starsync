@@ -169,13 +169,16 @@ Watching:
   your watched state, Continue watching and resume point follow what you
   saw (reported on start, every 10 s, on pause, resume, seek and track
   change, and when it stops).
-- Friends without an account watch through the host: the server fetches
-  the file with the host's sign-in and passes it on (only the current item,
-  only to people in the session). They show "via host" in the member list.
-  A dedicated server relays when started with `--jellyfin <file>` (see
-  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), Jellyfin relay).
-- Without either, the app says "This needs a Jellyfin account on ..." with
-  a button to link one; it plays as soon as you are signed in.
+- Friends without an account watch through the server: whoever put the
+  item up passes it on automatically, with their own sign-in, which never
+  leaves their computer (only the current item, only to people in the
+  session). They show "via host" in the member list. When the app hosts,
+  or a dedicated server has its own login (`--jellyfin <file>`, see
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), Jellyfin relay), the server
+  fetches it itself instead.
+- If nobody can pass it on (the person who put it up left), the app says
+  "No Jellyfin account here for ..." with a button to link one; it plays as
+  soon as you are signed in.
 
 Episodes: the ⏮ / ⏭ buttons next to the controls (or `<` / `>`,
 Shift+P / Shift+N) put up the previous or next episode for everyone. From
@@ -194,7 +197,24 @@ next episode. This is per person; nobody else is affected.
 
 "Change video" in the session panel (Tab) opens the same picker as the Host
 tab: the library starts on the series you are watching with the current
-season, else where you left it. File is offered to the host only.
+season, else where you left it.
+
+Anyone can put up a file from their own computer, also on a dedicated
+server: it streams from your computer through the server to everyone (the
+server keeps a few minutes in memory, so seeks and skipping the opening
+are quick). Keep the app open while it plays. For a link you choose how
+the others get it:
+- Everyone fetches it (default): each app plays the link itself.
+- Server fetches it: the server downloads it once for everyone, for links
+  that are slow or blocked for some. The server must be able to reach it,
+  and it must have a password (an open server refuses: anyone could make
+  it fetch addresses only it can reach).
+- Through me: your computer downloads it and passes it on, for links only
+  you can open.
+
+The last two need a link to a video file (not a page like YouTube) and
+never show the link to anyone. Your upload has to beat the video's
+bitrate: a 25-minute 2 GB episode is about 11 Mbit/s.
 
 ## Video quality and shaders
 

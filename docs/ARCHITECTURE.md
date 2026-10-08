@@ -8,7 +8,7 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 | Path | What | Rule |
 |---|---|---|
 | `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client | pure Dart, no Flutter |
-| `packages/server` | Relic HTTP + WebSocket server (`SyncServer`, `ServerHub`, `Session`, media endpoint, Jellyfin relay), the `serve()` entrypoint, `bin/server.dart` (dedicated server) | pure Dart, no Flutter |
+| `packages/server` | Relic HTTP + WebSocket server (`SyncServer`, `ServerHub`, `Session`, media endpoint, relay buffer, Jellyfin relay), the `serve()` entrypoint, `bin/server.dart` (dedicated server) | pure Dart, no Flutter |
 | `apps/desktop` | Flutter app: UI, `SyncClient`, `SessionCoordinator`, `PlaybackController` (media_kit/mpv), `ServerIsolate`, updater | ships with `watch-together-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
 | `deploy` | systemd unit for the dedicated server | |
@@ -144,7 +144,8 @@ Additive wire changes only; bump `proto` and PROTOCOL.md in the same commit.
 
 ## Media
 
-Three sources, same sync.
+Three sources, same sync. Any of them can also go through the relay
+(below).
 
 - **Link**: the media field holds an http(s) URL. It travels as `media.url`
   in `swap` and `state`, and as `mediaUrl` in `welcome`. Each app plays it
@@ -166,8 +167,8 @@ Three sources, same sync.
 - **Jellyfin item**: the media is a ref (`{serverId, itemId, ...}`, wire in
   [PROTOCOL.md](PROTOCOL.md) "Jellyfin media"); the server never stores or
   sends a URL or token for it. Each app resolves it with its own account and
-  direct-plays the static stream; guests use the relay (see "Jellyfin
-  relay").
+  direct-plays the static stream; guests use the server's own login when
+  it has one ("Jellyfin relay"), else the member who put it up ("Relay").
 
 Range table (`resolveMediaRequest`, tested byte-exact):
 
@@ -362,6 +363,86 @@ errors leave it out).
   subscription does).
 - No progress reporting in the server: watched state is per client.
 
+## Relay
+
+A member's media through the server's memory, for viewers who cannot
+reach it themselves (`packages/core/lib/src/relay.dart` for the wire and
+the source, `packages/server/lib/src/relay_buffer.dart`,
+`relay_routes.dart`; wire in [PROTOCOL.md](PROTOCOL.md) "Relay").
+
+What gets relayed (`SessionCoordinator.swapPicked`):
+
+| Put up | Others get it |
+|---|---|
+| File, by the host | `/m` from the hosting app (no relay) |
+| File, by anyone else | relayed from that member's computer |
+| Link, "Everyone fetches it" (default) | each app fetches it |
+| Link, "Server fetches it" | the server reads it once into the buffer; the link is never broadcast; refused on an open server (it would fetch any address it can reach for anyone) |
+| Link, "Through me" | relayed from that member's computer; for links only they can open |
+| Jellyfin item (browser pick or pasted link) | own account first, then the server's login (`/j`), then relayed from the member who put it up (with their sign-in, or the pasted link's key, which stays on their machine) |
+
+Relayed links must be one file the relay can range-read: a `text/*`
+response (YouTube and other pages, which only the player resolves) is
+refused before the swap.
+
+How bytes move:
+- The source dials `/r/.../source` (outbound, so NAT/CGNAT are fine) and
+  answers the server's pulls from the file or the URL (`RelaySource`,
+  `FileRelayBytes`, `HttpRelayBytes`; a Jellyfin source sends its own
+  `Authorization` header from this machine). Viewers only ever talk HTTP
+  to the server, so the source never sees mpv's request pattern.
+- The server keeps one `RelayBuffer` per relayed media: 1 MiB slices in
+  memory, filled by one sequential pull at a time. Kept: the first and
+  last 2 MiB (container indexes; mpv reads both on open and on seeks),
+  64 MiB behind the slowest viewer and 256 MiB past the furthest, the
+  same as each viewer's mpv buffer (`PlaybackController`), so a skip
+  inside the viewers' buffer window is served from memory. Evicted by
+  distance from the viewers, never LRU. With 2+ viewers the source sends
+  each byte about once.
+- Filling: a viewer blocked on a slice first (oldest wait first, handing
+  the source over at slice boundaries), then the pinned slices, then
+  read-ahead from the slowest viewer. Nothing is fetched while nobody
+  watches through the relay (a Jellyfin source with only account holders
+  uploads nothing).
+- mpv leaves superseded requests open but unread after a seek: only a
+  viewer's newest request moves its position or asks the source for
+  anything; older ones still get bytes that are already buffered.
+- Flow control on the source (`RelayWindow`): one in-flight budget per
+  connection, 2 x delivery rate x min RTT (rate max-filtered over 2 s),
+  clamped 256 KiB to 8 MiB; the server acks bytes as they arrive. A
+  cancelled pull's unacked bytes are written off, and a cancel that lands
+  while a frame is being read stops it before it is sent.
+- Cleanup: the buffer is memory only. Any swap disposes it (its URLs then
+  404, the source is closed with 4001 and stops), and so does server
+  stop. A crash frees it with the process.
+- Source away: viewers keep playing from the buffer; a request waits up
+  to 60 s for missing bytes. The source reconnects with backoff (same
+  token after a resume); a different file size drops the buffer.
+  `state.media.relay.live` follows the channel, and viewers show "waiting
+  for <name> to pass the video on" while it is down.
+
+Measured (mpv 0.41 viewers, real server and source, a shaped link
+between source and server; `tool/relay_e2e.dart`, 2-minute 1080p test
+file averaging 10 Mbit/s with a 15 Mbit/s busy section):
+
+| Source uplink | Open | Seeks (incl. +90 s skip) | Stalls in 50 s |
+|---|---|---|---|
+| 400 Mbit/s, 20 ms | 0.8 s | 0.01 to 0.03 s | 0 |
+| 40 Mbit/s, 40 ms | 2.1 s | 1.1 s first, then 0.03 s | 0 |
+| 20 Mbit/s, 150 ms | 5.4 s | 1.1 to 5.3 s | 3 |
+| 12 Mbit/s, 40 ms | 5.4 s | 0.5 to 2.9 s | 3 |
+
+3 viewers skipping together on 40 Mbit/s: no stalls, the source sent
+101 MiB for 287 MiB served. A late joiner opened in 0.04 s from the
+buffer. A 5 s source outage: no stall; 30 s: one stall once the buffer ran
+out, then it recovered. Freezes of 0.3 to 0.8 s in 30% of seconds: no
+stall. So the source's upload must beat the media's average bitrate
+(peaks are covered by read-ahead once it has some lead), and comfortably
+so for quick seeks. Rejected along the way: a fixed per-request window
+(seeks of 14 s on slow links, data for abandoned positions clogging the
+pipe), one shared window across requests (deadlocked on mpv's unread
+requests), Dart `http2` (connection window stuck at 64 KiB).
+
 ## Jellyfin in a session
 
 Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
@@ -374,8 +455,9 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   MediaBrowser` with this install's fields), not in the URL: `OwnPlay`,
   `report.jf {serverId: true}`. Else, when `state.relay`, `welcome.relayUrl`
   or `/j/default/<token>/<itemId>` on the dialled host: `RelayPlay`,
-  `jf: false`. Else `BlockedPlay`: the session shows "This needs a
-  Jellyfin account on <server> (or the host can relay)" with a button that
+  `jf: false`. Else, when `media.relay` names a source, the `/r/` URL:
+  `RelayPlay`. Else `BlockedPlay`: the session shows "No Jellyfin account
+  here for <server>, and nobody is passing it on" with a button that
   opens Integrations over the session; linking (or reconnecting) the
   account retries by itself. A 401 marks the account expired. The member
   list shows "via host" for members whose `jf` is false for the current
@@ -577,6 +659,13 @@ this repo, written by `tool/release.sh`.
 - Plain `ws://`, no TLS: friends use LAN, VPN or a forwarded port; TLS
   (e.g. a reverse proxy) is a documentation item.
 - One session per server, id `default`: the map is keyed for later but unused.
-- No server storage: config and logs only; media never touches the server disk.
+- No server storage: config and logs only; media never touches the server
+  disk. The relay buffer is memory only and sized like a viewer's buffer
+  (about 320 MiB at most), so a small VPS can carry it.
+- The relay is the source's own connection through the server, not a
+  shared token: a member's Jellyfin sign-in or a link's key never leaves
+  their machine. Prior art (Plex Relay, Tailscale DERP) relays as a
+  bandwidth-capped fallback on someone else's servers; here the server is
+  the owner's, so it carries full quality.
 - Avatars ride in the 1 Hz `state` broadcast (cap 256 KiB base64 per avatar):
   simple, costs host uplink; hash-based serving is on the roadmap.

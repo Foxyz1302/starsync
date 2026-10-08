@@ -10,6 +10,7 @@ import 'package:watch_together/src/jellyfin/accounts.dart';
 import 'package:watch_together/src/jellyfin/session_media.dart';
 import 'package:watch_together/src/jellyfin/track_prefs.dart';
 import 'package:watch_together/src/playback/media_marks.dart';
+import 'package:watch_together/src/screens/home/picked_media.dart';
 import 'package:watch_together/src/session/session_coordinator.dart';
 
 // Two account holders and a guest watch Jellyfin episodes together over a
@@ -444,7 +445,7 @@ void main() {
         await b.connect(ConnectParams(host: '127.0.0.1', port: server.boundPort, secret: '', name: 'bob'));
         await _poll(() => b.jellyfinBlocked.peek() != null, 'blocked');
         expect(b.serverState.peek()!.relay, isFalse);
-        expect(b.jellyfinBlocked.peek()!.message, contains('needs a Jellyfin account'));
+        expect(b.jellyfinBlocked.peek()!.message, contains('nobody is passing it on'));
         // Linking an account (Integrations) retries by itself.
         await accB.link(
             baseUrl: jelly.base,
@@ -457,6 +458,76 @@ void main() {
       } finally {
         await a.dispose();
         await b.dispose();
+        await server.stop();
+        await jelly.stop();
+      }
+    },
+  );
+
+  // The VPS case: a dedicated server with no Jellyfin login. Whoever puts
+  // the item up passes it on to guests without an account.
+  test(
+    'dedicated server without a login: the guest plays through the member who put it up',
+    timeout: const Timeout(Duration(minutes: 3)),
+    () async {
+      MediaKit.ensureInitialized();
+      final jelly = _FakeJellyfin(await _media());
+      await jelly.start();
+      final server = SyncServer(const AppConfig(port: 0, secret: '', name: 'vps'));
+      await server.start();
+      final accA = await _account(jelly.base, 'ATOKEN', 'ua', 'A-PC');
+      Future<JellyfinAccounts> none() async {
+        final x = JellyfinAccounts(store: MemoryJellyfinStore());
+        await x.ensureLoaded(validate: false);
+        return x;
+      }
+
+      final a = SessionCoordinator(jellyfin: accA, trackPrefs: TrackPrefs(store: MemoryJellyfinStore()));
+      final b = SessionCoordinator(jellyfin: await none(), trackPrefs: TrackPrefs(store: MemoryJellyfinStore()));
+      final d = SessionCoordinator(jellyfin: await none(), trackPrefs: TrackPrefs(store: MemoryJellyfinStore()));
+      ConnectParams params(String name) =>
+          ConnectParams(host: '127.0.0.1', port: server.boundPort, secret: '', name: name);
+      try {
+        await a.connect(params('alice'));
+        await b.connect(params('guest'));
+        await d.connect(params('dave'));
+        for (final x in [a, b, d]) {
+          await x.playback.player.setVolume(0);
+        }
+        // Alice picks from her browser: a ref plus a relay she sources.
+        await a.swapPicked(JellyfinMedia(serverId: _sid, baseUrl: jelly.base, itemId: _ep1, title: 'Pilot'));
+        await _poll(() => b.jellyfinPlan.peek() is RelayPlay && b.playback.durationSecs > 19, 'guest plays');
+        expect((b.jellyfinPlan.peek() as RelayPlay).url, contains('/r/default/'));
+        expect(a.jellyfinPlan.peek(), isA<OwnPlay>());
+        expect(a.relaying.peek(), isTrue);
+        expect(b.jellyfinBlocked.peek(), isNull);
+        for (final x in [a, b]) {
+          x.toggleReady();
+        }
+        await _poll(() => a.playback.player.state.playing && b.playback.player.state.playing, 'playing');
+        await Future.delayed(const Duration(seconds: 3));
+        expect((a.playback.positionSecs - b.playback.positionSecs).abs(), lessThan(1.0));
+        // Every stream request carried alice's token, from her machine.
+        expect(jelly.streams('ATOKEN'), isNotEmpty);
+        expect(jelly.calls.where((c) => c.path.startsWith('/Videos/')).every((c) =>
+            _FakeJellyfin.authFields(c.auth)['Token'] == 'ATOKEN'), isTrue);
+        for (final x in [a, b]) {
+          x.toggleReady();
+        }
+
+        // Dave has no account but a link with a key: he passes it on, the
+        // key never leaves his machine.
+        final link = '${jelly.base}/Videos/$_ep2/stream?static=true&api_key=ATOKEN';
+        expect(await d.swapPicked(LinkMedia(link)), isNull);
+        await _poll(() => (b.serverState.peek()?.media?['jellyfin'] as Map?)?['itemId'] == _ep2, 'ep2 up');
+        expect(b.serverState.peek()!.toJson().toString(), isNot(contains('api_key')));
+        await _poll(() => d.relaying.peek() && d.playback.durationSecs > 19, 'dave plays his link');
+        await _poll(() => b.jellyfinPlan.peek() is RelayPlay && b.playback.durationSecs > 19, 'guest plays ep2');
+        expect((b.jellyfinPlan.peek() as RelayPlay).url, contains('/r/default/'));
+      } finally {
+        for (final x in [a, b, d]) {
+          await x.dispose();
+        }
         await server.stop();
         await jelly.stop();
       }

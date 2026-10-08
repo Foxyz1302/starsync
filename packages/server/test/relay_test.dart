@@ -1,0 +1,386 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
+
+import 'package:sync_relay_core/core.dart';
+import 'package:sync_relay_server/server.dart';
+import 'package:test/test.dart';
+
+// The relay end to end inside one process: a real SyncServer, the real
+// RelaySource from core, viewers as plain HTTP range requests.
+
+class _Member {
+  final WebSocket ws;
+  final raw = <String>[];
+  late WelcomeMessage welcome;
+  _Member(this.ws);
+
+  static Future<_Member> join(int port, String name, {String secret = 'pw'}) async {
+    final ws = await WebSocket.connect('ws://127.0.0.1:$port/sync');
+    final m = _Member(ws);
+    final w = Completer<String>();
+    ws.listen((f) {
+      m.raw.add('$f');
+      if ('$f'.contains('"t":"welcome"') && !w.isCompleted) w.complete('$f');
+    }, onError: (_) {});
+    ws.add(jsonEncode(HelloMessage(
+      proto: RelayConstants.protoVersion,
+      secret: secret,
+      user: HelloUser(name: name),
+      media: const HelloMedia(name: '', size: 0, duration: 0),
+    ).toJson()));
+    m.welcome = WelcomeMessage.fromJson(
+        Map<String, Object?>.from(jsonDecode(await w.future.timeout(const Duration(seconds: 5))) as Map));
+    return m;
+  }
+
+  void send(Map<String, Object?> j) => ws.add(jsonEncode(j));
+
+  Map<String, Object?>? get lastState {
+    for (final f in raw.reversed) {
+      final d = jsonDecode(f) as Map;
+      if (d['t'] == 'state') return Map<String, Object?>.from(d);
+    }
+    return null;
+  }
+
+  Map<String, Object?>? get media => lastState?['media'] as Map<String, Object?>?;
+}
+
+Future<void> _until(bool Function() cond, String what, {int secs = 5}) async {
+  final deadline = DateTime.now().add(Duration(seconds: secs));
+  while (!cond()) {
+    if (DateTime.now().isAfter(deadline)) fail('timed out waiting for $what');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+}
+
+void main() {
+  late Directory tmp;
+  late File file;
+  late Uint8List bytes;
+  late SyncServer server;
+  late HttpClient http;
+  final cleanup = <Future<void> Function()>[];
+
+  setUp(() async {
+    tmp = await Directory.systemTemp.createTemp('relay-test');
+    final rnd = Random(7);
+    // 5.5 slices: exercises the short last slice.
+    bytes = Uint8List.fromList(List.generate(5 * RelayBuffer.slice + 500000, (_) => rnd.nextInt(256)));
+    file = File('${tmp.path}/ep 01.mkv')..writeAsBytesSync(bytes);
+    server = SyncServer(const AppConfig(port: 0, secret: 'pw', name: 't'));
+    await server.start();
+    http = HttpClient();
+  });
+
+  tearDown(() async {
+    for (final c in cleanup.reversed) {
+      await c();
+    }
+    cleanup.clear();
+    http.close(force: true);
+    await server.stop();
+    await tmp.delete(recursive: true);
+  });
+
+  Future<_Member> join(String name) async {
+    final m = await _Member.join(server.boundPort, name);
+    cleanup.add(() => m.ws.close());
+    return m;
+  }
+
+  Future<RelaySource> startSource(_Member m, {RelayBytes? from}) async {
+    final src = RelaySource(
+        Uri.parse('ws://127.0.0.1:${server.boundPort}/r/default/${m.welcome.token}/source'),
+        from ?? FileRelayBytes(file),
+        backoff: (_) => const Duration(milliseconds: 100));
+    await src.start();
+    cleanup.add(src.close);
+    return src;
+  }
+
+  Future<void> swapRelay(_Member m, {String name = 'ep 01.mkv', Map<String, Object?> relay = const {}, String? url}) async {
+    final before = m.raw.length;
+    m.send({
+      't': 'swap',
+      'media': {'name': name, 'size': bytes.length, 'duration': 0, if (url != null) 'url': url, 'relay': relay},
+    });
+    await _until(() => m.raw.skip(before).any((f) => f.contains('"relay"') && f.contains('"t":"state"')), 'relay state');
+  }
+
+  String viewerUrl(_Member v, int mediaId) =>
+      'http://127.0.0.1:${server.boundPort}/r/default/${v.welcome.token}/$mediaId/${Uri.encodeComponent('ep 01.mkv')}';
+
+  Future<(int, Map<String, String>, List<int>)> get(String url, {String? range}) async {
+    final req = await http.getUrl(Uri.parse(url));
+    if (range != null) req.headers.set('range', range);
+    final res = await req.close();
+    final body = <int>[for (final c in await res.toList()) ...c];
+    final h = <String, String>{};
+    res.headers.forEach((k, v) => h[k] = v.join(','));
+    return (res.statusCode, h, body);
+  }
+
+  int mediaIdOf(_Member m) => m.lastState!['mediaId'] as int;
+
+  group('member as source', () {
+    test('state names the source, no URL; live once the channel is up', () async {
+      final alice = await join('alice');
+      await swapRelay(alice);
+      expect(alice.media!['relay'], {'source': alice.welcome.memberId});
+      expect(alice.media!.containsKey('url'), isFalse);
+      await startSource(alice);
+      await _until(() => (alice.media?['relay'] as Map?)?['live'] == true, 'live');
+    });
+
+    test('viewers get byte-exact ranges, including the short last slice and 416', () async {
+      final alice = await join('alice');
+      final bob = await join('bob');
+      await swapRelay(alice);
+      await startSource(alice);
+      final url = viewerUrl(bob, mediaIdOf(alice));
+      final n = bytes.length;
+      for (final (range, start, end) in [
+        (null, 0, n - 1),
+        ('bytes=0-99', 0, 99),
+        ('bytes=${RelayBuffer.slice - 10}-${RelayBuffer.slice + 10}', RelayBuffer.slice - 10, RelayBuffer.slice + 10),
+        ('bytes=${n - 777}-', n - 777, n - 1),
+        ('bytes=-333', n - 333, n - 1),
+      ]) {
+        final (status, h, body) = await get(url, range: range);
+        expect(status, range == null ? 200 : 206, reason: '$range');
+        expect(body, bytes.sublist(start, end + 1), reason: '$range');
+        if (range != null) expect(h['content-range'], 'bytes $start-$end/$n');
+        expect(h['content-type'], 'video/x-matroska');
+      }
+      final (status, h, _) = await get(url, range: 'bytes=${n + 5}-');
+      expect(status, 416);
+      expect(h['content-range'], 'bytes */$n');
+    });
+
+    test('a late joiner gets its own /r/ URL in welcome', () async {
+      final alice = await join('alice');
+      await swapRelay(alice);
+      final carol = await join('carol');
+      expect(carol.welcome.mediaUrl, viewerUrl(carol, mediaIdOf(alice)));
+    });
+
+    test('nobody watching: the source uploads nothing', () async {
+      final alice = await join('alice');
+      await swapRelay(alice);
+      final src = await startSource(alice);
+      await _until(() => server.hub.relay!.live, 'live');
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      expect(src.bytesSent, 0);
+    });
+
+    test('several viewers: each byte crosses the source link about once', () async {
+      final alice = await join('alice');
+      final viewers = [for (final n in ['b', 'c', 'd']) await join(n)];
+      await swapRelay(alice);
+      final src = await startSource(alice);
+      final id = mediaIdOf(alice);
+      final got = await Future.wait([for (final v in viewers) get(viewerUrl(v, id))]);
+      for (final (status, _, body) in got) {
+        expect(status, 200);
+        expect(body.length, bytes.length);
+      }
+      expect(src.bytesSent, lessThan(bytes.length * 1.3));
+    });
+
+    test('only the source may open the channel', () async {
+      final alice = await join('alice');
+      final bob = await join('bob');
+      await swapRelay(alice);
+      final impostor = await startSource(bob);
+      await impostor.done.timeout(const Duration(seconds: 5));
+      expect(server.hub.relay!.live, isFalse);
+    });
+
+    test('a new swap drops the buffer, old URLs 404, the source stops', () async {
+      final alice = await join('alice');
+      final bob = await join('bob');
+      await swapRelay(alice);
+      final src = await startSource(alice);
+      final oldId = mediaIdOf(alice);
+      expect((await get(viewerUrl(bob, oldId), range: 'bytes=0-9')).$1, 206);
+      final buf = server.hub.relay!.buffer;
+      alice.send({
+        't': 'swap',
+        'media': {'name': 'x', 'size': 0, 'duration': 0, 'url': 'http://example.invalid/x.mkv'},
+      });
+      await _until(() => mediaIdOf(alice) != oldId, 'swap');
+      expect(server.hub.relay, isNull);
+      expect(buf.cachedBytes, 0);
+      await src.done.timeout(const Duration(seconds: 5));
+      expect((await get(viewerUrl(bob, oldId), range: 'bytes=0-9')).$1, 404);
+    });
+
+    test('server stop drops the relay', () async {
+      final alice = await join('alice');
+      await swapRelay(alice);
+      final buf = server.hub.relay!.buffer;
+      await server.stop();
+      expect(server.hub.relay, isNull);
+      expect(buf.cachedBytes, 0);
+      server = SyncServer(const AppConfig(port: 0, secret: 'pw', name: 't'));
+      await server.start();
+    });
+
+    test('source drops and comes back: buffered bytes keep serving, the rest resumes', () async {
+      final alice = await join('alice');
+      final bob = await join('bob');
+      await swapRelay(alice);
+      final src = await startSource(alice);
+      final url = viewerUrl(bob, mediaIdOf(alice));
+      expect((await get(url, range: 'bytes=0-${RelayBuffer.slice * 2 - 1}')).$3,
+          bytes.sublist(0, RelayBuffer.slice * 2));
+      await src.close();
+      await src.done;
+      await _until(() => !server.hub.relay!.live, 'down');
+      expect((await get(url, range: 'bytes=0-99')).$3, bytes.sublist(0, 100));
+      final pending = get(url, range: 'bytes=${RelayBuffer.slice * 4}-');
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await startSource(alice);
+      final (status, _, body) = await pending.timeout(const Duration(seconds: 10));
+      expect(status, 206);
+      expect(body, bytes.sublist(RelayBuffer.slice * 4));
+    });
+
+    test('Jellyfin swap can carry a relay', () async {
+      final alice = await join('alice');
+      final before = alice.raw.length;
+      alice.send({
+        't': 'swap',
+        'media': {
+          'name': 'Pilot',
+          'size': 0,
+          'duration': 0,
+          'jellyfin': {'serverId': 'srv1', 'itemId': '0123456789abcdef0123456789abcdef', 'title': 'Pilot'},
+          'relay': {},
+        },
+      });
+      await _until(() => alice.raw.skip(before).any((f) => f.contains('"jellyfin"')), 'state');
+      expect(alice.media!['relay'], {'source': alice.welcome.memberId});
+      expect(server.hub.relay!.sourceToken, alice.welcome.token);
+    });
+  });
+
+  group('server fetches the link', () {
+    late HttpServer origin;
+    setUp(() async {
+      origin = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      origin.listen((req) async {
+        final r = resolveMediaRequest(
+            rangeHeader: req.headers.value('range'), size: bytes.length, filename: 'x.mkv');
+        req.response.statusCode = r.status;
+        r.headers.forEach(req.response.headers.set);
+        if (r.status == 200 || r.status == 206) {
+          final end = r.end ?? bytes.length - 1;
+          req.response.add(bytes.sublist(r.start, end + 1));
+        }
+        await req.response.close();
+      });
+    });
+    tearDown(() => origin.close(force: true));
+
+    test('byte-exact, the link is never broadcast', () async {
+      final alice = await join('alice');
+      final link = 'http://127.0.0.1:${origin.port}/secret/file.mkv?api_key=KEY';
+      await swapRelay(alice, relay: {'fetch': true}, url: link);
+      expect(jsonEncode(alice.lastState), isNot(contains('KEY')));
+      await _until(() => server.hub.relay!.live, 'live');
+      final bob = await join('bob');
+      expect(jsonEncode(bob.welcome.toJson()), isNot(contains('KEY')));
+      final (status, _, body) = await get(bob.welcome.mediaUrl!, range: 'bytes=1000-');
+      expect(status, 206);
+      expect(body, bytes.sublist(1000));
+    });
+
+    test('an open server (no password) refuses to fetch', () async {
+      await server.stop();
+      server = SyncServer(const AppConfig(port: 0, secret: '', name: 'open'));
+      await server.start();
+      final m = await _Member.join(server.boundPort, 'mallory', secret: '');
+      cleanup.add(() => m.ws.close());
+      m.send({
+        't': 'swap',
+        'media': {
+          'name': 'x', 'size': 0, 'duration': 0,
+          'url': 'http://127.0.0.1:${origin.port}/x.mkv', 'relay': {'fetch': true},
+        },
+      });
+      await _until(() => m.raw.any((f) => f.contains('server fetch needs a server password')), 'err');
+      expect(server.hub.relay, isNull);
+    });
+
+    test('a non-http link is refused', () async {
+      final alice = await join('alice');
+      alice.send({
+        't': 'swap',
+        'media': {'name': 'x', 'size': 0, 'duration': 0, 'url': 'file:///etc/passwd', 'relay': {'fetch': true}},
+      });
+      await _until(() => alice.raw.any((f) => f.contains('relay fetch needs')), 'err');
+      expect(server.hub.relay, isNull);
+    });
+  });
+
+  group('buffer', () {
+    // A feed that serves [bytes] in-process and counts what it sends.
+    late RelayBuffer buf;
+    late LocalRelayFeed feed;
+    late _CountingBytes counted;
+    setUp(() {
+      buf = RelayBuffer(ahead: 2 * RelayBuffer.slice, back: RelayBuffer.slice, pin: RelayBuffer.slice);
+      counted = _CountingBytes(FileRelayBytes(file));
+      feed = LocalRelayFeed(counted, buf);
+      buf.attach(feed, bytes.length);
+    });
+    tearDown(() async {
+      buf.dispose();
+      await feed.close();
+    });
+
+    Future<List<int>> read(String v, int start, int end) async =>
+        [for (final c in await buf.read(v, start, end).toList()) ...c];
+
+    test('keeps pinned head/tail plus a window around the viewer', () async {
+      expect(await read('a', 0, bytes.length - 1), bytes);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      // ahead 2 + back 1 + 2 pinned slices: never all 6.
+      expect(buf.cachedBytes, lessThanOrEqualTo(5 * RelayBuffer.slice));
+    });
+
+    test('a superseded request does not hold the feed', () async {
+      // Like mpv after a seek: the old request stays open, unread.
+      final old = buf.read('a', 0, bytes.length - 1).listen((_) {})..pause();
+      final s = 3 * RelayBuffer.slice;
+      expect(await read('a', s, s + 999).timeout(const Duration(seconds: 5)), bytes.sublist(s, s + 1000));
+      await old.cancel();
+    });
+
+    test('dispose frees everything and ends waiting readers', () async {
+      await read('a', 0, 10);
+      buf.dispose();
+      expect(buf.cachedBytes, 0);
+    });
+  });
+}
+
+class _CountingBytes implements RelayBytes {
+  final RelayBytes inner;
+  int sent = 0;
+  _CountingBytes(this.inner);
+  @override
+  Future<int> size() => inner.size();
+  @override
+  Stream<List<int>> read(int start, int end) => inner.read(start, end).map((c) {
+        sent += c.length;
+        return c;
+      });
+  @override
+  Future<void> close() => inner.close();
+}

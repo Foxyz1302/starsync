@@ -93,7 +93,7 @@ void main() {
       final plan = await resolveJellyfinRef(accounts, episodeRef, relay: false, relayUrl: null);
       expect(plan, isA<BlockedPlay>());
       expect((plan as BlockedPlay).message,
-          'This needs a Jellyfin account on that Jellyfin server (or the host can relay)');
+          'No Jellyfin account here for that Jellyfin server, and nobody is passing it on');
       expect(plan.jfAccess, isNull);
     });
 
@@ -105,7 +105,7 @@ void main() {
       expect(plan, isA<RelayPlay>());
       expect(accounts.statusOf(fixtureServerId), JellyfinAccountStatus.expired);
       final blocked = await resolveJellyfinRef(accounts, episodeRef, relay: false, relayUrl: null);
-      expect((blocked as BlockedPlay).message, contains('on Example Server'));
+      expect((blocked as BlockedPlay).message, contains('for Example Server'));
       expect(blocked.message, contains('sign-in expired'));
     });
 
@@ -511,13 +511,13 @@ void main() {
           blocked: const BlockedPlay(serverId: fixtureServerId, serverName: 'Example Server'),
           onLinkAccount: () => link++,
           onRetry: () {})));
-      expect(find.text('This needs a Jellyfin account on Example Server (or the host can relay)'),
+      expect(find.text('No Jellyfin account here for Example Server, and nobody is passing it on'),
           findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('link-jellyfin-account')));
       expect(link, 1);
     });
 
-    testWidgets('swap panel: the shared picker, File only for the host', (tester) async {
+    testWidgets('swap panel: the shared picker, File for everyone, link relay choice', (tester) async {
       await setSize(tester, const Size(1400, 900));
       final (accounts, _) = await linkedAccounts();
       final c = MediaPickerController(source: MediaKind.link);
@@ -535,14 +535,16 @@ void main() {
         onClose: () => closed++,
       )));
       await settle(tester);
-      expect(find.widgetWithText(ButtonSegment<MediaKind>, 'File'), findsNothing);
-      expect(find.text('File'), findsNothing);
+      // A guest's file goes through the server's relay.
+      expect(find.text('File'), findsOneWidget);
       expect(find.text('Jellyfin'), findsOneWidget);
       await tester.enterText(find.byType(TextField), 'https://cdn.example/movie.mkv');
       await tester.pump();
+      await tester.tap(find.text('Through me'));
+      await tester.pump();
       await tester.tap(find.byKey(const ValueKey('swap-go')));
       await settle(tester);
-      expect(swapped, [const LinkMedia('https://cdn.example/movie.mkv')]);
+      expect(swapped, [const LinkMedia('https://cdn.example/movie.mkv', relay: LinkRelay.me)]);
       expect(closed, 1);
 
       // The Jellyfin source is the library browser; a pick goes up as is.
@@ -554,6 +556,9 @@ void main() {
           controller: c, accounts: accounts, isHost: true, onSwap: (_) async => 'x', onClose: () {})));
       await settle(tester);
       expect(find.text('File'), findsOneWidget);
+      await tester.tap(find.text('File'));
+      await settle(tester);
+      expect(find.text('Friends stream it from your computer.'), findsOneWidget);
     });
 
     testWidgets('swap panel opens on the series of the episode playing, episode highlighted',

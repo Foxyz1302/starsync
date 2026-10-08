@@ -6,16 +6,25 @@ off by deleting it in the same commit as the code. Wire changes also edit
 
 ## Backlog
 
-1. **Windows: first real install.** CI builds and publishes
+1. **Windows: first real use.** CI builds and publishes
    `watch-together-<ver>-windows-x64.zip` (libmpv bundled) and runs the
-   updater tests on NTFS, but nobody has launched the app on Windows yet.
-   Check: playback, fullscreen controls, hosting (firewall prompt), in-app
-   update from one release to the next. The rest of the desktop tests are
-   not in CI.
+   updater tests on NTFS; a friend has joined from it. Still unchecked:
+   fullscreen controls, hosting (firewall prompt), in-app update from one
+   release to the next. The rest of the desktop tests are not in CI.
 
-2. **Jellyfin** (epic, below).
+2. **Relay follow-ups** (see ARCHITECTURE "Relay"). First real use: owner's
+   PC -> VPS -> friend, Jellyfin and a file. Then:
+   - Source takeover: when the source leaves, another member with an
+     account on that Jellyfin (or the same file: name, size, hash) takes
+     over instead of the buffer running dry.
+   - "Bob can't open this link — relay it?": offer the relay to whoever put
+     a direct link up when a viewer's player fails to open it.
+   - Show who is relaying and how fast in the member list; warn the source
+     when its upload is below the media's bitrate.
 
-3. **Smaller items**
+3. **Jellyfin** (epic, below).
+
+4. **Smaller items**
    - Video output robustness: if media_kit's hardware path regresses to
      software (see ARCHITECTURE, Media: render mode), vendor a
      media_kit_video fix that builds the EGL display from GDK's native

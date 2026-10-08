@@ -37,6 +37,14 @@ class MediaPickerController extends ChangeNotifier {
   final TextEditingController file;
   MediaKind _source;
   String? _notice;
+  LinkRelay _linkRelay = LinkRelay.direct;
+
+  LinkRelay get linkRelay => _linkRelay;
+  set linkRelay(LinkRelay v) {
+    if (v == _linkRelay) return;
+    _linkRelay = v;
+    notifyListeners();
+  }
   JellyfinMedia? _jellyfin;
 
   /// The Jellyfin item picked in the browser (kept while another source
@@ -71,7 +79,7 @@ class MediaPickerController extends ChangeNotifier {
     switch (_source) {
       case MediaKind.link:
         final url = link.text.trim();
-        return url.isEmpty ? null : LinkMedia(url);
+        return url.isEmpty ? null : LinkMedia(url, relay: _linkRelay);
       case MediaKind.file:
         final path = file.text.trim();
         return path.isEmpty ? null : FileMedia(path);
@@ -117,15 +125,21 @@ class MediaPicker extends StatefulWidget {
   final bool expanded;
   /// Where the Jellyfin browser opens instead of its remembered location.
   final BrowseStart? jellyfinStart;
-  /// False hides the File source (only the host can serve a file).
+  /// False hides the File source.
   final bool allowFile;
   /// Shown under the Link field instead of the default help.
   final String? linkHelp;
+  /// Shown under the File field instead of the default help.
+  final String? fileHelp;
+  /// Offer the [LinkRelay] choice under the Link field (in a session).
+  final bool linkRelayChoice;
   const MediaPicker({
     super.key,
     this.jellyfinStart,
     this.allowFile = true,
     this.linkHelp,
+    this.fileHelp,
+    this.linkRelayChoice = false,
     required this.controller,
     this.onChanged,
     this.onSubmit,
@@ -247,10 +261,25 @@ class _MediaPickerState extends State<MediaPicker> {
             icon: const Icon(Icons.content_paste, size: 18),
             label: const Text('Paste'),
           ),
-          help: widget.linkHelp ??
-              'A direct http(s) link to a video file; everyone streams it from there. '
-                  'Jellyfin links are shared as the item, without your sign-in.',
+          help: widget.linkRelayChoice
+              ? _linkRelayHelp(_c.linkRelay)
+              : widget.linkHelp ??
+                  'A direct http(s) link to a video file; everyone streams it from there. '
+                      'Jellyfin links are shared as the item, without your sign-in.',
           notice: _c.notice,
+          extra: widget.linkRelayChoice
+              ? SegmentedButton<LinkRelay>(
+                  key: const ValueKey('link-relay'),
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: LinkRelay.direct, label: Text('Everyone fetches it')),
+                    ButtonSegment(value: LinkRelay.server, label: Text('Server fetches it')),
+                    ButtonSegment(value: LinkRelay.me, label: Text('Through me')),
+                  ],
+                  selected: {_c.linkRelay},
+                  onSelectionChanged: (s) => _c.linkRelay = s.first,
+                )
+              : null,
         ),
       MediaKind.file => _FieldRow(
           key: const ValueKey('media-file'),
@@ -264,7 +293,8 @@ class _MediaPickerState extends State<MediaPicker> {
             icon: const Icon(Icons.folder_open, size: 18),
             label: const Text('Browse'),
           ),
-          help: 'Friends stream it from you while you watch. Optional — you can host without media.',
+          help: widget.fileHelp ??
+              'Friends stream it from you while you watch. Optional — you can host without media.',
           notice: _c.notice,
         ),
     };
@@ -325,8 +355,10 @@ class _FieldRow extends StatelessWidget {
   final Widget button;
   final String help;
   final String? notice;
+  /// Under the field, above the help (e.g. the link relay choice).
+  final Widget? extra;
   const _FieldRow(
-      {super.key, required this.field, required this.button, required this.help, this.notice});
+      {super.key, required this.field, required this.button, required this.help, this.notice, this.extra});
 
   @override
   Widget build(BuildContext context) {
@@ -346,6 +378,7 @@ class _FieldRow extends StatelessWidget {
                 button,
               ],
             ),
+            if (extra != null) ...[const SizedBox(height: 10), extra!],
             const SizedBox(height: 8),
             Text(notice ?? help, style: small),
           ],
@@ -354,3 +387,12 @@ class _FieldRow extends StatelessWidget {
     );
   }
 }
+
+String _linkRelayHelp(LinkRelay r) => switch (r) {
+      LinkRelay.direct => 'Everyone streams the link themselves. Jellyfin links are shared as the item, '
+          'without your sign-in.',
+      LinkRelay.server => 'The server downloads it once and streams it to everyone: for links that are '
+          'slow or blocked for some. The server must be able to reach the link; it is not shown to anyone.',
+      LinkRelay.me => 'This computer downloads it and passes it on through the server: for links only you '
+          'can open. Keep the app open while it plays; the link is not shown to anyone.',
+    };

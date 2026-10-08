@@ -4,6 +4,7 @@ export 'src/logging.dart';
 export 'src/clock_sync.dart';
 export 'src/config.dart';
 export 'src/protocol.dart';
+export 'src/relay.dart';
 export 'src/media_source.dart';
 export 'src/sync_engine.dart';
 export 'src/jellyfin/client.dart';

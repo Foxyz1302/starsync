@@ -144,7 +144,9 @@ class JellyfinBlockedCard extends StatelessWidget {
               const SizedBox(height: 10),
               Text(blocked.message, textAlign: TextAlign.center, style: t.titleSmall),
               const SizedBox(height: 6),
-              Text('Link your own account in Integrations, or ask the host to relay it.',
+              Text(
+                  'Whoever put it up passes it on automatically while their app is open; '
+                  'if they left, ask them to put it up again. Or link your own account in Integrations.',
                   textAlign: TextAlign.center, style: t.bodySmall?.copyWith(color: Colors.grey)),
               const SizedBox(height: 14),
               Wrap(

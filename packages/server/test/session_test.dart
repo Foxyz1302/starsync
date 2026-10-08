@@ -80,8 +80,14 @@ void main() {
   });
 
   group('core welcome + proto', () {
-    test('proto 7: Jellyfin refs and relay', () {
-      expect(RelayConstants.protoVersion, 7);
+    test('proto 8: relayed media', () {
+      expect(RelayConstants.protoVersion, 8);
+      const m = HelloMedia(name: 'a', size: 1, duration: 0, relay: MediaRelay(source: 'm1', live: true));
+      final back = HelloMedia.fromJson(Map<String, Object?>.from(m.toJson()));
+      expect(back.relay!.source, 'm1');
+      expect(back.relay!.live, isTrue);
+      expect(back.relay!.fetch, isFalse);
+      expect(const MediaRelay().toJson(), isEmpty);
     });
 
     test('welcome round-trips with token + member id', () {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:signals/signals_flutter.dart';
@@ -92,6 +93,35 @@ class ToastItem {
 
 const _toastActions = {'join', 'leave', 'kick', 'swap', 'chat'};
 
+/// `media.relay` of a state, or null when the media is not relayed.
+MediaRelay? stateMediaRelay(StateBroadcast state) {
+  final r = state.media?['relay'];
+  return r is Map ? MediaRelay.fromJson(Map<String, Object?>.from(r)) : null;
+}
+
+/// What this member serves when its own swap is relayed: set at swap time,
+/// claimed by the state that names this member as the source.
+sealed class _RelayOrigin {
+  const _RelayOrigin();
+}
+
+final class _FileOrigin extends _RelayOrigin {
+  final String path;
+  const _FileOrigin(this.path);
+}
+
+final class _LinkOrigin extends _RelayOrigin {
+  final String url;
+  const _LinkOrigin(this.url);
+}
+
+/// A Jellyfin item: served with this install's account, else with the
+/// pasted [link] (its api_key stays on this machine).
+final class _JellyfinOrigin extends _RelayOrigin {
+  final String? link;
+  const _JellyfinOrigin(this.link);
+}
+
 String? stateMediaUrl(StateBroadcast state) {
   final media = state.media;
   if (media == null) return null;
@@ -184,6 +214,14 @@ class SessionCoordinator {
   String? _openUrl;
   String _wsHost = '';
   int _wsPort = 0;
+  _RelayOrigin? _pendingOrigin;
+  // What this member serves for media [$1]; survives a reconnect (the
+  // state then looks new again).
+  (int, _RelayOrigin)? _activeOrigin;
+  RelaySource? _relaySource;
+  int _relaySourceMediaId = -1;
+  /// This member serves the current media's bytes through the server.
+  final relaying = signal<bool>(false);
   // Server seek applied to the player (event id and when), checked once it
   // should have landed.
   int? _pendingSeekEvent;
@@ -392,6 +430,78 @@ class SessionCoordinator {
     }
   }
 
+  bool _relayWaitShown = false;
+
+  /// Relayed through a member whose channel is down: say who everyone is
+  /// waiting for (the buffer still plays what it has).
+  void _relayStatus(StateBroadcast r) {
+    final relay = stateMediaRelay(r);
+    final waiting = relay != null &&
+        relay.source.isNotEmpty &&
+        relay.source != sync.memberId &&
+        !relay.live &&
+        _openUrl != null &&
+        jellyfinPlan.peek() is! OwnPlay;
+    if (waiting) {
+      final who = r.members.where((m) => m.id == relay.source).firstOrNull?.name;
+      health.value = HealthStatus(HealthSeverity.warn,
+          who == null ? 'the member who put this up left' : 'waiting for $who to pass the video on');
+      _relayWaitShown = true;
+    } else if (_relayWaitShown) {
+      _relayWaitShown = false;
+      health.value = const HealthStatus(HealthSeverity.ok, 'connected');
+    }
+  }
+
+  String _relayMediaUrlFor(String name, int mediaId) =>
+      'http://$_wsHost:$_wsPort/r/default/${sync.token}/$mediaId/${Uri.encodeComponent(name)}';
+
+  /// Serves [bytes] for media [mediaId] on this member's relay channel.
+  /// The server only pulls while someone watches through it.
+  void _startRelaySource(int mediaId, RelayBytes bytes, {bool announce = false}) {
+    // Back after a reconnect on the same media: it is still serving (and
+    // redials by itself).
+    if (_relaySource != null && _relaySourceMediaId == mediaId) {
+      unawaited(bytes.close());
+      return;
+    }
+    _stopRelaySource();
+    final src = RelaySource(
+        Uri.parse('ws://$_wsHost:$_wsPort/r/default/${sync.token}/source'), bytes);
+    _relaySource = src;
+    _relaySourceMediaId = mediaId;
+    relaying.value = true;
+    if (announce) {
+      _pushToast('Passing the video on through the server. Keep the app open while it plays.');
+    }
+    unawaited(() async {
+      try {
+        await src.start();
+      } catch (e) {
+        debugPrint('relay source failed: $e');
+        if (identical(_relaySource, src)) {
+          _relaySource = null;
+          relaying.value = false;
+          _pushToast('Cannot pass the video on: $e');
+        }
+        return;
+      }
+      await src.done;
+      if (identical(_relaySource, src)) {
+        _relaySource = null;
+        relaying.value = false;
+      }
+    }());
+  }
+
+  void _stopRelaySource() {
+    final src = _relaySource;
+    _relaySource = null;
+    _relaySourceMediaId = -1;
+    relaying.value = false;
+    if (src != null) unawaited(src.close());
+  }
+
   String _fileUrlFor(String name) {
     return 'http://$_wsHost:$_wsPort/m/default/${sync.token}/${Uri.encodeComponent(name)}';
   }
@@ -440,12 +550,35 @@ class SessionCoordinator {
           r.mediaId == _jfMediaId &&
           sameJellyfinItem(ref, _jfRef) &&
           jellyfinPlan.peek() is OwnPlay;
+      final relay = stateMediaRelay(r);
+      final mine = relay != null && relay.source.isNotEmpty && relay.source == sync.memberId;
+      _RelayOrigin? origin;
+      if (mine) {
+        final pending = _pendingOrigin;
+        if (pending != null) {
+          _pendingOrigin = null;
+          _activeOrigin = (r.mediaId, pending);
+        }
+        origin = _activeOrigin?.$1 == r.mediaId ? _activeOrigin!.$2 : null;
+      }
+      if (_relaySourceMediaId != r.mediaId) _stopRelaySource();
       if (!same) {
         _seekGate.reset();
         _clearPendingSeek();
         _leaveJellyfinItem();
+        final name = (r.media?['name'] as String?) ?? '';
         if (ref != null) {
-          await _playJellyfin(ref, r);
+          await _playJellyfin(ref, r,
+              origin: origin is _JellyfinOrigin ? origin : null,
+              memberRelayUrl: relay != null && !mine ? _relayMediaUrlFor(name, r.mediaId) : null);
+        } else if (origin is _FileOrigin) {
+          await _openMedia(origin.path);
+          _startRelaySource(r.mediaId, FileRelayBytes(File(origin.path)), announce: true);
+        } else if (origin is _LinkOrigin) {
+          await _openMedia(origin.url);
+          _startRelaySource(r.mediaId, HttpRelayBytes(Uri.parse(origin.url)), announce: true);
+        } else if (relay != null && !mine) {
+          await _openMedia(_relayMediaUrlFor(name, r.mediaId));
         } else {
           var url = stateMediaUrl(r);
           if ((url == null || url.isEmpty) && sync.token.isNotEmpty) {
@@ -463,6 +596,7 @@ class SessionCoordinator {
       _clearPendingSeek();
     }
     _jellyfinTransport(r);
+    _relayStatus(r);
     if (!_playerReady || _openUrl == null) {
       _wasPlayAllowed = false;
       _updateStarving(r, 0);
@@ -825,35 +959,77 @@ class SessionCoordinator {
   }
 
   /// A pasted link: a recognised Jellyfin item link goes up as a ref
-  /// (see [mediaForLink]), anything else as the link.
-  Future<void> swapLink(String url) async {
+  /// (see [mediaForLink]) that this member relays for viewers without an
+  /// account (with the link's key, which stays here); anything else as the
+  /// link, or relayed per [relay]. Returns an error text, or null when sent.
+  Future<String?> swapLink(String url, {LinkRelay relay = LinkRelay.direct}) async {
     markInput();
-    sync.sendSwap(await mediaForLink(jellyfin, url));
+    final media = await mediaForLink(jellyfin, url);
+    if (media.jellyfin != null) {
+      _pendingOrigin = _JellyfinOrigin(url);
+      sync.sendSwap(media.copyWith(relay: const MediaRelay()));
+      return null;
+    }
+    if (relay == LinkRelay.direct) {
+      sync.sendSwap(media);
+      return null;
+    }
+    // Relayed: it must be a single file the relay can range-read (not a
+    // page like YouTube, which only the player can resolve).
+    final probe = HttpRelayBytes(Uri.parse(url));
+    final int size;
+    try {
+      size = await probe.size().timeout(const Duration(seconds: 15));
+    } catch (e) {
+      return relay == LinkRelay.me
+          ? 'cannot pass this link on: $e'
+          : 'cannot check this link: $e';
+    } finally {
+      await probe.close();
+    }
+    if (relay == LinkRelay.me) {
+      _pendingOrigin = _LinkOrigin(url);
+      sync.sendSwap(HelloMedia(name: media.name, size: size, duration: 0, relay: const MediaRelay()));
+    } else {
+      sync.sendSwap(HelloMedia(
+          name: media.name, size: size, duration: 0, url: url, relay: const MediaRelay(fetch: true)));
+    }
+    return null;
   }
 
-  /// A Jellyfin pick (browser, next / previous episode) goes up as a ref.
+  /// A Jellyfin pick (browser, next / previous episode) goes up as a ref,
+  /// relayed by this member for viewers without an account.
   void swapJellyfin(JellyfinMedia media) {
     markInput();
-    sync.sendSwap(mediaForPick(media));
+    _pendingOrigin = const _JellyfinOrigin(null);
+    sync.sendSwap(mediaForPick(media).copyWith(relay: const MediaRelay()));
   }
 
-  /// The host's File swap: the server takes the file, then the swap puts
-  /// it up. Returns an error text, or null when sent.
+  /// A file on this computer. The host's app serves it itself; anyone
+  /// else's goes through the server's relay. Returns an error text, or null
+  /// when sent.
   Future<String?> swapFile(String path) async {
     markInput();
     final host = hostFile;
-    if (host == null) return 'only the host can share a file';
-    final file = await host(path);
-    if (file == null) return 'file not found — check the path';
-    sync.sendSwap(HelloMedia(name: file.name, size: file.size, duration: 0));
+    if (host != null) {
+      final file = await host(path);
+      if (file == null) return 'file not found — check the path';
+      sync.sendSwap(HelloMedia(name: file.name, size: file.size, duration: 0));
+      return null;
+    }
+    final file = File(path);
+    if (!await file.exists()) return 'file not found — check the path';
+    _pendingOrigin = _FileOrigin(path);
+    sync.sendSwap(HelloMedia(
+        name: file.uri.pathSegments.last, size: await file.length(), duration: 0, relay: const MediaRelay()));
     return null;
   }
 
   /// Any picker selection.
   Future<String?> swapPicked(PickedMedia media) async {
     switch (media) {
-      case LinkMedia(:final url):
-        await swapLink(url);
+      case LinkMedia(:final url, :final relay):
+        return swapLink(url, relay: relay);
       case JellyfinMedia():
         swapJellyfin(media);
       case FileMedia(:final path):
@@ -978,7 +1154,8 @@ class SessionCoordinator {
   /// Resolves [ref] for this viewer and opens it: own account (direct
   /// play, progress reports, neighbouring episodes), the relay, or the
   /// blocked state. Then carries the audio/subtitle choice over.
-  Future<void> _playJellyfin(JellyfinRef ref, StateBroadcast r) async {
+  Future<void> _playJellyfin(JellyfinRef ref, StateBroadcast r,
+      {_JellyfinOrigin? origin, String? memberRelayUrl}) async {
     final gen = ++_jfGen;
     _jfRef = ref;
     _jfMediaId = r.mediaId;
@@ -992,13 +1169,24 @@ class SessionCoordinator {
         await playback.player.pause();
       } catch (_) {}
     }
-    final JellyfinPlan plan;
+    JellyfinPlan plan;
     try {
-      plan = await resolveJellyfinRef(jellyfin, ref, relay: r.relay, relayUrl: _relayUrlFor(ref));
+      plan = await resolveJellyfinRef(jellyfin, ref,
+          relay: r.relay, relayUrl: _relayUrlFor(ref), memberRelayUrl: memberRelayUrl);
     } finally {
       if (gen == _jfGen) _opening = false;
     }
     if (gen != _jfGen) return;
+    // This member put it up: serve it to viewers without an account, with
+    // its own sign-in, else the pasted link (played directly here too).
+    if (origin != null) {
+      if (plan is OwnPlay) {
+        _startRelaySource(r.mediaId, HttpRelayBytes(Uri.parse(plan.url), headers: plan.headers));
+      } else if (origin.link != null) {
+        plan = RelayPlay(origin.link!);
+        _startRelaySource(r.mediaId, HttpRelayBytes(Uri.parse(origin.link!)));
+      }
+    }
     jellyfinPlan.value = plan;
     switch (plan) {
       case BlockedPlay():
@@ -1321,6 +1509,9 @@ class SessionCoordinator {
     _seekGate.reset();
     reconnecting.value = false;
     await _stopJellyfin();
+    _stopRelaySource();
+    _pendingOrigin = null;
+    _activeOrigin = null;
     _playerReady = false;
     try {
       await playback.dispose();

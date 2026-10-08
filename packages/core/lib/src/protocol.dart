@@ -1,22 +1,6 @@
 import 'constants.dart';
 import 'errors.dart';
 
-enum MessageKind {
-  hello,
-  welcome,
-  state,
-  event,
-  chat,
-  buffered,
-  kicked,
-  kick,
-  eof,
-  err,
-  open,
-  ack,
-  cancel,
-}
-
 /// Reads an optional JSON number as a finite double. JSON like 1e400 decodes to
 /// Infinity, which would later break jsonEncode on every broadcast.
 double finiteDouble(Object? value, String field, {double fallback = 0.0}) {
@@ -111,11 +95,23 @@ class HelloMedia {
   final String? url;
   /// Set for Jellyfin media; then there is no [url] (the server drops one).
   final JellyfinRef? jellyfin;
+  /// Relayed media (bytes from the source member through the server).
+  final MediaRelay? relay;
   const HelloMedia(
-      {required this.name, required this.size, required this.duration, this.url, this.jellyfin});
+      {required this.name,
+      required this.size,
+      required this.duration,
+      this.url,
+      this.jellyfin,
+      this.relay});
 
-  HelloMedia copyWith({double? duration}) => HelloMedia(
-      name: name, size: size, duration: duration ?? this.duration, url: url, jellyfin: jellyfin);
+  HelloMedia copyWith({double? duration, int? size, MediaRelay? relay}) => HelloMedia(
+      name: name,
+      size: size ?? this.size,
+      duration: duration ?? this.duration,
+      url: url,
+      jellyfin: jellyfin,
+      relay: relay ?? this.relay);
 
   Map<String, Object?> toJson() => {
         'name': name,
@@ -123,18 +119,46 @@ class HelloMedia {
         'duration': duration,
         if (url != null) 'url': url,
         if (jellyfin != null) 'jellyfin': jellyfin!.toJson(),
+        if (relay != null) 'relay': relay!.toJson(),
       };
 
   factory HelloMedia.fromJson(Map<String, Object?> json) {
     final jf = json['jellyfin'];
+    final relay = json['relay'];
     return HelloMedia(
       name: (json['name'] as String?) ?? '',
       size: finiteInt(json['size'], 'size', fallback: 0),
       duration: finiteDouble(json['duration'], 'duration'),
       url: json['url'] as String?,
       jellyfin: jf is Map ? JellyfinRef.fromJson(Map<String, Object?>.from(jf)) : null,
+      relay: relay is Map ? MediaRelay.fromJson(Map<String, Object?>.from(relay)) : null,
     );
   }
+}
+
+/// Relayed media: the bytes go through the server's buffer (`/r/...`).
+/// Either from the [source] member's machine (it dials the relay channel),
+/// or, with [fetch], the server reads the swap's link itself. A swap sends
+/// `{}` or `{"fetch":true}`; the server fills in [source] (the swapper's
+/// member id, empty with [fetch]) and whether bytes can flow ([live]).
+class MediaRelay {
+  final String source;
+  final bool fetch;
+  final bool live;
+  const MediaRelay({this.source = '', this.fetch = false, this.live = false});
+
+  MediaRelay copyWith({bool? live}) => MediaRelay(source: source, fetch: fetch, live: live ?? this.live);
+
+  Map<String, Object?> toJson() => {
+        if (source.isNotEmpty) 'source': source,
+        if (fetch) 'fetch': true,
+        if (live) 'live': true,
+      };
+
+  factory MediaRelay.fromJson(Map<String, Object?> json) => MediaRelay(
+      source: json['source'] is String ? json['source'] as String : '',
+      fetch: json['fetch'] == true,
+      live: json['live'] == true);
 }
 
 class HelloMessage {
