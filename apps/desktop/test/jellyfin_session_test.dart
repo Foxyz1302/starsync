@@ -6,12 +6,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:watch_together/src/jellyfin/accounts.dart';
 import 'package:watch_together/src/jellyfin/browse_scope.dart';
+import 'package:watch_together/src/jellyfin/browser.dart';
 import 'package:watch_together/src/jellyfin/progress.dart';
 import 'package:watch_together/src/jellyfin/session_media.dart';
 import 'package:watch_together/src/jellyfin/track_prefs.dart';
 import 'package:watch_together/src/screens/home/media_picker.dart';
 import 'package:watch_together/src/screens/session/jellyfin_widgets.dart';
-import 'package:watch_together/src/screens/session/swap_panel.dart';
 import 'package:watch_together/src/session/session_coordinator.dart' show AutoAdvance;
 import 'package:watch_together/src/shell/library_tab.dart' show putUpJellyfinMedia;
 import 'package:watch_together/src/shell/party_strip.dart' show viaHostOf;
@@ -437,9 +437,7 @@ void main() {
         SeriesRoute(const JellyfinItem(id: arifuretaId, name: 'Arifureta', type: 'Series'),
             seasonId: season2Id),
       ]));
-      final c = MediaPickerController(source: MediaKind.jellyfin);
-      addTearDown(c.dispose);
-      await tester.pumpWidget(app(MediaPicker(controller: c, jellyfin: accounts)));
+      await tester.pumpWidget(app(JellyfinBrowser(accounts: accounts, onSelect: (_) {}, onPutUp: (_) {})));
       await settle(tester);
       final s2 = tester.widget<ChoiceChip>(find.byKey(const ValueKey('season-$season2Id')));
       expect(s2.selected, isTrue);
@@ -515,81 +513,6 @@ void main() {
           findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('link-jellyfin-account')));
       expect(link, 1);
-    });
-
-    testWidgets('swap panel: the shared picker, File for everyone, link relay choice', (tester) async {
-      await setSize(tester, const Size(1400, 900));
-      final (accounts, _) = await linkedAccounts();
-      final c = MediaPickerController(source: MediaKind.link);
-      addTearDown(c.dispose);
-      final swapped = <PickedMedia>[];
-      var closed = 0;
-      await tester.pumpWidget(app(SwapPanel(
-        controller: c,
-        accounts: accounts,
-        isHost: false,
-        onSwap: (m) async {
-          swapped.add(m);
-          return null;
-        },
-        onDone: () => closed++,
-      )));
-      await settle(tester);
-      // A guest's file goes through the server's relay.
-      expect(find.text('File'), findsOneWidget);
-      expect(find.text('Jellyfin'), findsOneWidget);
-      await tester.enterText(find.byType(TextField), 'https://cdn.example/movie.mkv');
-      await tester.pump();
-      await tester.tap(find.text('Through me'));
-      await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('swap-go')));
-      await settle(tester);
-      expect(swapped, [const LinkMedia('https://cdn.example/movie.mkv', relay: LinkRelay.me)]);
-      expect(closed, 1);
-
-      // The Jellyfin source is the library browser; a pick goes up as is.
-      await tester.tap(find.text('Jellyfin'));
-      await settle(tester);
-      expect(find.byKey(const ValueKey('media-jellyfin')), findsOneWidget);
-
-      await tester.pumpWidget(app(SwapPanel(
-          controller: c, accounts: accounts, isHost: true, onSwap: (_) async => 'x')));
-      await settle(tester);
-      expect(find.text('File'), findsOneWidget);
-      await tester.tap(find.text('File'));
-      await settle(tester);
-      expect(find.text('Friends stream it from your computer.'), findsOneWidget);
-    });
-
-    testWidgets('swap panel opens on the series of the episode playing, episode highlighted',
-        (tester) async {
-      await setSize(tester, const Size(1600, 1000));
-      final (accounts, _) = await linkedAccounts();
-      // Somewhere else remembered: the series start wins.
-      await accounts.saveBrowseLocation(fixtureServerId, encodeBrowseStack([const HomeRoute()]));
-      final eps = (jsonDecode(jellyfinFixture('episodes')) as Map)['Items'] as List;
-      final ep = JellyfinItem.fromJson((eps.firstWhere((e) => e['SeasonId'] == season2Id) as Map)
-          .cast<String, dynamic>());
-      final pick = pickForRef(accounts,
-          JellyfinRef(serverId: fixtureServerId, itemId: ep.id, title: ep.name))!;
-      final c = MediaPickerController(jellyfin: pick, source: MediaKind.jellyfin);
-      addTearDown(c.dispose);
-      await tester.pumpWidget(app(SwapPanel(
-        controller: c,
-        accounts: accounts,
-        isHost: false,
-        jellyfinStart: BrowseStart.seriesOf(fixtureServerId, ep),
-        onSwap: (_) async => null,
-      )));
-      await settle(tester, 10);
-      expect(tester.widget<ChoiceChip>(find.byKey(const ValueKey('season-$season2Id'))).selected,
-          isTrue);
-      expect(find.text('Put up: ${pick.label}'), findsOneWidget);
-      final row = tester.widget<Material>(find
-          .ancestor(of: find.byKey(ValueKey('episode-${ep.id}')), matching: find.byType(Material))
-          .first);
-      expect((row.shape as RoundedRectangleBorder).side.color, isNot(Colors.transparent),
-          reason: 'the episode playing is highlighted');
     });
   });
 }

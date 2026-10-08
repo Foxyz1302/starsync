@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:watch_together/src/files/ui/files_page.dart';
 import 'package:watch_together/src/schedule/ui/schedule_page.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:watch_together/src/screens/home/health_probe.dart';
@@ -82,7 +83,7 @@ void main() {
 
   test('pasting sorts links and paths into the right source', () {
     final c = MediaPickerController();
-    expect(c.source, MediaKind.file);
+    expect(c.source, MediaKind.jellyfin);
     c.pasteText(' https://example.com/a.mkv ');
     expect(c.source, MediaKind.link);
     expect(c.selection, const LinkMedia('https://example.com/a.mkv'));
@@ -129,13 +130,13 @@ void main() {
 
   testWidgets('tabs and settings pages switch the body', (tester) async {
     await pumpShell(tester, const Size(1280, 900));
-    expect(find.byKey(const ValueKey('swap-panel')), findsOneWidget);
+    expect(find.byKey(const ValueKey('library-tab')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('tab-schedule')));
     // The schedule shows a spinner while it loads: pump frames, not settle.
     for (var i = 0; i < 30; i++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
-    expect(find.byKey(const ValueKey('swap-panel')), findsNothing);
+    expect(find.byKey(const ValueKey('library-tab')), findsNothing);
     expect(find.byType(SchedulePage), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('tab-settings')));
     for (var i = 0; i < 30; i++) {
@@ -148,7 +149,7 @@ void main() {
     expect(find.text('Hardware decoding'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('settings-updates')));
     await tester.pumpAndSettle();
-    expect(find.text('Check automatically on start'), findsOneWidget);
+    expect(find.text('Check for updates on start'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('settings-shortcuts')));
     await tester.pumpAndSettle();
     expect(find.text('Toggle ready'), findsOneWidget);
@@ -160,7 +161,7 @@ void main() {
     expect(find.text('Dev build — update checks are off'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('tab-library')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('swap-panel')), findsOneWidget);
+    expect(find.byKey(const ValueKey('library-tab')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -229,21 +230,20 @@ void main() {
     expect(find.byKey(const ValueKey('join-row')), findsOneWidget);
   });
 
-  testWidgets('library: picker segments switch the input; Integrations opens Settings', (tester) async {
+  testWidgets('library: sources switch; offline nothing goes up; Integrations opens Settings', (tester) async {
     await pumpShell(tester, const Size(1280, 900));
-    await tester.tap(find.text('File'));
+    await tester.tap(find.text('Files'));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('media-file')), findsOneWidget);
-    expect(find.text('Browse'), findsOneWidget);
+    expect(find.byType(FilesPage), findsOneWidget);
     await tester.tap(find.text('Link'));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('media-link')), findsOneWidget);
-    expect(find.text('Paste'), findsOneWidget);
+    expect(find.text('Watch from a link'), findsOneWidget);
     // Offline nothing goes up.
     expect(find.text('Join or host to watch together'), findsOneWidget);
+    expect(find.text('How the others get it'), findsNothing);
     await tester.tap(find.text('Jellyfin'));
     await tester.pumpAndSettle();
-    // No linked server: sign-in right in the picker.
+    // No linked server: sign-in right in the library.
     expect(find.text('Add a Jellyfin server'), findsOneWidget);
     await tester.tap(find.text('Open Integrations'));
     await tester.pumpAndSettle();
@@ -269,14 +269,18 @@ void main() {
 
   testWidgets('narrow window: strip, cards and library fit', (tester) async {
     await pumpShell(tester, const Size(480, 800));
-    expect(tester.takeException(), isNull);
+    final ex = tester.takeException();
+    expect(ex, isNull);
     await openCard(tester, 'strip-join');
     expect(find.byKey(const ValueKey('join-row')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.tapAt(const Offset(5, 790));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Jellyfin'));
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
+    // Narrow: the sources are icons with tooltips.
+    for (final source in ['Link', 'Files', 'Jellyfin']) {
+      await tester.tap(find.byTooltip(source));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: source);
+    }
   });
 }

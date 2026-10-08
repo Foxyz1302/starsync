@@ -2,52 +2,51 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:sync_relay_core/core.dart';
 
-import '../screens/home/picked_media.dart';
 import 'accounts.dart';
 import 'browse_scope.dart';
-import 'detail_page.dart';
-import 'format.dart';
 import 'home_page.dart';
-import 'inspector.dart';
 import 'library_page.dart';
 import 'search_results.dart';
 import 'series_page.dart';
 import 'sign_in_panel.dart';
 
-/// Browser width from which the inspector pane shows on the right.
-const inspectorFrom = 1400.0;
-const inspectorWidth = 340.0;
-
 /// Library browser for the linked Jellyfin servers: server switcher,
 /// breadcrumbs, search, and a back stack of pages (Home rows, library
-/// grids, series, details). Pages below the top stay alive, so going back
-/// keeps scroll position and loaded pages.
+/// grids, series). Pages below the top stay alive, so going back keeps
+/// scroll position and loaded pages. Where it is lives in a
+/// [BrowseController] (shared with the Library header's library chips and
+/// the details panel; one of its own when none is given).
 ///
-/// Keyboard: arrows move between cards, Enter picks / opens, I opens
-/// details, Esc / Backspace / Alt+Left go back, / or Ctrl+F searches.
+/// A click on a card selects it ([onSelect]; libraries and folders open),
+/// a double-click puts it up ([onPutUp]).
+///
+/// Keyboard: arrows move between cards, Enter selects / opens, Esc /
+/// Backspace / Alt+Left go back, / or Ctrl+F searches.
 class JellyfinBrowser extends StatefulWidget {
   final JellyfinAccounts accounts;
-  final JellyfinMedia? selected;
-  final ValueChanged<JellyfinMedia> onPick;
-  /// Shown when given: toggles a bigger browser (the host hides its form).
-  final VoidCallback? onToggleExpanded;
-  final bool expanded;
+  final BrowseController? controller;
+  /// Highlighted card.
+  final JellyfinSelection? selected;
+  final ValueChanged<JellyfinSelection> onSelect;
+  final ValueChanged<JellyfinSelection> onPutUp;
   final VoidCallback? onOpenIntegrations;
   final Duration searchDebounce;
   /// Opens here instead of the remembered location (the series of the
-  /// episode playing, in the session's swap panel).
+  /// episode playing, after "Change video").
   final BrowseStart? start;
+  /// Library chips on Home (off when the Library header shows them).
+  final bool libraryStrip;
   const JellyfinBrowser({
     this.start,
     super.key,
     required this.accounts,
-    required this.onPick,
+    required this.onSelect,
+    required this.onPutUp,
+    this.controller,
     this.selected,
-    this.onToggleExpanded,
-    this.expanded = false,
     this.onOpenIntegrations,
+    this.libraryStrip = true,
     this.searchDebounce = const Duration(milliseconds: 300),
   });
 
@@ -56,45 +55,23 @@ class JellyfinBrowser extends StatefulWidget {
 }
 
 class _JellyfinBrowserState extends State<JellyfinBrowser> {
-  String? _serverId;
-  List<BrowseRoute> _stack = const [HomeRoute()];
+  BrowseController? _own;
   final _search = TextEditingController();
   final _searchFocus = FocusNode(debugLabel: 'jf-search');
   final _body = FocusScopeNode(debugLabel: 'jf-body');
-  final _peek = ValueNotifier<JellyfinItem?>(null);
   String _term = '';
   Timer? _debounce;
   int _refresh = 0;
 
   JellyfinAccounts get _accounts => widget.accounts;
+  BrowseController get _c => widget.controller ?? (_own ??= BrowseController(widget.accounts));
 
   @override
   void initState() {
     super.initState();
-    final start = widget.start;
-    if (start != null && _accounts.account(start.serverId) != null) {
-      _serverId = start.serverId;
-      _stack = start.stack.isEmpty ? const [HomeRoute()] : start.stack;
-      _remember();
-    } else {
-      _serverId = widget.selected != null && _accounts.account(widget.selected!.serverId) != null
-          ? widget.selected!.serverId
-          : _accounts.defaultServerId;
-      _stack = _restored(_serverId);
-    }
+    _c.start(start: widget.start, serverHint: widget.selected?.serverId);
     _accounts.addListener(_changed);
-  }
-
-  /// The remembered location on [serverId], else Home.
-  List<BrowseRoute> _restored(String? serverId) =>
-      (serverId == null ? null : decodeBrowseStack(_accounts.browseLocation(serverId))) ??
-      const [HomeRoute()];
-
-  /// Every navigation is saved per server (Hive), so the next browser
-  /// (the Library tab, next start) opens where this one was.
-  void _remember() {
-    final id = _account?.serverId;
-    if (id != null) unawaited(_accounts.saveBrowseLocation(id, encodeBrowseStack(_stack)));
+    _c.addListener(_moved);
   }
 
   @override
@@ -104,16 +81,22 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
       old.accounts.removeListener(_changed);
       widget.accounts.addListener(_changed);
     }
+    final was = old.controller ?? _own;
+    if (was != _c) {
+      was?.removeListener(_moved);
+      _c.addListener(_moved);
+    }
   }
 
   @override
   void dispose() {
     _accounts.removeListener(_changed);
+    _c.removeListener(_moved);
+    _own?.dispose();
     _debounce?.cancel();
     _search.dispose();
     _searchFocus.dispose();
     _body.dispose();
-    _peek.dispose();
     super.dispose();
   }
 
@@ -121,44 +104,33 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
     if (mounted) setState(() {});
   }
 
-  JellyfinAccount? get _account =>
-      (_serverId == null ? null : _accounts.account(_serverId!)) ?? _accounts.defaultAccount;
-
-  void _switchServer(String serverId) {
-    if (serverId == _account?.serverId) return;
+  /// Any move (here, from the library chips or a server switch) ends a
+  /// search.
+  int _depth = 0;
+  String? _server;
+  void _moved() {
+    if (!mounted) return;
+    final moved = _c.stack.length != _depth || _c.serverId != _server;
+    _depth = _c.stack.length;
+    _server = _c.serverId;
     setState(() {
-      _serverId = serverId;
-      _stack = _restored(serverId);
-      _peek.value = null;
-      _clearSearch();
+      if (moved) _clearSearch();
     });
   }
+
+  JellyfinAccount? get _account => _c.account;
 
   // ------------------------------------------------------------- navigation
 
-  void _open(BrowseRoute route) {
-    setState(() {
-      _clearSearch();
-      if (_stack.last.key != route.key) _stack = [..._stack, route];
-    });
-    _remember();
-    _body.requestFocus();
-  }
-
   bool _back() {
-    if (_stack.length <= 1) return false;
-    setState(() => _stack = _stack.sublist(0, _stack.length - 1));
-    _remember();
-    _body.requestFocus();
-    return true;
+    final ok = _c.back();
+    if (ok) _body.requestFocus();
+    return ok;
   }
 
   void _popTo(int index) {
-    setState(() {
-      _clearSearch();
-      _stack = _stack.sublist(0, index + 1);
-    });
-    _remember();
+    setState(_clearSearch);
+    _c.popTo(index);
     _body.requestFocus();
   }
 
@@ -173,12 +145,6 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
     _debounce?.cancel();
     _search.clear();
     _term = '';
-  }
-
-  void _pick(JellyfinItem item) {
-    final account = _account;
-    if (account == null) return;
-    widget.onPick(pickFor(account, item));
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent e) {
@@ -217,10 +183,9 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
 
   Widget _page(BrowseRoute r) => switch (r) {
         HomeRoute() => const JellyfinHomePage(),
-        LibraryRoute(:final folder) => JellyfinLibraryPage(folder: folder),
+        LibraryRoute(:final folder, :final sort) => JellyfinLibraryPage(folder: folder, sort: sort),
         SeriesRoute(:final series, :final seasonId) =>
           JellyfinSeriesPage(series: series, seasonId: seasonId),
-        DetailRoute(:final item) => JellyfinDetailPage(item: item),
       };
 
   @override
@@ -233,15 +198,16 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
     final status = _accounts.statusOf(account.serverId);
     final sel = widget.selected;
     final searching = _term.isNotEmpty;
+    final stack = _c.stack;
 
     final pages = Stack(
       children: [
-        for (var i = 0; i < _stack.length; i++)
+        for (var i = 0; i < stack.length; i++)
           Visibility(
-            key: ValueKey('$_refresh:${account.serverId}:$i:${_stack[i].key}'),
-            visible: !searching && i == _stack.length - 1,
+            key: ValueKey('$_refresh:${account.serverId}:$i:${stack[i].key}'),
+            visible: !searching && i == stack.length - 1,
             maintainState: true,
-            child: _page(_stack[i]),
+            child: _page(stack[i]),
           ),
         if (searching) JellyfinSearchResults(key: ValueKey('$_refresh:$_term'), term: _term),
       ],
@@ -251,10 +217,11 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
       accounts: _accounts,
       account: account,
       client: client,
+      controller: _c,
       selectedItemId: sel != null && sel.serverId == account.serverId ? sel.itemId : null,
-      onPick: _pick,
-      onOpen: _open,
-      onPeek: (item) => _peek.value = item,
+      onSelect: (item) => widget.onSelect(JellyfinSelection(account.serverId, item.id, item)),
+      onPutUp: (item) => widget.onPutUp(JellyfinSelection(account.serverId, item.id, item)),
+      libraryStrip: widget.libraryStrip,
       child: Focus(
         onKeyEvent: _onKey,
         child: Column(
@@ -265,21 +232,7 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
             if (status == JellyfinAccountStatus.expired || status == JellyfinAccountStatus.offline)
               _StatusBanner(accounts: _accounts, account: account, status: status),
             const SizedBox(height: 12),
-            Expanded(
-              child: LayoutBuilder(builder: (context, box) {
-                final inspector = box.maxWidth >= inspectorFrom;
-                final body = FocusScope(node: _body, child: pages);
-                if (!inspector) return body;
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(child: body),
-                    const SizedBox(width: 16),
-                    SizedBox(width: inspectorWidth, child: JellyfinInspector(item: _peek)),
-                  ],
-                );
-              }),
-            ),
+            Expanded(child: FocusScope(node: _body, child: pages)),
           ],
         ),
       ),
@@ -289,9 +242,10 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
   Widget _header(BuildContext context, JellyfinAccount account) {
     final theme = Theme.of(context);
     final t = theme.textTheme;
+    final stack = _c.stack;
     final crumbs = <Widget>[];
-    for (var i = 0; i < _stack.length; i++) {
-      final last = i == _stack.length - 1 && _term.isEmpty;
+    for (var i = 0; i < stack.length; i++) {
+      final last = i == stack.length - 1 && _term.isEmpty;
       if (i > 0) {
         crumbs.add(const Padding(
           padding: EdgeInsets.symmetric(horizontal: 2),
@@ -299,7 +253,7 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
         ));
       }
       final label = Text(
-        _stack[i].label,
+        stack[i].label,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: t.titleSmall?.copyWith(
@@ -328,73 +282,68 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
                 style: t.titleSmall?.copyWith(fontWeight: FontWeight.w600))));
     }
 
-    return Row(
-      children: [
-        _ServerSwitcher(
-          accounts: _accounts,
-          current: account,
-          onSelect: _switchServer,
-          onOpenIntegrations: widget.onOpenIntegrations,
-        ),
-        const SizedBox(width: 4),
-        IconButton(
-          tooltip: 'Back (Esc)',
-          visualDensity: VisualDensity.compact,
-          onPressed: _stack.length > 1 ? _back : null,
-          icon: const Icon(Icons.arrow_back, size: 20),
-        ),
-        const SizedBox(width: 4),
-        Expanded(child: Row(children: crumbs)),
-        const SizedBox(width: 8),
-        SizedBox(
-          width: 260,
-          child: TextField(
-            key: const ValueKey('jf-search'),
-            controller: _search,
-            focusNode: _searchFocus,
-            onChanged: _onSearchChanged,
-            onSubmitted: (v) {
-              _debounce?.cancel();
-              setState(() => _term = v.trim());
-            },
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: 'Search  ( / )',
-              prefixIcon: const Icon(Icons.search, size: 18),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              suffixIcon: ListenableBuilder(
-                listenable: _search,
-                builder: (context, _) => _search.text.isEmpty
-                    ? const SizedBox.shrink()
-                    : IconButton(
-                        tooltip: 'Clear (Esc)',
-                        iconSize: 16,
-                        onPressed: () => setState(_clearSearch),
-                        icon: const Icon(Icons.close),
-                      ),
+    return LayoutBuilder(builder: (context, box) {
+      final narrow = box.maxWidth < 640;
+      return Row(
+        children: [
+          _ServerSwitcher(
+            accounts: _accounts,
+            current: account,
+            compact: narrow,
+            onSelect: _c.switchServer,
+            onOpenIntegrations: widget.onOpenIntegrations,
+          ),
+          IconButton(
+            tooltip: 'Back (Esc)',
+            visualDensity: VisualDensity.compact,
+            onPressed: stack.length > 1 ? _back : null,
+            icon: const Icon(Icons.arrow_back, size: 20),
+          ),
+          const SizedBox(width: 4),
+          Expanded(child: Row(children: crumbs)),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: narrow ? 170 : 260,
+            child: TextField(
+              key: const ValueKey('jf-search'),
+              controller: _search,
+              focusNode: _searchFocus,
+              onChanged: _onSearchChanged,
+              onSubmitted: (v) {
+                _debounce?.cancel();
+                setState(() => _term = v.trim());
+              },
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: 'Search  ( / )',
+                prefixIcon: const Icon(Icons.search, size: 18),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                suffixIcon: ListenableBuilder(
+                  listenable: _search,
+                  builder: (context, _) => _search.text.isEmpty
+                      ? const SizedBox.shrink()
+                      : IconButton(
+                          tooltip: 'Clear (Esc)',
+                          iconSize: 16,
+                          onPressed: () => setState(_clearSearch),
+                          icon: const Icon(Icons.close),
+                        ),
+                ),
               ),
             ),
           ),
-        ),
-        IconButton(
-          tooltip: 'Refresh',
-          visualDensity: VisualDensity.compact,
-          onPressed: () {
-            _accounts.invalidate(account.serverId);
-            setState(() => _refresh++);
-          },
-          icon: const Icon(Icons.refresh, size: 20),
-        ),
-        if (widget.onToggleExpanded != null)
           IconButton(
-            key: const ValueKey('jf-expand'),
-            tooltip: widget.expanded ? 'Show the host form' : 'Bigger browser',
+            tooltip: 'Refresh',
             visualDensity: VisualDensity.compact,
-            onPressed: widget.onToggleExpanded,
-            icon: Icon(widget.expanded ? Icons.close_fullscreen : Icons.open_in_full, size: 18),
+            onPressed: () {
+              _accounts.invalidate(account.serverId);
+              setState(() => _refresh++);
+            },
+            icon: const Icon(Icons.refresh, size: 20),
           ),
-      ],
-    );
+        ],
+      );
+    });
   }
 }
 
@@ -404,11 +353,14 @@ class _ServerSwitcher extends StatelessWidget {
   final JellyfinAccount current;
   final ValueChanged<String> onSelect;
   final VoidCallback? onOpenIntegrations;
+  /// Narrow: the name is shorter.
+  final bool compact;
   const _ServerSwitcher({
     required this.accounts,
     required this.current,
     required this.onSelect,
     this.onOpenIntegrations,
+    this.compact = false,
   });
 
   @override
@@ -420,7 +372,7 @@ class _ServerSwitcher extends StatelessWidget {
         StatusDot(status: accounts.statusOf(current.serverId)),
         const SizedBox(width: 8),
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 200),
+          constraints: BoxConstraints(maxWidth: compact ? 110 : 200),
           child: Text(current.displayName,
               maxLines: 1, overflow: TextOverflow.ellipsis, style: t.titleSmall),
         ),

@@ -18,6 +18,8 @@ const _keyShaderQuality = 'shaderQuality';
 const _keyCustomShaders = 'customShaders';
 const _keyAutoAdvance = 'autoAdvance';
 const _keyMpvControls = 'mpvControls';
+const _keyHideReReleases = 'hideReReleases';
+const _keyProgressLine = 'progressLine';
 
 enum HwdecMode { auto, off, custom }
 
@@ -29,9 +31,15 @@ class AppSettings {
   final autoCheckUpdates = signal(true);
   /// Jellyfin episodes: at the end, count down 10 s and put up the next.
   final autoAdvance = signal(true);
-  /// Experimental: the session uses the mpv-style (uosc) controls
-  /// (`controls/uosc/`) instead of media_kit's. Applies live.
+  /// Player design: the uosc controls (`controls/uosc/`) instead of the
+  /// standard ones (media_kit's with our bars). Applies live.
   final mpvControls = signal(false);
+  /// Library: leave out of "Latest in X" what was added long after it
+  /// first aired (re-uploads, old seasons added late).
+  final hideReReleases = signal(true);
+  /// A 2 px progress line at the bottom of the video while the controls
+  /// are hidden (both designs). Applies live.
+  final progressLine = signal(true);
 
   /// Video shaders: one choice, used on join and changed both here and
   /// in the session (Ctrl+0..6, the shader button).
@@ -70,6 +78,10 @@ class AppSettings {
       if (advance is bool) autoAdvance.value = advance;
       final mpv = box.get(_keyMpvControls);
       if (mpv is bool) mpvControls.value = mpv;
+      final hideRe = box.get(_keyHideReReleases);
+      if (hideRe is bool) hideReReleases.value = hideRe;
+      final line = box.get(_keyProgressLine);
+      if (line is bool) progressLine.value = line;
       final preset = box.get(_keyShaderPreset);
       shaderPreset.value =
           ShaderPreset.values.where((p) => p.name == preset).firstOrNull ??
@@ -110,6 +122,16 @@ class AppSettings {
   void setMpvControls(bool on) {
     mpvControls.value = on;
     _put(_keyMpvControls, on);
+  }
+
+  void setProgressLine(bool on) {
+    progressLine.value = on;
+    _put(_keyProgressLine, on);
+  }
+
+  void setHideReReleases(bool on) {
+    hideReReleases.value = on;
+    _put(_keyHideReReleases, on);
   }
 
   void setShaderPreset(ShaderPreset preset) {

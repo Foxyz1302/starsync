@@ -88,6 +88,12 @@ void main() {
       const h = MemberView(
           id: 'm1', name: 'a', avatarHash: 'abc', ready: false, inSet: false, buffered: 0, stale: false);
       expect(MemberView.fromJson(Map<String, Object?>.from(h.toJson())).avatarHash, 'abc');
+      // host: only on the hosting app's member, absent otherwise.
+      expect(v.toJson().containsKey('host'), isFalse);
+      const host = MemberView(id: 'm2', name: 'h', ready: false, inSet: false, buffered: 0, stale: false, host: true);
+      expect(host.toJson()['host'], isTrue);
+      expect(MemberView.fromJson(Map<String, Object?>.from(host.toJson())).host, isTrue);
+      expect(MemberView.fromJson(Map<String, Object?>.from(v.toJson())).host, isFalse);
       expect(const ProfileIntent(name: 'b').toJson(), {'t': 'profile', 'name': 'b'});
       final p = ProfileIntent.fromJson({'t': 'profile', 'avatar': ''});
       expect(p.name, isNull);

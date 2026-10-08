@@ -516,7 +516,9 @@ void mountSyncRoute(
         }
         memberId = hub.engine.applyJoin(token, session.tokens[token]!.name, hello.user.avatar);
       }
-      session.tokens[token]!.isHost = hub.isHostKey(hello.hostKey);
+      final isHost = hub.isHostKey(hello.hostKey);
+      session.tokens[token]!.isHost = isHost;
+      hub.engine.members[token]?.host = isHost;
       final activeToken = token;
       hub.sockets[activeToken] = ws;
       session.tokens[activeToken]!.onKick = (reason) async {

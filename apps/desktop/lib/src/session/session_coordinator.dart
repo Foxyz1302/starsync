@@ -89,7 +89,10 @@ class ToastItem {
   final int id;
   final String text;
   final DateTime at;
-  const ToastItem({required this.id, required this.text, required this.at});
+  /// The member a feed or chat toast is about (their name, as the feed
+  /// carries it; [text] starts with it); null for the app's own toasts.
+  final String? actor;
+  const ToastItem({required this.id, required this.text, required this.at, this.actor});
 }
 
 const _toastActions = {'join', 'leave', 'kick', 'swap', 'chat'};
@@ -705,7 +708,7 @@ class SessionCoordinator {
       _toastId++;
       toasts.value = [
         ...toasts.peek(),
-        ToastItem(id: _toastId, text: text, at: DateTime.now().toUtc())
+        ToastItem(id: _toastId, text: text, at: DateTime.now().toUtc(), actor: f.actor)
       ];
     }
     final kind = sfxForFeedAction(f.action);

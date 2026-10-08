@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:sync_relay_core/core.dart';
 
 import 'browse_scope.dart';
+import 'cards.dart' show doubleClickTime;
 import 'format.dart';
 import 'images.dart';
 
@@ -60,6 +60,7 @@ class _JellyfinSeriesPageState extends State<JellyfinSeriesPage> {
     final scope = BrowseScope.of(context);
     return Loader<_SeriesData>(
       key: ValueKey('series-${widget.series.id}-${scope.account.serverId}'),
+      version: scope.controller.version,
       load: () => _load(scope),
       builder: (context, d) {
         final seasonId = (_seasonId != null && d.seasons.any((s) => s.id == _seasonId))
@@ -99,6 +100,7 @@ class _JellyfinSeriesPageState extends State<JellyfinSeriesPage> {
                 key: ValueKey('episodes-$seasonId'),
                 seriesId: widget.series.id,
                 seasonId: seasonId,
+                version: scope.controller.version,
               ),
             const SliverToBoxAdapter(child: SizedBox(height: 24)),
           ],
@@ -218,7 +220,7 @@ class _SeriesHeaderState extends State<_SeriesHeader> {
                           Wrap(spacing: 8, runSpacing: 8, children: [
                             FilledButton.icon(
                               key: const ValueKey('series-next'),
-                              onPressed: next == null ? null : () => scope.onPick(next),
+                              onPressed: next == null ? null : () => scope.onSelect(next),
                               icon: Icon(selectedNext ? Icons.check : Icons.play_arrow),
                               label: Text(nextLabel, overflow: TextOverflow.ellipsis),
                             ),
@@ -242,7 +244,9 @@ class _SeriesHeaderState extends State<_SeriesHeader> {
 class _EpisodeList extends StatefulWidget {
   final String seriesId;
   final String seasonId;
-  const _EpisodeList({super.key, required this.seriesId, required this.seasonId});
+  final int version;
+  const _EpisodeList(
+      {super.key, required this.seriesId, required this.seasonId, required this.version});
 
   @override
   State<_EpisodeList> createState() => _EpisodeListState();
@@ -250,6 +254,13 @@ class _EpisodeList extends StatefulWidget {
 
 class _EpisodeListState extends State<_EpisodeList> {
   Future<List<JellyfinItem>>? _future;
+  List<JellyfinItem>? _last;
+
+  @override
+  void didUpdateWidget(_EpisodeList old) {
+    super.didUpdateWidget(old);
+    if (old.version != widget.version) _future = null;
+  }
 
   void _load(BrowseScope scope) => _future = scope.load('episodes:${widget.seriesId}:${widget.seasonId}',
       (c) => c.episodes(widget.seriesId, seasonId: widget.seasonId));
@@ -265,7 +276,8 @@ class _EpisodeListState extends State<_EpisodeList> {
           return SliverToBoxAdapter(
               child: LoadError(error: snap.error!, onRetry: () => setState(() => _load(scope))));
         }
-        final eps = snap.data;
+        final eps = snap.data ?? _last;
+        if (snap.data != null) _last = snap.data;
         if (eps == null) {
           return const SliverToBoxAdapter(
             child: Padding(
@@ -302,7 +314,8 @@ class _EpisodeListState extends State<_EpisodeList> {
 const episodeTileHeight = 6 + 176 * 9 / 16 + 6 + 2;
 
 /// One episode: thumbnail with progress, number + title, runtime / air
-/// date, two lines of overview. Click picks it; I opens details.
+/// date, two lines of overview. Click selects it (details panel), a second
+/// click soon after puts it up.
 class EpisodeTile extends StatefulWidget {
   final JellyfinItem episode;
   const EpisodeTile({super.key, required this.episode});
@@ -314,6 +327,19 @@ class EpisodeTile extends StatefulWidget {
 class _EpisodeTileState extends State<EpisodeTile> {
   bool _focus = false;
   bool _hover = false;
+  DateTime? _lastTap;
+
+  void _tap(BrowseScope scope) {
+    final now = DateTime.now();
+    final last = _lastTap;
+    _lastTap = now;
+    if (last != null && now.difference(last) < doubleClickTime) {
+      _lastTap = null;
+      scope.onPutUp(widget.episode);
+    } else {
+      scope.onSelect(widget.episode);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -332,122 +358,92 @@ class _EpisodeTileState extends State<EpisodeTile> {
       if (e.premiereDate != null)
         '${e.premiereDate!.year}-${e.premiereDate!.month.toString().padLeft(2, '0')}-${e.premiereDate!.day.toString().padLeft(2, '0')}',
     ].join(' · ');
-    return Focus(
-      canRequestFocus: false,
-      skipTraversal: true,
-      onKeyEvent: (_, k) {
-        if (k is KeyDownEvent && k.logicalKey == LogicalKeyboardKey.keyI) {
-          scope.onOpen(DetailRoute(e));
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Material(
-        color: selected
-            ? scheme.primaryContainer.withValues(alpha: 0.35)
-            : _hover || _focus
-                ? scheme.surfaceContainerHigh
-                : Colors.transparent,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-          side: BorderSide(
-              color: selected ? scheme.primary : _focus ? scheme.onSurface : Colors.transparent,
-              width: 1.5),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          key: ValueKey('episode-${e.id}'),
-          focusColor: Colors.transparent,
-          onTap: () => scope.onPick(e),
-          onHover: (h) {
-            setState(() => _hover = h);
-            if (h) scope.onPeek(e);
-          },
-          onFocusChange: (f) {
-            setState(() => _focus = f);
-            if (f) scope.onPeek(e);
-          },
-          child: Padding(
-            padding: const EdgeInsets.all(6),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 176,
-                  child: AspectRatio(
-                    aspectRatio: 16 / 9,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: Stack(fit: StackFit.expand, children: [
-                        JellyfinImage(
-                          client: scope.client,
-                          image: e.ownImage(JellyfinImageType.primary) ??
-                              e.image(JellyfinImageType.thumb) ??
-                              e.image(JellyfinImageType.backdrop),
-                          icon: Icons.tv_outlined,
+    return Material(
+      color: selected
+          ? scheme.primaryContainer.withValues(alpha: 0.35)
+          : _hover || _focus
+              ? scheme.surfaceContainerHigh
+              : Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(
+            color: selected ? scheme.primary : _focus ? scheme.onSurface : Colors.transparent,
+            width: 1.5),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: ValueKey('episode-${e.id}'),
+        focusColor: Colors.transparent,
+        onTap: () => _tap(scope),
+        onHover: (h) => setState(() => _hover = h),
+        onFocusChange: (f) => setState(() => _focus = f),
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 176,
+                child: AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Stack(fit: StackFit.expand, children: [
+                      JellyfinImage(
+                        client: scope.client,
+                        image: e.ownImage(JellyfinImageType.primary) ??
+                            e.image(JellyfinImageType.thumb) ??
+                            e.image(JellyfinImageType.backdrop),
+                        icon: Icons.tv_outlined,
+                      ),
+                      if (progress > 0)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: LinearProgressIndicator(
+                              value: progress, minHeight: 3, backgroundColor: Colors.black54),
                         ),
-                        if (progress > 0)
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            child: LinearProgressIndicator(
-                                value: progress, minHeight: 3, backgroundColor: Colors.black54),
+                      if (played || selected)
+                        Positioned(
+                          top: 4,
+                          right: 4,
+                          child: CircleAvatar(
+                            radius: 10,
+                            backgroundColor: selected ? scheme.primary : const Color(0xCC1B5E20),
+                            child: Icon(Icons.check,
+                                size: 13, color: selected ? scheme.onPrimary : Colors.white),
                           ),
-                        if (played || selected)
-                          Positioned(
-                            top: 4,
-                            right: 4,
-                            child: CircleAvatar(
-                              radius: 10,
-                              backgroundColor: selected ? scheme.primary : const Color(0xCC1B5E20),
-                              child: Icon(Icons.check,
-                                  size: 13, color: selected ? scheme.onPrimary : Colors.white),
-                            ),
-                          ),
-                      ]),
+                        ),
+                    ]),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      e.indexNumber == null ? e.name : '${e.indexNumber}. ${e.name}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.titleSmall?.copyWith(
+                        color: selected ? scheme.primary : played ? Colors.grey : null,
+                      ),
                     ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(children: [
-                        Expanded(
-                          child: Text(
-                            e.indexNumber == null ? e.name : '${e.indexNumber}. ${e.name}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: t.titleSmall?.copyWith(
-                              color: selected ? scheme.primary : played ? Colors.grey : null,
-                            ),
-                          ),
-                        ),
-                        if (_hover)
-                          IconButton(
-                            tooltip: 'Details (I)',
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints.tightFor(width: 24, height: 22),
-                            iconSize: 18,
-                            onPressed: () => scope.onOpen(DetailRoute(e)),
-                            icon: const Icon(Icons.info_outline),
-                          ),
-                      ]),
-                      Text(meta, style: t.bodySmall?.copyWith(color: Colors.grey)),
-                      if (e.overview != null) ...[
-                        const SizedBox(height: 4),
-                        Text(e.overview!,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-                      ],
+                    Text(meta, style: t.bodySmall?.copyWith(color: Colors.grey)),
+                    if (e.overview != null) ...[
+                      const SizedBox(height: 4),
+                      Text(e.overview!,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
                     ],
-                  ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

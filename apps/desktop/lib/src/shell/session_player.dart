@@ -5,6 +5,8 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
+import '../controls/controls_probe.dart';
+import '../controls/player_settings.dart';
 import '../controls/uosc/buttons.dart';
 import '../controls/uosc/controls.dart';
 import '../controls/uosc/timeline.dart';
@@ -19,6 +21,7 @@ import '../state/session_state.dart';
 import '../state/settings.dart';
 import '../widgets/shown_frame_probe.dart';
 import '../widgets/text_focus.dart';
+import '../widgets/window_buttons.dart';
 import 'avatar.dart';
 import 'motion.dart';
 
@@ -52,6 +55,9 @@ class SessionPlayer extends StatefulWidget {
   /// Asks before leaving the server.
   final VoidCallback onLeave;
   final VideoViewBuilder? videoBuilder;
+  /// Window buttons in the fullscreen top bar (off in tests: they need
+  /// window_manager).
+  final bool windowControls;
   const SessionPlayer({
     super.key,
     required this.mode,
@@ -67,6 +73,7 @@ class SessionPlayer extends StatefulWidget {
     this.chatOpen = false,
     this.unread = 0,
     this.videoBuilder,
+    this.windowControls = true,
   });
 
   @override
@@ -87,6 +94,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
   int _toastSeq = 0;
   int _shaderNoticeSeen = 0;
   bool _miniHover = false;
+  // Whether the standard controls are up (tracked like media_kit does:
+  // shown on mount and on mouse movement, hidden 3 s later or on exit).
+  final _standardShown = ValueNotifier(true);
 
   SessionCoordinator get _coord => SessionState.instance.coordinator;
   bool get _full => widget.mode == PlayerMode.full;
@@ -114,6 +124,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
     if (playback.shownFrame == _frameProbe.sample) playback.shownFrame = null;
     _stopShaderWatch();
     _noFocus.dispose();
+    _standardShown.dispose();
     super.dispose();
   }
 
@@ -131,13 +142,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
 
   /// Menu, Ctrl+0..6: saved as the choice (also used on the next join)
   /// and applied live. A null quality keeps the saved one.
-  void _pickShader(ShaderPreset preset, ShaderQuality? quality) {
-    final s = AppSettings.instance;
-    if (quality != null) s.setShaderQuality(quality);
-    s.setShaderPreset(preset);
-    _coord.markInput();
-    _coord.playback.applyShaders(announce: true);
-  }
+  void _pickShader(ShaderPreset preset, ShaderQuality? quality) => applyShaderChoice(preset, quality);
 
   void _toggleChat() {
     _coord.markInput();
@@ -274,6 +279,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
               if (_full) ...[
                 _healthOverlay(),
                 _waitingPill(bottom: 124),
+                _progressLine(),
                 _jellyfinOverlay(),
                 if (widget.fullscreen) _pausedParty(),
               ] else
@@ -300,6 +306,45 @@ class _SessionPlayerState extends State<SessionPlayer> {
   }
 
   static const _barHeight = 56.0;
+  static const _controlsHide = Duration(seconds: 3);
+
+  /// Fullscreen hides the strip and its window buttons: the top bar
+  /// carries them while the controls are up (restore leaves fullscreen).
+  Widget? _fullscreenWindowButtons() {
+    if (!widget.fullscreen || !widget.windowControls) return null;
+    return Padding(
+      key: const ValueKey('fullscreen-window-buttons'),
+      padding: const EdgeInsets.only(left: 8),
+      child: IconTheme.merge(
+        data: const IconThemeData(color: Colors.white),
+        child: WindowButtons(
+          focusNode: _noFocus,
+          fullscreen: true,
+          onToggleFullscreen: widget.onToggleFullscreen,
+        ),
+      ),
+    );
+  }
+
+  /// The standard design's progress line while its controls are hidden
+  /// (the uosc timeline collapses into its own).
+  Widget _progressLine() => Positioned(
+        left: 0,
+        right: 0,
+        bottom: 0,
+        child: IgnorePointer(
+          child: SignalBuilder(builder: (context) {
+            final s = AppSettings.instance;
+            if (s.mpvControls.value || !s.progressLine.value) return const SizedBox.shrink();
+            return ValueListenableBuilder<bool>(
+              valueListenable: _standardShown,
+              builder: (context, shown, _) => shown
+                  ? const SizedBox.shrink()
+                  : const _MiniSeekBar(key: ValueKey('progress-line-standard'), thin: true),
+            );
+          }),
+        ),
+      );
 
   String get _title {
     final ref = _coord.currentRef.value;
@@ -320,7 +365,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
       keyboardShortcuts: {},
       visibleOnMount: true,
       hideMouseOnControlsRemoval: true,
-      controlsHoverDuration: const Duration(seconds: 3),
+      controlsHoverDuration: _controlsHide,
       // Our seek bar (chapter marks, hover title) sits in the bottom bar,
       // which grows by its height; the top bar keeps its row at the top.
       displaySeekBar: false,
@@ -359,6 +404,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                     icon: Icon(widget.fullscreen ? Icons.fullscreen_exit : Icons.close_fullscreen),
                     onPressed: widget.fullscreen ? widget.onToggleFullscreen : widget.onCollapse,
                   ),
+                  ?_fullscreenWindowButtons(),
                 ],
               ),
             ),
@@ -455,6 +501,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
         onPick: _pickShader,
         onMenuOpen: menuOpen,
       ),
+      PlayerSettingsButton(focusNode: _noFocus, renderMode: playback.renderMode),
       MaterialDesktopCustomButton(
         icon: Icon(widget.fullscreen ? Icons.fullscreen_exit : Icons.fullscreen),
         onPressed: widget.onToggleFullscreen,
@@ -463,20 +510,24 @@ class _SessionPlayerState extends State<SessionPlayer> {
   }
 
   Widget _sessionControls(VideoState state) {
-    // Settings → "Experimental: mpv-style controls" swaps them live.
+    // The "Player design" setting swaps them live.
     return SessionControlsSwitch(
-      material: (_) => DoubleClickListener(
-        onDoubleClick: widget.onToggleFullscreen,
-        // Clicks on the bars are button clicks, not the video.
-        skipTop: _barHeight,
-        skipBottom: _barHeight + ChapterSeekBar.height,
-        child: MaterialDesktopVideoControls(state),
+      material: (_) => ControlsHoverProbe(
+        shown: _standardShown,
+        hideAfter: _controlsHide,
+        child: DoubleClickListener(
+          onDoubleClick: widget.onToggleFullscreen,
+          // Clicks on the bars are button clicks, not the video.
+          skipTop: _barHeight,
+          skipBottom: _barHeight + ChapterSeekBar.height,
+          child: MaterialDesktopVideoControls(state),
+        ),
       ),
       mpv: (_) => _mpvControls(),
     );
   }
 
-  /// The experimental uosc-style controls: same actions as the bars above,
+  /// The uosc controls: same actions as the bars above,
   /// all through the coordinator (seeks via `player.seek`, the user path).
   Widget _mpvControls() {
     final coord = _coord;
@@ -504,6 +555,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
             tooltip: widget.fullscreen ? 'Exit fullscreen (Esc)' : 'Back to the library (keeps playing)',
             onPressed: widget.fullscreen ? widget.onToggleFullscreen : widget.onCollapse,
           ),
+          ?_fullscreenWindowButtons(),
         ],
       ),
       timeline: (context, expanded) => SignalBuilder(
@@ -593,6 +645,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
             onChanged: (x) => playback.player.setVolume(x),
           ),
         ),
+        UoscPlayerSettingsButton(renderMode: playback.renderMode),
         UoscButton(
           icon: widget.fullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
           tooltip: 'Fullscreen (F)',
@@ -930,7 +983,7 @@ class WaitingPill extends StatelessWidget {
 class _MiniSeekBar extends StatelessWidget {
   final bool thin;
   final ValueChanged<Duration>? onSeek;
-  const _MiniSeekBar({this.thin = false, this.onSeek});
+  const _MiniSeekBar({super.key, this.thin = false, this.onSeek});
 
   @override
   Widget build(BuildContext context) {

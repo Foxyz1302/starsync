@@ -490,6 +490,8 @@ class MemberView {
   final bool stale;
   /// Last `report.jf` of this member; empty when never reported.
   final Map<String, bool> jf;
+  /// The hosting app's own member (sent the server's host key).
+  final bool host;
   const MemberView({
     required this.id,
     required this.name,
@@ -499,6 +501,7 @@ class MemberView {
     required this.buffered,
     required this.stale,
     this.jf = const {},
+    this.host = false,
   });
 
   Map<String, Object?> toJson() => {
@@ -510,6 +513,7 @@ class MemberView {
         'buffered': buffered,
         'stale': stale,
         if (jf.isNotEmpty) 'jf': jf,
+        if (host) 'host': true,
       };
 
   factory MemberView.fromJson(Map<String, Object?> json) => MemberView(
@@ -521,6 +525,7 @@ class MemberView {
         buffered: finiteDouble(json['buffered'], 'buffered'),
         stale: (json['stale'] as bool?) ?? false,
         jf: jfAccessFromJson(json['jf']) ?? const {},
+        host: json['host'] == true,
       );
 }
 

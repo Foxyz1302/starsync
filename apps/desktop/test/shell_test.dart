@@ -301,17 +301,21 @@ void main() {
   test('toasts: feed toasts carry the actor, the rest are the app\'s', () {
     AvatarInfo who(String n) => AvatarInfo(name: n, color: Colors.teal);
     final at = DateTime.now();
-    final names = ['Bob', 'Bob Jr'];
-    final chat = shellToastFor(ToastItem(id: 1, text: 'Bob Jr: hi there', at: at), names, who);
+    // The actor is exact: "Bob" is not mistaken for "Bob Jr".
+    final chat = shellToastFor(ToastItem(id: 1, text: 'Bob Jr: hi there', at: at, actor: 'Bob Jr'), who);
     expect(chat.who!.name, 'Bob Jr');
     expect(chat.text, 'hi there');
     expect(chat.chat, isTrue);
-    final joined = shellToastFor(ToastItem(id: 2, text: 'Bob joined', at: at), names, who);
+    final joined = shellToastFor(ToastItem(id: 2, text: 'Bob joined', at: at, actor: 'Bob'), who);
     expect(joined.who!.name, 'Bob');
     expect(joined.text, 'joined');
     expect(joined.icon, Icons.login);
-    final app = shellToastFor(ToastItem(id: 3, text: 'Video froze — reloaded', at: at), names, who);
+    // A name that is a prefix of a sentence is not guessed without an actor.
+    final app = shellToastFor(ToastItem(id: 3, text: 'Bob joined', at: at), who);
     expect(app.who, isNull);
+    expect(app.text, 'Bob joined');
+    final froze = shellToastFor(ToastItem(id: 4, text: 'Video froze — reloaded', at: at), who);
+    expect(froze.who, isNull);
   });
 
   testWidgets('toasts slide in with an avatar and leave after their time', (tester) async {

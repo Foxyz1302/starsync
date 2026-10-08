@@ -2,12 +2,12 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:sync_relay_core/core.dart';
 
 import 'browse_scope.dart';
 import 'format.dart';
 import 'images.dart';
+import '../shell/motion.dart' show HScroll;
 
 enum CardShape {
   /// 2:3 poster (movies, series, latest).
@@ -49,20 +49,29 @@ IconData kindIcon(JellyfinItem item) => switch (item.kind) {
       _ => Icons.movie_outlined,
     };
 
+/// Two clicks on the same card within this time put it up.
+const doubleClickTime = Duration(milliseconds: 350);
+
 /// Poster or thumb card: image with progress bar and state badges, title
-/// and one meta line. Click / Enter activates (pick or open), hover and
-/// focus feed the inspector, "i" or the hover button opens the details.
+/// and one meta line. Click / Enter selects it (details panel; libraries
+/// and folders open), a second click soon after puts it up. [display]
+/// gives the picture and title when they are not [item]'s own (a series
+/// card for a new episode), [subtitle] replaces the meta line.
 class MediaCard extends StatefulWidget {
   final JellyfinItem item;
+  final JellyfinItem? display;
+  final String? subtitle;
   final CardShape shape;
-  /// Rows mixing series (Continue watching, Next up): series name on top,
-  /// "S2E3 · 12 min left" below.
+  /// Rows mixing series (Continue): series name on top, "S2E3 · 12 min
+  /// left" below.
   final bool seriesFirst;
   final bool autofocus;
   const MediaCard({
     super.key,
     required this.item,
     required this.shape,
+    this.display,
+    this.subtitle,
     this.seriesFirst = false,
     this.autofocus = false,
   });
@@ -74,18 +83,20 @@ class MediaCard extends StatefulWidget {
 class _MediaCardState extends State<MediaCard> {
   bool _hover = false;
   bool _focus = false;
+  DateTime? _lastTap;
 
   JellyfinItem get item => widget.item;
 
-  void _details(BrowseScope scope) => scope.onOpen(DetailRoute(item));
-
-  KeyEventResult _onKey(BrowseScope scope, KeyEvent e) {
-    if (e is! KeyDownEvent) return KeyEventResult.ignored;
-    if (e.logicalKey == LogicalKeyboardKey.keyI && isPlayable(item)) {
-      _details(scope);
-      return KeyEventResult.handled;
+  void _tap(BrowseScope scope) {
+    final now = DateTime.now();
+    final last = _lastTap;
+    _lastTap = now;
+    if (last != null && now.difference(last) < doubleClickTime && isSelectable(item)) {
+      _lastTap = null;
+      scope.onPutUp(item);
+      return;
     }
-    return KeyEventResult.ignored;
+    scope.activate(item);
   }
 
   @override
@@ -93,10 +104,11 @@ class _MediaCardState extends State<MediaCard> {
     final scope = BrowseScope.of(context);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final shown = widget.display ?? item;
     final selected = scope.selectedItemId == item.id;
     final played = item.userData.played;
     final progress = progressOf(item);
-    final unplayed = item.userData.unplayedItemCount;
+    final unplayed = shown.userData.unplayedItemCount;
     final ring = selected
         ? scheme.primary
         : _focus
@@ -106,20 +118,21 @@ class _MediaCardState extends State<MediaCard> {
     final image = AspectRatio(
       aspectRatio: widget.shape.aspect,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.fastEaseInToSlowEaseOut,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: ring, width: 2),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: ring, width: 3),
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(7),
           child: Stack(
             fit: StackFit.expand,
             children: [
               JellyfinImage(
                 client: scope.client,
-                image: cardImage(item, widget.shape),
-                icon: kindIcon(item),
+                image: cardImage(shown, widget.shape),
+                icon: kindIcon(shown),
               ),
               if (_hover || _focus)
                 const ColoredBox(color: Color(0x22FFFFFF)),
@@ -141,7 +154,7 @@ class _MediaCardState extends State<MediaCard> {
                     ? _Badge(color: scheme.primary, child: Icon(Icons.check, size: 14, color: scheme.onPrimary))
                     : played
                         ? const _Badge(color: Color(0xCC1B5E20), child: Icon(Icons.check, size: 14, color: Colors.white))
-                        : unplayed != null && unplayed > 0 && !isPlayable(item)
+                        : unplayed != null && unplayed > 0 && !isPlayable(shown) && widget.subtitle == null
                             ? _Badge(
                                 color: scheme.primaryContainer,
                                 child: Text('$unplayed',
@@ -151,78 +164,55 @@ class _MediaCardState extends State<MediaCard> {
                                         color: scheme.onPrimaryContainer)))
                             : const SizedBox.shrink(),
               ),
-              if (_hover && isPlayable(item))
-                Positioned(
-                  top: 4,
-                  left: 4,
-                  child: IconButton.filledTonal(
-                    key: ValueKey('card-info-${item.id}'),
-                    tooltip: 'Details (I)',
-                    visualDensity: VisualDensity.compact,
-                    iconSize: 16,
-                    onPressed: () => _details(scope),
-                    icon: const Icon(Icons.info_outline),
-                  ),
-                ),
             ],
           ),
         ),
       ),
     );
 
-    final title = cardTitle(item, seriesFirst: widget.seriesFirst);
-    final sub = widget.seriesFirst && item.kind == JellyfinItemKind.episode
-        ? [cardSubtitle(item), item.name].where((s) => s.isNotEmpty).join(' · ')
-        : cardSubtitle(item);
-    return Focus(
-      canRequestFocus: false,
-      skipTraversal: true,
-      onKeyEvent: (_, e) => _onKey(scope, e),
-      child: Semantics(
-        button: true,
-        selected: selected,
-        label: title,
-        child: InkWell(
-          key: ValueKey('card-${item.id}'),
-          autofocus: widget.autofocus,
-          borderRadius: BorderRadius.circular(8),
-          focusColor: Colors.transparent,
-          hoverColor: Colors.transparent,
-          onTap: () => scope.activate(item),
-          onHover: (h) {
-            setState(() => _hover = h);
-            if (h) scope.onPeek(item);
-          },
-          onFocusChange: (f) {
-            setState(() => _focus = f);
-            if (f) scope.onPeek(item);
-          },
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              image,
-              const SizedBox(height: 6),
-              SizedBox(
-                height: cardTextHeight - 6,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w500,
-                            color: selected ? scheme.primary : null)),
-                    Text(sub,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey)),
-                  ],
-                ),
+    final title = widget.display != null ? shown.name : cardTitle(item, seriesFirst: widget.seriesFirst);
+    final sub = widget.subtitle ??
+        (widget.seriesFirst && item.kind == JellyfinItemKind.episode
+            ? [cardSubtitle(item), item.name].where((s) => s.isNotEmpty).join(' · ')
+            : cardSubtitle(item));
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: title,
+      child: InkWell(
+        key: ValueKey('card-${item.id}'),
+        autofocus: widget.autofocus,
+        borderRadius: BorderRadius.circular(10),
+        focusColor: Colors.transparent,
+        hoverColor: Colors.transparent,
+        onTap: () => _tap(scope),
+        onHover: (h) => setState(() => _hover = h),
+        onFocusChange: (f) => setState(() => _focus = f),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            image,
+            const SizedBox(height: 6),
+            SizedBox(
+              height: cardTextHeight - 6,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: selected ? scheme.primary : null)),
+                  Text(sub,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey)),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -275,18 +265,25 @@ class CardGridDelegate extends SliverGridDelegate {
   bool shouldRelayout(CardGridDelegate old) => old.shape != shape || old.minWidth != minWidth;
 }
 
-/// A titled horizontal row of cards sized to fill the width; arrows (on
-/// hover) page through it. Lazy: only visible cards are built.
+/// One card of a [MediaRow]: see [MediaCard].
+typedef CardEntry = ({JellyfinItem item, JellyfinItem? display, String? subtitle});
+
+List<CardEntry> cardEntries(Iterable<JellyfinItem> items) =>
+    [for (final i in items) (item: i, display: null, subtitle: null)];
+
+/// A titled horizontal row of cards sized to fill the width; mouse drag
+/// and the wheel move it ([HScroll]), arrows (on hover) page through it.
+/// Lazy: only visible cards are built.
 class MediaRow extends StatefulWidget {
   final String title;
-  final List<JellyfinItem> items;
+  final List<CardEntry> entries;
   final CardShape shape;
   final bool seriesFirst;
   final Widget? trailing;
   const MediaRow({
     super.key,
     required this.title,
-    required this.items,
+    required this.entries,
     required this.shape,
     this.seriesFirst = false,
     this.trailing,
@@ -315,44 +312,38 @@ class _MediaRowState extends State<MediaRow> {
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
+    final entries = widget.entries;
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
-              children: [
-                Text(widget.title, style: t.titleMedium),
-                const SizedBox(width: 8),
-                Text('${widget.items.length}', style: t.bodySmall?.copyWith(color: Colors.grey)),
-                const Spacer(),
-                ?widget.trailing,
-              ],
-            ),
-          ),
+          SectionHeader(widget.title, count: '${entries.length}', trailing: widget.trailing),
           LayoutBuilder(builder: (context, box) {
             final fit = fitColumns(box.maxWidth, widget.shape.minWidth);
             final h = fit.itemWidth / widget.shape.aspect + cardTextHeight;
-            final overflow = widget.items.length > fit.cols;
+            final overflow = entries.length > fit.cols;
             return SizedBox(
               height: h,
               child: Stack(
                 children: [
-                  ListView.separated(
+                  HScroll(
                     controller: _scroll,
-                    scrollDirection: Axis.horizontal,
-                    itemCount: widget.items.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: cardGap),
-                    itemBuilder: (context, i) => SizedBox(
-                      width: fit.itemWidth,
-                      child: MediaCard(
-                        item: widget.items[i],
-                        shape: widget.shape,
-                        seriesFirst: widget.seriesFirst,
+                    builder: (c) => ListView.separated(
+                      controller: c,
+                      scrollDirection: Axis.horizontal,
+                      itemCount: entries.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: cardGap),
+                      itemBuilder: (context, i) => SizedBox(
+                        width: fit.itemWidth,
+                        child: MediaCard(
+                          item: entries[i].item,
+                          display: entries[i].display,
+                          subtitle: entries[i].subtitle,
+                          shape: widget.shape,
+                          seriesFirst: widget.seriesFirst,
+                        ),
                       ),
                     ),
                   ),
@@ -410,12 +401,19 @@ class SectionHeader extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8, top: 4),
       child: Row(
         children: [
-          Text(title, style: t.titleMedium),
-          if (count != null) ...[
-            const SizedBox(width: 8),
-            Text(count!, style: t.bodySmall?.copyWith(color: Colors.grey)),
-          ],
-          const Spacer(),
+          Expanded(
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: t.titleMedium),
+                ),
+                if (count != null) ...[
+                  const SizedBox(width: 8),
+                  Text(count!, style: t.bodySmall?.copyWith(color: Colors.grey)),
+                ],
+              ],
+            ),
+          ),
           ?trailing,
         ],
       ),

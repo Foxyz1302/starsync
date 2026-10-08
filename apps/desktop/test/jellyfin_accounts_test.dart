@@ -30,6 +30,20 @@ class FakeJellyfin implements JellyfinHttp {
   bool offline = false;
   int meStatus = 200;
 
+  /// Finished episodes (`/Items?filters=IsPlayed&sortBy=DatePlayed`): JoJo
+  /// and Black Summoner watched on 2026-10-07, after Black Summoner's
+  /// resume point (10-06), so its next-up episode is what continues.
+  List<Object> recentlyPlayed = [
+    {
+      'Id': 'jojo-played', 'Name': 'Played', 'Type': 'Episode', 'SeriesId': '757534d5ccc39274aa0cc7f1d9a38d7d',
+      'UserData': {'Played': true, 'LastPlayedDate': '2026-10-07T21:00:00Z'},
+    },
+    {
+      'Id': 'bs-played', 'Name': 'Played', 'Type': 'Episode', 'SeriesId': 'c7974a65e1b7bd43f26858744a7d3c11',
+      'UserData': {'Played': true, 'LastPlayedDate': '2026-10-07T20:00:00Z'},
+    },
+  ];
+
   FakeJellyfin() {
     fixture('GET', '/System/Info/Public', 'pub');
     on('GET', '/QuickConnect/Enabled', (_, _) => const JellyfinHttpResponse(200, 'true'));
@@ -58,6 +72,7 @@ class FakeJellyfin implements JellyfinHttp {
     fixture('GET', '/Items/Latest', 'latest_shows');
     on('GET', '/Items', (uri, _) {
       final q = uri.queryParameters;
+      if (q['filters'] == 'IsPlayed' && q['sortBy'] == 'DatePlayed') return _page(recentlyPlayed);
       if ((q['searchTerm'] ?? '').isNotEmpty) {
         return q['searchTerm']!.toLowerCase().startsWith('ari')
             ? JellyfinHttpResponse(200, jellyfinFixture('search'))
@@ -307,10 +322,12 @@ void main() {
       c.dispose();
     });
 
-    test('a saved Jellyfin pick starts on the Jellyfin source', () {
+    test('the library starts on Jellyfin unless told otherwise; a saved pick is selected', () {
       const m = JellyfinMedia(serverId: 's', baseUrl: 'b', itemId: 'i', title: 't');
       expect(MediaPickerController(jellyfin: m).source, MediaKind.jellyfin);
-      expect(MediaPickerController(jellyfin: m, mediaPath: '/x.mkv').source, MediaKind.file);
+      expect(MediaPickerController(jellyfin: m).selected!.itemId, 'i');
+      expect(MediaPickerController(mediaPath: '/x.mkv', linkUrl: 'https://a/b').source, MediaKind.jellyfin);
+      expect(MediaPickerController(source: MediaKind.link).source, MediaKind.link);
     });
 
     test('JellyfinMedia round-trips and labels', () {

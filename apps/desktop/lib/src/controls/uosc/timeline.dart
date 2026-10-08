@@ -59,7 +59,7 @@ class UoscTimeline extends StatefulWidget {
   });
 
   static const height = 30.0;
-  static const collapsedHeight = 3.0;
+  static const collapsedHeight = 2.0;
 
   @override
   State<UoscTimeline> createState() => _UoscTimelineState();

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../update/update_controller.dart';
 import '../../update/updater.dart';
+import 'settings_page.dart';
 import 'ui.dart';
 import 'update_indicator.dart';
 
@@ -41,7 +42,8 @@ class AboutPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    return Panel(
+    return SettingsPanel(
+          title: 'About',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

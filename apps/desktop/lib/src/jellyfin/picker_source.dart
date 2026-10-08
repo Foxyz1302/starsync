@@ -1,31 +1,32 @@
 import 'package:flutter/material.dart';
 
-import '../screens/home/picked_media.dart';
 import '../screens/home/ui.dart';
 import 'accounts.dart';
 import 'browse_scope.dart';
 import 'browser.dart';
 import 'sign_in_panel.dart';
 
-/// The media picker's Jellyfin source: the library browser once a server
-/// is linked, else an inline add-server panel.
+/// The Library's Jellyfin source: the library browser once a server is
+/// linked, else an inline add-server panel.
 class JellyfinPickerSource extends StatefulWidget {
   final JellyfinAccounts accounts;
-  final JellyfinMedia? selected;
-  final ValueChanged<JellyfinMedia> onPick;
+  final BrowseController? controller;
+  final JellyfinSelection? selected;
+  final ValueChanged<JellyfinSelection> onSelect;
+  final ValueChanged<JellyfinSelection> onPutUp;
   final VoidCallback? onOpenIntegrations;
-  final VoidCallback? onToggleExpanded;
-  final bool expanded;
   final BrowseStart? start;
+  final bool libraryStrip;
   const JellyfinPickerSource({
     super.key,
     this.start,
     required this.accounts,
-    required this.onPick,
+    required this.onSelect,
+    required this.onPutUp,
+    this.controller,
     this.selected,
     this.onOpenIntegrations,
-    this.onToggleExpanded,
-    this.expanded = false,
+    this.libraryStrip = true,
   });
 
   @override
@@ -52,12 +53,13 @@ class _JellyfinPickerSourceState extends State<JellyfinPickerSource> {
         return JellyfinBrowser(
           key: const ValueKey('media-jellyfin'),
           accounts: a,
+          controller: widget.controller,
           selected: widget.selected,
-          onPick: widget.onPick,
+          onSelect: widget.onSelect,
+          onPutUp: widget.onPutUp,
           onOpenIntegrations: widget.onOpenIntegrations,
-          onToggleExpanded: widget.onToggleExpanded,
-          expanded: widget.expanded,
           start: widget.start,
+          libraryStrip: widget.libraryStrip,
         );
       },
     );

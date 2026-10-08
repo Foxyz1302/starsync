@@ -164,6 +164,28 @@ void main() {
       expect(http.last.uri.queryParameters['parentId'], 'df39dd8262146d0ff7d3c04498a4a6a5');
     });
 
+    test('latest ungrouped and recently played: query params, dates', () async {
+      http.on('GET', '/Items/Latest', body: '[{"Id":"e","Type":"Episode",'
+          '"PremiereDate":"2010-01-01T00:00:00.0000000Z","DateCreated":"2026-10-01T12:00:00.0000000Z"}]');
+      final latest = await client.latest('lib', limit: 100, groupItems: false);
+      expect(http.last.uri.queryParameters['groupItems'], 'false');
+      expect(http.last.uri.queryParameters['fields'], contains('DateCreated'));
+      expect(latest.single.premiereDate, DateTime.utc(2010));
+      expect(latest.single.dateCreated, DateTime.utc(2026, 10, 1, 12));
+
+      http.on('GET', '/Items', body: '{"Items":[{"Id":"p","Type":"Episode","SeriesId":"s",'
+          '"UserData":{"Played":true,"LastPlayedDate":"2026-10-07T20:00:00Z"}}],"TotalRecordCount":1}');
+      final played = await client.recentlyPlayed(limit: 50);
+      final q = http.last.uri.queryParameters;
+      expect(q['filters'], 'IsPlayed');
+      expect(q['sortBy'], 'DatePlayed');
+      expect(q['sortOrder'], 'Descending');
+      expect(q['includeItemTypes'], 'Episode,Movie');
+      expect(q['recursive'], 'true');
+      expect(q['limit'], '50');
+      expect(played.single.userData.lastPlayedDate, DateTime.utc(2026, 10, 7, 20));
+    });
+
     test('library page: query params and paging', () async {
       http.on('GET', '/Items', fixture: 'series_page');
       const q = JellyfinItemQuery(

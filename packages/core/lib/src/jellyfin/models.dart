@@ -198,6 +198,9 @@ class JellyfinItem {
   final String? overview;
   final int? productionYear;
   final DateTime? premiereDate;
+  /// When the item was added to the library (needs `DateCreated` in
+  /// `fields`; [JellyfinClient.listFields] has it).
+  final DateTime? dateCreated;
   final double? communityRating;
   final String? officialRating;
   final int? runTimeTicks;
@@ -244,6 +247,7 @@ class JellyfinItem {
     this.overview,
     this.productionYear,
     this.premiereDate,
+    this.dateCreated,
     this.communityRating,
     this.officialRating,
     this.runTimeTicks,
@@ -282,6 +286,7 @@ class JellyfinItem {
         overview: _str(j['Overview']),
         productionYear: _int(j['ProductionYear']),
         premiereDate: _date(j['PremiereDate']),
+        dateCreated: _date(j['DateCreated']),
         communityRating: _double(j['CommunityRating']),
         officialRating: _str(j['OfficialRating']),
         runTimeTicks: _int(j['RunTimeTicks']),

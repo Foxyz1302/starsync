@@ -148,10 +148,27 @@ void main() {
     await host.ws.close();
   });
 
+  test('state marks the host member for everyone', () async {
+    await server.stop();
+    server = SyncServer(AppConfig(port: 0, secret: '', name: 't', hostKey: 'hk'));
+    await server.start();
+    final host = await _Peer.join('127.0.0.1', server.boundPort, 'host', hostKey: 'hk');
+    final friend = await _Peer.join('127.0.0.1', server.boundPort, 'friend');
+    final state = StateBroadcast.fromJson(await friend.next('state'));
+    final byName = {for (final m in state.members) m.name: m};
+    expect(byName['host']!.host, isTrue);
+    expect(byName['friend']!.host, isFalse);
+    final raw = server.hub.stateBroadcast().toJson()['members'] as List;
+    expect([for (final m in raw) (m as Map)['host']], containsAll([true, null]));
+    await host.ws.close();
+    await friend.ws.close();
+  });
+
   test('no hostKey configured: nobody is the host', () async {
     final a = await _Peer.join('127.0.0.1', server.boundPort, 'a', hostKey: '');
     final b = await _Peer.join('127.0.0.1', server.boundPort, 'b', hostKey: 'x');
     expect(server.session.tokens.values.where((t) => t.isHost), isEmpty);
+    expect(server.hub.stateBroadcast().members.where((m) => m.host), isEmpty);
     await a.ws.close();
     await b.ws.close();
   });

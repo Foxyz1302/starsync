@@ -1,12 +1,16 @@
+import 'dart:convert';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sync_relay_core/core.dart';
 import 'package:watch_together/src/jellyfin/accounts.dart';
 import 'package:watch_together/src/jellyfin/accounts_panel.dart';
 import 'package:watch_together/src/jellyfin/browser.dart';
-import 'package:watch_together/src/screens/home/media_picker.dart';
-import 'package:watch_together/src/shell/library_tab.dart';
+import 'package:watch_together/src/jellyfin/browse_scope.dart';
+import 'package:watch_together/src/jellyfin/picker_source.dart';
+import 'package:watch_together/src/state/settings.dart';
 
 import 'jellyfin_accounts_test.dart'
     show FakeJellyfin, arifuretaId, fixtureServerId, linkedAccounts, season2Id;
@@ -30,49 +34,149 @@ Future<void> settle(WidgetTester tester, [int frames = 6]) async {
   }
 }
 
-/// MediaPicker on the Jellyfin source with one linked fake server.
-Future<(MediaPickerController, JellyfinAccounts, FakeJellyfin)> pumpPicker(
+/// Pinned "now" for the Continue row (the fixtures were captured in
+/// October 2026).
+final fixtureNow = DateTime.utc(2026, 10, 8, 12);
+
+/// What the browser reported: selections and put-ups.
+class Picks {
+  final selected = <JellyfinSelection>[];
+  final putUp = <JellyfinSelection>[];
+}
+
+/// The browser on one linked fake server; clicks select, double-clicks put
+/// up (both recorded), like the Library tab wires it.
+Future<(Picks, JellyfinAccounts, FakeJellyfin, BrowseController)> pumpBrowser(
     WidgetTester tester, Size size) async {
   await setSize(tester, size);
   // Memory store + fake transport: no real IO, so no runAsync (futures
   // made there would resume outside the test's fake clock).
   final (accounts, fake) = await linkedAccounts();
-  final c = MediaPickerController(source: MediaKind.jellyfin);
-  addTearDown(c.dispose);
-  await tester.pumpWidget(app(MediaPicker(controller: c, jellyfin: accounts)));
+  final controller = BrowseController(accounts, now: () => fixtureNow);
+  addTearDown(controller.dispose);
+  final picks = Picks();
+  await tester.pumpWidget(app(StatefulBuilder(
+    builder: (context, setState) => JellyfinBrowser(
+      accounts: accounts,
+      controller: controller,
+      selected: picks.selected.lastOrNull,
+      onSelect: (s) => setState(() => picks.selected.add(s)),
+      onPutUp: picks.putUp.add,
+    ),
+  )));
   await settle(tester);
-  return (c, accounts, fake);
+  return (picks, accounts, fake, controller);
 }
 
 Future<void> openArifureta(WidgetTester tester) async {
   await tester.enterText(find.byKey(const ValueKey('jf-search')), 'arifureta');
   await settle(tester, 10);
   expect(find.byKey(const ValueKey('search-results')), findsOneWidget);
+  // Series cards select; the series page opens from the details panel or
+  // a season card, here straight through the controller.
   await tester.tap(find.byKey(const ValueKey('card-$arifuretaId')));
   await settle(tester);
 }
 
 void main() {
-  testWidgets('home rows: continue watching with time left, next up, latest', (tester) async {
-    await pumpPicker(tester, const Size(1600, 2400));
-    expect(find.text('Continue watching'), findsOneWidget);
-    expect(find.text('Next up'), findsOneWidget);
+  testWidgets('home: one Continue row (resume + next up per series), latest as series cards',
+      (tester) async {
+    final (_, _, fake, controller) = await pumpBrowser(tester, const Size(1600, 2400));
+    expect(find.text('Continue'), findsOneWidget);
+    expect(find.text('Continue watching'), findsNothing);
+    expect(find.text('Next up'), findsNothing);
     expect(find.text('Latest in Shows'), findsOneWidget);
     expect(find.widgetWithText(ActionChip, 'Movies'), findsOneWidget);
-    // Continue watching: series name on top, "S1E10 · N min left · title" below.
-    expect(find.text('From Old Country Bumpkin to Master Swordsman'), findsWidgets);
-    expect(find.textContaining(RegExp(r'^S1E10 · \d+ min left')), findsOneWidget);
-    expect(find.text('Black Summoner'), findsWidgets);
-    expect(find.text('Monogatari'), findsWidgets);
+    final row = find.byKey(const ValueKey('row-continue'));
+    // JoJo and Black Summoner were watched yesterday; Black Summoner's
+    // resume point is older than its last finished episode, so its next
+    // up shows. Bumpkin (62 days) and the never-dated series drop out.
+    expect(find.descendant(of: row, matching: find.text("JoJo's Bizarre Adventure")), findsOneWidget);
+    expect(find.descendant(of: row, matching: find.text('Black Summoner')), findsOneWidget);
+    expect(find.descendant(of: row, matching: find.textContaining('S1E6')), findsOneWidget);
+    expect(find.descendant(of: row, matching: find.text('From Old Country Bumpkin to Master Swordsman')),
+        findsNothing);
+    final jojo = tester.getTopLeft(find.byKey(const ValueKey('card-0df6f8e7fdae3fb1b69607e59153703e')));
+    final bs = tester.getTopLeft(find.byKey(const ValueKey('card-1c67aa9143ebcdcea7953aada4db543a')));
+    expect(jojo.dx, lessThan(bs.dx));
+    expect(controller.continueKeys, {'757534d5ccc39274aa0cc7f1d9a38d7d', 'c7974a65e1b7bd43f26858744a7d3c11'});
+    // Latest asks for single items and groups them itself; grouped series
+    // from the server say how many are new.
+    final latest = fake.requests.lastWhere((r) => r.uri.path == '/Items/Latest').uri.queryParameters;
+    expect(latest['groupItems'], 'false');
+    expect(find.text('30 new'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('series page: smart next button, season switching, pick an episode',
+  testWidgets('cards: click selects, double-click puts up; Show all opens newest first',
       (tester) async {
-    final (c, _, _) = await pumpPicker(tester, const Size(1600, 1000));
+    final (picks, _, fake, controller) = await pumpBrowser(tester, const Size(1600, 1200));
+    final card = find.byKey(const ValueKey('card-1c67aa9143ebcdcea7953aada4db543a'));
+    await tester.tap(card);
+    await tester.pump();
+    expect(picks.selected.single.itemId, '1c67aa9143ebcdcea7953aada4db543a');
+    expect(picks.putUp, isEmpty);
+    // Selected: outline and check.
+    expect(find.descendant(of: card, matching: find.byIcon(Icons.check)), findsOneWidget);
+    await tester.tap(card);
+    await tester.pump(const Duration(milliseconds: 60));
+    await tester.tap(card);
+    await tester.pump();
+    expect(picks.putUp.single.itemId, '1c67aa9143ebcdcea7953aada4db543a');
+
+    await tester.tap(find.byKey(const ValueKey('show-all-df39dd8262146d0ff7d3c04498a4a6a5')));
+    await settle(tester);
+    final q = fake.requests.lastWhere((r) => r.uri.path == '/Items').uri.queryParameters;
+    expect(q['sortBy'], startsWith('DateCreated'));
+    expect(q['sortOrder'], 'Descending');
+    expect(find.widgetWithText(OutlinedButton, 'Date added'), findsOneWidget);
+    expect((controller.stack.last as LibraryRoute).sort, 'added');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Latest: "Hide re-releases" hides items added long after airing', (tester) async {
+    final fake = FakeJellyfin();
+    fake.on('GET', '/Items/Latest', (_, _) => JellyfinHttpResponse(200, jsonEncode([
+          {
+            'Id': 'fresh', 'Name': 'Fresh', 'Type': 'Episode', 'SeriesId': 'sf', 'SeriesName': 'Fresh Show',
+            'ParentIndexNumber': 1, 'IndexNumber': 1,
+            'PremiereDate': '2026-10-01T00:00:00Z', 'DateCreated': '2026-10-02T00:00:00Z',
+          },
+          {
+            'Id': 'old', 'Name': 'Old', 'Type': 'Episode', 'SeriesId': 'so', 'SeriesName': 'Old Show',
+            'ParentIndexNumber': 1, 'IndexNumber': 4,
+            'PremiereDate': '2012-10-01T00:00:00Z', 'DateCreated': '2026-10-02T00:00:00Z',
+          },
+        ])));
+    await setSize(tester, const Size(1600, 1400));
+    final (accounts, _) = await linkedAccounts(http: fake);
+    final controller = BrowseController(accounts, now: () => fixtureNow);
+    addTearDown(controller.dispose);
+    AppSettings.instance.hideReReleases.value = true;
+    addTearDown(() => AppSettings.instance.hideReReleases.value = true);
+    await tester.pumpWidget(app(JellyfinBrowser(
+        accounts: accounts, controller: controller, onSelect: (_) {}, onPutUp: (_) {})));
+    await settle(tester);
+    expect(find.text('Fresh Show'), findsWidgets);
+    expect(find.text('S1E1'), findsWidgets);
+    expect(find.text('Old Show'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('latest-menu-df39dd8262146d0ff7d3c04498a4a6a5')));
+    await settle(tester, 4);
+    await tester.tap(find.byKey(const ValueKey('hide-rereleases')));
+    await settle(tester, 4);
+    expect(AppSettings.instance.hideReReleases.value, isFalse);
+    expect(find.text('Old Show'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('series page: smart next button and episodes select, double-click puts up',
+      (tester) async {
+    final (picks, _, _, controller) = await pumpBrowser(tester, const Size(1600, 1000));
     await openArifureta(tester);
+    expect(picks.selected.last.itemId, arifuretaId);
+    controller.open(SeriesRoute(const JellyfinItem(id: arifuretaId, name: 'Arifureta', type: 'Series')));
+    await settle(tester);
     // Opens on the season holding next up (S2E4).
-    expect(find.byKey(const ValueKey('season-$season2Id')), findsOneWidget);
     final s2 = tester.widget<ChoiceChip>(find.byKey(const ValueKey('season-$season2Id')));
     expect(s2.selected, isTrue);
     expect(find.text('1. Irregular'), findsOneWidget);
@@ -83,37 +187,38 @@ void main() {
     expect(find.text('1. Irregular'), findsNothing);
     expect(find.text('1. Haulias Assemble'), findsWidgets);
 
-    // Picking an episode fills the controller.
     await tester.tap(find.text('2. Roar of Revolution').first);
     await tester.pump();
-    final sel = c.selection;
-    expect(sel, isA<JellyfinMedia>());
-    sel as JellyfinMedia;
+    final sel = picks.selected.last;
     expect(sel.serverId, fixtureServerId);
-    expect(sel.title, 'Roar of Revolution');
-    expect(sel.subtitle, "Arifureta: From Commonplace to World's Strongest · S3E2");
-    expect(sel.baseUrl, 'https://example.invalid');
+    expect(sel.item!.name, 'Roar of Revolution');
+    expect(picks.putUp, isEmpty);
+    await tester.tap(find.text('2. Roar of Revolution').first);
+    await tester.pump(const Duration(milliseconds: 60));
+    await tester.tap(find.text('2. Roar of Revolution').first);
+    await tester.pump();
+    expect(picks.putUp.single.item!.name, 'Roar of Revolution');
 
-    // The smart button picks next up.
+    // The smart button selects next up.
     await tester.tap(find.byKey(const ValueKey('series-next')));
     await tester.pump();
-    expect((c.selection as JellyfinMedia).subtitle, endsWith('S2E4'));
+    expect(picks.selected.last.item!.episodeLabel, 'S2E4');
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('keyboard: / searches, Esc clears then goes back, arrows move', (tester) async {
-    await pumpPicker(tester, const Size(1600, 1000));
+    final (_, _, _, controller) = await pumpBrowser(tester, const Size(1600, 1000));
     final search = find.byKey(const ValueKey('jf-search'));
 
     // Focus a card, then arrow right moves to the next card.
-    final first = find.byKey(const ValueKey('card-d66e875e181f74d80e838bddc76c6f23'));
+    final first = find.byKey(const ValueKey('card-0df6f8e7fdae3fb1b69607e59153703e'));
     Focus.of(tester.element(find.descendant(of: first, matching: find.byType(Column)).first))
         .requestFocus();
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
     final ink = FocusManager.instance.primaryFocus!.context!.findAncestorWidgetOfExactType<InkWell>()!;
-    expect((ink.key as ValueKey<String>).value, 'card-7c108a1cf6f062b4e3607a9be6d5ba0a');
+    expect((ink.key as ValueKey<String>).value, 'card-1c67aa9143ebcdcea7953aada4db543a');
 
     // "/" jumps to search.
     await tester.sendKeyEvent(LogicalKeyboardKey.slash, character: '/');
@@ -125,21 +230,22 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
     expect(find.byKey(const ValueKey('search-results')), findsNothing);
-    expect(find.text('Continue watching'), findsOneWidget);
+    expect(find.text('Continue'), findsOneWidget);
 
-    // Into the series and back with Esc.
-    await openArifureta(tester);
+    // Into a series and back with Esc.
+    controller.open(SeriesRoute(const JellyfinItem(id: arifuretaId, name: 'Arifureta', type: 'Series')));
+    await settle(tester);
     expect(find.byKey(const ValueKey('series-next')), findsOneWidget);
     expect(find.byKey(const ValueKey('crumb-0')), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
     expect(find.byKey(const ValueKey('series-next')), findsNothing);
-    expect(find.text('Continue watching'), findsOneWidget);
+    expect(find.text('Continue'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('library grid with sort and filters', (tester) async {
-    final (_, _, fake) = await pumpPicker(tester, const Size(1600, 1000));
+    final (_, _, fake, _) = await pumpBrowser(tester, const Size(1600, 1000));
     await tester.tap(find.widgetWithText(ActionChip, 'Shows'));
     await settle(tester);
     expect(find.text('218 items'), findsOneWidget);
@@ -160,33 +266,29 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('layouts: narrow has no inspector, ultrawide adds it and fits more columns',
+  testWidgets('layouts: narrow and ultrawide fill rows with whole cards; rows scroll by drag',
       (tester) async {
-    await pumpPicker(tester, const Size(820, 700));
-    expect(find.byKey(const ValueKey('jf-inspector')), findsNothing);
+    await pumpBrowser(tester, const Size(820, 700));
     expect(tester.takeException(), isNull);
-    final narrowCard = tester.getSize(find.byKey(const ValueKey('card-d66e875e181f74d80e838bddc76c6f23')));
+    final narrowCard = tester.getSize(find.byKey(const ValueKey('card-0df6f8e7fdae3fb1b69607e59153703e')));
 
-    await pumpPicker(tester, const Size(3440, 1440));
-    expect(find.byKey(const ValueKey('jf-inspector')), findsOneWidget);
+    await pumpBrowser(tester, const Size(3440, 1440));
     expect(tester.takeException(), isNull);
-    // Rows fill the width with whole cards.
     final wideCards = find.byWidgetPredicate((w) =>
         w is InkWell && w.key is ValueKey<String> && (w.key as ValueKey<String>).value.startsWith('card-'));
     expect(wideCards.evaluate().length, greaterThan(10));
     expect(narrowCard.width, greaterThan(200));
 
-    // Hover feeds the inspector.
-    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    addTearDown(gesture.removePointer);
-    await gesture.addPointer(location: Offset.zero);
-    await gesture.moveTo(tester.getCenter(find.byKey(const ValueKey('card-1c67aa9143ebcdcea7953aada4db543a')).first));
-    await tester.pump();
-    expect(
-        find.descendant(
-            of: find.byKey(const ValueKey('jf-inspector')),
-            matching: find.textContaining('Rice and Thieves and Heroes')),
-        findsOneWidget);
+    // A Latest row is an HScroll: a mouse drag moves it sideways.
+    await setSize(tester, const Size(640, 1400));
+    await settle(tester);
+    final row = find.byKey(const ValueKey('latest-06da8841d9ae960a2ef504238428c61c'));
+    final list = find.descendant(of: row, matching: find.byType(Scrollable)).first;
+    final before = tester.state<ScrollableState>(list).position.pixels;
+    await tester.drag(list, const Offset(-300, 0), kind: PointerDeviceKind.mouse);
+    await settle(tester, 4);
+    expect(tester.state<ScrollableState>(list).position.pixels, greaterThan(before));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('Integrations: Quick Connect shows the code, approve links, cancel stops',
@@ -245,14 +347,12 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('no linked server: the picker offers sign-in inline', (tester) async {
+  testWidgets('no linked server: the Jellyfin source offers sign-in inline', (tester) async {
     await setSize(tester, const Size(1200, 900));
     final accounts = JellyfinAccounts(store: MemoryJellyfinStore(), httpFactory: () => FakeJellyfin());
     await accounts.ensureLoaded(validate: false);
-    final c = MediaPickerController(source: MediaKind.jellyfin);
-    addTearDown(c.dispose);
-    await tester.pumpWidget(app(SingleChildScrollView(
-        child: MediaPicker(controller: c, jellyfin: accounts, onOpenIntegrations: () {}))));
+    await tester.pumpWidget(app(JellyfinPickerSource(
+        accounts: accounts, onSelect: (_) {}, onPutUp: (_) {}, onOpenIntegrations: () {})));
     await tester.pump();
     expect(find.byKey(const ValueKey('jf-sign-in')), findsOneWidget);
     expect(find.text('Open Integrations'), findsOneWidget);
@@ -260,61 +360,11 @@ void main() {
   });
 
   testWidgets('expired account shows a reconnect banner in the browser', (tester) async {
-    final (_, accounts, _) = await pumpPicker(tester, const Size(1400, 900));
+    final (_, accounts, _, _) = await pumpBrowser(tester, const Size(1400, 900));
     accounts.markExpired(fixtureServerId);
     await tester.pump();
     expect(find.byKey(const ValueKey('jf-status-banner')), findsOneWidget);
     expect(find.text('Reconnect'), findsOneWidget);
     expect(find.byType(JellyfinBrowser), findsOneWidget);
-  });
-
-  testWidgets('Library tab: the last pick comes back; offline it only browses',
-      (tester) async {
-    await setSize(tester, const Size(1800, 1000));
-    final (accounts, _) = await linkedAccounts();
-    const pick = JellyfinMedia(
-        serverId: fixtureServerId,
-        baseUrl: 'https://example.invalid',
-        itemId: '1c67aa9143ebcdcea7953aada4db543a',
-        title: 'Rice and Thieves and Heroes',
-        subtitle: 'Black Summoner · S1E6');
-    await accounts.rememberPick(pick);
-    final c = MediaPickerController();
-    addTearDown(c.dispose);
-    await restoreLastPick(c, accounts, () => true);
-    final put = <PickedMedia>[];
-    Future<void> pump({required bool online}) => tester.pumpWidget(MaterialApp(
-        theme: ThemeData.dark(),
-        home: Scaffold(
-          body: LibraryTab(
-            controller: c,
-            accounts: accounts,
-            online: online,
-            isHost: false,
-            onPutUp: (m) async {
-              put.add(m);
-              return null;
-            },
-          ),
-        )));
-    await pump(online: false);
-    await settle(tester);
-    // The saved pick comes back on the Jellyfin source.
-    expect(c.selection, pick);
-    expect(find.byType(JellyfinBrowser), findsOneWidget);
-    expect(find.text('Join or host to watch together'), findsOneWidget);
-    final go = find.byKey(const ValueKey('swap-go'));
-    expect(tester.widget<ButtonStyleButton>(go).onPressed, isNull);
-
-    await pump(online: true);
-    await settle(tester);
-    expect(find.text('Put up: Rice and Thieves and Heroes — Black Summoner · S1E6'), findsOneWidget);
-    await tester.tap(go);
-    await settle(tester);
-    expect(put, [pick]);
-    tester.view.physicalSize = const Size(800, 900);
-    await settle(tester, 2);
-    expect(find.byType(JellyfinBrowser), findsOneWidget);
-    expect(tester.takeException(), isNull);
   });
 }

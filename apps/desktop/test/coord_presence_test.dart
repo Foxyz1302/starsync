@@ -206,4 +206,32 @@ void main() {
       }
     },
   );
+
+  test(
+    'feed and chat toasts name their actor exactly',
+    timeout: const Timeout(Duration(minutes: 1)),
+    () async {
+      MediaKit.ensureInitialized();
+      final server = SyncServer(const AppConfig(port: 0, secret: 'toast', name: 'toast'));
+      await server.start();
+      final coord = SessionCoordinator();
+      final friend = SyncClient();
+      try {
+        await coord.connect(ConnectParams(
+            host: '127.0.0.1', port: server.boundPort, secret: 'toast', name: 'Bob'));
+        await coord.playback.player.setVolume(0);
+        await friend.connect(
+            wsUri: Uri.parse('ws://127.0.0.1:${server.boundPort}/sync'), secret: 'toast', name: 'Bob Jr');
+        friend.sendChat('hi there');
+        await _poll(() => coord.toasts.peek().any((t) => t.text == 'Bob Jr: hi there'), 'chat toast');
+        final toasts = coord.toasts.peek();
+        expect(toasts.firstWhere((t) => t.text == 'Bob Jr joined').actor, 'Bob Jr');
+        expect(toasts.firstWhere((t) => t.text == 'Bob Jr: hi there').actor, 'Bob Jr');
+      } finally {
+        await friend.dispose();
+        await coord.dispose();
+        await server.stop();
+      }
+    },
+  );
 }

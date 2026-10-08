@@ -447,7 +447,7 @@ void main() {
     expect(find.text('material'), findsOneWidget);
   });
 
-  testWidgets('Settings: "Experimental: mpv-style controls", off by default', (tester) async {
+  testWidgets('Settings: "Player design", Standard by default', (tester) async {
     final s = AppSettings.instance;
     s.mpvControls.value = false;
     addTearDown(() => s.mpvControls.value = false);
@@ -464,12 +464,14 @@ void main() {
         ),
       ),
     ));
-    final toggle = find.byKey(const ValueKey('mpv-controls'));
-    expect(find.text('Experimental: mpv-style controls'), findsOneWidget);
-    expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
-    await tester.tap(toggle);
-    await tester.pump();
+    final design = find.byKey(const ValueKey('player-design'));
+    expect(find.text('Player design'), findsOneWidget);
+    expect(tester.widget<DropdownButton<bool>>(design).value, isFalse);
+    await tester.tap(design);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('uosc').last);
+    await tester.pumpAndSettle();
     expect(s.mpvControls.value, isTrue);
-    expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+    expect(tester.widget<DropdownButton<bool>>(design).value, isTrue);
   });
 }

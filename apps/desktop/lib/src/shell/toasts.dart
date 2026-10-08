@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
-import 'package:sync_relay_core/core.dart' show MemberView;
 
 import '../session/session_coordinator.dart' show ToastItem;
 import '../state/session_state.dart';
@@ -21,29 +20,26 @@ class ShellToast {
   ShellToast({required this.id, required this.text, this.who, this.icon, this.chat = false});
 }
 
-/// Splits a coordinator toast into who and what: feed toasts start with
-/// the actor's name ("Bob joined", "Bob: hi"); anything else is the app's.
-ShellToast shellToastFor(ToastItem t, Iterable<String> names, AvatarInfo Function(String name) avatar) {
-  final sorted = names.where((n) => n.isNotEmpty).toSet().toList()..sort((a, b) => b.length - a.length);
-  for (final n in sorted) {
-    if (t.text.startsWith('$n: ')) {
-      return ShellToast(id: t.id, who: avatar(n), text: t.text.substring(n.length + 2), chat: true);
-    }
-    if (t.text.startsWith('$n ')) {
-      final rest = t.text.substring(n.length + 1);
-      final icon = rest.startsWith('joined')
-          ? Icons.login
-          : rest.startsWith('left')
-              ? Icons.logout
-              : rest.startsWith('kicked')
-                  ? Icons.gavel
-                  : rest.startsWith('changed')
-                      ? Icons.swap_horiz
-                      : Icons.info_outline;
-      return ShellToast(id: t.id, who: avatar(n), text: rest, icon: icon);
-    }
+/// Splits a coordinator toast into who and what: feed and chat toasts
+/// name their [ToastItem.actor] and start with it ("Bob joined", "Bob:
+/// hi"); the rest are the app's.
+ShellToast shellToastFor(ToastItem t, AvatarInfo Function(String name) avatar) {
+  final n = t.actor;
+  if (n == null || n.isEmpty) return ShellToast(id: t.id, text: t.text, icon: Icons.info_outline);
+  if (t.text.startsWith('$n: ')) {
+    return ShellToast(id: t.id, who: avatar(n), text: t.text.substring(n.length + 2), chat: true);
   }
-  return ShellToast(id: t.id, text: t.text, icon: Icons.info_outline);
+  final rest = t.text.startsWith('$n ') ? t.text.substring(n.length + 1) : t.text;
+  final icon = rest.startsWith('joined')
+      ? Icons.login
+      : rest.startsWith('left')
+          ? Icons.logout
+          : rest.startsWith('kicked')
+              ? Icons.gavel
+              : rest.startsWith('changed')
+                  ? Icons.swap_horiz
+                  : Icons.info_outline;
+  return ShellToast(id: t.id, who: avatar(n), text: rest, icon: icon);
 }
 
 /// The coordinator's toasts as cards with avatars, bottom-left: each
@@ -75,13 +71,8 @@ class _PartyToastsState extends State<PartyToasts> {
       if (fresh.isEmpty) return;
       // Only new toasts re-run this, not the party they mention.
       untracked(() {
-        final r = coord.serverState.value;
-        final names = [
-          for (final m in r?.members ?? const <MemberView>[]) m.name,
-          for (final f in coord.feedLog.value) f.actor,
-        ];
         for (final t in fresh) {
-          _add(shellToastFor(t, names, (n) => avatarForName(n, coord)));
+          _add(shellToastFor(t, (n) => avatarForName(n, coord)));
         }
       });
     });

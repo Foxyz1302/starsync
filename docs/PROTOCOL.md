@@ -92,7 +92,8 @@ Field notes:
 {"t":"state","eventId":7,"transport":"playing"|"held"|"finished","position":12.3,
  "serverTime":"<ISO-8601 UTC>","mediaId":1,
  "media":{name,size,duration,url?,jellyfin?}|absent,
- "members":[{"id","name","avatarHash"?,"ready","inSet","buffered","stale","jf"?}],
+ "members":[{"id","name","avatarHash"?,"ready","inSet","buffered","stale","jf"?,
+   "host"?}],
  "seekBy":"m1","seekSeq":3,"relay":true}
 {"t":"pong","c":1767225600000,"s":1767225600012}
 {"t":"feed","actor":"","action":"","target":"","reason":"","at":"<ISO-8601>"}
@@ -120,7 +121,8 @@ Field notes:
   relay the current Jellyfin media. `members[].jf` is the member's last
   `report.jf`, omitted when it never sent one. `members[].avatarHash`
   (omitted when the member has no picture) names the picture's bytes (see
-  "Avatars").
+  "Avatars"). `members[].host` (omitted when false): the member sent the
+  server's `hostKey` (see `hello.hostKey`).
 - `pong.c` echoes the ping's `c`; `pong.s` is the server's clock in epoch ms
   (the clock `serverTime` uses). With `t3` the local receive time, the offset
   is `s - (c + t3) / 2`, accurate to half the round trip.

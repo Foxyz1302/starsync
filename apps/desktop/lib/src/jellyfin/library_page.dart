@@ -39,15 +39,18 @@ const libraryPageSize = 100;
 /// pages load as they come near the viewport.
 class JellyfinLibraryPage extends StatefulWidget {
   final JellyfinItem folder;
-  const JellyfinLibraryPage({super.key, required this.folder});
+  /// A [LibrarySort] name to start with (in its natural direction).
+  final String? sort;
+  const JellyfinLibraryPage({super.key, required this.folder, this.sort});
 
   @override
   State<JellyfinLibraryPage> createState() => _JellyfinLibraryPageState();
 }
 
 class _JellyfinLibraryPageState extends State<JellyfinLibraryPage> {
-  LibrarySort _sort = LibrarySort.name;
-  bool _descending = false;
+  late LibrarySort _sort =
+      LibrarySort.values.where((s) => s.name == widget.sort).firstOrNull ?? LibrarySort.name;
+  late bool _descending = _sort.descending;
   bool _unplayed = false;
   bool _favorites = false;
 

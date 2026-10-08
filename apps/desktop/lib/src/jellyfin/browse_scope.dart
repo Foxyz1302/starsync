@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:sync_relay_core/core.dart';
 
@@ -20,14 +23,17 @@ final class HomeRoute extends BrowseRoute {
   String get key => 'home';
 }
 
-/// A library or folder grid.
+/// A library or folder grid, optionally opened with a sort ("Show all"
+/// next to Latest opens it newest first).
 final class LibraryRoute extends BrowseRoute {
   final JellyfinItem folder;
-  const LibraryRoute(this.folder);
+  /// A `LibrarySort` name; null = by name.
+  final String? sort;
+  const LibraryRoute(this.folder, {this.sort});
   @override
   String get label => folder.name;
   @override
-  String get key => 'lib:${folder.id}';
+  String get key => sort == null ? 'lib:${folder.id}' : 'lib:${folder.id}:$sort';
 }
 
 final class SeriesRoute extends BrowseRoute {
@@ -41,18 +47,6 @@ final class SeriesRoute extends BrowseRoute {
   String get key => 'series:${series.id}';
 }
 
-/// Movie / episode / video detail.
-final class DetailRoute extends BrowseRoute {
-  final JellyfinItem item;
-  const DetailRoute(this.item);
-  @override
-  String get label => item.kind == JellyfinItemKind.episode
-      ? (item.episodeLabel ?? item.name)
-      : item.name;
-  @override
-  String get key => 'item:${item.id}';
-}
-
 /// A route stack as JSON for [JellyfinAccounts.saveBrowseLocation]: only
 /// ids, names and the fields the pages start from (each page loads the
 /// full item itself).
@@ -60,18 +54,17 @@ List<Map<String, Object?>> encodeBrowseStack(List<BrowseRoute> stack) => [
       for (final r in stack)
         switch (r) {
           HomeRoute() => {'r': 'home'},
-          LibraryRoute(:final folder) => {'r': 'lib', ..._itemJson(folder)},
+          LibraryRoute(:final folder, :final sort) => {'r': 'lib', ..._itemJson(folder), 'sort': ?sort},
           SeriesRoute(:final series, :final seasonId) => {
               'r': 'series',
               ..._itemJson(series),
               'seasonId': ?seasonId,
             },
-          DetailRoute(:final item) => {'r': 'item', ..._itemJson(item)},
         }
     ];
 
 /// Inverse of [encodeBrowseStack]; always starts with Home. Null when
-/// [raw] is not a stack.
+/// [raw] is not a stack. Entries it no longer knows are skipped.
 List<BrowseRoute>? decodeBrowseStack(Object? raw) {
   if (raw is! List) return null;
   final out = <BrowseRoute>[const HomeRoute()];
@@ -79,11 +72,10 @@ List<BrowseRoute>? decodeBrowseStack(Object? raw) {
     if (e is! Map) return null;
     final item = _itemFrom(e);
     final route = switch (e['r']) {
-      'home' => null,
-      'lib' when item != null => LibraryRoute(item),
+      'lib' when item != null =>
+        LibraryRoute(item, sort: e['sort'] is String ? e['sort'] as String : null),
       'series' when item != null =>
         SeriesRoute(item, seasonId: e['seasonId'] is String ? e['seasonId'] as String : null),
-      'item' when item != null => DetailRoute(item),
       _ => null,
     };
     if (route != null && out.every((r) => r.key != route.key)) out.add(route);
@@ -141,46 +133,181 @@ class BrowseStart {
   }
 }
 
+/// The card selected in the library (details panel): an item on a server.
+/// [item] is what the card had, when known (the panel loads it in full).
+class JellyfinSelection {
+  final String serverId;
+  final String itemId;
+  final JellyfinItem? item;
+  const JellyfinSelection(this.serverId, this.itemId, [this.item]);
+
+  @override
+  bool operator ==(Object other) =>
+      other is JellyfinSelection && other.serverId == serverId && other.itemId == itemId;
+  @override
+  int get hashCode => Object.hash(serverId, itemId);
+}
+
+/// Browser location shared by the browser, the library chips in the
+/// Library header and the details panel: the server shown, its route
+/// stack (saved per server on every move), a data version that bumps after
+/// watched-state changes (rows reload), and the keys in the Continue row.
+class BrowseController extends ChangeNotifier {
+  final JellyfinAccounts accounts;
+  /// Clock for the Continue row's age cut-off (tests pin it).
+  final DateTime Function() now;
+  BrowseController(this.accounts, {this.now = DateTime.now});
+
+  String? _serverId;
+  List<BrowseRoute> _stack = const [HomeRoute()];
+  bool _started = false;
+  int _version = 0;
+  Set<String> _continueKeys = const {};
+
+  List<BrowseRoute> get stack => _stack;
+  int get version => _version;
+  /// [continueKey]s of the cards in the Continue row now.
+  Set<String> get continueKeys => _continueKeys;
+
+  JellyfinAccount? get account =>
+      (_serverId == null ? null : accounts.account(_serverId!)) ?? accounts.defaultAccount;
+  String? get serverId => account?.serverId;
+
+  /// First use (accounts loaded): [start], else the server of [serverHint]
+  /// at its remembered location, else the default server's.
+  void start({BrowseStart? start, String? serverHint}) {
+    if (_started) return;
+    _started = true;
+    if (start != null && accounts.account(start.serverId) != null) {
+      _serverId = start.serverId;
+      _stack = start.stack.isEmpty ? const [HomeRoute()] : start.stack;
+      _remember();
+    } else {
+      _serverId = serverHint != null && accounts.account(serverHint) != null
+          ? serverHint
+          : accounts.defaultServerId;
+      _stack = _restored(_serverId);
+    }
+  }
+
+  List<BrowseRoute> _restored(String? serverId) =>
+      (serverId == null ? null : decodeBrowseStack(accounts.browseLocation(serverId))) ??
+      const [HomeRoute()];
+
+  void _remember() {
+    final id = serverId;
+    if (id != null) unawaited(accounts.saveBrowseLocation(id, encodeBrowseStack(_stack)));
+  }
+
+  void switchServer(String serverId) {
+    if (serverId == this.serverId) return;
+    _serverId = serverId;
+    _stack = _restored(serverId);
+    _continueKeys = const {};
+    notifyListeners();
+  }
+
+  void open(BrowseRoute route) {
+    if (_stack.last.key == route.key) return;
+    _stack = [..._stack, route];
+    _remember();
+    notifyListeners();
+  }
+
+  /// Home, then [route] (library chips: a library is a top-level place).
+  void openTop(BrowseRoute route) {
+    _stack = [const HomeRoute(), route];
+    _remember();
+    notifyListeners();
+  }
+
+  bool back() {
+    if (_stack.length <= 1) return false;
+    _stack = _stack.sublist(0, _stack.length - 1);
+    _remember();
+    notifyListeners();
+    return true;
+  }
+
+  void popTo(int index) {
+    _stack = _stack.sublist(0, index + 1);
+    _remember();
+    notifyListeners();
+  }
+
+  /// Watched state changed on the server: drop its cached lists and let
+  /// the rows reload.
+  void dataChanged() {
+    final id = serverId;
+    if (id != null) accounts.invalidate(id);
+    _version++;
+    notifyListeners();
+  }
+
+  set continueKeys(Set<String> keys) {
+    if (setEquals(keys, _continueKeys)) return;
+    _continueKeys = keys;
+    // Set while building a row: tell listeners after the frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_disposed) notifyListeners();
+    });
+  }
+
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+}
+
 /// What every browser page needs, provided by [JellyfinBrowser].
 class BrowseScope extends InheritedWidget {
   final JellyfinAccounts accounts;
   final JellyfinAccount account;
   final JellyfinClient client;
-  /// Item id of the current pick on this server, highlighted everywhere.
+  final BrowseController controller;
+  /// Item id of the selected card on this server, highlighted everywhere.
   final String? selectedItemId;
-  final ValueChanged<JellyfinItem> onPick;
-  final ValueChanged<BrowseRoute> onOpen;
-  /// Hover / focus: the inspector pane follows it.
-  final ValueChanged<JellyfinItem> onPeek;
+  /// Click: select (details panel).
+  final ValueChanged<JellyfinItem> onSelect;
+  /// Double-click: put it up (a series: its next episode).
+  final ValueChanged<JellyfinItem> onPutUp;
+  /// Home shows the library chips itself (the Library tab has them in its
+  /// header instead).
+  final bool libraryStrip;
 
   const BrowseScope({
     super.key,
     required this.accounts,
     required this.account,
     required this.client,
+    required this.controller,
     required this.selectedItemId,
-    required this.onPick,
-    required this.onOpen,
-    required this.onPeek,
+    required this.onSelect,
+    required this.onPutUp,
+    this.libraryStrip = true,
     required super.child,
   });
 
   static BrowseScope of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<BrowseScope>()!;
 
+  void onOpen(BrowseRoute route) => controller.open(route);
+
   /// Cached browse call on this server.
   Future<T> load<T>(String key, Future<T> Function(JellyfinClient c) fn) =>
       accounts.cached(account.serverId, key, () => fn(client));
 
-  /// Click / Enter on a card: playable items are picked, containers open.
+  /// Click / Enter on a card: series, movies and episodes are selected,
+  /// seasons open their series, libraries and folders open.
   void activate(JellyfinItem item) {
-    if (isPlayable(item)) {
-      onPick(item);
+    if (isSelectable(item)) {
+      onSelect(item);
       return;
     }
     switch (item.kind) {
-      case JellyfinItemKind.series:
-        onOpen(SeriesRoute(item));
       case JellyfinItemKind.season:
         final sid = item.seriesId;
         if (sid != null) {
@@ -193,7 +320,7 @@ class BrowseScope extends InheritedWidget {
     }
   }
 
-  /// Opens the series of an episode (or the item itself if it has none).
+  /// Opens the series of an episode.
   void openSeriesOf(JellyfinItem episode) {
     final sid = episode.seriesId;
     if (sid == null) return;
@@ -206,23 +333,28 @@ class BrowseScope extends InheritedWidget {
   bool updateShouldNotify(BrowseScope old) =>
       old.selectedItemId != selectedItemId ||
       old.account != account ||
-      old.client != client;
+      old.client != client ||
+      old.libraryStrip != libraryStrip;
 }
 
-/// Runs [load] once (again on [retry]) and shows [builder] with the result,
-/// a spinner meanwhile, and a compact error with Retry on failure.
+/// Runs [load] once (again on [retry] and when [version] changes) and
+/// shows [builder] with the result, a spinner meanwhile, and a compact
+/// error with Retry on failure. A reload for a new [version] keeps the old
+/// result on screen until the new one arrives.
 class Loader<T> extends StatefulWidget {
   final Future<T> Function() load;
   final Widget Function(BuildContext context, T data) builder;
   final Widget? loading;
   /// When false the error collapses to nothing (optional sections).
   final bool showError;
+  final Object? version;
   const Loader({
     super.key,
     required this.load,
     required this.builder,
     this.loading,
     this.showError = true,
+    this.version,
   });
 
   @override
@@ -231,22 +363,31 @@ class Loader<T> extends StatefulWidget {
 
 class _LoaderState<T> extends State<Loader<T>> {
   late Future<T> _future = widget.load();
+  (T,)? _last;
 
   void _retry() => setState(() => _future = widget.load());
+
+  @override
+  void didUpdateWidget(Loader<T> old) {
+    super.didUpdateWidget(old);
+    if (old.version != widget.version) _future = widget.load();
+  }
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<T>(
       future: _future,
       builder: (context, snap) {
-        if (snap.hasData) return widget.builder(context, snap.data as T);
+        if (snap.hasData || (snap.connectionState == ConnectionState.done && !snap.hasError)) {
+          _last = (snap.data as T,);
+          return widget.builder(context, snap.data as T);
+        }
         if (snap.hasError) {
           if (!widget.showError) return const SizedBox.shrink();
           return LoadError(error: snap.error!, onRetry: _retry);
         }
-        if (snap.connectionState == ConnectionState.done) {
-          return widget.builder(context, snap.data as T);
-        }
+        final last = _last;
+        if (last != null) return widget.builder(context, last.$1);
         return widget.loading ??
             const Padding(
               padding: EdgeInsets.all(32),

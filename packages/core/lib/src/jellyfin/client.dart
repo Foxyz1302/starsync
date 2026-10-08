@@ -180,7 +180,8 @@ class JellyfinClient {
   final JellyfinHttp _http;
 
   /// Fields requested for list items: enough for cards and detail headers.
-  static const listFields = 'PrimaryImageAspectRatio,Overview,ChildCount,RecursiveItemCount';
+  static const listFields =
+      'PrimaryImageAspectRatio,Overview,ChildCount,RecursiveItemCount,DateCreated';
   static const _imageParams = {
     'enableImageTypes': 'Primary,Backdrop,Thumb,Logo',
     'imageTypeLimit': '1',
@@ -349,6 +350,22 @@ class JellyfinClient {
         .map((e) => JellyfinItem.fromJson(e.cast<String, dynamic>()))
         .toList();
   }
+
+  /// Episodes and movies the user finished, most recently played first
+  /// ([JellyfinUserData.lastPlayedDate] set): when each series was last
+  /// watched, which [resume] and [nextUp] do not tell for fully played
+  /// episodes.
+  Future<List<JellyfinItem>> recentlyPlayed({int limit = 100}) async => (await items(
+        JellyfinItemQuery(
+          includeItemTypes: const [JellyfinItemType.episode, JellyfinItemType.movie],
+          recursive: true,
+          filters: const [JellyfinFilter.isPlayed],
+          sortBy: const [JellyfinSortBy.datePlayed],
+          descending: true,
+          limit: limit,
+        ),
+      ))
+          .items;
 
   /// A page of library items; see [JellyfinItemQuery].
   Future<JellyfinItemPage> items(JellyfinItemQuery q) async {

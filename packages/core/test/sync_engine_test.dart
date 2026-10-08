@@ -538,6 +538,21 @@ void main() {
     });
   });
 
+  test('host flag: only the marked member, on the wire as host:true', () {
+    join('a', 'alice');
+    join('b', 'bob');
+    engine.members['a']!.host = true;
+    final members = {for (final m in engine.broadcast().members) m.name: m};
+    expect(members['alice']!.host, isTrue);
+    expect(members['bob']!.host, isFalse);
+    final json = engine.broadcast().toJson()['members'] as List;
+    expect((json.first as Map)['host'], isTrue);
+    expect((json.last as Map).containsKey('host'), isFalse);
+    final back = StateBroadcast.fromJson(
+        Map<String, Object?>.from(jsonDecode(jsonEncode(engine.broadcast().toJson())) as Map));
+    expect([for (final m in back.members) m.host], [true, false]);
+  });
+
   group('profile + avatars', () {
     // Real magic bytes: anything that is not PNG/JPEG/WebP/GIF is dropped.
     final png = base64Encode([0x89, 0x50, 0x4E, 0x47, ...List<int>.generate(60, (i) => i)]);

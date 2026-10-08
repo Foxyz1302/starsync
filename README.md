@@ -43,9 +43,11 @@ profile: name, picture with a crop editor, colour, and links to the
 settings), the Library / Schedule / Settings tabs, and the party. Offline
 the party side has Join and Host; in a server it shows everyone's avatar
 with a ring for their state (green ready, amber buffering, grey not ready,
-dimmed reconnecting; a crown on yours when you host, a tower on whoever
+dimmed reconnecting; a crown on whoever hosts, a tower on whoever
 passes the video on). Click the avatars for the member list (force ready,
-kick). Beside them the server and "ready n/m", the chat button with unread
+kick, "Copy invite address"; when you host it lists this computer's
+network addresses with the port, and friends outside your network need
+that port forwarded or a server they can all reach, like a VPS). Beside them the server and "ready n/m", the chat button with unread
 count, and Leave. Empty strip space drags the window.
 
 The player fills the window under the strip. Pick a tab and it shrinks to
@@ -53,7 +55,8 @@ a mini player in a corner: drag it anywhere and it snaps to the nearest
 corner; double-click or ⤢ makes it big again, × stops watching (you stay in
 the server, muted) and the strip's screen button brings it back. F or
 double-click on the picture goes fullscreen (the strip hides, the party
-shows in a corner while paused), Esc leaves it. While playback waits, a
+shows in a corner while paused, the window buttons sit in the player's top
+bar while its controls are up), Esc leaves it. While playback waits, a
 pill under the picture says for whom ("Waiting for you · press Space when
 ready"). Chat and activity open in a panel on the right (chat button or
 Tab); joins, leaves, chat and other news also pop up bottom left with the
@@ -67,7 +70,7 @@ colour is yours only.
 Host in the strip: set a port and an optional password (blank = anyone can
 join), then Host. The app starts a server inside itself and joins it; you
 are the host and nobody can kick you. Nothing is up yet: pick what to
-watch in the Library tab (below) and "Put it up for everyone". Leaving or
+watch in the Library tab (below) and put it up. Leaving or
 closing the app stops the server. Friends need to reach your machine: open
 the TCP port on your router (or use a LAN or VPN address). Friends open
 nothing. Ports you hosted on before are one click away in the Host card.
@@ -77,10 +80,30 @@ disk. Nothing is uploaded or stored anywhere.
 
 ## Library
 
-What to watch: Jellyfin (browse your linked servers, see below), Link
-(paste an http(s) URL; Ctrl+V outside a field pastes it in) or File (path
-or Browse), then "Put it up for everyone" and the player opens. Offline the
-library browses but nothing goes up until you join or host.
+What to watch, from three sources (the switch at the top; Ctrl+V outside
+a field pastes a link into Link):
+
+- **Jellyfin**: your linked servers (see below). Library chips beside the
+  switch, then one **Continue** row (what you were watching and what comes
+  next, one card per series, the one you watched most recently first;
+  series not touched for two months drop out) and **Latest in** each
+  library (one card per series: "S1E1" or "3 new"; Show all opens the
+  library newest first). Re-uploads (added long after they aired) are
+  hidden from Latest; the row's ⋮ menu turns that off. Search (/), library
+  grids (sort, unwatched, favourites) and series pages sit behind them.
+  Click a card to select it: its
+  details open on the right with "Put it up · S1E3", mark watched /
+  unwatched, remove from Continue and the episode list (click an episode
+  to choose it). Double-click a card or an episode to put it up at once.
+- **Link**: paste an http(s) link. The preview shows what it is (title and
+  thumbnail for YouTube, else the file name); in a server, pick how the
+  others get it (everyone fetches it, the server fetches it, or through
+  you). Your last 12 links are listed under it.
+- **Files**: video folders you add on this computer, grouped by series,
+  or any file through Browse. The others stream it from you.
+
+Put it up and the player opens. Offline the library browses but nothing
+goes up until you join or host ("Join or host to watch together").
 
 ## Dedicated server
 
@@ -118,13 +141,23 @@ is one, then Enter or Join. Your name and picture come from your profile
 
 ## Settings
 
-The Settings tab (Ctrl+,) has a page per topic: Profile; Player (hardware
-decoding: auto, off or custom, the env var `SYNC_RELAY_HWDEC` overrides
-it, applies on the next join or Reload video; "Experimental: mpv-style
-controls", below; video shaders, see below); Jellyfin & integrations
-(linked Jellyfin servers, below, and playing the next episode
-automatically); Updates; Keyboard shortcuts (read-only); About (the
-version).
+The Settings tab (Ctrl+,) has a page per topic, each setting with a line
+of help: Profile; Party & network (the Host card's default port and
+password, recent servers with remove); Player (below); Jellyfin &
+integrations (linked Jellyfin servers, below, the AnimeFlow connection:
+"connected as <name>" with what you may do, or why not, and playing the
+next episode automatically); Notifications & sounds (what pops up; there
+is nothing to switch yet); Updates; Keyboard shortcuts (read-only); About
+(the version).
+
+Player settings live in the player: ⚙ at the right end of its controls
+(both designs) opens them, and Settings → Player has the same ones (plus
+the custom shader files). Player design: Standard or uosc (below);
+progress line when hidden (on by default: a 2 px line at the bottom of
+the video while the controls are hidden); upscaling shader (see below);
+hardware decoding (auto, off or custom; the env var `SYNC_RELAY_HWDEC`
+overrides it); in the player also the subtitle and audio track. Every
+change applies right away.
 
 Keys while the player fills the window: Space = ready / unready, Tab =
 chat & activity, Left/Right = seek 10 s, Shift+Right = skip 1:30,
@@ -140,15 +173,15 @@ shows the time and the chapter title. The chapters button lists them
 Subtitles buttons (with the track count) list tracks as "Japanese · E-AC3
 2.0 · title"; subtitles have Off.
 
-Experimental mpv-style controls (Settings → Player, off by default,
+The uosc player design (⚙ → Player design, Standard by default,
 switches right away): video controls modeled on mpv's uosc theme. A thick
 timeline across the bottom shows the played part, the cached part ahead
 (hatched), chapter starts as diamonds and the time; hovering it shows the
 chapter title and the time there. With the controls hidden it stays as a
-thin line. Above it flat buttons: ≡ menu, Subtitles and Audio (with the
+thin line (unless "Progress line when hidden" is off). Above it flat buttons: ≡ menu, Subtitles and Audio (with the
 track count), the shader badge (the active Anime4K mode, e.g. "A HQ"),
-ready, chapters, 1:30, previous / next episode, change video, volume and
-fullscreen; chat and back-to-library top right. Keys and skip buttons work
+ready, chapters, 1:30, previous / next episode, change video, volume, ⚙
+and fullscreen; chat and back-to-library top right. Keys and skip buttons work
 the same.
 
 Skipping: during the opening a "Skip OP" button floats in the corner (it
@@ -258,8 +291,9 @@ C (480p), A+A, B+B, C+A, each as HQ (strong GPUs, GTX 1080 and up) or Fast
 
 Pick one with the ✨ button in the player's control bar (also in
 fullscreen) or Ctrl+0..6; the change applies live and is saved, so the next
-session starts with it. Settings → Player sets the default,
-HQ or Fast (used by Ctrl+1..6) and the custom files. Shaders cost GPU time
+session starts with it. The player's ⚙ and Settings → Player set it too,
+with HQ or Fast (used by Ctrl+1..6); Settings → Player holds the custom
+files. Shaders cost GPU time
 every frame and need hardware video rendering: on media_kit's software
 fallback they do nothing, and the app says so. A shader that is missing or
 fails to load shows a toast and switches shaders off.

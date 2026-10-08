@@ -103,8 +103,9 @@ AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator 
     buffering: !m.stale && m.ready && playing && m.buffered < RelayConstants.minBufferSecs,
     relaying: relay != null && relay.source.isNotEmpty && relay.source == m.id,
     stale: m.stale,
-    // Only your own app knows it hosts: the state carries no host flag.
-    host: self && coord.hostFile != null,
+    // The state marks the host (`members[].host`); your own app also
+    // knows before the first state.
+    host: m.host || (self && coord.hostFile != null),
     self: self,
   );
 }

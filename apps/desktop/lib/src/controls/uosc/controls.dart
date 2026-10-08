@@ -5,11 +5,12 @@ import 'package:signals/signals_flutter.dart';
 
 import '../../state/settings.dart';
 
-// The experimental mpv-style (uosc) controls frame: a full-width timeline
-// at the bottom with a row of flat buttons above it, a corner widget top
-// right. Mouse movement shows them; after [UoscControls.hideAfter] without
-// any they fade out, the timeline shrinks to a thin line and the cursor
-// hides. Our own frame: no media_kit controls state to reach into.
+// The mpv-style (uosc) controls frame: a full-width timeline at the
+// bottom with a row of flat buttons above it, a corner widget top right.
+// Mouse movement shows them; after [UoscControls.hideAfter] without any
+// they fade out, the timeline shrinks to a 2 px line (gone when "Progress
+// line when hidden" is off) and the cursor hides. Our own frame: no
+// media_kit controls state to reach into.
 
 class UoscControls extends StatefulWidget {
   /// The timeline; [expanded] is false while the controls are hidden.
@@ -167,7 +168,19 @@ class UoscControlsState extends State<UoscControls> {
                     ),
                   ),
                 ),
-                widget.timeline(context, visible),
+                // Hidden: the collapsed timeline is the progress line,
+                // unless the player settings turn it off.
+                SignalBuilder(
+                  builder: (context) {
+                    final line = AppSettings.instance.progressLine.value;
+                    return AnimatedOpacity(
+                      key: const ValueKey('uosc-timeline-wrap'),
+                      duration: fade,
+                      opacity: visible || line ? 1 : 0,
+                      child: widget.timeline(context, visible),
+                    );
+                  },
+                ),
               ],
             ),
           ),
@@ -177,9 +190,9 @@ class UoscControlsState extends State<UoscControls> {
   }
 }
 
-/// The session's controls: media_kit's ([material]) or, with Settings →
-/// "Experimental: mpv-style controls", the uosc ones ([mpv]). Switches
-/// live when the setting changes.
+/// The session's controls: the standard ones ([material]) or, with the
+/// "Player design" setting on uosc, the uosc ones ([mpv]). Switches live
+/// when the setting changes.
 class SessionControlsSwitch extends StatelessWidget {
   final WidgetBuilder material;
   final WidgetBuilder mpv;

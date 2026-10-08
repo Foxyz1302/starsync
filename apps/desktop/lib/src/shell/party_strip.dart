@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -339,15 +341,49 @@ class StripTab extends StatelessWidget {
 }
 
 /// Who is in the server, from the avatars: status, host / relay pills,
-/// and per member force ready and kick.
+/// per member force ready and kick, and the address to invite friends.
 Future<void> showMembersCard(BuildContext context) => showPopover<void>(
   context,
   at: const Alignment(0.7, -0.84),
   child: const MembersCard(),
 );
 
+/// "ip:port" for each of [addresses] friends could dial: IPv4, neither
+/// loopback nor link-local, private (LAN) ranges first, no repeats.
+List<String> inviteAddresses(Iterable<InternetAddress> addresses, String port) {
+  bool private(List<int> b) =>
+      b[0] == 10 || (b[0] == 192 && b[1] == 168) || (b[0] == 172 && b[1] >= 16 && b[1] < 32);
+  final usable = [
+    for (final a in addresses)
+      if (a.type == InternetAddressType.IPv4 &&
+          !a.isLoopback &&
+          !a.isLinkLocal &&
+          !(a.rawAddress[0] == 169 && a.rawAddress[1] == 254))
+        a,
+  ];
+  final ordered = [
+    ...usable.where((a) => private(a.rawAddress)),
+    ...usable.where((a) => !private(a.rawAddress)),
+  ];
+  return {for (final a in ordered) '${a.address}:$port'}.toList();
+}
+
+/// This machine's [inviteAddresses] (empty when the interfaces can't be
+/// listed).
+Future<List<String>> lanInviteAddresses(String port) async {
+  try {
+    final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
+    return inviteAddresses([for (final i in interfaces) ...i.addresses], port);
+  } catch (e) {
+    debugPrint('list network interfaces failed: $e');
+    return const [];
+  }
+}
+
 class MembersCard extends StatelessWidget {
-  const MembersCard({super.key});
+  /// This machine's invite addresses for a port (tests pass fixed ones).
+  final Future<List<String>> Function(String port) lanAddresses;
+  const MembersCard({super.key, this.lanAddresses = lanInviteAddresses});
 
   @override
   Widget build(BuildContext context) {
@@ -392,22 +428,26 @@ class MembersCard extends StatelessWidget {
                       style: TextStyle(color: scheme.onSurfaceVariant),
                     ),
                   ),
-                if (address != null) ...[
-                  const Divider(),
+                const Divider(),
+                if (address != null)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
+                        key: const ValueKey('copy-invite'),
                         onPressed: () =>
                             Clipboard.setData(ClipboardData(text: address)),
                         icon: const Icon(Icons.copy, size: 16),
-                        label: const Text('Copy address'),
+                        label: const Text('Copy invite address'),
                       ),
                     ),
+                  )
+                else
+                  _HostInvite(
+                    port: session.lastForm.hostPort,
+                    lanAddresses: lanAddresses,
                   ),
-                ] else
-                  const SizedBox(height: 8),
               ],
             );
           },
@@ -471,7 +511,7 @@ class _MemberTile extends StatelessWidget {
             value: 'force',
             child: Text(m.ready ? 'Force unready' : 'Force ready'),
           ),
-          if (!info.self)
+          if (!info.self && !info.host)
             PopupMenuItem(
               value: 'kick',
               child: Text(
@@ -481,6 +521,80 @@ class _MemberTile extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// Hosting: the addresses friends on this network can join, the first
+/// one behind "Copy invite address", and what friends elsewhere need.
+class _HostInvite extends StatefulWidget {
+  final String port;
+  final Future<List<String>> Function(String port) lanAddresses;
+  const _HostInvite({required this.port, required this.lanAddresses});
+
+  @override
+  State<_HostInvite> createState() => _HostInviteState();
+}
+
+class _HostInviteState extends State<_HostInvite> {
+  late final Future<List<String>> _addresses = widget.lanAddresses(widget.port);
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    return FutureBuilder<List<String>>(
+      future: _addresses,
+      builder: (context, snap) {
+        final list = snap.data ?? const <String>[];
+        void copy(String a) => Clipboard.setData(ClipboardData(text: a));
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          child: Column(
+            key: const ValueKey('host-invite'),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextButton.icon(
+                key: const ValueKey('copy-invite'),
+                onPressed: list.isEmpty ? null : () => copy(list.first),
+                icon: const Icon(Icons.copy, size: 16),
+                label: const Text('Copy invite address'),
+              ),
+              if (snap.connectionState != ConnectionState.done)
+                const SizedBox.shrink()
+              else if (list.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text('No network address found', style: TextStyle(color: muted)),
+                )
+              else
+                for (final a in list)
+                  InkWell(
+                    key: ValueKey('invite-$a'),
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => copy(a),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      child: Row(
+                        children: [
+                          Expanded(child: Text(a, style: const TextStyle(fontFamily: 'monospace'))),
+                          Icon(Icons.copy, size: 14, color: muted),
+                        ],
+                      ),
+                    ),
+                  ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
+                child: Text(
+                  'Works for friends on your network. Friends elsewhere need port '
+                  '${widget.port} forwarded on your router, or a server they can '
+                  'all reach (like a VPS).',
+                  style: TextStyle(color: muted, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

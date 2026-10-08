@@ -33,6 +33,9 @@ bool isPlayable(JellyfinItem item) => switch (item.kind) {
       _ => !item.isFolder && item.mediaType == 'Video',
     };
 
+/// Cards that select (details panel) on click: playable items and series.
+bool isSelectable(JellyfinItem item) => isPlayable(item) || item.kind == JellyfinItemKind.series;
+
 /// Line under a card title: "S2E3 · 12 min left", "2019 · 24 eps", ...
 String cardSubtitle(JellyfinItem item, {bool withSeries = false}) {
   final parts = <String>[];

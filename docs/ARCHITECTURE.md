@@ -306,7 +306,8 @@ behind a `JellyfinHttp` interface (tests inject a fake). Plans:
 
 - `JellyfinClient`: one server + one user. Auth (Quick Connect, password,
   `/Users/Me` check, logout), browsing (views, Resume, NextUp, Latest, paged
-  `/Items`, search, seasons, episodes), image URLs (tag + maxWidth, no token
+  `/Items` with `DateCreated`, search, seasons, episodes, recently played),
+  image URLs (tag + maxWidth, no token
   needed), PlaybackInfo, stream URLs, MediaSegments (a 404 = none),
   Playing / Progress / Stopped reports, played / unplayed / resume position.
 - `normalizeServerUrl`, `parseJellyfinLink`: pasted addresses and item links
@@ -500,10 +501,9 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   matched with `matchTrack` against the source's streams (mapped to mpv ids
   with `mpvTrackId`) or mpv's track list, and selected locally. Nothing goes
   on the wire.
-- **Change video**: the player's "Change video" opens the Library tab
-  (the shared `MediaPicker`, `screens/session/swap_panel.dart`); Link
-  goes through `mediaForLink`, a Jellyfin pick as a ref, File (host only)
-  through `ServerIsolate.setFile` and a matching `swap`.
+- **Change video**: the player's "Change video" opens the Library tab;
+  Link goes through `mediaForLink`, a Jellyfin pick as a ref, a file
+  through `ServerIsolate.setFile` (host) or the relay (`swapFile`).
 
 ## Desktop UI
 
@@ -523,15 +523,19 @@ sideways until an end, then the page).
   ready; spreads on hover; 5 shown, 3 under 1100 px), the server name and
   "ready n/m" (hidden under 1100 px), chat with an unread badge, and Leave
   (asks first). The stack opens the members card (status, host / relay
-  pills, "via host", force ready, kick). Empty strip space is the window
+  pills, "via host", force ready, kick for all but the host, "Copy invite
+  address": the dialled address when joined; hosting, `inviteAddresses`
+  of `NetworkInterface.list` (IPv4, no loopback or link-local, private
+  ranges first) with the Host port, and a note that friends outside the
+  LAN need a forwarded port or a reachable server). Empty strip space is the window
   drag area; the window buttons sit at its end. Debug builds add a button
   that opens the layout mock (`screens/demo/`).
 - **Avatars** (`avatar.dart`): `StatusAvatar` draws a ring outside the
   picture with a gap in the background colour (both scale with the size):
   green ready, amber buffering (with a spinner), grey not ready, dimmed
-  stale; a crown for the host (only your own app knows it hosts: the
-  state has no host flag) and a tower for the member passing the video
-  on. `memberAvatarImage` is the one picture lookup: yours from the
+  stale; a crown for the host (`members[].host` in the state; your own
+  app also knows before the first state) and a tower for the member
+  passing the video on. `memberAvatarImage` is the one picture lookup: yours from the
   profile, anyone else's from `coordinator.avatars` by `avatarHash`.
   Colours are local: yours is picked in the profile, others' come from
   their name.
@@ -552,16 +556,40 @@ sideways until an end, then the page).
   the `connect_form` box (an old picture path is shrunk once and kept as
   bytes). Online, a name change (once typing settles) or picture change
   goes out through `Profile.push` (`coordinator.updateProfile`).
-- **Tabs**: Library (`library_tab.dart`) is the media picker
-  (`media_picker.dart`: Jellyfin, Link, File; a `MediaPickerController`
-  whose `selection` is a sealed `PickedMedia`, see `picked_media.dart`)
-  with "Put it up for everyone" (`screens/session/swap_panel.dart`); it
-  starts on what was last put up. Offline it only browses. Schedule is a
-  placeholder. Settings (`settings_tab.dart`) has a left nav (chips under
-  760 px) over the settings panels (`screens/home/settings_page.dart`):
-  profile, player (hardware decoding, mpv-style controls, shaders),
-  Jellyfin & integrations (linked servers, auto-advance), updates,
-  shortcuts, about.
+- **Tabs**: Library (`library_tab.dart`): a source switch (Jellyfin /
+  Link / Files, fade through) with the Jellyfin library chips beside it.
+  Its state (source, link field and relay mode, selected Jellyfin card,
+  last pick) is the shell's `MediaPickerController`
+  (`screens/home/media_picker.dart`; picks are sealed `PickedMedia`,
+  `picked_media.dart`), so it survives tab switches; it opens on Jellyfin
+  with the last put-up selected. Jellyfin cards select on click and open
+  `JellyfinDetailsPanel` (`jellyfin/details_panel.dart`, 400 px, slides
+  in, docked from 1000 px library width, floating over it below; content
+  cross-fades between items): banner, meta, "Put it up · S1E3", mark
+  watched / unwatched, remove from Continue, overview, the episode list
+  (click picks the episode, double-click puts it up). A double-click on a
+  card puts it up (a series: `playableFor`, its next episode). Link
+  (`library_link.dart`): paste field, a preview (YouTube oEmbed title and
+  thumbnail, else the file name), the three relay modes online, and the
+  last 12 links put up (`recentLinks` in the `connect_form` box). Files
+  is `FilesPage` (`files/`). Ctrl+V outside a field pastes a link into
+  Link. Offline everything browses; the buttons say "Join or host to
+  watch together". Schedule (`schedule/`) is a week of day columns built
+  from AniList's airing schedule (`anilist.dart`: pages cached 10 min in
+  memory and 1 h on disk, stale data shown on 429 or failure) matched
+  against AnimeFlow (`animeflow.dart`, app API with the Jellyfin token;
+  `/library` marks shows on Jellyfin it doesn't track) into a status per
+  episode (`schedule_model.dart`); requests and the owner's inbox are in
+  `requests_sheet.dart`. It refreshes every minute; mouse drag and
+  Shift+wheel scroll the board sideways, the plain wheel scrolls a column.
+  Settings (`settings_tab.dart`) has a left nav with icons
+  (icon chips under 760 px) over pages of rounded Material cards
+  (`SettingsPanel`), one help line under every setting: profile, party &
+  network (Host card port and password in the connect form, recent
+  servers), player (the shared rows below, custom shader files),
+  Jellyfin & integrations (linked servers, AnimeFlow's `/me` via
+  `AnimeFlowClient.fromAccounts`, auto-advance), notifications & sounds
+  (what pops up; no switches), updates, shortcuts, about.
 - **Player** (`session_player.dart`): `SessionPlayer` holds the one
   `Video` of the current player (a new `GlobalKey` per player generation).
   The shell keeps it in one layer of the body at one place in the element
@@ -578,15 +606,28 @@ sideways until an end, then the page).
   is closed opens it: full right after joining or after putting it up
   here, else mini. While held, a pill under the picture names who
   everyone waits for, or says "Waiting for you · press Space" (a click
-  marks you ready); the mini shows it in its hover bar.
+  marks you ready); the mini shows it in its hover bar. ⚙ in both
+  control designs opens the player settings card (`controls/
+  player_settings.dart`, `showPopover`): player design, progress line
+  when hidden, upscaling shader, hardware decoding (set live on mpv's
+  `hwdec`), subtitle and audio track. The rows (`playerSettingRows`) are
+  the same widgets Settings → Player shows; all apply live. The progress
+  line (2 px, `AppSettings.progressLine`) is the collapsed uosc timeline;
+  for the standard design `ControlsHoverProbe` mirrors media_kit's
+  visibility rule (up on mount and mouse movement, down 3 s later or on
+  exit), as media_kit does not expose it. Fullscreen adds the
+  `WindowButtons` to the top bar while the controls are up (restore
+  leaves fullscreen).
 - **Chat** (`chat_panel.dart`): a 340 px panel sliding in at the right
   (strip button or Tab): chat with avatars, other activity as quiet lines.
   **Toasts** (`toasts.dart`): the coordinator's toasts bottom left, with
-  the actor's avatar when the text starts with a member's name; each
+  the avatar of their `ToastItem.actor` (feed and chat toasts; the app's
+  own have none); each
   slides in, stays 5 s, then slides out and collapses its gap.
 
-Settings persist in two Hive boxes: `connect_form` (last form, recents and
-the profile picture and colour; saved even when a join fails) and
+Settings persist in two Hive boxes: `connect_form` (last form, recent
+servers and links, the profile picture and colour; saved even when a join
+fails) and
 `settings`. Link media names are derived from the URL path and never
 contain a query string.
 
@@ -604,14 +645,28 @@ Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
   -> Quick Connect (code, poll, cancel) or password; reconnect must hit the
   same ServerId. `accounts_panel.dart` is the Integrations card.
 - `browser.dart`: back stack of `BrowseRoute`s (Home rows, library grid,
-  series, detail) kept alive under `Visibility(maintainState)` so back keeps
-  scroll and loaded pages; search (300 ms debounce) overlays them. Cards
-  (`cards.dart`) fill the width with whole columns (`fitColumns`); rows and
-  grids are lazy builders; library grids page 100 at a time with skeletons
-  up to the total count. Images (`images.dart`) are `Image.network` at
-  width steps (160..2560) with the image tag in the URL, so the image cache
-  key changes only when the image does. An inspector pane follows
-  hover/focus from 1400 px browser width.
+  series) kept alive under `Visibility(maintainState)` so back keeps
+  scroll and loaded pages; search (300 ms debounce) overlays them. Where
+  it is (server, stack, a data version that moves after watched-state
+  changes so rows reload in place, the Continue keys) is a
+  `BrowseController` shared with the header chips and the details panel.
+  Cards (`cards.dart`) fill the width with whole columns (`fitColumns`);
+  rows are `HScroll`s, rows and grids lazy builders; library grids page
+  100 at a time with skeletons up to the total count. Images
+  (`images.dart`) are `Image.network` at width steps (160..2560) with the
+  image tag in the URL, so the image cache key changes only when the
+  image does.
+- Home (`home_page.dart`, rules in `home_rows.dart`): one Continue row,
+  `mergeContinue` over Resume, NextUp and recently played: one card per
+  series, ordered by when it was last played, the resume item if that was
+  the last thing played in it, else next up; series untouched for 60 days
+  drop out unless nothing else is left; "Remove from Continue" clears a
+  resume point and hides the series (`dismissed:<serverId>` in the
+  `jellyfin` box) until it is played again. "Latest in X" loads single
+  items (`groupItems=false`) and `latestCards` makes one series card per
+  series (its poster, "S1E1" or "N new"); with `hideReReleases` (setting,
+  row menu, default on) items added over 30 days after they aired are left
+  out. "Show all" opens the library sorted by date added, newest first.
 - Picking an item gives a `JellyfinMedia` (serverId, baseUrl, itemId,
   mediaSourceId?, title, subtitle, runtime; no credentials). The library
   remembers the last pick in the `jellyfin` box and puts it up as a ref
@@ -626,12 +681,14 @@ Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
   video" opens the library on the series of the episode playing, its
   season selected and the episode highlighted.
 
-Session controls: media_kit's `MaterialDesktopVideoControls` with our
-bars (`shell/session_player.dart`, pieces in
+Session controls (the Standard player design): media_kit's
+`MaterialDesktopVideoControls` with our bars (`shell/session_player.dart`, pieces in
 `screens/session/player_controls.dart`); its own double-click and keys are
 off (its double-click pushes a fullscreen route with a second `Video`), the
 picture's double-click is a raw pointer observer (`DoubleClickListener`).
-The top bar holds the title, Change video, chat and back-to-library. Its seek bar is off; ours
+The top bar holds the title, Change video, chat and back-to-library
+(fullscreen: exit, then the window buttons); the bottom bar ends with the
+shader button, ⚙ and fullscreen. Its seek bar is off; ours
 (`ChapterSeekBar`: chapter diamonds, hover time with the chapter title)
 sits in the bottom bar, which is taller by the bar's height (the top bar
 keeps its row at the top). A drag sends no hover events, so the bar keeps
@@ -640,8 +697,8 @@ private controls state (`keepVideoControlsAwake`). Pills (Skip OP / ED /
 1:30, Next episode) and cards live outside the auto-hiding controls, so
 they stay up when the controls hide.
 
-Experimental mpv-style controls (`controls/uosc/`, after mpv's uosc theme;
-Settings toggle `AppSettings.mpvControls`, default off): the `Video`'s
+The uosc player design (`controls/uosc/`, after mpv's uosc theme;
+"Player design" = `AppSettings.mpvControls`, default Standard): the `Video`'s
 controls builder wraps both sets in `SessionControlsSwitch`, which follows
 the setting live. `UoscControls` is our
 own frame (no media_kit controls state): mouse movement shows it, 3 s
@@ -651,12 +708,13 @@ drag and while a menu route is open, double-click toggles fullscreen.
 `cacheRect` (position to `buffered`) hatched (`hatchLines`), chapter
 diamonds on the top edge, current time and duration in boxes inside it, a
 hover tip with the chapter title over the hover time; hidden, it shrinks
-to a 3 px line with chapter ticks. Above it a row of flat buttons: menu (≡:
+to a 2 px line with chapter ticks (faded out when the progress line
+setting is off). Above it a row of flat buttons: menu (≡:
 change video, chat & activity, reload, mark everyone ready, fullscreen,
 leave),
 subtitles and audio with track counts, a shader badge ("A HQ", opening the
 shared `showShaderMenu`), ready, mark everyone ready, reload; 1:30,
-chapters, previous / next episode, change video, volume, fullscreen; chat
+chapters, previous / next episode, change video, volume, ⚙, fullscreen; chat
 and back-to-library (fullscreen: exit) top right. Menus (`showUoscMenu`: a popup route above the button, the
 current row highlighted) list tracks and chapters with start times. All
 actions are the coordinator's (seeks through `player.seek`, the user path;
@@ -665,7 +723,7 @@ the same in both sets.
 
 Window chrome is frameless (`window_manager`): the party strip is the drag
 area and holds the min/max/close buttons (`widgets/window_buttons.dart`);
-fullscreen has neither.
+fullscreen has no drag area and shows the buttons in the player's top bar.
 
 ## Health reporting
 

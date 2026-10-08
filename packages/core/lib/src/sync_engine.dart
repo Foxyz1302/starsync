@@ -52,6 +52,8 @@ class EngineMember {
   double buffered = 0;
   /// Last reported Jellyfin access by ServerId (`report.jf`).
   Map<String, bool> jf = const {};
+  /// The hosting app's own member (set by the server from the host key).
+  bool host = false;
   DateTime lastSeen;
   EngineMember({
     required this.id,
@@ -91,6 +93,7 @@ class EngineMember {
         buffered: buffered,
         stale: stale,
         jf: jf,
+        host: host,
       );
 }
 

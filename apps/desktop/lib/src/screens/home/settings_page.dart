@@ -2,8 +2,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 
-import '../../playback/playback_controller.dart';
-import '../../shaders/shader_presets.dart';
 import '../../state/settings.dart';
 import '../../update/update_controller.dart';
 import 'ui.dart';
@@ -26,7 +24,8 @@ const sessionShortcuts = [
   ('Esc', 'Close the panel or fullscreen, else ask to leave'),
 ];
 
-/// One titled panel of the Settings tab.
+/// One titled card of the Settings tab (rounded Material, so list tiles
+/// paint their ripple on it).
 class SettingsPanel extends StatelessWidget {
   final String title;
   final Widget child;
@@ -36,76 +35,56 @@ class SettingsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: kGap),
-      child: Panel(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [SectionLabel(title), child],
+      child: Material(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 6),
+              child,
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class HwdecSetting extends StatefulWidget {
-  const HwdecSetting({super.key});
-
-  @override
-  State<HwdecSetting> createState() => _HwdecSettingState();
-}
-
-class _HwdecSettingState extends State<HwdecSetting> {
-  final _s = AppSettings.instance;
-  late final _custom = TextEditingController(text: _s.hwdecCustom.peek());
-
-  @override
-  void dispose() {
-    _custom.dispose();
-    super.dispose();
-  }
+/// A tinted hint card at the top of a Settings page.
+class SettingsHintCard extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  const SettingsHintCard({super.key, required this.icon, required this.text});
 
   @override
   Widget build(BuildContext context) {
-    return SignalBuilder(builder: (context) {
-      final mode = _s.hwdecMode.value;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.only(bottom: kGap),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: scheme.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
         children: [
-          const Text('Hardware decoding'),
-          const SizedBox(height: 4),
-          const Text(
-            'Applies on the next join or Reload video (Ctrl+R). Turn it off if video '
-            'shows glitches or a black picture.',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
-          ),
-          const SizedBox(height: 12),
-          SegmentedButton<HwdecMode>(
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(value: HwdecMode.auto, label: Text('Auto')),
-              ButtonSegment(value: HwdecMode.off, label: Text('Off')),
-              ButtonSegment(value: HwdecMode.custom, label: Text('Custom')),
-            ],
-            selected: {mode},
-            onSelectionChanged: (s) => _s.setHwdecMode(s.first),
-          ),
-          if (mode == HwdecMode.custom)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: TextField(
-                controller: _custom,
-                decoration: fieldDecoration('mpv hwdec value',
-                    hint: 'e.g. vaapi, nvdec, d3d11va, auto-safe'),
-                onChanged: _s.setHwdecCustom,
-              ),
-            ),
+          Icon(icon, color: scheme.primary),
+          const SizedBox(width: 12),
+          Expanded(child: Text(text)),
         ],
-      );
-    });
+      ),
+    );
   }
 }
 
-class ShaderSettings extends StatelessWidget {
-  const ShaderSettings({super.key});
+/// The .glsl files of the "Custom shaders" preset, in mpv order.
+class CustomShaderFiles extends StatelessWidget {
+  const CustomShaderFiles({super.key});
 
   Future<void> _addFiles() async {
     final List<PlatformFile> files;
@@ -130,65 +109,18 @@ class ShaderSettings extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = AppSettings.instance;
+    final muted = TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant);
     return SignalBuilder(builder: (context) {
-      final preset = s.shaderPreset.value;
-      final quality = s.shaderQuality.value;
       final custom = s.customShaders.value;
-      final mode = PlaybackController.lastRenderMode.value;
-      const hint = TextStyle(fontSize: 12, color: Colors.grey);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Anime4K upscales and sharpens anime on your GPU, for you only. '
-            'Mode A suits 1080p sources, B 720p, C 480p; A+A, B+B and C+A add '
-            'a second pass. HQ is for strong GPUs (GTX 1080 and up), Fast for '
-            'weaker ones. Costs GPU time every frame and only works with '
-            'hardware video rendering. In the player: the ✨ button or '
-            'Ctrl+1…6, Ctrl+0 for off; changes apply live and are saved here.',
-            style: hint,
-          ),
-          if (mode == RenderMode.software || mode == RenderMode.softwareGl)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                mode == RenderMode.software
-                    ? 'The last session used software rendering: shaders had no effect there.'
-                    : 'The last session rendered OpenGL on the CPU: shaders will be slow.',
-                style: const TextStyle(fontSize: 12, color: Colors.orange),
-              ),
-            ),
-          const SizedBox(height: 12),
           Row(
             children: [
-              const Text('Shaders'),
-              const SizedBox(width: 16),
-              DropdownButton<ShaderPreset>(
-                value: preset,
-                onChanged: (p) {
-                  if (p != null) s.setShaderPreset(p);
-                },
-                items: [
-                  for (final p in ShaderPreset.values)
-                    DropdownMenuItem(value: p, child: Text(p.label)),
-                ],
+              Expanded(
+                child: Text('Your own mpv shaders for the "Custom shaders" choice; they run in this order.',
+                    style: muted),
               ),
-              const Spacer(),
-              SegmentedButton<ShaderQuality>(
-                showSelectedIcon: false,
-                segments: [
-                  for (final q in ShaderQuality.values)
-                    ButtonSegment(value: q, label: Text(q.label)),
-                ],
-                selected: {quality},
-                onSelectionChanged: (q) => s.setShaderQuality(q.first),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              const Expanded(child: Text('Custom shaders (run in this order)')),
               TextButton.icon(
                 onPressed: _addFiles,
                 icon: const Icon(Icons.add, size: 18),
@@ -197,7 +129,7 @@ class ShaderSettings extends StatelessWidget {
             ],
           ),
           if (custom.isEmpty)
-            const Text('None picked.', style: hint)
+            Text('None picked.', style: muted)
           else
             for (final (i, path) in custom.indexed)
               Row(
@@ -205,15 +137,13 @@ class ShaderSettings extends StatelessWidget {
                   Expanded(
                     child: Tooltip(
                       message: path,
-                      child: Text(path.split(RegExp(r'[/\\]')).last,
-                          overflow: TextOverflow.ellipsis),
+                      child: Text(path.split(RegExp(r'[/\\]')).last, overflow: TextOverflow.ellipsis),
                     ),
                   ),
                   IconButton(
                     tooltip: 'Remove',
                     icon: const Icon(Icons.close, size: 18),
-                    onPressed: () =>
-                        s.setCustomShaders([...custom]..removeAt(i)),
+                    onPressed: () => s.setCustomShaders([...custom]..removeAt(i)),
                   ),
                 ],
               ),
@@ -264,33 +194,15 @@ class UpdateSettings extends StatelessWidget {
         const SizedBox(height: 8),
         SignalBuilder(
           builder: (context) => SwitchListTile(
+            key: const ValueKey('auto-check-updates'),
             contentPadding: EdgeInsets.zero,
-            title: const Text('Check automatically on start'),
+            title: const Text('Check for updates on start'),
+            subtitle: const Text('Looks for a new version when the app opens; nothing installs without asking'),
             value: s.autoCheckUpdates.value,
             onChanged: s.setAutoCheckUpdates,
           ),
         ),
       ],
-    );
-  }
-}
-
-class MpvControlsSetting extends StatelessWidget {
-  const MpvControlsSetting({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final s = AppSettings.instance;
-    return SignalBuilder(
-      builder: (context) => SwitchListTile(
-        key: const ValueKey('mpv-controls'),
-        contentPadding: EdgeInsets.zero,
-        title: const Text('Experimental: mpv-style controls'),
-        subtitle: const Text('Video controls modeled on mpv\'s uosc theme: a thick timeline with '
-            'chapters and the cached range, flat buttons and menus. Applies right away.'),
-        value: s.mpvControls.value,
-        onChanged: s.setMpvControls,
-      ),
     );
   }
 }
@@ -306,10 +218,30 @@ class AutoAdvanceSetting extends StatelessWidget {
         key: const ValueKey('auto-advance'),
         contentPadding: EdgeInsets.zero,
         title: const Text('Play the next episode automatically'),
-        subtitle: const Text('When an episode ends, a 10 s countdown puts up the next one; '
-            'anyone can cancel it on their screen.'),
+        subtitle: const Text('When a Jellyfin episode ends, a 10 s countdown puts up the next one; '
+            'anyone can cancel it'),
         value: s.autoAdvance.value,
         onChanged: s.setAutoAdvance,
+      ),
+    );
+  }
+}
+
+class HideReReleasesSetting extends StatelessWidget {
+  const HideReReleasesSetting({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppSettings.instance;
+    return SignalBuilder(
+      builder: (context) => SwitchListTile(
+        key: const ValueKey('hide-re-releases'),
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Hide re-releases in Latest'),
+        subtitle: const Text('Skips episodes added more than 30 days after they aired '
+            '(re-uploads, upgrades); also in each Latest row\'s ⋮ menu'),
+        value: s.hideReReleases.value,
+        onChanged: s.setHideReReleases,
       ),
     );
   }

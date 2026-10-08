@@ -24,6 +24,7 @@ const _keyAccounts = 'accounts';
 const _keyDefault = 'defaultServer';
 const _keyLastPick = 'lastPick';
 const _keyBrowsePrefix = 'browse:';
+const _keyDismissedPrefix = 'dismissed:';
 
 /// One signed-in user on one server.
 class JellyfinAccount {
@@ -481,6 +482,38 @@ class JellyfinAccounts extends ChangeNotifier {
           '$_keyBrowsePrefix$serverId', location == null ? null : jsonEncode(location));
     } catch (e) {
       debugPrint('save browse location failed: $e');
+    }
+  }
+
+  /// Continue-row entries removed by hand on [serverId] (key -> when), so a
+  /// next-up series (which Jellyfin cannot drop) stays out until it is
+  /// played again. Keys are `continueKey`s.
+  Map<String, DateTime> continueDismissed(String serverId) {
+    try {
+      final v = _store.get('$_keyDismissedPrefix$serverId');
+      final j = v is String ? _tryJson(v) : null;
+      if (j is! Map) return const {};
+      return {
+        for (final e in j.entries)
+          if (e.key is String && e.value is int)
+            e.key as String: DateTime.fromMillisecondsSinceEpoch(e.value as int, isUtc: true),
+      };
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// Keeps [key] out of the Continue row on [serverId] until it is played
+  /// after [at] (default now). The newest 200 are kept.
+  Future<void> dismissContinue(String serverId, String key, {DateTime? at}) async {
+    final all = {...continueDismissed(serverId), key: (at ?? DateTime.now()).toUtc()};
+    final newest = all.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+    try {
+      await _store.put('$_keyDismissedPrefix$serverId', jsonEncode({
+        for (final e in newest.take(200)) e.key: e.value.millisecondsSinceEpoch,
+      }));
+    } catch (e) {
+      debugPrint('save dismissed continue failed: $e');
     }
   }
 

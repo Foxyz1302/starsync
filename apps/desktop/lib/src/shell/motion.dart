@@ -35,12 +35,14 @@ Widget fadeThrough(Widget child, {Key? key}) => AnimatedSwitcher(
           );
         }
         // Outgoing (anim 1 -> 0): fully faded by the time it reaches 0.65.
+        // Same widget shape as the incoming branch, or the old view would
+        // remount (and lose its state) while it fades.
         return FadeTransition(
           opacity: CurvedAnimation(
             parent: anim,
             curve: const Interval(1 - fadeOutPart, 1, curve: Curves.easeIn),
           ),
-          child: c,
+          child: ScaleTransition(scale: const AlwaysStoppedAnimation(1.0), child: c),
         );
       },
       child: child,
