@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../schedule_model.dart';
@@ -100,11 +101,17 @@ class DayColumn extends StatelessWidget {
                   ? Center(
                       child: Text('—', style: TextStyle(color: scheme.onSurfaceVariant)),
                     )
-                  : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
-                      itemCount: cards.length,
-                      separatorBuilder: (_, _) => SizedBox(height: compact ? 6 : 10),
-                      itemBuilder: (context, i) => cards[i],
+                  // The board's mouse drag is sideways only: a column scrolls by
+                  // wheel (or touch), never by dragging the mouse.
+                  : ScrollConfiguration(
+                      behavior: ScrollConfiguration.of(context)
+                          .copyWith(dragDevices: {...PointerDeviceKind.values}..remove(PointerDeviceKind.mouse)),
+                      child: ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+                        itemCount: cards.length,
+                        separatorBuilder: (_, _) => SizedBox(height: compact ? 6 : 10),
+                        itemBuilder: (context, i) => cards[i],
+                      ),
                     ),
             ),
           ),

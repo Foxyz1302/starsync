@@ -89,7 +89,11 @@ Future<T?> showPopover<T>(
 class HScroll extends StatefulWidget {
   final ScrollController? controller;
   final Widget Function(ScrollController controller) builder;
-  const HScroll({super.key, this.controller, required this.builder});
+  /// Map the plain (vertical) wheel to sideways scrolling. Off where the
+  /// children scroll vertically themselves (the schedule's day columns):
+  /// there only mouse drag and Shift+wheel move sideways.
+  final bool wheel;
+  const HScroll({super.key, this.controller, required this.builder, this.wheel = true});
 
   @override
   State<HScroll> createState() => _HScrollState();
@@ -121,6 +125,6 @@ class _HScrollState extends State<HScroll> {
   Widget build(BuildContext context) => ScrollConfiguration(
         behavior: ScrollConfiguration.of(context)
             .copyWith(dragDevices: PointerDeviceKind.values.toSet()),
-        child: Listener(onPointerSignal: _wheel, child: widget.builder(_c)),
+        child: widget.wheel ? Listener(onPointerSignal: _wheel, child: widget.builder(_c)) : widget.builder(_c),
       );
 }

@@ -501,6 +501,7 @@ class _SchedulePageState extends State<SchedulePage> {
       (byDay[DateTime(l.year, l.month, l.day)] ??= []).add(e);
     }
     return HScroll(
+      wheel: false,
       controller: _scroll,
       builder: (c) => ListView.separated(
         key: const ValueKey('schedule-board'),
