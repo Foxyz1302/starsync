@@ -1,10 +1,10 @@
 {
-  "version": "0.2.2",
-  "protocol": 7,
-  "url": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v0.2.2/watch-together-0.2.2-linux-x64.tar.gz",
-  "notes": "- CI: Windows build + release on yuuka-windows",
+  "version": "1.0.0",
+  "protocol": 9,
+  "url": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.0.0/watch-together-1.0.0-linux-x64.tar.gz",
+  "notes": "- Player: now-playing title with cover, start banner, one status pill; media art for everyone",
   "assets": {
-    "linux-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v0.2.2/watch-together-0.2.2-linux-x64.tar.gz",
-    "windows-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v0.2.2/watch-together-0.2.2-windows-x64.zip"
+    "linux-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.0.0/watch-together-1.0.0-linux-x64.tar.gz",
+    "windows-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.0.0/watch-together-1.0.0-windows-x64.zip"
   }
 }
