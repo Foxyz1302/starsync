@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../update/update_controller.dart';
 import '../../widgets/window_buttons.dart';
+import '../demo/shell_demo.dart';
 import 'profile.dart';
 import 'update_indicator.dart';
 
@@ -66,6 +68,13 @@ class HomeTopBar extends StatelessWidget {
         const Spacer(),
         UpdateIndicator(controller: updates),
         const SizedBox(width: 8),
+        if (kDebugMode)
+          IconButton(
+            tooltip: 'Layout demo (debug builds only)',
+            icon: const Icon(Icons.bug_report_outlined, size: 20, color: Colors.amber),
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute<void>(builder: (_) => const ShellDemo())),
+          ),
         for (final (v, icon, selectedIcon, label) in _pages)
           IconButton(
             tooltip: label,
