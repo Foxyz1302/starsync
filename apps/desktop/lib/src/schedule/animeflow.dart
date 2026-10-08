@@ -142,6 +142,32 @@ enum EpisodeStatus {
   static EpisodeStatus parse(Object? s) => values.where((v) => v.name == s).firstOrNull ?? upcoming;
 }
 
+/// A series on Jellyfin (`GET /library`).
+class AnimeFlowLibraryItem {
+  final String jellyfinSeriesId;
+  final String name;
+  /// Set when AnimeFlow tracks it.
+  final int? seriesId;
+  /// AniList entry per TVDB season.
+  final Map<int, int> anilistIds;
+  const AnimeFlowLibraryItem({
+    required this.jellyfinSeriesId,
+    required this.name,
+    this.seriesId,
+    this.anilistIds = const {},
+  });
+
+  static AnimeFlowLibraryItem fromJson(Map j) => AnimeFlowLibraryItem(
+        jellyfinSeriesId: _str(j['jellyfin_series_id']) ?? '',
+        name: _str(j['name']) ?? '',
+        seriesId: _int(j['series_id']),
+        anilistIds: {
+          for (final e in ((j['anilist_ids'] as Map?) ?? const {}).entries)
+            if (int.tryParse('${e.key}') case final season? when _int(e.value) != null) season: _int(e.value)!,
+        },
+      );
+}
+
 class AnimeFlowEpisode {
   /// 0 = specials.
   final int season;
@@ -152,6 +178,9 @@ class AnimeFlowEpisode {
   /// The AniList entry of this episode's season (one AnimeFlow series may
   /// span several AniList entries).
   final int? anilistId;
+  /// The episode number within [anilistId] when AnimeFlow knows it (split
+  /// cours, absolute numbering); prefer it over [episode] for matching.
+  final int? anilistEpisode;
   final EpisodeStatus status;
   /// 0..1, only while downloading.
   final double? progress;
@@ -165,6 +194,7 @@ class AnimeFlowEpisode {
     this.title,
     this.airDate,
     this.anilistId,
+    this.anilistEpisode,
     required this.status,
     this.progress,
     this.reason,
@@ -177,6 +207,7 @@ class AnimeFlowEpisode {
         title: _str(j['episode_title']),
         airDate: _time(j['air_date']),
         anilistId: _int(j['anilist_id']),
+        anilistEpisode: _int(j['anilist_episode']),
         status: EpisodeStatus.parse(j['status']),
         progress: (j['progress'] as num?)?.toDouble(),
         reason: _str(j['reason']),
@@ -609,6 +640,17 @@ class AnimeFlowClient {
   /// Every tracked series [view].
   Future<List<AnimeFlowSeries>> series() async =>
       [for (final s in _items(await _call('GET', '/series', etag: true))) AnimeFlowSeries.fromJson(s)];
+
+  /// Every series on Jellyfin (as the caller sees it), tracked by
+  /// AnimeFlow or not [view]. Empty on servers without the endpoint.
+  Future<List<AnimeFlowLibraryItem>> library() async {
+    try {
+      return [for (final s in _items(await _call('GET', '/library', etag: true))) AnimeFlowLibraryItem.fromJson(s)];
+    } on AnimeFlowException catch (e) {
+      if (e.isNotFound) return const [];
+      rethrow;
+    }
+  }
 
   /// One series with all its episodes [view].
   Future<AnimeFlowSeries> seriesDetail(int seriesId) async {

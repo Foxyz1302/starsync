@@ -188,7 +188,7 @@ class _SchedulePageState extends State<SchedulePage> {
   bool _followed(ScheduleEntry e) => (e.seriesId == null ? null : _followOverride[e.seriesId]) ?? e.followed;
 
   bool _shows(ScheduleEntry e) => switch (_filter) {
-    ScheduleFilter.jellyfin => e.tracked,
+    ScheduleFilter.jellyfin => e.tracked || e.onJellyfin,
     ScheduleFilter.following => _followed(e),
     ScheduleFilter.all => _niche || e.tracked || e.airing.popularity >= SchedulePage.nicheBelow,
   };
@@ -214,7 +214,7 @@ class _SchedulePageState extends State<SchedulePage> {
   }
 
   (CardAction, String?) _actionFor(ScheduleEntry e) {
-    if (e.status == ScheduleStatus.available) {
+    if (e.status == ScheduleStatus.available || e.status == ScheduleStatus.inLibrary) {
       if (!widget.online) return (CardAction.playOffline, 'Join or host a server to put it up');
       if (e.jellyfinSeriesId == null) return (CardAction.putUp, 'Not linked to a Jellyfin series yet');
       return (CardAction.putUp, null);
@@ -226,7 +226,8 @@ class _SchedulePageState extends State<SchedulePage> {
           ? CardAction.request
           : CardAction.none;
     } else {
-      kind = me != null ? CardAction.requestSeries : CardAction.none;
+      // On Jellyfin already (owner added it by hand): nothing to request.
+      kind = me != null && !e.onJellyfin ? CardAction.requestSeries : CardAction.none;
     }
     if (kind == CardAction.none) return (kind, null);
     if (_isRequested(e)) return (CardAction.requested, null);

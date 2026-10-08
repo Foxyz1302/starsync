@@ -47,6 +47,7 @@ String countdownText(DateTime at, DateTime now) {
   ScheduleStatus.failed => ('failed${e.reason == null ? '' : ' · ${e.reason}'}', Colors.redAccent, Icons.error_outline),
   ScheduleStatus.unmonitored => ('not monitored', Colors.grey, Icons.visibility_off_outlined),
   ScheduleStatus.notTracked => ('not in AnimeFlow', Colors.grey, Icons.public),
+  ScheduleStatus.inLibrary => ('on Jellyfin', Colors.greenAccent, Icons.video_library_outlined),
 };
 
 class DayColumn extends StatelessWidget {

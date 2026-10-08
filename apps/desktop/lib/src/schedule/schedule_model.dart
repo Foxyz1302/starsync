@@ -16,7 +16,10 @@ enum ScheduleStatus {
   failed,
   unmonitored,
   /// AnimeFlow does not track this series (or is unreachable).
-  notTracked;
+  notTracked,
+  /// Not tracked by AnimeFlow, but the series is on Jellyfin (`/library`):
+  /// the episode may be there; Put it up finds out.
+  inLibrary;
 
   static ScheduleStatus of(EpisodeStatus s) => switch (s) {
         EpisodeStatus.available => available,
@@ -45,6 +48,8 @@ class ScheduleEntry {
   final int? season;
   /// Play target once available.
   final String? jellyfinSeriesId;
+  /// The series is on Jellyfin (tracked or not).
+  bool get onJellyfin => jellyfinSeriesId != null;
 
   const ScheduleEntry({
     required this.airing,
@@ -89,9 +94,18 @@ List<ScheduleEntry> matchSchedule(
   List<Airing> airings, {
   required List<AnimeFlowScheduleItem> schedule,
   List<AnimeFlowSeries> series = const [],
+  List<AnimeFlowLibraryItem> library = const [],
   DateTime? now,
 }) {
   final at = now ?? DateTime.now();
+  // AniList id -> (Jellyfin series, its TVDB season) from /library.
+  final lib = <int, (String, int)>{};
+  for (final item in library) {
+    if (item.jellyfinSeriesId.isEmpty) continue;
+    for (final e in item.anilistIds.entries) {
+      lib[e.value] ??= (item.jellyfinSeriesId, e.key);
+    }
+  }
   final refs = <int, _SeriesRef>{};
   for (final s in series) {
     final id = s.anilistId;
@@ -105,6 +119,9 @@ List<ScheduleEntry> matchSchedule(
     if (id == null) continue;
     final ref = refs[id] ??= _SeriesRef(it.seriesId, it.jellyfinSeriesId, it.followed);
     if (it.followed) ref.followed = true;
+    // AnimeFlow's AniList episode number first: TVDB numbering can run on
+    // across split cours.
+    if (e.anilistEpisode != null) byEp.putIfAbsent('$id#${e.anilistEpisode}', () => it);
     byEp.putIfAbsent('$id#${e.episode}', () => it);
     if (e.absolute != null) byAbs.putIfAbsent('$id#${e.absolute}', () => it);
     if (e.airDate != null) byDay.putIfAbsent('$id@${_day(e.airDate!)}', () => it);
@@ -126,17 +143,26 @@ List<ScheduleEntry> matchSchedule(
             followed: it.followed || (ref?.followed ?? false),
             seriesId: it.seriesId,
             season: e.season,
-            jellyfinSeriesId: it.jellyfinSeriesId ?? ref?.jellyfinSeriesId,
+            jellyfinSeriesId: it.jellyfinSeriesId ?? ref?.jellyfinSeriesId ?? lib[id]?.$1,
           );
         }
-        if (ref == null) return ScheduleEntry(airing: a, status: ScheduleStatus.notTracked);
+        if (ref == null) {
+          final onJf = lib[id];
+          if (onJf == null) return ScheduleEntry(airing: a, status: ScheduleStatus.notTracked);
+          return ScheduleEntry(
+            airing: a,
+            status: a.airingAt.isAfter(at) ? ScheduleStatus.upcoming : ScheduleStatus.inLibrary,
+            season: onJf.$2,
+            jellyfinSeriesId: onJf.$1,
+          );
+        }
         return ScheduleEntry(
           airing: a,
           status: a.airingAt.isAfter(at) ? ScheduleStatus.upcoming : ScheduleStatus.missing,
           tracked: true,
           followed: ref.followed,
           seriesId: ref.seriesId,
-          jellyfinSeriesId: ref.jellyfinSeriesId,
+          jellyfinSeriesId: ref.jellyfinSeriesId ?? lib[id]?.$1,
         );
       }(),
   ];
@@ -207,7 +233,7 @@ class ScheduleRepository {
     final flow = await flowF;
     final airings = [...ani.airings]..sort((a, b) => a.airingAt.compareTo(b.airingAt));
     final entries = flow.error == null
-        ? matchSchedule(airings, schedule: flow.schedule, series: flow.series, now: now)
+        ? matchSchedule(airings, schedule: flow.schedule, series: flow.series, library: flow.library, now: now)
         : [for (final a in airings) untrackedEntry(a, now)];
     return ScheduleSnapshot(
       from: start,
@@ -220,28 +246,36 @@ class ScheduleRepository {
     );
   }
 
-  Future<({AnimeFlowMe? me, List<AnimeFlowScheduleItem> schedule, List<AnimeFlowSeries> series, Object? error})>
+  Future<({AnimeFlowMe? me, List<AnimeFlowScheduleItem> schedule, List<AnimeFlowSeries> series, List<AnimeFlowLibraryItem> library, Object? error})>
       _animeFlow(DateTime from, DateTime to, bool force) async {
     final c = animeFlow;
     if (c == null) {
       return (me: null, schedule: const <AnimeFlowScheduleItem>[], series: const <AnimeFlowSeries>[],
+          library: const <AnimeFlowLibraryItem>[],
           error: 'AnimeFlow is not configured');
     }
     try {
       if (force) c.clearCache();
       final me = await c.me();
       final (sched, series) = await (c.schedule(from, to), c.series()).wait;
-      return (me: me, schedule: sched.items, series: series, error: null);
+      // The library only adds "on Jellyfin" for untracked shows: its
+      // failure never fails the schedule.
+      List<AnimeFlowLibraryItem> library = const [];
+      try {
+        library = await c.library();
+      } catch (_) {}
+      return (me: me, schedule: sched.items, series: series, library: library, error: null);
     } on ParallelWaitError catch (e) {
       final errs = e.errors as (AsyncError?, AsyncError?);
       return (
         me: null,
         schedule: const <AnimeFlowScheduleItem>[],
         series: const <AnimeFlowSeries>[],
+        library: const <AnimeFlowLibraryItem>[],
         error: (errs.$1 ?? errs.$2)!.error,
       );
     } catch (e) {
-      return (me: null, schedule: const <AnimeFlowScheduleItem>[], series: const <AnimeFlowSeries>[], error: e);
+      return (me: null, schedule: const <AnimeFlowScheduleItem>[], series: const <AnimeFlowSeries>[], library: const <AnimeFlowLibraryItem>[], error: e);
     }
   }
 

@@ -41,6 +41,47 @@ AnimeFlowScheduleItem item(int? anilistId, int ep, EpisodeStatus status,
 
 void main() {
   group('matchSchedule', () {
+    test('shows on Jellyfin but not in AnimeFlow come from /library', () {
+      final out = matchSchedule(
+        [
+          airing(172192, 1, DateTime(2026, 10, 6, 18)), // aired
+          airing(172192, 2, DateTime(2026, 10, 13, 18)), // upcoming
+          airing(999, 1, DateTime(2026, 10, 6, 18)), // nowhere
+        ],
+        schedule: const [],
+        library: const [
+          AnimeFlowLibraryItem(jellyfinSeriesId: 'jfR', name: 'Returner', anilistIds: {1: 163142, 2: 172192}),
+        ],
+        now: now,
+      );
+      expect(out.map((e) => e.status),
+          [ScheduleStatus.inLibrary, ScheduleStatus.upcoming, ScheduleStatus.notTracked]);
+      expect(out[0].jellyfinSeriesId, 'jfR');
+      expect(out[0].season, 2, reason: 'the TVDB season of that AniList entry');
+      expect(out[0].tracked, isFalse);
+      expect(out[1].onJellyfin, isTrue);
+      expect(out[2].onJellyfin, isFalse);
+    });
+
+    test("AnimeFlow's anilist_episode wins over TVDB numbering (split cour)", () {
+      // S2E13 in TVDB is part 2 (AniList 300) episode 1.
+      final out = matchSchedule(
+        [airing(300, 1, DateTime(2026, 10, 7, 20))],
+        schedule: [
+          AnimeFlowScheduleItem(
+            episode: const AnimeFlowEpisode(
+                season: 2, episode: 13, anilistId: 300, anilistEpisode: 1, status: EpisodeStatus.available),
+            seriesId: 7,
+            title: 'Show',
+            jellyfinSeriesId: 'jf7',
+          ),
+        ],
+        now: now,
+      );
+      expect(out.single.status, ScheduleStatus.available);
+      expect(out.single.season, 2);
+    });
+
     test('by AniList id + episode, per season ids', () {
       // One AnimeFlow series (7) spans two AniList entries: S1 = 100, S2 = 200.
       final out = matchSchedule(
