@@ -65,6 +65,7 @@ class SyncServer {
     mountSessionMediaRoute(_app, sessions);
     mountRelayRoutes(_app, sessions, () => hub.relay);
     mountAvatarRoute(_app, hub);
+    mountArtRoute(_app, hub);
     mountJellyfinRelayRoute(
         _app, sessions, () => hub.jellyfin, () => _relayClient ??= HttpClient());
     // advertiseHost is only an explicit override; otherwise echo what the client dialled.

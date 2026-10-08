@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_together/src/schedule/anilist.dart';
+import 'package:watch_together/src/session/media_art.dart';
 
 import 'schedule_fake_server.dart';
 
@@ -161,6 +163,52 @@ void main() {
   test('unreachable is an AniListException', () async {
     await server.close();
     await expectLater(client().schedule(from, to), throwsA(isA<AniListException>()));
+  });
+
+  test('searchMedia: one request per title, 404 is no match, art via aniListArt', () async {
+    server.handler = (req, res) async {
+      final search = ((jsonDecode(req.body) as Map)['variables'] as Map)['search'];
+      if (search != 'Frieren') {
+        json(res, {'errors': [{'message': 'Not Found.', 'status': 404}], 'data': {'Media': null}}, status: 404);
+        return;
+      }
+      json(res, {
+        'data': {
+          'Media': {
+            'id': 154587,
+            'title': {'romaji': 'Sousou no Frieren', 'english': 'Frieren: Beyond Journey\'s End'},
+            'coverImage': {'extraLarge': 'https://img/xl.jpg', 'large': 'https://img/l.jpg'},
+            'bannerImage': 'https://img/banner.jpg',
+          },
+        },
+      });
+    };
+    final c = client();
+    final m = await c.searchMedia('Frieren');
+    expect(m!.id, 154587);
+    expect(m.title, "Frieren: Beyond Journey's End");
+    expect(m.cover, 'https://img/xl.jpg');
+    expect(m.coverSmall, 'https://img/l.jpg');
+    expect(m.banner, 'https://img/banner.jpg');
+    await c.searchMedia('Frieren');
+    expect(server.seen, hasLength(1), reason: 'cached per title');
+    expect(await c.searchMedia('Nothing Like It'), isNull);
+    expect(await c.searchMedia('  '), isNull);
+    expect(server.seen, hasLength(2));
+
+    // Files: the release name's series; the extraLarge cover too big falls
+    // back to large.
+    final jpeg = Uint8List.fromList([0xFF, 0xD8, 0xFF, 1, 2, 3]);
+    final asked = <String>[];
+    final art = await aniListArt(c, '[SubsPlease] Frieren - 05 (1080p) [ABCD1234].mkv', fetch: (url, headers, max) async {
+      asked.add('$url');
+      return url.path == '/xl.jpg' ? null : jpeg;
+    });
+    expect(art!.poster, jpeg);
+    expect(art.banner, jpeg);
+    expect(asked, unorderedEquals(['https://img/xl.jpg', 'https://img/banner.jpg', 'https://img/l.jpg']));
+    expect(await aniListArt(c, 'Nothing Like It.mkv', fetch: (_, _, _) async => jpeg), isNull);
+    c.close();
   });
 
   test('parseHexColor', () {

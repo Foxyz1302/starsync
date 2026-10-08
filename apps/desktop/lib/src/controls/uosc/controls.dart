@@ -6,7 +6,8 @@ import 'package:signals/signals_flutter.dart';
 import '../../state/settings.dart';
 
 // The mpv-style (uosc) controls frame: a full-width timeline at the
-// bottom with a row of flat buttons above it, a corner widget top right.
+// bottom with a row of flat buttons above it, the title top left and a
+// corner widget top right.
 // Mouse movement shows them; after [UoscControls.hideAfter] without any
 // they fade out, the timeline shrinks to a 2 px line (gone when "Progress
 // line when hidden" is off) and the cursor hides. Our own frame: no
@@ -20,6 +21,9 @@ class UoscControls extends StatefulWidget {
   final List<Widget> right;
   /// Top-right corner (chat, back to the library), shown with the controls.
   final Widget? top;
+  /// Top left (what is playing), shown with the controls; gets the width
+  /// [top] leaves.
+  final Widget? topLeft;
   final VoidCallback? onDoubleTap;
   final Duration hideAfter;
   const UoscControls({
@@ -28,6 +32,7 @@ class UoscControls extends StatefulWidget {
     this.left = const [],
     this.right = const [],
     this.top,
+    this.topLeft,
     this.onDoubleTap,
     this.hideAfter = const Duration(seconds: 3),
   });
@@ -136,13 +141,54 @@ class UoscControlsState extends State<UoscControls> {
               ),
             ),
           ),
-          if (widget.top != null)
+          if (widget.topLeft != null)
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              height: 120,
+              child: IgnorePointer(
+                child: AnimatedOpacity(
+                  duration: fade,
+                  opacity: visible ? 1 : 0,
+                  child: const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0x8C000000), Color(0x00000000)],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (widget.top != null || widget.topLeft != null)
             Positioned(
               top: 0,
+              left: 0,
               right: 0,
               child: IgnorePointer(
+                key: const ValueKey('uosc-top'),
                 ignoring: !visible,
-                child: AnimatedOpacity(duration: fade, opacity: visible ? 1 : 0, child: widget.top),
+                child: AnimatedOpacity(
+                  duration: fade,
+                  opacity: visible ? 1 : 0,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                          child: widget.topLeft == null
+                              ? const SizedBox.shrink()
+                              : Align(alignment: AlignmentDirectional.centerStart, child: widget.topLeft),
+                        ),
+                      ),
+                      ?widget.top,
+                    ],
+                  ),
+                ),
               ),
             ),
           Positioned(

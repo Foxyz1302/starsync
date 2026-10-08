@@ -132,7 +132,8 @@ enum JellyfinImageType {
   primary('Primary'),
   backdrop('Backdrop'),
   thumb('Thumb'),
-  logo('Logo');
+  logo('Logo'),
+  banner('Banner');
 
   final String apiName;
   const JellyfinImageType(this.apiName);
@@ -361,6 +362,8 @@ class JellyfinItem {
         if (parentLogoItemId != null && parentLogoImageTag != null) {
           return JellyfinImageRef(parentLogoItemId!, type, parentLogoImageTag!);
         }
+      case JellyfinImageType.banner:
+        break;
     }
     return null;
   }

@@ -3,15 +3,38 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:sync_relay_core/core.dart';
 
 import 'sync_client.dart';
 
-/// Member pictures by content hash (`state.members[].avatarHash`), fetched
-/// once from `/a/<sid>/<token>/<hash>` on the host the client dialled and
-/// kept in memory. A hash names fixed bytes, so entries never go stale;
-/// listeners are notified when one arrives.
-class AvatarCache extends ChangeNotifier {
+/// Member pictures by content hash (`state.members[].avatarHash`), from `/a/`.
+class AvatarCache extends PictureCache {
+  AvatarCache(super.sync, {super.fetch})
+      : super(route: 'a', keep: 32, live: (s) => [for (final m in s.members) m.avatarHash]);
+}
+
+/// The current media's art by content hash (`state.media.art`), from `/i/`.
+class ArtCache extends PictureCache {
+  ArtCache(super.sync, {super.fetch}) : super(route: 'i', keep: 8, live: artHashesOf);
+
+  /// Poster and banner hashes of [s]'s media.
+  static List<String> artHashesOf(StateBroadcast s) {
+    final art = s.media?['art'];
+    if (art is! Map) return const [];
+    return [for (final v in art.values) if (v is String) v];
+  }
+}
+
+/// Pictures by content hash, fetched once from `/<route>/<sid>/<token>/<hash>`
+/// on the host the client dialled and kept in memory. A hash names fixed
+/// bytes, so entries never go stale; listeners are notified when one
+/// arrives. Hashes in each state ([live]) are fetched ahead of use.
+class PictureCache extends ChangeNotifier {
   final SyncClient sync;
+  /// First path segment of the picture route: 'a' (avatars), 'i' (art).
+  final String route;
+  /// Above this many pictures, ones not in the latest state go.
+  final int keep;
   /// Fetches one picture; null on any failure. Injectable for tests.
   final Future<Uint8List?> Function(Uri url) _fetch;
   final Map<String, Uint8List> _bytes = {};
@@ -21,15 +44,17 @@ class AvatarCache extends ChangeNotifier {
   bool _disposed = false;
 
   static const _retryAfter = Duration(seconds: 10);
-  /// Above this many pictures, ones nobody in the latest state uses go.
-  static const _keep = 32;
 
-  AvatarCache(this.sync, {Future<Uint8List?> Function(Uri url)? fetch})
+  PictureCache(this.sync,
+      {required this.route,
+      required this.keep,
+      required Iterable<String> Function(StateBroadcast state) live,
+      Future<Uint8List?> Function(Uri url)? fetch})
       : _fetch = fetch ?? _httpGet {
     _sub = sync.states.listen((s) {
-      final live = {for (final m in s.members) if (m.avatarHash.isNotEmpty) m.avatarHash};
-      if (_bytes.length > _keep) _bytes.removeWhere((h, _) => !live.contains(h));
-      live.forEach(_want);
+      final hashes = {for (final h in live(s)) if (h.isNotEmpty) h};
+      if (_bytes.length > keep) _bytes.removeWhere((h, _) => !hashes.contains(h));
+      hashes.forEach(_want);
     });
   }
 
@@ -53,7 +78,7 @@ class AvatarCache extends ChangeNotifier {
         scheme: ws.scheme == 'wss' ? 'https' : 'http',
         host: ws.host,
         port: ws.port,
-        pathSegments: ['a', 'default', token, hash]);
+        pathSegments: [route, 'default', token, hash]);
     _inFlight.add(hash);
     unawaited(_fetch(url).then((bytes) {
       _inFlight.remove(hash);

@@ -13,7 +13,6 @@ import '../controls/uosc/timeline.dart';
 import '../playback/media_marks.dart' show SkipOffer, formatClock;
 import '../screens/session/jellyfin_widgets.dart';
 import '../screens/session/player_controls.dart';
-import '../session/health.dart';
 import '../session/session_coordinator.dart';
 import '../shaders/shader_menu.dart';
 import '../shaders/shader_presets.dart';
@@ -24,6 +23,9 @@ import '../widgets/text_focus.dart';
 import '../widgets/window_buttons.dart';
 import 'avatar.dart';
 import 'motion.dart';
+import 'now_playing_title.dart';
+import 'player_status.dart';
+import 'start_banner.dart';
 
 /// Where the session's video is shown: nowhere, the floating mini player,
 /// or filling the body (and, with fullscreen, the window).
@@ -36,8 +38,8 @@ typedef VideoViewBuilder = Widget Function(BuildContext context, VideoControlsBu
 
 /// The session's player: the one `Video` of the current player and
 /// everything over it. Full: our bars on media_kit's controls or the uosc
-/// set (Settings), health / waiting / Jellyfin overlays and the player
-/// keys. Mini: hover controls and a progress line. The shell keeps this
+/// set (Settings), the start card, the status pill, Jellyfin overlays and
+/// the player keys. Mini: hover controls and a progress line. The shell keeps this
 /// widget mounted at one place in the tree while the mode changes, so the
 /// `Video` is never mounted twice nor rebuilt for a move.
 class SessionPlayer extends StatefulWidget {
@@ -277,8 +279,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                 child: Stack(fit: StackFit.expand, children: [video, _frameProbe.anchor()]),
               ),
               if (_full) ...[
-                _healthOverlay(),
-                _waitingPill(bottom: 124),
+                _status(),
                 _progressLine(),
                 _jellyfinOverlay(),
                 if (widget.fullscreen) _pausedParty(),
@@ -306,6 +307,8 @@ class _SessionPlayerState extends State<SessionPlayer> {
   }
 
   static const _barHeight = 56.0;
+  /// The standard top bar: room for the cover (2:3, 60 px tall).
+  static const _topBarHeight = 72.0;
   static const _controlsHide = Duration(seconds: 3);
 
   /// Fullscreen hides the strip and its window buttons: the top bar
@@ -346,14 +349,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
         ),
       );
 
-  String get _title {
-    final ref = _coord.currentRef.value;
-    if (ref != null && ref.title.isNotEmpty) {
-      return [ref.title, ?ref.subtitle].join(' · ');
-    }
-    return (_coord.serverState.value?.media?['name'] as String?) ?? '';
-  }
-
   MaterialDesktopVideoControlsThemeData _controlsTheme() {
     final coord = _coord;
     return MaterialDesktopVideoControlsThemeData(
@@ -375,19 +370,10 @@ class _SessionPlayerState extends State<SessionPlayer> {
           child: Align(
             alignment: Alignment.topCenter,
             child: SizedBox(
-              height: _barHeight,
+              height: _topBarHeight,
               child: Row(
                 children: [
-                  Expanded(
-                    child: SignalBuilder(
-                      builder: (context) => Text(
-                        _title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16),
-                      ),
-                    ),
-                  ),
+                  const Expanded(child: NowPlayingTitle()),
                   MaterialDesktopCustomButton(
                     icon: const Icon(Icons.video_library_outlined),
                     onPressed: widget.onChangeVideo,
@@ -510,7 +496,12 @@ class _SessionPlayerState extends State<SessionPlayer> {
   }
 
   Widget _sessionControls(VideoState state) {
+    // The start card sits under the controls (they stay usable on it).
     // The "Player design" setting swaps them live.
+    return Stack(fit: StackFit.expand, children: [const StartBanner(), _controlsSwitch(state)]);
+  }
+
+  Widget _controlsSwitch(VideoState state) {
     return SessionControlsSwitch(
       material: (_) => ControlsHoverProbe(
         shown: _standardShown,
@@ -518,7 +509,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
         child: DoubleClickListener(
           onDoubleClick: widget.onToggleFullscreen,
           // Clicks on the bars are button clicks, not the video.
-          skipTop: _barHeight,
+          skipTop: _topBarHeight,
           skipBottom: _barHeight + ChapterSeekBar.height,
           child: MaterialDesktopVideoControls(state),
         ),
@@ -546,6 +537,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
         });
     return UoscControls(
       onDoubleTap: widget.onToggleFullscreen,
+      topLeft: const NowPlayingTitle(),
       top: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -655,80 +647,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
     );
   }
 
-  Widget _healthOverlay() {
-    final coord = _coord;
-    return Positioned(
-      top: _barHeight + 8,
-      left: 12,
-      right: 12,
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: SignalBuilder(
-          builder: (context) {
-            final h = coord.health.value;
-            final starve = coord.starving.value;
-            final retrying = coord.reconnecting.value;
-            final kicked = coord.kickReason.value;
-            final unwell = h.severity == HealthSeverity.warn ||
-                h.severity == HealthSeverity.error ||
-                retrying ||
-                starve != null;
-            if (!unwell) return const SizedBox.shrink();
-            final color = switch (h.severity) {
-              HealthSeverity.ok => Colors.green,
-              HealthSeverity.info => Colors.grey,
-              HealthSeverity.warn => Colors.orange,
-              HealthSeverity.error => Colors.red,
-            };
-            final IconData icon;
-            if (retrying) {
-              icon = Icons.sync;
-            } else if (h.severity == HealthSeverity.error) {
-              icon = Icons.error_outline;
-            } else if (h.severity == HealthSeverity.warn) {
-              icon = Icons.warning_amber_outlined;
-            } else {
-              icon = Icons.hourglass_empty;
-            }
-            final text = [h.message, ?starve, if (retrying) 'reconnecting…'].join(' · ');
-            final canRetry = !retrying &&
-                kicked == null &&
-                (h.severity == HealthSeverity.error || h.severity == HealthSeverity.warn);
-            final button = TextButton.styleFrom(
-                foregroundColor: Colors.white, tapTargetSize: MaterialTapTargetSize.shrinkWrap);
-            return Container(
-              decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.65), borderRadius: BorderRadius.circular(999)),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, color: color, size: 16),
-                  const SizedBox(width: 8),
-                  Flexible(child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 12))),
-                  if (retrying)
-                    TextButton(
-                      style: button,
-                      onPressed: coord.cancelReconnect,
-                      child: const Text('Cancel', style: TextStyle(fontSize: 12)),
-                    ),
-                  if (canRetry)
-                    TextButton(
-                      style: button,
-                      onPressed: coord.retry,
-                      child: const Text('Retry', style: TextStyle(fontSize: 12)),
-                    ),
-                ],
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _waitingPill({required double bottom}) =>
-      Positioned(left: 0, right: 0, bottom: bottom, child: const Center(child: WaitingPill()));
+  /// The one status pill, bottom centre above the controls.
+  Widget _status() =>
+      const Positioned(left: 16, right: 16, bottom: 124, child: Center(child: PlayerStatus()));
 
   /// Jellyfin: the blocked card, the end-of-episode card (countdown) and
   /// the "Next episode" pill; for any media the skip pill (Skip OP / ED /
@@ -807,7 +728,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
   Widget _miniOverlay() {
     final coord = _coord;
     final playback = coord.playback;
-    const white = TextStyle(color: Colors.white, fontWeight: FontWeight.w600);
     return MouseRegion(
       onEnter: (_) => setState(() => _miniHover = true),
       onExit: (_) => setState(() => _miniHover = false),
@@ -832,12 +752,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                     Row(
                       children: [
                         const SizedBox(width: 10),
-                        Expanded(
-                          child: SignalBuilder(
-                            builder: (context) =>
-                                Text(_title, maxLines: 1, overflow: TextOverflow.ellipsis, style: white),
-                          ),
-                        ),
+                        const Expanded(child: NowPlayingTitle(cover: false, compact: true)),
                         IconButton(
                           focusNode: _noFocus,
                           onPressed: widget.onExpand,
@@ -871,7 +786,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                               style: const TextStyle(color: Colors.white70, fontSize: 12)),
                           const Spacer(),
                           Flexible(
-                            child: Text(waitingText(compact: true),
+                            child: Text(playerStatusNow()?.short ?? '',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(color: Colors.amber, fontSize: 12)),
@@ -903,81 +818,6 @@ const _shaderKeys = [
   LogicalKeyboardKey.digit5,
   LogicalKeyboardKey.digit6,
 ];
-
-/// Who the server waits for: "Waiting for you · press Space when ready",
-/// "Waiting for Alex, Mika", or '' while playing or with nothing up.
-String waitingText({bool compact = false}) {
-  final coord = SessionState.instance.coordinator;
-  final r = coord.serverState.value;
-  if (r == null || r.media == null || r.transport != 'held') return '';
-  final self = coord.selfMember.value;
-  if (self != null && !self.ready) {
-    return compact ? 'waiting for you' : 'Waiting for you · press Space when ready';
-  }
-  final waiting = [for (final m in r.members) if (!m.ready && !m.stale) m.name];
-  if (waiting.isEmpty) return compact ? '' : 'Paused';
-  return '${compact ? 'waiting' : 'Waiting'} for ${waiting.join(', ')}';
-}
-
-/// While held: who everyone is waiting for, with their avatars. When it
-/// is you, a click marks you ready.
-class WaitingPill extends StatelessWidget {
-  const WaitingPill({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return PartyWatch(builder: (context) {
-      final coord = SessionState.instance.coordinator;
-      final text = waitingText();
-      final r = coord.serverState.value;
-      final self = coord.selfMember.value;
-      final meWaiting = self != null && !self.ready;
-      final who = meWaiting
-          ? [selfAvatarInfo()]
-          : [
-              for (final m in r?.members ?? const <MemberView>[])
-                if (!m.ready && !m.stale) memberAvatarInfo(m, r, coord),
-            ];
-      return AnimatedOpacity(
-        duration: easeTime,
-        curve: ease,
-        opacity: text.isEmpty ? 0 : 1,
-        child: IgnorePointer(
-          ignoring: text.isEmpty || !meWaiting,
-          child: GestureDetector(
-            key: const ValueKey('waiting-pill'),
-            onTap: coord.toggleReady,
-            child: MouseRegion(
-              cursor: meWaiting ? SystemMouseCursors.click : MouseCursor.defer,
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(8, 6, 16, 6),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.72),
-                  borderRadius: BorderRadius.circular(30),
-                  border: Border.all(color: Colors.white12),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final m in who.take(4))
-                      Padding(padding: const EdgeInsets.only(right: 4), child: StatusAvatar(info: m, size: 28)),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(text,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    });
-  }
-}
 
 /// Mini player progress: a 2 px line, or (hovered) a 4 px bar that seeks.
 class _MiniSeekBar extends StatelessWidget {

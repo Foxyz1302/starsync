@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
@@ -11,6 +12,7 @@ import '../jellyfin/session_media.dart';
 import '../jellyfin/track_prefs.dart';
 import '../playback/media_marks.dart';
 import '../playback/playback_controller.dart';
+import '../schedule/anilist.dart';
 import '../screens/home/picked_media.dart';
 import '../sfx/sfx.dart';
 import '../state/settings.dart';
@@ -20,6 +22,9 @@ import '../sync/sync_client.dart';
 import '../sync/user_seek.dart';
 import 'health.dart';
 import 'idle.dart';
+import 'media_art.dart';
+import 'now_playing.dart';
+import 'now_playing_info.dart';
 
 /// Thrown when a connect is superseded by cancel/leave before it finished.
 class ConnectCancelled implements Exception {
@@ -146,6 +151,8 @@ class SessionCoordinator {
   final SyncClient sync = SyncClient();
   /// Member pictures by `avatarHash`, fetched from the server.
   late final AvatarCache avatars = AvatarCache(sync);
+  /// The current media's poster and banner by `state.media.art` hash.
+  late final ArtCache art = ArtCache(sync);
   final PlaybackController playback = PlaybackController();
   final StateDiff diff = StateDiff();
 
@@ -160,6 +167,9 @@ class SessionCoordinator {
 
   /// The current media's Jellyfin ref (null for links and files).
   final currentRef = signal<JellyfinRef?>(null);
+  /// Title, episode line and art hashes of the current media; null with
+  /// nothing up.
+  late final nowPlaying = computed<NowPlaying?>(() => nowPlayingOf(serverState.value?.media));
   /// How this viewer plays [currentRef]; null while resolving.
   final jellyfinPlan = signal<JellyfinPlan?>(null);
   /// Set when this viewer cannot play the Jellyfin media: no account and
@@ -221,6 +231,10 @@ class SessionCoordinator {
   String _wsHost = '';
   int _wsPort = 0;
   _RelayOrigin? _pendingOrigin;
+  // This client's last swap, until a state shows it landed (a newer
+  // mediaId than [after] with this member as `swapBy`): its art goes up then.
+  ({HelloMedia media, int after})? _pendingArt;
+  AniListClient? _aniList;
   // What this member serves for media [$1]; survives a reconnect (the
   // state then looks new again).
   (int, _RelayOrigin)? _activeOrigin;
@@ -386,7 +400,7 @@ class SessionCoordinator {
       final media = params.media ??
           (params.linkUrl.isEmpty ? null : await mediaForLink(jellyfin, params.linkUrl));
       if (epoch != _epoch) throw const ConnectCancelled();
-      if (media != null) sync.sendSwap(media);
+      if (media != null) _swap(media);
       _startTicker();
     } catch (e) {
       if (epoch != _epoch) throw const ConnectCancelled();
@@ -522,6 +536,7 @@ class SessionCoordinator {
   void _onState(StateBroadcast r) {
     _lastStateAt = DateTime.now().toUtc();
     serverState.value = r;
+    _maybeSendArt(r);
     _queuedState = r;
     if (_applying) return;
     _applying = true;
@@ -984,6 +999,43 @@ class SessionCoordinator {
     sync.sendKick(memberId, reason: reason);
   }
 
+  void _swap(HelloMedia media) {
+    _pendingArt = (media: media, after: serverState.peek()?.mediaId ?? 0);
+    sync.sendSwap(media);
+  }
+
+  void _maybeSendArt(StateBroadcast r) {
+    final pending = _pendingArt;
+    if (pending == null || r.mediaId <= pending.after) return;
+    if (sync.memberId.isEmpty || r.media?['swapBy'] != sync.memberId) return;
+    _pendingArt = null;
+    unawaited(_sendArt(r.mediaId, pending.media));
+  }
+
+  /// Fetches the art of [media] (this client's swap, now [mediaId]) and
+  /// sends it; quietly nothing on any failure.
+  Future<void> _sendArt(int mediaId, HelloMedia media) async {
+    try {
+      final ref = media.jellyfin;
+      final client = ref == null ? null : jellyfin.clientFor(ref.serverId);
+      final ArtBytes? bytes;
+      if (ref != null && client != null) {
+        bytes = await jellyfinArt(client, ref.itemId);
+      } else {
+        final name = ref == null ? media.name : jellyfinTitle(ref.title, ref.subtitle).$1;
+        bytes = await aniListArt(_aniList ??= AniListClient(), name);
+      }
+      final poster = bytes?.poster, banner = bytes?.banner;
+      if (poster == null && banner == null) return;
+      if (serverState.peek()?.mediaId != mediaId) return;
+      sync.sendArt(mediaId,
+          poster: poster == null ? null : base64Encode(poster),
+          banner: banner == null ? null : base64Encode(banner));
+    } catch (e) {
+      debugPrint('art for media $mediaId: $e');
+    }
+  }
+
   /// A pasted link: a recognised Jellyfin item link goes up as a ref
   /// (see [mediaForLink]) that this member relays for viewers without an
   /// account (with the link's key, which stays here); anything else as the
@@ -993,11 +1045,11 @@ class SessionCoordinator {
     final media = await mediaForLink(jellyfin, url);
     if (media.jellyfin != null) {
       _pendingOrigin = _JellyfinOrigin(url);
-      sync.sendSwap(media.copyWith(relay: const MediaRelay()));
+      _swap(media.copyWith(relay: const MediaRelay()));
       return null;
     }
     if (relay == LinkRelay.direct) {
-      sync.sendSwap(media);
+      _swap(media);
       return null;
     }
     // Relayed: it must be a single file the relay can range-read (not a
@@ -1015,9 +1067,9 @@ class SessionCoordinator {
     }
     if (relay == LinkRelay.me) {
       _pendingOrigin = _LinkOrigin(url);
-      sync.sendSwap(HelloMedia(name: media.name, size: size, duration: 0, relay: const MediaRelay()));
+      _swap(HelloMedia(name: media.name, size: size, duration: 0, relay: const MediaRelay()));
     } else {
-      sync.sendSwap(HelloMedia(
+      _swap(HelloMedia(
           name: media.name, size: size, duration: 0, url: url, relay: const MediaRelay(fetch: true)));
     }
     return null;
@@ -1028,7 +1080,7 @@ class SessionCoordinator {
   void swapJellyfin(JellyfinMedia media) {
     markInput();
     _pendingOrigin = const _JellyfinOrigin(null);
-    sync.sendSwap(mediaForPick(media).copyWith(relay: const MediaRelay()));
+    _swap(mediaForPick(media).copyWith(relay: const MediaRelay()));
   }
 
   /// A file on this computer. The host's app serves it itself; anyone
@@ -1040,13 +1092,13 @@ class SessionCoordinator {
     if (host != null) {
       final file = await host(path);
       if (file == null) return 'file not found — check the path';
-      sync.sendSwap(HelloMedia(name: file.name, size: file.size, duration: 0));
+      _swap(HelloMedia(name: file.name, size: file.size, duration: 0));
       return null;
     }
     final file = File(path);
     if (!await file.exists()) return 'file not found — check the path';
     _pendingOrigin = _FileOrigin(path);
-    sync.sendSwap(HelloMedia(
+    _swap(HelloMedia(
         name: file.uri.pathSegments.last, size: await file.length(), duration: 0, relay: const MediaRelay()));
     return null;
   }
@@ -1541,6 +1593,7 @@ class SessionCoordinator {
     await _stopJellyfin();
     _stopRelaySource();
     _pendingOrigin = null;
+    _pendingArt = null;
     _activeOrigin = null;
     _playerReady = false;
     try {
@@ -1567,6 +1620,7 @@ class SessionCoordinator {
     await _kickSub?.cancel();
     await _errSub?.cancel();
     await _statusSub?.cancel();
+    _aniList?.close();
     await sync.dispose();
     await playback.dispose();
   }

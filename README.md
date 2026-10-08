@@ -56,9 +56,12 @@ corner; double-click or ⤢ makes it big again, × stops watching (you stay in
 the server, muted) and the strip's screen button brings it back. F or
 double-click on the picture goes fullscreen (the strip hides, the party
 shows in a corner while paused, the window buttons sit in the player's top
-bar while its controls are up), Esc leaves it. While playback waits, a
-pill under the picture says for whom ("Waiting for you · press Space when
-ready"). Chat and activity open in a panel on the right (chat button or
+bar while its controls are up), Esc leaves it. The controls show the
+show's cover, title and episode top left (guests get the cover too); before
+a video first plays, its banner fills the picture until playback starts.
+One pill above the controls says what playback waits for ("Press Space
+when you're ready", "Waiting for Bob and Mika · 2/3 ready", "Bob is
+loading…") or what went wrong, with Retry or Cancel when it helps. Chat and activity open in a panel on the right (chat button or
 Tab); joins, leaves, chat and other news also pop up bottom left with the
 person's avatar.
 
@@ -181,7 +184,7 @@ chapter title and the time there. With the controls hidden it stays as a
 thin line (unless "Progress line when hidden" is off). Above it flat buttons: ≡ menu, Subtitles and Audio (with the
 track count), the shader badge (the active Anime4K mode, e.g. "A HQ"),
 ready, chapters, 1:30, previous / next episode, change video, volume, ⚙
-and fullscreen; chat and back-to-library top right. Keys and skip buttons work
+and fullscreen; the title top left, chat and back-to-library top right. Keys and skip buttons work
 the same.
 
 Skipping: during the opening a "Skip OP" button floats in the corner (it

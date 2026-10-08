@@ -250,6 +250,11 @@ class SyncClient {
     _send(ProfileIntent(name: name, avatar: avatar).toJson());
   }
 
+  /// Art for media [mediaId] (base64 picture bytes; null = none).
+  void sendArt(int mediaId, {String? poster, String? banner}) {
+    _send(ArtMessage(mediaId: mediaId, poster: poster, banner: banner).toJson());
+  }
+
   void sendKick(String target, {String reason = ''}) {
     _send(KickRequest(target: target, reason: reason).toJson());
   }

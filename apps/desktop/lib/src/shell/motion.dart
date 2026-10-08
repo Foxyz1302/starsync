@@ -15,11 +15,16 @@ const fadeOutPart = 0.35;
 /// Fade through (Material motion): the old view is gone after the first
 /// 35%, then the new one fades and scales in; they never overlap. Key
 /// [child] by what it shows so a change of key runs the transition.
-Widget fadeThrough(Widget child, {Key? key}) => AnimatedSwitcher(
+/// [expand] false: sized by the views (at [alignment]) instead of filling
+/// the box, for unbounded places (a row, a pill).
+Widget fadeThrough(Widget child,
+        {Key? key, bool expand = true, AlignmentGeometry alignment = AlignmentDirectional.topStart}) =>
+    AnimatedSwitcher(
       key: key,
       duration: fadeThroughTime,
       layoutBuilder: (current, previous) => Stack(
-        fit: StackFit.expand,
+        fit: expand ? StackFit.expand : StackFit.loose,
+        alignment: alignment,
         children: [...previous, ?current],
       ),
       transitionBuilder: (c, anim) {

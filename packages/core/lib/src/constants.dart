@@ -38,6 +38,9 @@ abstract class RelayConstants {
   // over-size for private-server use. PNG keeps transparency; JPEG did
   // not. Only the hash rides in `state`; the bytes are fetched once.
   static const int maxAvatarBytes = 256 * 1024;
+  /// Decoded-byte caps of the current media's art (`art` message).
+  static const int maxPosterBytes = 256 * 1024;
+  static const int maxBannerBytes = 768 * 1024;
   static const int maxNameLength = 32;
   static const int maxChatLength = 500;
 }

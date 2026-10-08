@@ -97,6 +97,27 @@ class EngineMember {
       );
 }
 
+/// Picture bytes from base64 when they decode, are at most [maxBytes] and
+/// are a known image type (see [avatarImageType]); else null.
+Uint8List? decodePicture(String base64, int maxBytes) {
+  // Base64 is 4 chars per 3 bytes: skip decoding what cannot fit.
+  if (base64.isEmpty || base64.length > (maxBytes + 2) ~/ 3 * 4) return null;
+  try {
+    final bytes = base64Decode(base64);
+    if (bytes.length > maxBytes || avatarImageType(bytes) == null) return null;
+    return bytes;
+  } on FormatException {
+    return null;
+  }
+}
+
+/// One picture of the current media's art, by content hash.
+class ArtImage {
+  final String hash;
+  final Uint8List bytes;
+  ArtImage(this.bytes) : hash = avatarHashOf(bytes);
+}
+
 class EngineFeed {
   final List<FeedMessage> pending = [];
   void add(FeedMessage message) => pending.add(message);
@@ -120,6 +141,12 @@ class SyncEngine {
   DateTime serverTime;
   int mediaId = 1;
   HelloMedia? media;
+  /// Token of the member who made the current swap; null before any swap.
+  String? swapBy;
+  /// Art of the current media (`art`), served at `/i/...`; only the hashes
+  /// ride in `state.media.art`. Every swap clears it.
+  ArtImage? poster;
+  ArtImage? banner;
   int _nextId = 1;
   // Who sent the seek that produced [_seekEventId], for the echo check.
   String? _seekBy;
@@ -206,6 +233,38 @@ class SyncEngine {
     }
     return null;
   }
+
+  /// Art for the current media from [token]: only from the member who made
+  /// the current swap (or the host) and only for the current [forMediaId].
+  /// It replaces any earlier art; an absent or invalid field is none.
+  /// Returns whether it was taken.
+  bool applyArt(String token, int forMediaId, {String? poster, String? banner}) {
+    final member = members[token];
+    if (member == null || media == null || forMediaId != mediaId) return false;
+    if (token != swapBy && !member.host) return false;
+    _seen(member);
+    final p = poster == null ? null : decodePicture(poster, RelayConstants.maxPosterBytes);
+    final b = banner == null ? null : decodePicture(banner, RelayConstants.maxBannerBytes);
+    this.poster = p == null ? null : ArtImage(p);
+    this.banner = b == null ? null : ArtImage(b);
+    return true;
+  }
+
+  /// Bytes of the current media's art by hash.
+  Uint8List? artFor(String hash) {
+    if (hash.isEmpty) return null;
+    if (poster?.hash == hash) return poster!.bytes;
+    if (banner?.hash == hash) return banner!.bytes;
+    return null;
+  }
+
+  /// `state.media.art`; null when there is none.
+  Map<String, Object?>? get artJson => poster == null && banner == null
+      ? null
+      : {
+          if (poster != null) 'poster': poster!.hash,
+          if (banner != null) 'banner': banner!.hash,
+        };
 
   /// A reconnect took over [token]'s member (see `hello.resume`).
   void applyResume(String token) {
@@ -301,6 +360,9 @@ class SyncEngine {
     final actor = members[actorToken];
     mediaId++;
     media = next;
+    swapBy = actorToken;
+    poster = null;
+    banner = null;
     position = 0;
     serverTime = now;
     eventId++;
@@ -409,7 +471,13 @@ class SyncEngine {
       position: position,
       serverTime: serverTime,
       mediaId: mediaId,
-      media: media?.toJson(),
+      media: media == null
+          ? null
+          : {
+              ...media!.toJson(),
+              if (members[swapBy]?.id case final id?) 'swapBy': id,
+              if (artJson != null) 'art': artJson,
+            },
       members: members.values.map((m) => m.view(stale: isStale(m))).toList(),
       seekBy: bySeek ? _seekBy : null,
       seekSeq: bySeek ? _seekSeq : null,

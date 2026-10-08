@@ -604,9 +604,22 @@ sideways until an end, then the page).
   The player keys (Settings → Keyboard shortcuts) work while the player is
   full and nothing is in front of it. Something coming up while the player
   is closed opens it: full right after joining or after putting it up
-  here, else mini. While held, a pill under the picture names who
-  everyone waits for, or says "Waiting for you · press Space" (a click
-  marks you ready); the mini shows it in its hover bar. ⚙ in both
+  here, else mini. Both control designs show `NowPlayingTitle` top left
+  (`now_playing_title.dart`: 2:3 cover, title, episode line from
+  `coordinator.nowPlaying`, art through `artBytes`; it fades through when
+  the media changes); the mini shows title and episode without the cover.
+  Until playback first starts on a media (server not playing, position
+  under 1 s) `StartBanner` (`start_banner.dart`) lies under the controls:
+  the banner (else a blur of the cover, else dark), darkened, with cover,
+  big title and episode; it fades out on play and stays gone for that
+  media. One status pill (`player_status.dart`) sits bottom centre above
+  the controls: `playerStatusFor` (pure) picks the most pressing of
+  removed, reconnecting (Cancel), a warn/error health message (Retry),
+  connecting (only after 2 s), finished, someone loading (their avatar
+  and buffer progress), you not ready (a click marks you ready) and who
+  everyone waits for (avatars, "2/3 ready"); nothing otherwise, info
+  never. Frosted glass, colour only for problems; it fades through
+  between kinds. The mini shows its short line in its hover bar. ⚙ in both
   control designs opens the player settings card (`controls/
   player_settings.dart`, `showPopover`): player design, progress line
   when hidden, upscaling shader, hardware decoding (set live on mpv's
@@ -686,7 +699,7 @@ Session controls (the Standard player design): media_kit's
 `screens/session/player_controls.dart`); its own double-click and keys are
 off (its double-click pushes a fullscreen route with a second `Video`), the
 picture's double-click is a raw pointer observer (`DoubleClickListener`).
-The top bar holds the title, Change video, chat and back-to-library
+The top bar holds the now-playing title, Change video, chat and back-to-library
 (fullscreen: exit, then the window buttons); the bottom bar ends with the
 shader button, ⚙ and fullscreen. Its seek bar is off; ours
 (`ChapterSeekBar`: chapter diamonds, hover time with the chapter title)
@@ -714,7 +727,8 @@ change video, chat & activity, reload, mark everyone ready, fullscreen,
 leave),
 subtitles and audio with track counts, a shader badge ("A HQ", opening the
 shared `showShaderMenu`), ready, mark everyone ready, reload; 1:30,
-chapters, previous / next episode, change video, volume, ⚙, fullscreen; chat
+chapters, previous / next episode, change video, volume, ⚙, fullscreen; the
+now-playing title top left (`UoscControls.topLeft`, with a top gradient), chat
 and back-to-library (fullscreen: exit) top right. Menus (`showUoscMenu`: a popup route above the button, the
 current row highlighted) list tracks and chapters with start times. All
 actions are the coordinator's (seeks through `player.seek`, the user path;
@@ -791,3 +805,10 @@ this repo, written by `tool/release.sh`.
   the bytes of current members in memory and serves them at `/a/...`, which
   clients fetch once per hash (`AvatarCache`). Uplink per broadcast stays
   small whatever the picture size (cap 256 KiB base64 per avatar).
+- Media art the same way (`/i/...`, `ArtCache` as `coordinator.art`): the
+  member who swapped the media in fetches poster and banner once the state
+  shows its swap landed (`media_art.dart`: Jellyfin series/item images with
+  its own account, else an AniList title search on the parsed release
+  name) and sends `art`, so guests without Jellyfin get covers too.
+  `coordinator.nowPlaying` derives title, episode line and art hashes from
+  `state.media` (`now_playing_info.dart`).

@@ -606,4 +606,68 @@ void main() {
       expect(engine.members['a']!.avatarHash, isEmpty);
     });
   });
+
+  group('media art', () {
+    final jpeg = base64Encode([0xFF, 0xD8, 0xFF, ...List<int>.generate(61, (i) => i)]);
+    final png = base64Encode([0x89, 0x50, 0x4E, 0x47, ...List<int>.generate(60, (i) => 255 - i)]);
+    const media = HelloMedia(name: 'Show - 01.mkv', size: 1, duration: 0, url: 'http://x/a.mkv');
+    Map<String, Object?>? art() => engine.broadcast().media?['art'] as Map<String, Object?>?;
+
+    test('swapper sends art for the current media; state carries hashes only', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applySwap('a', media);
+      expect(art(), isNull, reason: 'omitted when empty');
+      expect(engine.broadcast().media?['swapBy'], 'm1');
+      expect(engine.applyArt('a', engine.mediaId, poster: jpeg, banner: png), isTrue);
+      final hashes = art()!;
+      expect(hashes['poster'], avatarHashOf(base64Decode(jpeg)));
+      expect(hashes['banner'], avatarHashOf(base64Decode(png)));
+      expect(engine.artFor(hashes['poster'] as String), base64Decode(jpeg));
+      expect(engine.artFor('0123456789abcdef'), isNull);
+      expect(jsonEncode(engine.broadcast().toJson()), isNot(contains(jpeg)));
+      // A later art replaces it; a field left out is none.
+      expect(engine.applyArt('a', engine.mediaId, poster: png), isTrue);
+      expect(art(), {'poster': avatarHashOf(base64Decode(png))});
+    });
+
+    test('rejects other members, stale mediaId; host may send', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      join('h', 'host');
+      engine.members['h']!.host = true;
+      expect(engine.applyArt('a', engine.mediaId, poster: jpeg), isFalse, reason: 'no media yet');
+      engine.applySwap('a', media);
+      final id = engine.mediaId;
+      expect(engine.applyArt('b', id, poster: jpeg), isFalse);
+      expect(engine.applyArt('a', id - 1, poster: jpeg), isFalse);
+      expect(art(), isNull);
+      expect(engine.applyArt('h', id, poster: jpeg), isTrue);
+      expect(art(), contains('poster'));
+    });
+
+    test('bad bytes and oversize fields are dropped; any swap clears', () {
+      join('a', 'alice');
+      engine.applySwap('a', media);
+      final big = base64Encode([0xFF, 0xD8, 0xFF, ...List<int>.filled(RelayConstants.maxPosterBytes, 1)]);
+      engine.applyArt('a', engine.mediaId,
+          poster: big, banner: base64Encode(List<int>.generate(64, (i) => i)));
+      expect(art(), isNull);
+      engine.applyArt('a', engine.mediaId, poster: 'not base64!', banner: big);
+      expect(art(), {'banner': avatarHashOf(base64Decode(big))}, reason: 'banner cap is larger');
+      join('b', 'bob');
+      engine.applySwap('b', media);
+      expect(art(), isNull);
+      expect(engine.artFor(avatarHashOf(base64Decode(big))), isNull);
+    });
+
+    test('ArtMessage round trip', () {
+      final m = ArtMessage.fromJson(Map<String, Object?>.from(
+          jsonDecode(jsonEncode(ArtMessage(mediaId: 3, poster: jpeg).toJson())) as Map));
+      expect(m.mediaId, 3);
+      expect(m.poster, jpeg);
+      expect(m.banner, isNull);
+      expect(const ArtMessage(mediaId: 1).toJson(), {'t': 'art', 'mediaId': 1});
+    });
+  });
 }

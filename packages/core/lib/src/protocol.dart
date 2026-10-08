@@ -478,6 +478,32 @@ class ProfileIntent {
   }
 }
 
+/// Cover art for the current media, sent by the member who swapped it in
+/// (or the host). Base64 picture bytes; null = none.
+class ArtMessage {
+  final int mediaId;
+  final String? poster;
+  final String? banner;
+  const ArtMessage({required this.mediaId, this.poster, this.banner});
+
+  Map<String, Object?> toJson() => {
+        't': 'art',
+        'mediaId': mediaId,
+        if (poster != null) 'poster': poster,
+        if (banner != null) 'banner': banner,
+      };
+
+  factory ArtMessage.fromJson(Map<String, Object?> json) {
+    if (json['t'] != 'art') throw const ProtocolException('not an art message');
+    final poster = json['poster'];
+    final banner = json['banner'];
+    return ArtMessage(
+        mediaId: finiteInt(json['mediaId'], 'mediaId'),
+        poster: poster is String ? poster : null,
+        banner: banner is String ? banner : null);
+  }
+}
+
 class MemberView {
   final String id;
   final String name;

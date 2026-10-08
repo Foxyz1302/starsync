@@ -290,12 +290,13 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('waiting pill: who is not ready, or you', (tester) async {
+  testWidgets('status pill: who is not ready, with the ready count', (tester) async {
     coord.playback.alive.value = true;
     await pumpShell(tester, const Size(1280, 800));
     online([member('a', 'Alex', ready: true), member('b', 'Bob'), member('c', 'Cleo')]);
     await tester.pumpAndSettle();
-    expect(find.text('Waiting for Bob, Cleo'), findsOneWidget);
+    expect(find.text('Waiting for Bob and Cleo'), findsOneWidget);
+    expect(find.text('1/3 ready'), findsOneWidget);
   });
 
   test('toasts: feed toasts carry the actor, the rest are the app\'s', () {

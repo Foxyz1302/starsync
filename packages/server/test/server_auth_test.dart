@@ -390,6 +390,98 @@ void main() {
       } catch (_) {}
     });
 
+    test('art: swapper only, current mediaId, hashes in state, /i serves', () async {
+      final jpeg = Uint8List.fromList([0xFF, 0xD8, 0xFF, ...List<int>.generate(200, (i) => (i * 3) % 256)]);
+      final png = Uint8List.fromList([0x89, 0x50, 0x4E, 0x47, ...List<int>.generate(200, (i) => i % 256)]);
+      final clients = <WebSocketChannel>[];
+      final subs = <StreamSubscription<Object?>>[];
+      Future<(WebSocketChannel, List<Map<String, Object?>>, String)> connect(String name) async {
+        final ch = WebSocketChannel.connect(Uri.parse('ws://127.0.0.1:${server.boundPort}/sync'));
+        final messages = <Map<String, Object?>>[];
+        clients.add(ch);
+        subs.add(ch.stream.listen((m) => messages.add(Map<String, Object?>.from(jsonDecode('$m') as Map))));
+        ch.sink.add(jsonEncode(HelloMessage(
+            proto: RelayConstants.protoVersion,
+            secret: 'shh',
+            user: HelloUser(name: name),
+            media: const HelloMedia(name: 'f.bin', size: 8192, duration: 10.0)).toJson()));
+        final deadline = DateTime.now().add(const Duration(seconds: 5));
+        while (!messages.any((m) => m['t'] == 'welcome')) {
+          if (DateTime.now().isAfter(deadline)) fail('no welcome');
+          await Future.delayed(const Duration(milliseconds: 20));
+        }
+        return (ch, messages, messages.firstWhere((m) => m['t'] == 'welcome')['token'] as String);
+      }
+
+      Future<Map<String, Object?>> waitFor(
+          List<Map<String, Object?>> messages, bool Function(Map<String, Object?>) test) async {
+        final deadline = DateTime.now().add(const Duration(seconds: 5));
+        while (DateTime.now().isBefore(deadline)) {
+          for (final m in messages) {
+            if (test(m)) return m;
+          }
+          await Future.delayed(const Duration(milliseconds: 20));
+        }
+        fail('timed out; got $messages');
+      }
+
+      Map<String, Object?>? artOf(Map<String, Object?> state) =>
+          (state['media'] as Map?)?['art'] as Map<String, Object?>?;
+      Future<HttpClientResponse> artGet(String token, String hash) async =>
+          (await http.get('127.0.0.1', server.boundPort, '/i/default/$token/$hash')).close();
+
+      try {
+        final (a, aMsgs, aToken) = await connect('alice');
+        final (b, bMsgs, bToken) = await connect('bob');
+        a.sink.add(jsonEncode(const SwapIntent(
+            media: HelloMedia(name: 'Show - 01.mkv', size: 1, duration: 0, url: 'http://example.com/a.mkv')).toJson()));
+        final swapped = await waitFor(bMsgs, (m) => m['t'] == 'state' && (m['media'] as Map?)?['name'] == 'Show - 01.mkv');
+        final mediaId = swapped['mediaId'] as int;
+
+        // Not the swapper, or a stale mediaId: ignored.
+        b.sink.add(jsonEncode(ArtMessage(mediaId: mediaId, poster: base64Encode(png)).toJson()));
+        a.sink.add(jsonEncode(ArtMessage(mediaId: mediaId - 1, poster: base64Encode(png)).toJson()));
+        await Future.delayed(const Duration(milliseconds: 300));
+        expect(server.hub.engine.poster, isNull);
+
+        a.sink.add(jsonEncode(ArtMessage(mediaId: mediaId, poster: base64Encode(jpeg), banner: base64Encode(png)).toJson()));
+        final withArt = await waitFor(bMsgs, (m) => m['t'] == 'state' && artOf(m) != null);
+        final art = artOf(withArt)!;
+        expect(art, {'poster': avatarHashOf(jpeg), 'banner': avatarHashOf(png)});
+
+        // Any member (a guest without Jellyfin) fetches it.
+        final ok = await artGet(bToken, art['poster'] as String);
+        expect(ok.statusCode, 200);
+        expect(ok.headers.contentType?.mimeType, 'image/jpeg');
+        expect(ok.headers.value('cache-control'), contains('immutable'));
+        expect(await ok.expand((c) => c).toList(), jpeg);
+        final unknown = await artGet(bToken, '0123456789abcdef');
+        expect(unknown.statusCode, 404);
+        await unknown.drain();
+        final noToken = await artGet('nope', art['poster'] as String);
+        expect(noToken.statusCode, 401);
+        await noToken.drain();
+
+        // Any swap clears the art.
+        b.sink.add(jsonEncode(const SwapIntent(
+            media: HelloMedia(name: 'Other.mkv', size: 1, duration: 0, url: 'http://example.com/b.mkv')).toJson()));
+        final cleared = await waitFor(aMsgs, (m) => m['t'] == 'state' && (m['media'] as Map?)?['name'] == 'Other.mkv');
+        expect(artOf(cleared), isNull);
+        final gone = await artGet(aToken, art['poster'] as String);
+        expect(gone.statusCode, 404);
+        await gone.drain();
+      } finally {
+        for (final sub in subs) {
+          await sub.cancel();
+        }
+        for (final ch in clients) {
+          try {
+            await ch.sink.close();
+          } catch (_) {}
+        }
+      }
+    });
+
     test('profile: rename + avatar feed, state carries hash, /a gated', () async {
       final png = Uint8List.fromList([0x89, 0x50, 0x4E, 0x47, ...List<int>.generate(296, (i) => (i * 7) % 256)]);
       final ch = WebSocketChannel.connect(

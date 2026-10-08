@@ -9,7 +9,8 @@ import 'package:sync_relay_core/core.dart';
 import '../update/updater.dart' show appVersion;
 
 // AniList airing schedule (public GraphQL, no login): every episode airing
-// in a time range, with covers, banners and popularity.
+// in a time range, with covers, banners and popularity; and a title search
+// (cover + banner of a show, for the media art of files and links).
 //
 // AniList allows ~90 requests/min (sometimes degraded to 30), so the raw
 // pages are cached: in memory for 10 min (tab switches) and on disk for an
@@ -74,6 +75,35 @@ class Airing {
 
   @override
   String toString() => 'Airing($anilistId "$title" ep $episode @ $airingAt)';
+}
+
+/// An anime found by title ([AniListClient.searchMedia]).
+class AniListMedia {
+  final int id;
+  /// English title, else romaji.
+  final String title;
+  /// Cover (portrait) URL: extraLarge, else large.
+  final String? cover;
+  /// The smaller cover, for when [cover] is too big to send on.
+  final String? coverSmall;
+  final String? banner;
+  const AniListMedia({required this.id, required this.title, this.cover, this.coverSmall, this.banner});
+
+  static AniListMedia? fromJson(Object? m) {
+    if (m is! Map || m['id'] is! int) return null;
+    final t = m['title'] is Map ? m['title'] as Map : const {};
+    final romaji = t['romaji'] is String ? t['romaji'] as String : '';
+    final english = t['english'] is String ? t['english'] as String : '';
+    final cov = m['coverImage'] is Map ? m['coverImage'] as Map : const {};
+    final large = cov['large'] is String ? cov['large'] as String : null;
+    return AniListMedia(
+      id: m['id'] as int,
+      title: english.isNotEmpty ? english : romaji,
+      cover: cov['extraLarge'] is String ? cov['extraLarge'] as String : large,
+      coverSmall: large,
+      banner: m['bannerImage'] is String ? m['bannerImage'] as String : null,
+    );
+  }
 }
 
 /// "#e4a15d" -> opaque [Color]; anything else -> null.
@@ -217,11 +247,19 @@ media{id title{romaji english} coverImage{large color} bannerImage isAdult popul
   }
 
   Future<Map> _page(int from, int to, int page) async {
+    final (data, status, j) = await _graphql(query, {'from': from - 1, 'to': to, 'page': page});
+    final p = data?['Page'];
+    if (p is! Map) {
+      throw AniListException('AniList: bad response${_errorText(j)}', statusCode: status);
+    }
+    return p;
+  }
+
+  /// One GraphQL request: `data` (null when missing), status and body. A
+  /// 429 waits out Retry-After once; other non-200s throw.
+  Future<(Map?, int, Object?)> _graphql(String query, Map<String, Object?> variables) async {
     for (var attempt = 0;; attempt++) {
-      final (status, body, retryAfter) = await _post(jsonEncode({
-        'query': query,
-        'variables': {'from': from - 1, 'to': to, 'page': page},
-      }));
+      final (status, body, retryAfter) = await _post(jsonEncode({'query': query, 'variables': variables}));
       if (status == 429 && attempt == 0) {
         final wait = retryAfter ?? 60;
         _log.info('AniList rate limited, retrying in ${wait}s');
@@ -235,11 +273,37 @@ media{id title{romaji english} coverImage{large color} bannerImage isAdult popul
       if (status != 200) {
         throw AniListException('AniList HTTP $status${_errorText(j)}', statusCode: status);
       }
-      final data = j is Map && j['data'] is Map ? (j['data'] as Map)['Page'] : null;
-      if (data is! Map) {
-        throw AniListException('AniList: bad response${_errorText(j)}', statusCode: status);
-      }
-      return data;
+      final data = j is Map && j['data'] is Map ? j['data'] as Map : null;
+      return (data, status, j);
+    }
+  }
+
+  static const searchQuery = r'''
+query($search:String){Media(search:$search,type:ANIME,isAdult:false){id title{romaji english}
+coverImage{extraLarge large} bannerImage}}''';
+
+  final _search = <String, Future<AniListMedia?>>{};
+
+  /// AniList's best anime match for [title], or null when there is none.
+  /// One request per title for this client's life (a failure is not kept,
+  /// so a later call asks again).
+  Future<AniListMedia?> searchMedia(String title) {
+    final key = title.trim();
+    if (key.isEmpty) return Future.value(null);
+    return _search[key] ??= _searchMedia(key).catchError((Object e) {
+      _search.remove(key);
+      throw e;
+    });
+  }
+
+  Future<AniListMedia?> _searchMedia(String title) async {
+    try {
+      final (data, _, _) = await _graphql(searchQuery, {'search': title});
+      return AniListMedia.fromJson(data?['Media']);
+    } on AniListException catch (e) {
+      // No match is a 404 with "Not Found." in errors.
+      if (e.statusCode == 404) return null;
+      rethrow;
     }
   }
 

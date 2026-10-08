@@ -24,7 +24,8 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
   `GET /j/<sid>/<token>/<itemId>` relays the current Jellyfin media (see
   "Jellyfin media" below). `/r/<sid>/<token>/...` is the relay of a
   member's media (see "Relay" below). `GET /a/<sid>/<token>/<hash>` serves
-  a member's picture (see "Avatars" below).
+  a member's picture (see "Avatars" below), `GET /i/<sid>/<token>/<hash>`
+  the current media's art (see "Media art" below).
 
 ## Client to server
 
@@ -44,6 +45,7 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
 {"t":"chat","text":"..."}
 {"t":"kick","target":"<memberId>","reason":""}
 {"t":"profile","name":"...","avatar":"<base64>"}
+{"t":"art","mediaId":2,"poster":"<base64>","banner":"<base64>"}
 ```
 
 Field notes:
@@ -77,6 +79,7 @@ Field notes:
   that is absent (or null) stays as it is; `avatar: ""` removes the picture.
   Same rules as `hello.user`; a too large avatar gets `err`
   `rejected: avatar too large` (the socket stays open, nothing changes).
+- `art`: pictures of the current media (see "Media art").
 - `chat.text` is cut to 500 characters.
 - `swap.media.url` is the link; `name`, `size`, `duration` are informational.
   `swap.media.jellyfin` makes it Jellyfin media (see below); then `url` is
@@ -91,7 +94,7 @@ Field notes:
  "state":{<state>}}
 {"t":"state","eventId":7,"transport":"playing"|"held"|"finished","position":12.3,
  "serverTime":"<ISO-8601 UTC>","mediaId":1,
- "media":{name,size,duration,url?,jellyfin?}|absent,
+ "media":{name,size,duration,url?,jellyfin?,relay?,swapBy?,art?}|absent,
  "members":[{"id","name","avatarHash"?,"ready","inSet","buffered","stale","jf"?,
    "host"?}],
  "seekBy":"m1","seekSeq":3,"relay":true}
@@ -116,7 +119,9 @@ Field notes:
   `eventId` increases on seek, swap and transport changes.
   `mediaId` increases on swap. `media.relay` is present for relayed media
   (see "Relay"). `media.duration` is 0 until a client reports
-  it. `seekBy` (member id) and `seekSeq` are present only while the current
+  it. `media.swapBy`: member id of who swapped it in (omitted once that
+  member left, and for the media the server started with). `media.art`:
+  see "Media art". `seekBy` (member id) and `seekSeq` are present only while the current
   `eventId` came from a seek. `relay` (omitted when false): the server can
   relay the current Jellyfin media. `members[].jf` is the member's last
   `report.jf`, omitted when it never sent one. `members[].avatarHash`
@@ -149,6 +154,26 @@ Field notes:
   Errors: 401 bad token, 403 kicked, 404 no current member has that
   picture, 410 unknown session. Pictures go with their member (leave,
   change, removal).
+
+## Media art
+
+```
+client  {"t":"art","mediaId":2,"poster":"<base64>","banner":"<base64>"}
+state   media.art = {"poster":"<hash>","banner":"<hash>"}
+```
+
+- A portrait poster and a wide banner for the current media, so every
+  member (guests without Jellyfin included) can show them. Sent by the
+  member who made the current swap (`media.swapBy`) or the host, for the
+  current `mediaId`; from anyone else, or for another `mediaId`, it is
+  ignored. Each field is optional; one that is not a picture (same check
+  as avatars) or larger than its cap (poster 256 KiB, banner 768 KiB of
+  decoded bytes) counts as none. A later `art` replaces the earlier one
+  whole; any swap clears it.
+- `media.art` carries hashes like `avatarHash`; a key is omitted when that
+  picture is absent, `art` when both are.
+- `GET /i/<sid>/<token>/<hash>`: as `/a/` (see "Avatars"); 404 when the
+  current media has no such art.
 
 ## Jellyfin media
 

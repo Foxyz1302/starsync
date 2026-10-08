@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:relic/relic.dart';
 import 'package:sync_relay_core/core.dart';
@@ -162,9 +163,17 @@ class ServerHub {
 /// `GET /a/<sid>/<token>/<hash>`: a current member's picture by its
 /// content hash, for members (valid, unkicked token) only. The bytes for a
 /// hash never change, so clients may cache them for good.
-void mountAvatarRoute(RelicApp app, ServerHub hub) {
+void mountAvatarRoute(RelicApp app, ServerHub hub) =>
+    _mountPictureRoute(app, hub, 'a', hub.engine.avatarFor);
+
+/// `GET /i/<sid>/<token>/<hash>`: the current media's art (`art`) by hash,
+/// same rules as [mountAvatarRoute].
+void mountArtRoute(RelicApp app, ServerHub hub) =>
+    _mountPictureRoute(app, hub, 'i', hub.engine.artFor);
+
+void _mountPictureRoute(RelicApp app, ServerHub hub, String prefix, Uint8List? Function(String hash) lookup) {
   Response status(int code) => Response(code, body: Body.fromString('status $code'));
-  app.get('/a/:sid/:token/:hash', (final req) {
+  app.get('/$prefix/:sid/:token/:hash', (final req) {
     final sid = req.pathParameters.raw[#sid] ?? '';
     final token = req.pathParameters.raw[#token] ?? '';
     final hash = req.pathParameters.raw[#hash] ?? '';
@@ -178,7 +187,7 @@ void mountAvatarRoute(RelicApp app, ServerHub hub) {
       default:
         break;
     }
-    final bytes = hub.engine.avatarFor(hash);
+    final bytes = lookup(hash);
     final type = bytes == null ? null : avatarImageType(bytes);
     if (bytes == null || type == null) return status(404);
     return Response.ok(
@@ -402,6 +411,12 @@ void mountSyncRoute(
               if (name != null) viewer.name = name;
               hub.engine.applyProfile(token, name: name, avatar: avatar);
               hub.changed();
+            case 'art':
+              if (token == null) return;
+              final art = ArtMessage.fromJson(decoded);
+              if (hub.engine.applyArt(token, art.mediaId, poster: art.poster, banner: art.banner)) {
+                hub.broadcastState();
+              }
             case 'report':
               if (token == null) return;
               final report = ReportMessage.fromJson(decoded);
