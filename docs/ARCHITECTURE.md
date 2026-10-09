@@ -43,7 +43,7 @@ size (`ServerIsolate.setFile`): the host's in-session File swap then sends a
 - **Dedicated server**: `bin/server.dart` compiled with `dart compile exe`
   and shipped next to the app as `watch-together-server`. It parses flags
   (`--port`, `--secret`, `--name`, `--media`, `--advertise-host`,
-  `--jellyfin <file>`, `--[no-]yt-dlp`, `--yt-dlp-dir`, `--config`; default port 8080) into the same map and calls `serve`;
+  `--jellyfin <file>`, `--[no-]yt-dlp`, `--yt-dlp-dir`, `--yt-dlp-cookies`, `--config`; default port 8080) into the same map and calls `serve`;
   SIGINT and SIGTERM stop it. A Flutter binary cannot run without a
   display, which is why the server is its own build.
 
@@ -529,8 +529,30 @@ all three link modes. Nothing is bundled or installed by hand.
   `--yt-dlp-dir`, else `$STATE_DIRECTORY/yt-dlp` (systemd), else
   `yt-dlp` next to the binary if writable, else
   `~/.cache/watch-together/yt-dlp`.
-- **Resolve** (`YtDlp.resolve`): `yt-dlp -J --no-playlist --no-warnings
-  --ignore-config`, 25 s timeout: title, uploader, duration, thumbnail,
+- **Cookies** (`YtDlpCookies`, `cookies.dart`): a yt-dlp folder holds at
+  most one source, `cookies.txt` (a private Netscape copy, mode 0600,
+  written to a `.part` that is made private before anything goes into
+  it) or `cookies-browser` (`BROWSER[:PROFILE]`). Every resolve adds
+  `--cookies <copy>` or `--cookies-from-browser <spec>` (the update and
+  `--version` runs do not); yt-dlp may write the copy back. Imports
+  (`parseCookies`) take a Netscape cookies.txt or a cookie extension's
+  JSON array (`name`, `value`, `domain`, `path`, `expirationDate` /
+  `expires`, `hostOnly`, `secure`, `httpOnly`, `session`; host-only
+  cookies keep their bare host with `FALSE`, the rest get a leading '.';
+  session cookies expire `0`), grouped by site (`cookieSite`: the
+  registrable domain by a short rule, with google.com filed under
+  youtube.com and bilibili's CDNs under bilibili.com). The app: Settings
+  → Player → yt-dlp → Cookies (a browser and profile, or a file picked or
+  dropped, then the sites to keep, bilibili.com and youtube.com ticked
+  when present; "Remove cookies"); its hosted server shares the folder,
+  so it uses them too. mpv's hook gets the same as `ytdl-raw-options`
+  (`cookies=%N%<path>` / `cookies-from-browser=%N%<spec>`, length-quoted),
+  re-set before each external link when it changed. The dedicated
+  server: `--yt-dlp-cookies <file>` / `ytDlpCookies` converted into its
+  folder at start; without it the copy and browser setting are removed.
+  Values are never logged and never leave the machine.
+- **Resolve** (`YtDlp.resolve`, `resolveArgs`): `yt-dlp -J --no-playlist --no-warnings
+  --ignore-config` plus the cookies, 25 s timeout: title, uploader, duration, thumbnail,
   live or not, and what a relay reads (`pickTracks`), each format with
   its URL, `http_headers` and `http_chunk_size`. Only plain http(s)
   formats without DRM count:

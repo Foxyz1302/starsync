@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+import 'cookies.dart';
 import 'logging.dart';
 
 // yt-dlp: turns a web page (YouTube, Twitter/X, ...) into media URLs. The
@@ -284,6 +285,9 @@ class YtDlp {
   Future<String?>? _ensuring;
   Future<void>? _updating;
 
+  /// Cookies every resolve sends (see [YtDlpCookies]), kept in [dir].
+  late final cookies = YtDlpCookies(dir);
+
   String get managedPath => p.join(dir, Platform.isWindows ? 'yt-dlp.exe' : 'yt-dlp');
   String get _stampPath => p.join(dir, 'last-check');
 
@@ -482,12 +486,12 @@ class YtDlp {
     }
   }
 
-  /// Asks yt-dlp what [url] is. Throws [YtDlpException] with yt-dlp's own
-  /// reason on failure.
+  /// Asks yt-dlp what [url] is, with [cookies] if any. Throws
+  /// [YtDlpException] with yt-dlp's own reason on failure.
   Future<YtDlpInfo> resolve(String url, {Duration timeout = const Duration(seconds: 25)}) async {
     final exe = await ensure();
     if (exe == null) throw YtDlpException(lastError ?? 'yt-dlp is not available');
-    final proc = await Process.start(exe, ['-J', '--no-playlist', '--no-warnings', '--ignore-config', '--', url]);
+    final proc = await Process.start(exe, resolveArgs(url));
     final out = proc.stdout.transform(utf8.decoder).join();
     final err = proc.stderr.transform(utf8.decoder).join();
     final int code;
@@ -506,6 +510,10 @@ class YtDlp {
       throw YtDlpException('unreadable yt-dlp output: ${e.message}');
     }
   }
+
+  /// The command line [resolve] runs.
+  List<String> resolveArgs(String url) =>
+      ['-J', '--no-playlist', '--no-warnings', '--ignore-config', ...cookies.args(), '--', url];
 
   Future<void> close() => _changes.close();
 }

@@ -16,7 +16,7 @@ import '../sync/state_diff.dart';
 import '../sync/user_seek.dart';
 import 'frame_watchdog.dart';
 import 'media_marks.dart';
-import 'yt_dlp_app.dart' show ytdlFormat;
+import 'yt_dlp_app.dart' show AppYtDlp, ytdlFormat;
 
 /// Owns one mpv [Player] (and its [VideoController]) per session: created
 /// by [init] on join, released by [dispose] on leave, swapped by
@@ -65,21 +65,31 @@ class PlaybackController {
   void Function(String error)? onYtdlError;
 
   /// Points mpv's yt-dlp hook at [path] (the app's managed copy) for web
-  /// page links, at most 1080p. Once per player.
+  /// page links, at most 1080p, once per player; its cookies
+  /// (`ytdl-raw-options`) whenever they changed.
   Future<void> useYtDlp(String path) async {
     final p = _player;
-    if (p == null || identical(p, _ytdlSetOn)) return;
+    if (p == null) return;
     try {
       final dynamic platform = p.platform;
-      await platform?.setProperty('script-opts', 'ytdl_hook-ytdl_path=$path');
-      await platform?.setProperty('ytdl-format', ytdlFormat);
-      _ytdlSetOn = p;
+      if (!identical(p, _ytdlSetOn)) {
+        await platform?.setProperty('script-opts', 'ytdl_hook-ytdl_path=$path');
+        await platform?.setProperty('ytdl-format', ytdlFormat);
+        _ytdlSetOn = p;
+        _ytdlRaw = '';
+      }
+      final raw = await AppYtDlp.instance.mpvRawOptions();
+      if (raw != _ytdlRaw && identical(p, _player)) {
+        await platform?.setProperty('ytdl-raw-options', raw);
+        _ytdlRaw = raw;
+      }
     } catch (e) {
       debugPrint('yt-dlp path not set: $e');
     }
   }
 
   Player? _ytdlSetOn;
+  String _ytdlRaw = '';
 
   /// Fingerprint of the picture on screen, installed by the video view
   /// (`ShownFrameProbe.sample`). Without it the watchdog stays idle.

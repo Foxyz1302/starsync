@@ -111,6 +111,10 @@ class AppConfig {
   /// Where that yt-dlp lives (writable); empty: a `yt-dlp` folder next to
   /// the server binary, else `~/.cache/watch-together/yt-dlp`.
   final String ytDlpDir;
+  /// Dedicated server: a cookies.txt or browser-extension JSON export
+  /// copied (converted) into [ytDlpDir] at start, so yt-dlp is logged in
+  /// (see `YtDlpCookies`); empty: no cookies.
+  final String ytDlpCookies;
 
   const AppConfig({
     required this.port,
@@ -123,6 +127,7 @@ class AppConfig {
     this.jellyfin,
     this.ytDlp = true,
     this.ytDlpDir = '',
+    this.ytDlpCookies = '',
   });
 
   factory AppConfig.defaults() =>
@@ -141,6 +146,7 @@ class AppConfig {
         jellyfin: JellyfinCredential.fromMap(map['jellyfin']),
         ytDlp: (map['ytDlp'] as bool?) ?? true,
         ytDlpDir: (map['ytDlpDir'] as String?) ?? '',
+        ytDlpCookies: (map['ytDlpCookies'] as String?) ?? '',
       );
     } on ConfigException {
       rethrow;
@@ -160,6 +166,7 @@ class AppConfig {
         if (jellyfin != null) 'jellyfin': jellyfin!.toMap(),
         'ytDlp': ytDlp,
         'ytDlpDir': ytDlpDir,
+        'ytDlpCookies': ytDlpCookies,
       };
 
   static Future<AppConfig> loadFile(String path) async =>

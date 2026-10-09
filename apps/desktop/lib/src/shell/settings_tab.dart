@@ -1,8 +1,13 @@
 import 'dart:async';
 
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:fox_utils/fox_utils.dart' show DesktopDropX, DropTarget;
 import 'package:signals/signals_flutter.dart';
-import 'package:sync_relay_core/core.dart' show YtDlp;
+import 'package:sync_relay_core/core.dart'
+    show CookieBrowser, CookieFile, NetscapeCookie, YtDlp, YtDlpCookies, cookieBrowsers, cookiesBySite, parseCookies, suggestedCookieSites;
 
 import '../controls/player_settings.dart';
 import '../jellyfin/accounts.dart';
@@ -420,11 +425,278 @@ class _YtDlpSettingsState extends State<YtDlpSettings> {
                   'Downloaded and kept up to date by the app; checked once a day.',
                   style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
                 ),
+                const SizedBox(height: 12),
+                YtDlpCookieSettings(cookies: y.cookies),
               ],
             );
           },
         );
       },
+    );
+  }
+}
+
+/// yt-dlp's cookies (sites that refuse guests): from a browser, or a
+/// cookies.txt / JSON export picked or dropped, filtered by site into the
+/// private copy in the yt-dlp folder (see [YtDlpCookies]).
+class YtDlpCookieSettings extends StatefulWidget {
+  final YtDlpCookies cookies;
+  const YtDlpCookieSettings({super.key, required this.cookies});
+
+  @override
+  State<YtDlpCookieSettings> createState() => _YtDlpCookieSettingsState();
+}
+
+class _YtDlpCookieSettingsState extends State<YtDlpCookieSettings> {
+  late var _source = widget.cookies.read();
+  String? _error;
+  bool _dragging = false;
+
+  void _reload([String? error]) {
+    if (!mounted) return;
+    setState(() {
+      _source = widget.cookies.read();
+      _error = error;
+    });
+  }
+
+  String get _summary => switch (_source) {
+        CookieFile f => '${f.count} cookie${f.count == 1 ? '' : 's'} for ${f.sites.join(', ')}',
+        CookieBrowser b => 'From ${b.browser}${b.profile.isEmpty ? '' : ' (profile ${b.profile})'}',
+        _ => 'No cookies: yt-dlp visits sites as a guest',
+      };
+
+  Future<void> _pickFile() async {
+    final List<PlatformFile> files;
+    try {
+      files = await FilePicker.pickFiles(
+        dialogTitle: 'Pick a cookies.txt or a JSON cookie export',
+        type: FileType.custom,
+        allowedExtensions: const ['txt', 'json'],
+      );
+    } catch (_) {
+      _reload('file dialog unavailable — try again');
+      return;
+    }
+    final path = files.firstOrNull?.path;
+    if (path != null) await _importFile(path);
+  }
+
+  Future<void> _importFile(String path) async {
+    final List<NetscapeCookie> all;
+    try {
+      all = parseCookies(await File(path).readAsString());
+    } on FormatException catch (e) {
+      _reload("Can't read that file: ${e.message}");
+      return;
+    } on FileSystemException catch (e) {
+      _reload("Can't read that file: ${e.message}");
+      return;
+    }
+    if (!mounted) return;
+    final bySite = cookiesBySite(all);
+    final sites = await showDialog<Set<String>>(
+      context: context,
+      builder: (_) => _CookieSitesDialog(bySite: {for (final e in bySite.entries) e.key: e.value.length}),
+    );
+    if (sites == null || sites.isEmpty) return;
+    try {
+      await widget.cookies.saveFile([for (final s in sites) ...?bySite[s]]);
+      _reload();
+    } catch (e) {
+      _reload('Could not keep the cookies: $e');
+    }
+  }
+
+  Future<void> _pickBrowser() async {
+    final current = _source;
+    final picked = await showDialog<CookieBrowser>(
+      context: context,
+      builder: (_) => _CookieBrowserDialog(initial: current is CookieBrowser ? current : null),
+    );
+    if (picked == null) return;
+    try {
+      await widget.cookies.saveBrowser(picked.browser, picked.profile);
+      _reload();
+    } catch (e) {
+      _reload('Could not save: $e');
+    }
+  }
+
+  Future<void> _remove() async {
+    try {
+      await widget.cookies.remove();
+      _reload();
+    } catch (e) {
+      _reload('Could not remove the cookies: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _dragging = true),
+      onDragExited: (_) => setState(() => _dragging = false),
+      onDragDone: (d) {
+        setState(() => _dragging = false);
+        final path = DesktopDropX.pathsOf(d.files).firstOrNull;
+        if (path != null) _importFile(path);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _dragging ? scheme.primary : scheme.outlineVariant),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.cookie_outlined),
+              title: const Text('Cookies'),
+              subtitle: Text(_summary, key: const ValueKey('ytdlp-cookies-summary')),
+            ),
+            if (_error != null)
+              Text(_error!, key: const ValueKey('ytdlp-cookies-error'), style: TextStyle(color: scheme.error)),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _pickBrowser,
+                  icon: const Icon(Icons.public),
+                  label: const Text('From a browser…'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _pickFile,
+                  icon: const Icon(Icons.file_open_outlined),
+                  label: const Text('From a file…'),
+                ),
+                if (_source != null)
+                  TextButton(
+                    key: const ValueKey('ytdlp-cookies-remove'),
+                    onPressed: _remove,
+                    child: const Text('Remove cookies'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'For sites that refuse guests (Bilibili, YouTube asking to sign in). Drop a cookies.txt or a '
+              'cookie-extension JSON export here, or pick one; only the sites you tick are kept, on this computer only. '
+              'Cookies log yt-dlp in as you on those sites. Keep the file private; for YouTube consider a '
+              'throwaway account (Google may flag accounts used with yt-dlp).',
+              style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Which sites of an imported cookie file to keep; pops the ticked ones.
+class _CookieSitesDialog extends StatefulWidget {
+  /// Site -> number of cookies.
+  final Map<String, int> bySite;
+  const _CookieSitesDialog({required this.bySite});
+
+  @override
+  State<_CookieSitesDialog> createState() => _CookieSitesDialogState();
+}
+
+class _CookieSitesDialogState extends State<_CookieSitesDialog> {
+  late final _on = {for (final s in widget.bySite.keys) if (suggestedCookieSites.contains(s)) s};
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Keep cookies for'),
+      content: SizedBox(
+        width: 380,
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            for (final e in widget.bySite.entries)
+              CheckboxListTile(
+                dense: true,
+                value: _on.contains(e.key),
+                title: Text(e.key),
+                subtitle: Text('${e.value} cookie${e.value == 1 ? '' : 's'}'),
+                onChanged: (v) => setState(() => v == true ? _on.add(e.key) : _on.remove(e.key)),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: _on.isEmpty ? null : () => Navigator.pop(context, {..._on}),
+          child: const Text('Keep'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Which browser (and profile) yt-dlp reads cookies from.
+class _CookieBrowserDialog extends StatefulWidget {
+  final CookieBrowser? initial;
+  const _CookieBrowserDialog({this.initial});
+
+  @override
+  State<_CookieBrowserDialog> createState() => _CookieBrowserDialogState();
+}
+
+class _CookieBrowserDialogState extends State<_CookieBrowserDialog> {
+  late var _browser = widget.initial?.browser ?? cookieBrowsers.first;
+  late final _profile = TextEditingController(text: widget.initial?.profile ?? '');
+
+  @override
+  void dispose() {
+    _profile.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Cookies from a browser'),
+      content: SizedBox(
+        width: 380,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: _browser,
+              decoration: const InputDecoration(labelText: 'Browser'),
+              items: [for (final b in cookieBrowsers) DropdownMenuItem(value: b, child: Text(b))],
+              onChanged: (v) => setState(() => _browser = v ?? _browser),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _profile,
+              decoration: const InputDecoration(labelText: 'Profile (optional)', hintText: 'the default profile'),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'yt-dlp reads them each time it opens a link (the browser may need to be closed on Windows).',
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, CookieBrowser(_browser, _profile.text.trim())),
+          child: const Text('Use'),
+        ),
+      ],
     );
   }
 }

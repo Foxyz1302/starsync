@@ -28,6 +28,16 @@ class AppYtDlp {
   /// update check afterwards).
   void warmUp() => unawaited(ytDlp.then((y) => y.ensure()).catchError((_) => null));
 
+  /// mpv's `ytdl-raw-options` for the cookies in the yt-dlp folder ('' for
+  /// none; see [YtDlpCookies]).
+  Future<String> mpvRawOptions() async {
+    try {
+      return (await ytDlp).cookies.mpvRawOptions();
+    } catch (_) {
+      return '';
+    }
+  }
+
   final _probes = <String, (DateTime, Future<LinkProbe>)>{};
   static const _probeTtl = Duration(minutes: 10);
 

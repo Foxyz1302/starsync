@@ -25,6 +25,10 @@ Future<void> main(List<String> args) async {
             'downloaded on first use.')
     ..addOption('yt-dlp-dir',
         defaultsTo: '', help: 'Writable folder for that yt-dlp (default: yt-dlp next to this binary).')
+    ..addOption('yt-dlp-cookies',
+        defaultsTo: '',
+        help: 'cookies.txt or browser-extension JSON export to log that yt-dlp in (sites that refuse guests). '
+            'An account login: keep it private. Copied into --yt-dlp-dir at start.')
     ..addOption('config', help: 'YAML or JSON config file (keys as in AppConfig); overrides the other flags.')
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show this help.');
   final ArgResults parsed;
@@ -60,6 +64,7 @@ Future<void> main(List<String> args) async {
         advertiseHost: '${parsed['advertise-host']}',
         ytDlp: parsed['yt-dlp'] as bool,
         ytDlpDir: '${parsed['yt-dlp-dir']}',
+        ytDlpCookies: '${parsed['yt-dlp-cookies']}',
       );
     }
     final jellyfinPath = parsed['jellyfin'] as String?;
@@ -76,8 +81,10 @@ Future<void> main(List<String> args) async {
         jellyfin: await JellyfinCredential.loadFile(jellyfinPath),
         ytDlp: c.ytDlp,
         ytDlpDir: c.ytDlpDir,
+        ytDlpCookies: c.ytDlpCookies,
       );
     }
+    await _setUpCookies(config);
   } on ConfigException catch (e) {
     stderr.writeln(e.message);
     exitCode = 64;
@@ -114,5 +121,25 @@ Future<void> main(List<String> args) async {
   events.close();
   for (final s in signals) {
     await s.cancel();
+  }
+}
+
+/// The private cookie copy in the server's yt-dlp folder: converted from
+/// [AppConfig.ytDlpCookies], or removed when none is given (so dropping the
+/// flag logs yt-dlp out).
+Future<void> _setUpCookies(AppConfig config) async {
+  if (!config.ytDlp) return;
+  final cookies = YtDlpCookies(serverYtDlpDir(config.ytDlpDir));
+  try {
+    if (config.ytDlpCookies.isEmpty) {
+      await cookies.remove();
+      return;
+    }
+    final kept = await cookies.import(config.ytDlpCookies);
+    stdout.writeln('yt-dlp cookies: ${kept.count} for ${kept.sites.join(', ')}');
+  } on FormatException catch (e) {
+    throw ConfigException('--yt-dlp-cookies ${config.ytDlpCookies}: ${e.message}');
+  } on FileSystemException catch (e) {
+    throw ConfigException('--yt-dlp-cookies: ${e.message} (${e.path})');
   }
 }

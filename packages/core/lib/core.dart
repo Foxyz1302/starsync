@@ -7,6 +7,7 @@ export 'src/protocol.dart';
 export 'src/relay.dart';
 export 'src/link_probe.dart';
 export 'src/yt_dlp.dart';
+export 'src/cookies.dart';
 export 'src/media_source.dart';
 export 'src/sync_engine.dart';
 export 'src/jellyfin/client.dart';

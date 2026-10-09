@@ -151,7 +151,8 @@ then everyone (you included) uses Join.
 | `--advertise-host` | none | host put in file URLs instead of the one each viewer dialled |
 | `--[no-]yt-dlp` | on | read web pages (YouTube, X, …) with yt-dlp when the server fetches a link |
 | `--yt-dlp-dir` | next to the binary | writable folder for the server's yt-dlp (systemd: the unit's `StateDirectory`) |
-| `--config` | none | YAML or JSON file with the same settings (`port`, `secret`, `name`, `mediaPath`, `advertiseHost`, `ytDlp`, `ytDlpDir`); replaces the flags |
+| `--yt-dlp-cookies` | none | cookies.txt or cookie-extension JSON export for that yt-dlp (sites that refuse guests); copied into the yt-dlp folder at start, removed from it when not given. **An account login**: keep it private, use a throwaway account for YouTube |
+| `--config` | none | YAML or JSON file with the same settings (`port`, `secret`, `name`, `mediaPath`, `advertiseHost`, `ytDlp`, `ytDlpDir`, `ytDlpCookies`); replaces the flags |
 
 It prints `READY port=... name=...` once listening and stops cleanly on
 Ctrl+C or SIGTERM. A dedicated server has no host.
@@ -316,6 +317,14 @@ Web pages work in all three: the app and the dedicated server each
 download [yt-dlp](https://github.com/yt-dlp/yt-dlp) by themselves (checked
 against the release's checksums, updated once a day; Settings → Player
 shows its version and has "Update now"), so there is nothing to install.
+Sites that refuse guests (Bilibili answers "HTTP Error 412", YouTube may
+ask to sign in) need cookies: Settings → Player → yt-dlp → Cookies reads
+them from a browser, or from a cookies.txt or a cookie extension's JSON
+export (picked or dropped; tick the sites to keep). They stay on this
+computer and are used by its yt-dlp only (your own playback, "through
+me", and a server you host). Cookies log yt-dlp in as you on those
+sites: keep the file private, and for YouTube consider a throwaway
+account (Google may flag accounts used with yt-dlp).
 YouTube works in all three too. The last two never show the link to
 anyone; they can't pass on live streams or pages that only offer streaming
 playlists (use "Everyone fetches it" for those). Your upload has to beat the video's
