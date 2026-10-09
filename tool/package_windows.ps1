@@ -31,8 +31,12 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -ne 0) {
       # Flutter hides MSBuild's messages: rebuild verbosely and show only
       # the compiler/linker errors, so CI logs say what broke.
-      $log = flutter build windows --release -v "--dart-define=APP_VERSION=$Version" 2>&1
-      $log | Select-String -Pattern 'error C\d+|error LNK\d+|fatal error|: error ' | ForEach-Object { $_.Line } | Select-Object -First 40
+      # Through cmd and with 'Continue': under 'Stop' PowerShell aborts on
+      # the first stderr line of a native command.
+      $ErrorActionPreference = 'Continue'
+      $log = cmd /c "flutter build windows --release -v --dart-define=APP_VERSION=$Version 2>&1"
+      $ErrorActionPreference = 'Stop'
+      $log | Select-String -Pattern 'error C\d+|error LNK\d+|fatal error|: error |error MSB' | ForEach-Object { $_.Line } | Select-Object -Unique -First 40
       throw 'flutter build windows failed'
     }
   } finally { Pop-Location }
