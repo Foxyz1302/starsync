@@ -50,7 +50,8 @@ Future<void> main(List<String> argv) async {
       .toJson()));
   await Future<void>.delayed(const Duration(milliseconds: 300));
   final via = a['via'] as String? ?? '$port';
-  var source = RelaySource(Uri.parse('ws://127.0.0.1:$via/r/default/${srcW.token}/source'), FileRelayBytes(file));
+  var source = RelaySource(
+      Uri.parse('ws://127.0.0.1:$via/r/default/${srcW.token}/source'), RelayMedia.single(FileRelayBytes(file)));
   await source.start();
   final urls = <String>[];
   for (var i = 0; i < int.parse(a['viewers'] as String); i++) {
@@ -58,14 +59,15 @@ Future<void> main(List<String> argv) async {
   }
   stdout.writeln('URL ${urls.join(',')}');
   Timer.periodic(const Duration(seconds: 5), (_) {
-    final b = server.hub.relay?.buffer;
+    final b = server.hub.relay?.buffers.firstOrNull;
     stdout.writeln('STATS sourceSent=${source.bytesSent} toViewers=${b?.bytesToViewers} '
         'cached=${b?.cachedBytes} window=${source.window.window}');
   });
   // SIGUSR1: drop the source; SIGUSR2: bring it back (outage tests).
   ProcessSignal.sigusr1.watch().listen((_) => source.close());
   ProcessSignal.sigusr2.watch().listen((_) async {
-    source = RelaySource(Uri.parse('ws://127.0.0.1:$via/r/default/${srcW.token}/source'), FileRelayBytes(file));
+    source = RelaySource(
+        Uri.parse('ws://127.0.0.1:$via/r/default/${srcW.token}/source'), RelayMedia.single(FileRelayBytes(file)));
     await source.start();
   });
 }

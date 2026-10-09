@@ -1,19 +1,21 @@
-// yt-dlp output parsing, the single-file pick and the link classifier.
+// yt-dlp output parsing, the relay track pick, chunked upstream reads and
+// the link classifier.
 // The live test (real download from GitHub, a real tweet) runs only with
 // YTDLP_LIVE=1.
 library;
 
 import 'dart:ffi' show Abi;
 import 'dart:io';
+import 'dart:math';
 
 import 'package:sync_relay_core/core.dart';
 import 'package:test/test.dart';
 
 Map<String, Object?> _f(String id, String protocol, Object? vcodec, Object? acodec, int? height,
-        {String ext = 'mp4', num tbr = 0}) =>
+        {String ext = 'mp4', num tbr = 0, Map<String, Object?> extra = const {}}) =>
     {
       'format_id': id, 'protocol': protocol, 'vcodec': vcodec, 'acodec': acodec, 'height': height, //
-      'ext': ext, 'tbr': tbr, 'url': 'https://cdn.example/$id', 'http_headers': {'User-Agent': 'UA'},
+      'ext': ext, 'tbr': tbr, 'url': 'https://cdn.example/$id', 'http_headers': {'User-Agent': 'UA'}, ...extra,
     };
 
 void main() {
@@ -68,9 +70,77 @@ void main() {
           },
         ],
       });
-      expect((info.title, info.uploader, info.duration, info.thumbnail, info.extractor, info.single?.id),
+      expect((info.title, info.uploader, info.duration, info.thumbnail, info.extractor, info.tracks.single.format.id),
           ('a girl. - https://t.co/x', 'a girl.', 6.3, 'https://pbs/x.jpg', 'Twitter', 'http-2176'));
     });
+  });
+
+  group('relay tracks', () {
+    // YouTube now: only video-only and audio-only https files (+ HLS).
+    final youtube = [
+      _f('139', 'https', 'none', 'mp4a.40.5', null, ext: 'm4a', tbr: 49),
+      _f('140', 'https', 'none', 'mp4a.40.2', null, ext: 'm4a', tbr: 129),
+      _f('140-drc', 'https', 'none', 'mp4a.40.2', null, ext: 'm4a', tbr: 129),
+      _f('251', 'https', 'none', 'opus', null, ext: 'webm', tbr: 135),
+      _f('248', 'https', 'vp9', 'none', 1080, ext: 'webm', tbr: 2600),
+      _f('137', 'https', 'avc1.640028', 'none', 1080, tbr: 4400),
+      _f('299', 'https', 'avc1.64002a', 'none', 1080, tbr: 6000,
+          extra: {'downloader_options': {'http_chunk_size': 10485760}}),
+      _f('401', 'https', 'av01.0.12M.08', 'none', 2160, tbr: 18000),
+      _f('96', 'm3u8_native', 'avc1', 'mp4a', 1080),
+    ];
+
+    test('YouTube: avc1 video up to 1080p (highest bitrate) + m4a audio, with the chunk size', () {
+      final t = pickTracks(youtube);
+      expect([for (final x in t) (x.kind, x.format.id)], [('video', '299'), ('audio', '140')]);
+      expect(t.first.format.chunkSize, 10485760);
+      expect(YtDlpInfo.parse({'title': 'x', 'formats': youtube}).formats['137']?.height, 1080);
+    });
+
+    test('a single file wins unless the pair is taller; nothing relayable: empty; live: none', () {
+      final single = _f('22', 'https', 'avc1', 'mp4a', 720);
+      expect(pickTracks([single, ...youtube]).map((x) => x.kind), ['video', 'audio']);
+      expect(pickTracks([_f('18', 'https', 'avc1', 'mp4a', 1080), ...youtube]).single.format.id, '18');
+      expect(pickTracks([_f('96', 'm3u8_native', 'avc1', 'mp4a', 1080)]), isEmpty);
+      final live = YtDlpInfo.parse({'title': 'x', 'is_live': true, 'formats': youtube});
+      expect(live.isLive, isTrue);
+      expect(live.tracks, isEmpty);
+      expect(LinkProbe.page(Uri.parse('https://x'), info: live).relayProblem, liveStreamText);
+    });
+
+    test('vp9 when there is no avc1; the drc variant only when alone', () {
+      final t = pickTracks([youtube[2], youtube[4]]);
+      expect([for (final x in t) x.format.id], ['248', '140-drc']);
+    });
+  });
+
+  test('viewer URL: one track plain, several an mpv EDL with %length% framing', () {
+    expect(relayViewerUrl('http://h:1/r/default/t/3', 'a/b c'), 'http://h:1/r/default/t/3/a_b%20c');
+    const v = 'http://h:1/r/default/t/3/0/x', a = 'http://h:1/r/default/t/3/1/x';
+    expect(relayViewerUrl('http://h:1/r/default/t/3', 'x', tracks: 2),
+        'edl://!no_clip;%${v.length}%$v;!new_stream;!no_clip;%${a.length}%$a');
+    expect(mpvEdl(['http://x/a;b,c']), 'edl://!no_clip;%14%http://x/a;b,c');
+  });
+
+  test('upstream reads go in GETs of at most the chunk size, back to back', () async {
+    final data = List.generate(2500, (i) => i % 251);
+    final seen = <String>[];
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((req) async {
+      final m = RegExp(r'bytes=(\d+)-(\d+)').firstMatch(req.headers.value('range')!)!;
+      final s = int.parse(m.group(1)!), e = min(int.parse(m.group(2)!), data.length - 1);
+      seen.add('$s-$e');
+      req.response
+        ..statusCode = 206
+        ..headers.set('content-range', 'bytes $s-$e/${data.length}')
+        ..add(data.sublist(s, e + 1));
+      await req.response.close();
+    });
+    final b = HttpRelayBytes(Uri.parse('http://127.0.0.1:${server.port}/f.mp4'), chunkSize: 1000);
+    addTearDown(b.close);
+    expect([for (final c in await b.read(100, 2400).toList()) ...c], data.sublist(100, 2401));
+    expect(seen, ['100-1099', '1100-2099', '2100-2400']);
   });
 
   test('link classifier: media types and media file names are files; pages, HLS, errors are not', () {
@@ -120,13 +190,14 @@ void main() {
     expect(probe.isPage, isTrue);
     expect(probe.title, startsWith('a girl.'));
     expect(probe.relayProblem, isNull);
-    final bytes = LinkRelayBytes(url, ytDlp: y, probe: probe);
+    final media = LinkRelayMedia(url, ytDlp: y, probe: probe);
+    final bytes = (await media.open()).single.bytes;
     final size = await bytes.size();
     var n = 0;
     await for (final c in bytes.read(0, size - 1)) {
       n += c.length;
     }
-    await bytes.close();
+    await media.close();
     expect(n, size);
   }, timeout: const Timeout(Duration(minutes: 3)), skip: Platform.environment['YTDLP_LIVE'] == '1' ? false : 'YTDLP_LIVE not set');
 }

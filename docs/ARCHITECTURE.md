@@ -395,24 +395,49 @@ What gets relayed (`SessionCoordinator.swapPicked`):
 | Link, "Through me" | relayed from that member's computer; for links only they can open |
 | Jellyfin item (browser pick or pasted link) | own account first, then the server's login (`/j`), then relayed from the member who put it up (with their sign-in, or the pasted link's key, which stays on their machine) |
 
-Relayed links are range-read as one file: a media file as is, a web page
-as yt-dlp's single-file format, resolved where the bytes are fetched (see
-"yt-dlp"); the swap carries only the page URL and the mode.
+Relayed links are range-read: a media file as is, a web page as yt-dlp's
+formats, resolved where the bytes are fetched (see "yt-dlp"); the swap
+carries only the page URL and the mode. A page's formats are one file, or
+a video-only and an audio-only file (YouTube has only those): a media of
+two **tracks**, each relayed as its own byte stream with its own buffer
+and URL, played together by viewers as an mpv EDL
+(`edl://!no_clip;%n%<video>;!new_stream;!no_clip;%n%<audio>`,
+`relayViewerUrl` / `mpvEdl`). media_kit opens an `edl://` URL unchanged
+(it writes it to a playlist and `loadlist`s it) and mpv keeps both
+streams in sync across seeks; one URL keeps the app's "one media URL"
+path (sync, swap, reopen) as is. The source member plays the page
+itself (yt-dlp hook) like any other link.
 
 How bytes move:
 - The source dials `/r/.../source` (outbound, so NAT/CGNAT are fine) and
-  answers the server's pulls from the file or the URL (`RelaySource`,
-  `FileRelayBytes`, `HttpRelayBytes`, `LinkRelayBytes`; a Jellyfin source sends its own
-  `Authorization` header from this machine). Viewers only ever talk HTTP
-  to the server, so the source never sees mpv's request pattern.
-- The server keeps one `RelayBuffer` per relayed media: 1 MiB slices in
+  answers the server's pulls from the file or the URL (`RelaySource` over
+  a `RelayMedia`: its `RelayTrack`s, each a `RelayBytes`:
+  `FileRelayBytes`, `HttpRelayBytes`, `LinkRelayMedia` / `PageRelayMedia`
+  for links; a Jellyfin source sends its own `Authorization` header from
+  this machine). Viewers only ever talk HTTP to the server, so the source
+  never sees mpv's request pattern. The tracks of a media share the
+  channel and its flow control (they compete for the same uplink).
+- Upstream GETs (`HttpRelayBytes.read`) are split into back-to-back
+  ranges of at most yt-dlp's `http_chunk_size` for the format, else
+  10 MiB (`relayUpstreamChunkBytes`); a buffer pull stays one read.
+  YouTube serves a range up to 10 MiB at full speed but throttles a longer
+  or open-ended one to about twice the bitrate (measured 0.8 MB/s against
+  8.6 to 12.5 MB/s); chunked, a 1080p relay seeks in under 0.8 s (4 to
+  6.6 s unchunked) and even beats mpv reading YouTube directly, since the
+  buffer reads ahead at full speed.
+- The server keeps one `RelayBuffer` per track of a relayed media (one
+  for a file): 1 MiB slices in
   memory, filled by one sequential pull at a time. Kept: the first and
   last 2 MiB (container indexes; mpv reads both on open and on seeks),
   64 MiB behind the slowest viewer and 256 MiB past the furthest, the
   same as each viewer's mpv buffer (`PlaybackController`), so a skip
   inside the viewers' buffer window is served from memory. Evicted by
   distance from the viewers, never LRU. With 2+ viewers the source sends
-  each byte about once.
+  each byte about once. Several tracks split the ahead and behind budgets
+  by size (one duration, so by bitrate; `relayBudgets`), at least 8 MiB
+  each, which keeps both windows at the same playback distance (1080p
+  video + aac: about 246 + 10 MiB ahead); each pins its own head and
+  tail. A viewer is its token in every track's buffer.
 - Filling: a viewer blocked on a slice first (oldest wait first, handing
   the source over at slice boundaries), then the pinned slices, then
   read-ahead from the slowest viewer. Nothing is fetched while nobody
@@ -431,7 +456,7 @@ How bytes move:
   stop. A crash frees it with the process.
 - Source away: viewers keep playing from the buffer; a request waits up
   to 60 s for missing bytes. The source reconnects with backoff (same
-  token after a resume); a different file size drops the buffer.
+  token after a resume); a different size drops that track's buffer.
   `state.media.relay.live` follows the channel, and viewers show "waiting
   for <name> to pass the video on" while it is down.
 
@@ -481,10 +506,17 @@ all three link modes. Nothing is bundled or installed by hand.
   `~/.cache/watch-together/yt-dlp`.
 - **Resolve** (`YtDlp.resolve`): `yt-dlp -J --no-playlist --no-warnings
   --ignore-config`, 25 s timeout: title, uploader, duration, thumbnail,
-  and the best single-file format (`pickSingleFile`: video and audio not
-  `none`, plain http(s), a video container, tallest up to 1080p) with its
-  URL and `http_headers`; none when the page has only split or HLS
-  streams (YouTube today).
+  live or not, and what a relay reads (`pickTracks`), each format with
+  its URL, `http_headers` and `http_chunk_size`. Only plain http(s)
+  formats without DRM count:
+  - the best single file (`pickSingleFile`: video and audio not `none`, a
+    video container, tallest up to 1080p, else the shortest above), unless
+  - a video-only + audio-only pair is taller (`pickSplit`): video tallest
+    up to 1080p (else the shortest above), avc1 before vp9 before av01
+    (hardware decoding), then bitrate; audio the original language, not a
+    `-drc` variant unless alone, m4a/aac before opus, then bitrate.
+    YouTube has only these (299 + 140 for a 1080p60 video).
+  - Neither (only HLS/DASH playlists) or a live stream: nothing to relay.
 - **Probe** (`probeLink`, `link_probe.dart`): a `Range: bytes=0-0` GET; a
   video/audio type, or a generic one on a media file name, is a file
   (`looksLikeMediaFile`); anything else goes to yt-dlp, and when yt-dlp
@@ -498,17 +530,22 @@ all three link modes. Nothing is bundled or installed by hand.
   (`script-opts=ytdl_hook-ytdl_path=...`, `ytdl-format=bv*[height<=1080]+ba/b`,
   once per player), waiting for the download unless the URL names a media
   file. A hook error shows as "can't open this link: ...".
-- **Through me**: the putter's probe must give a single-file format, else
-  the swap is refused with a hint to use "Everyone fetches it". Its relay
-  source reads that format with yt-dlp's headers (`PageRelayBytes`); on
-  403/410 (expired format URL) it resolves the page again once and goes
-  on from where it stopped.
+- **Through me**: the putter's probe must give tracks, else the swap is
+  refused ("Live streams can't be passed on", or no video file: only
+  streaming playlists) with a hint to use "Everyone fetches it". The swap
+  names the tracks; its relay source reads them with yt-dlp's headers
+  (`PageRelayMedia`). On 403/410 (expired format URLs, 6 h on YouTube) from
+  any track it resolves the page again once for all tracks, finds the
+  same format ids with the same sizes (else "the video changed on the
+  page") and goes on from where it stopped. Format URLs are bound to the
+  resolving machine's address, so they never leave it.
 - **Server fetches it**: the server probes the link itself
-  (`LinkRelayBytes`) with its own yt-dlp (off with `--no-yt-dlp` /
-  `ytDlp: false`) and relays the single-file format the same way. The
-  putter only refuses a page its own yt-dlp says has no single file (the
-  server may reach what the putter cannot); when the server cannot read
-  it, the putter gets an `err` with the reason. Viewers open a fetched
+  (`LinkRelayMedia`) with its own yt-dlp (off with `--no-yt-dlp` /
+  `ytDlp: false`) and relays its tracks the same way, setting
+  `relay.tracks` with `live`. The putter only refuses a page its own
+  yt-dlp says cannot be relayed (the server may reach what the putter
+  cannot); when the server cannot read it, the putter gets an `err` with
+  the reason. Viewers open a fetched
   link's `/r/` URL only once `relay.live` is set ("the server is getting
   the video…" until then): resolving takes seconds and media_kit's mpv
   gives up on a silent request after 5 s (`network-timeout`).

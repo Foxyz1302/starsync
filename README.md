@@ -304,9 +304,9 @@ Web pages work in all three: the app and the dedicated server each
 download [yt-dlp](https://github.com/yt-dlp/yt-dlp) by themselves (checked
 against the release's checksums, updated once a day; Settings → Player
 shows its version and has "Update now"), so there is nothing to install.
-The last two need a page with a single-file video (X has one; YouTube only
-has separate video and audio streams, so use "Everyone fetches it") and
-never show the link to anyone. Your upload has to beat the video's
+YouTube works in all three too. The last two never show the link to
+anyone; they can't pass on live streams or pages that only offer streaming
+playlists (use "Everyone fetches it" for those). Your upload has to beat the video's
 bitrate: a 25-minute 2 GB episode is about 11 Mbit/s.
 
 ## Video quality and shaders

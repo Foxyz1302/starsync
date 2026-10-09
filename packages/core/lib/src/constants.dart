@@ -1,5 +1,5 @@
 abstract class RelayConstants {
-  static const int protoVersion = 10;
+  static const int protoVersion = 11;
 
   // Relay (`/r/...`): a member's bytes through the server's buffer.
   static const int relaySliceBytes = 1 << 20;
@@ -12,6 +12,13 @@ abstract class RelayConstants {
   /// Kept regardless of position: containers keep their index at the start
   /// or the end, and players read both on open and on seeks.
   static const int relayPinBytes = 2 << 20;
+  /// A relayed media of several tracks splits the buffer by bitrate; no
+  /// track gets less than this ahead or behind.
+  static const int relayTrackFloorBytes = 8 << 20;
+  /// Upstream GETs are split into ranges of at most this (yt-dlp's
+  /// `http_chunk_size` when it gives one): YouTube throttles longer ones to
+  /// about twice the bitrate.
+  static const int relayUpstreamChunkBytes = 10 << 20;
   static const int relayMinWindowBytes = 256 * 1024;
   static const int relayMaxWindowBytes = 8 << 20;
   /// A viewer request waits this long for its bytes (source away) before

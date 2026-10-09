@@ -46,16 +46,20 @@ class ServerHub {
     relay = next;
   }
 
-  /// `media.relay` for a relayed swap by [token]: who serves the bytes.
-  MediaRelay relayFor(String token, MediaRelay requested) => MediaRelay(
-      source: requested.fetch ? '' : (engine.members[token]?.id ?? ''), fetch: requested.fetch);
+  /// `media.relay` for a relayed swap by [token]: who serves the bytes
+  /// and, from a member, its tracks (the server finds a fetched link's).
+  MediaRelay relayFor(String token, MediaRelay requested) => requested.fetch
+      ? const MediaRelay(fetch: true)
+      : MediaRelay(source: engine.members[token]?.id ?? '', tracks: requested.tracks);
 
-  /// The relay's channel came up or went down: `media.relay.live` follows.
+  /// The relay's channel came up or went down, or a fetched link was read:
+  /// `media.relay.live` and `tracks` follow.
   void relayLiveChanged(ActiveRelay r) {
     final m = engine.media;
     if (!identical(relay, r) || m?.relay == null) return;
-    if (m!.relay!.live == r.live) return;
-    engine.media = m.copyWith(relay: m.relay!.copyWith(live: r.live));
+    final was = m!.relay!;
+    if (was.live == r.live && was.tracks.join(',') == r.kinds.join(',')) return;
+    engine.media = m.copyWith(relay: was.copyWith(live: r.live, tracks: r.kinds));
     changed();
   }
 
@@ -243,7 +247,7 @@ void mountSyncRoute(
   String Function(String sid, String token, SessionMedia? media, String host)
       urlBuilder, {
   String Function(String sid, String token, String itemId, String host)? relayUrlBuilder,
-  String Function(String sid, String token, int mediaId, String name, String host)? relayMediaUrlBuilder,
+  String Function(String sid, String token, int mediaId, String name, int tracks, String host)? relayMediaUrlBuilder,
 }) {
   app.get('/sync', (final req) {
     // Host the client dialled (Host header), so file URLs work for remote joiners.
@@ -310,7 +314,7 @@ void mountSyncRoute(
                         size: parsed.size,
                         duration: parsed.duration,
                         jellyfin: ref,
-                        relay: relayReq == null ? null : hub.relayFor(token, relayReq));
+                        relay: relayReq == null ? null : hub.relayFor(token, const MediaRelay()));
                 if (media == null || !hub.engine.applySwap(token, media)) {
                   wsErr(ws, 'bad swap media');
                   return;
@@ -321,7 +325,7 @@ void mountSyncRoute(
                     duration: media.duration,
                     jellyfin: ref,
                     mediaId: hub.engine.mediaId);
-                hub.setRelay(relayReq == null ? null : _memberRelay(hub, token, media.name));
+                hub.setRelay(relayReq == null ? null : _memberRelay(hub, token, media.name, const []));
                 hub.changed();
                 return;
               }
@@ -361,7 +365,7 @@ void mountSyncRoute(
                         ytDlp: hub.ytDlp,
                         onLiveChanged: () => hub.relayLiveChanged(active),
                         onFail: (why) => wsErr(ws, "The server can't fetch this link: $why"))
-                    : _memberRelay(hub, token, name);
+                    : _memberRelay(hub, token, name, media.relay!.tracks);
                 hub.setRelay(active);
                 hub.changed();
                 return;
@@ -556,13 +560,17 @@ void mountSyncRoute(
         // Jellyfin media resolves per member (own account first); only
         // relayed files and links start from the /r/ URL, and never for
         // the source itself (it plays its own copy).
+        // A fetched link not read yet has no URL: the state's `live` opens it.
         mediaUrl: relayed != null &&
                 media != null &&
                 media.jellyfin == null &&
                 relayed.sourceToken != activeToken &&
                 relayed.mediaId == media.mediaId &&
                 relayMediaUrlBuilder != null
-            ? relayMediaUrlBuilder('default', activeToken, relayed.mediaId, relayed.name, dialledHost)
+            ? (relayed.known
+                ? relayMediaUrlBuilder(
+                    'default', activeToken, relayed.mediaId, relayed.name, relayed.buffers.length, dialledHost)
+                : null)
             : media?.file != null
                 ? urlBuilder('default', activeToken, media, dialledHost)
                 : media?.url,
@@ -587,8 +595,9 @@ void mountSyncRoute(
   });
 }
 
-ActiveRelay _memberRelay(ServerHub hub, String token, String name) {
+ActiveRelay _memberRelay(ServerHub hub, String token, String name, List<String> tracks) {
   late final ActiveRelay r;
-  r = ActiveRelay.fromMember(hub.engine.mediaId, name, token, onLiveChanged: () => hub.relayLiveChanged(r));
+  r = ActiveRelay.fromMember(hub.engine.mediaId, name, token,
+      tracks: tracks, onLiveChanged: () => hub.relayLiveChanged(r));
   return r;
 }

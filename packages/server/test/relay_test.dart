@@ -92,10 +92,10 @@ void main() {
     return m;
   }
 
-  Future<RelaySource> startSource(_Member m, {RelayBytes? from}) async {
+  Future<RelaySource> startSource(_Member m, {RelayMedia? from}) async {
     final src = RelaySource(
         Uri.parse('ws://127.0.0.1:${server.boundPort}/r/default/${m.welcome.token}/source'),
-        from ?? FileRelayBytes(file),
+        from ?? RelayMedia.single(FileRelayBytes(file)),
         backoff: (_) => const Duration(milliseconds: 100));
     await src.start();
     cleanup.add(src.close);
@@ -207,7 +207,7 @@ void main() {
       final src = await startSource(alice);
       final oldId = mediaIdOf(alice);
       expect((await get(viewerUrl(bob, oldId), range: 'bytes=0-9')).$1, 206);
-      final buf = server.hub.relay!.buffer;
+      final buf = server.hub.relay!.buffers.single;
       alice.send({
         't': 'swap',
         'media': {'name': 'x', 'size': 0, 'duration': 0, 'url': 'http://example.invalid/x.mkv'},
@@ -222,7 +222,7 @@ void main() {
     test('server stop drops the relay', () async {
       final alice = await join('alice');
       await swapRelay(alice);
-      final buf = server.hub.relay!.buffer;
+      final buf = server.hub.relay!.buffers.single;
       await server.stop();
       expect(server.hub.relay, isNull);
       expect(buf.cachedBytes, 0);
@@ -250,6 +250,39 @@ void main() {
       expect(body, bytes.sublist(RelayBuffer.slice * 4));
     });
 
+    test('two tracks: each byte-exact at its own URL, welcome is an EDL of both', () async {
+      final alice = await join('alice');
+      final bob = await join('bob');
+      final audio = Uint8List.fromList(List.generate(RelayBuffer.slice + 1234, (i) => i * 7 % 256));
+      final audioFile = File('${tmp.path}/a.m4a')..writeAsBytesSync(audio);
+      await swapRelay(alice, relay: {
+        'tracks': [
+          {'kind': 'video'},
+          {'kind': 'audio'},
+        ],
+      });
+      expect((alice.media!['relay'] as Map)['tracks'], [
+        {'kind': 'video'},
+        {'kind': 'audio'},
+      ]);
+      await startSource(alice,
+          from: _Tracks([RelayTrack('video', FileRelayBytes(file)), RelayTrack('audio', FileRelayBytes(audioFile))]));
+      final id = mediaIdOf(alice);
+      final base = 'http://127.0.0.1:${server.boundPort}/r/default/${bob.welcome.token}/$id';
+      final name = Uri.encodeComponent('ep 01.mkv');
+      final (vs, _, v) = await get('$base/0/$name', range: 'bytes=1000-');
+      final (aStatus, _, a) = await get('$base/1/$name');
+      expect((vs, aStatus), (206, 200));
+      expect(v, bytes.sublist(1000));
+      expect(a, audio);
+      // The single-file URL and a track past the end are not this media.
+      expect((await get('$base/$name')).$1, 404);
+      expect((await get('$base/2/$name')).$1, 404);
+      final carol = await join('carol');
+      final carolBase = base.replaceFirst(bob.welcome.token, carol.welcome.token);
+      expect(carol.welcome.mediaUrl, mpvEdl(['$carolBase/0/$name', '$carolBase/1/$name']));
+    });
+
     test('Jellyfin swap can carry a relay', () async {
       final alice = await join('alice');
       final before = alice.raw.length;
@@ -271,9 +304,19 @@ void main() {
 
   group('server fetches the link', () {
     late HttpServer origin;
+    final ranges = <(String, int)>[];
     setUp(() async {
       origin = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      ranges.clear();
       origin.listen((req) async {
+        if (req.uri.path == '/watch') {
+          req.response.headers.contentType = ContentType.html;
+          req.response.write('<title>page</title>');
+          await req.response.close();
+          return;
+        }
+        final m = RegExp(r'bytes=(\d+)-(\d+)').firstMatch(req.headers.value('range') ?? '');
+        if (m != null) ranges.add((req.uri.path, int.parse(m.group(2)!) - int.parse(m.group(1)!) + 1));
         final r = resolveMediaRequest(
             rangeHeader: req.headers.value('range'), size: bytes.length, filename: 'x.mkv');
         req.response.statusCode = r.status;
@@ -298,6 +341,39 @@ void main() {
       final (status, _, body) = await get(bob.welcome.mediaUrl!, range: 'bytes=1000-');
       expect(status, 206);
       expect(body, bytes.sublist(1000));
+    });
+
+    test('a page with separate video and audio: two tracks, read in chunks', () async {
+      final alice = await join('alice');
+      final y = _FakeYtDlp(tmp.path, [
+        (
+          kind: 'video',
+          format: YtDlpFormat(id: 'v', url: Uri.parse('http://127.0.0.1:${origin.port}/v.mp4'), chunkSize: 300000),
+        ),
+        (kind: 'audio', format: YtDlpFormat(id: 'a', url: Uri.parse('http://127.0.0.1:${origin.port}/a.m4a'))),
+      ]);
+      await server.stop();
+      server = SyncServer(const AppConfig(port: 0, secret: 'pw', name: 't'), ytDlp: y);
+      await server.start();
+      final m = await _Member.join(server.boundPort, 'alice');
+      cleanup.add(() => m.ws.close());
+      await alice.ws.close();
+      await swapRelay(m, relay: {'fetch': true}, url: 'http://127.0.0.1:${origin.port}/watch?v=1');
+      await _until(() => (m.media?['relay'] as Map?)?['live'] == true, 'live');
+      expect((m.media!['relay'] as Map)['tracks'], [
+        {'kind': 'video'},
+        {'kind': 'audio'},
+      ]);
+      final bob = await _Member.join(server.boundPort, 'bob');
+      cleanup.add(() => bob.ws.close());
+      final url = bob.welcome.mediaUrl!;
+      expect(url, startsWith('edl://!no_clip;%'));
+      final parts = RegExp(r'%\d+%([^;]+)').allMatches(url).map((x) => x.group(1)!).toList();
+      expect(parts, hasLength(2));
+      expect((await get(parts[0])).$3, bytes);
+      expect((await get(parts[1], range: 'bytes=5-')).$3, bytes.sublist(5));
+      // The 300 000-byte chunk size: no upstream GET for the video asked for more.
+      expect(ranges.where((r) => r.$1 == '/v.mp4').every((r) => r.$2 <= 300000), isTrue);
     });
 
     test('an open server (no password) refuses to fetch', () async {
@@ -383,4 +459,22 @@ class _CountingBytes implements RelayBytes {
       });
   @override
   Future<void> close() => inner.close();
+}
+
+class _Tracks implements RelayMedia {
+  final List<RelayTrack> tracks;
+  _Tracks(this.tracks);
+  @override
+  Future<List<RelayTrack>> open() async => tracks;
+  @override
+  Future<void> close() async {}
+}
+
+/// yt-dlp that "resolves" any page to [tracks].
+class _FakeYtDlp extends YtDlp {
+  final List<YtDlpTrack> tracks;
+  _FakeYtDlp(super.dir, this.tracks);
+  @override
+  Future<YtDlpInfo> resolve(String url, {Duration timeout = const Duration(seconds: 25)}) async =>
+      YtDlpInfo(title: 'page', tracks: tracks, formats: {for (final t in tracks) t.format.id: t.format});
 }

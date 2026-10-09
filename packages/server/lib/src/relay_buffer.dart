@@ -31,7 +31,7 @@ class LocalRelayFeed extends RelayFeed {
     _subs[id] = bytes.read(start, end).listen(
           (c) => buffer.feedBytes(id, c is Uint8List ? c : Uint8List.fromList(c)),
           onError: (Object e) {
-            _subs.remove(id)?.cancel();
+            unawaited(_subs.remove(id)?.cancel().catchError((_) {}));
             buffer.feedFail(id, '$e');
           },
           onDone: () {
@@ -42,26 +42,29 @@ class LocalRelayFeed extends RelayFeed {
         );
   }
 
+  /// A read cut off mid-request errors on cancel: moot.
   @override
-  void cancel(int id) => _subs.remove(id)?.cancel();
+  void cancel(int id) => unawaited(_subs.remove(id)?.cancel().catchError((_) {}));
 
   Future<void> close() async {
     for (final s in _subs.values) {
-      await s.cancel();
+      await s.cancel().catchError((_) {});
     }
     _subs.clear();
     await bytes.close();
   }
 }
 
-/// A relay channel (`/r/.../source`) as a feed.
+/// A relay channel (`/r/.../source`) as a feed: [track] of the source's
+/// media (null: a single file, the pull names no track).
 class ChannelRelayFeed extends RelayFeed {
   final void Function(String text) send;
-  ChannelRelayFeed(this.send);
+  final int? track;
+  ChannelRelayFeed(this.send, {this.track});
 
   @override
   void pull(int id, int start, int end) =>
-      send(jsonEncode({'t': 'pull', 'id': id, 'start': start, 'end': end}));
+      send(jsonEncode({'t': 'pull', 'id': id, if (track != null) 'track': track, 'start': start, 'end': end}));
 
   @override
   void cancel(int id) => send(jsonEncode({'t': 'cancel', 'id': id}));
@@ -100,14 +103,24 @@ class _Viewer {
 ///   for anything; older ones still get bytes once they are buffered.
 /// Everything lives in memory: dropping the buffer is the cleanup.
 class RelayBuffer {
-  final int ahead, back, pin;
+  /// Set by the relay when a media's tracks share the budget.
+  int ahead, back;
+  final int pin;
   final Duration waitLimit;
+  /// Pull ids; the tracks of one media share one sequence (one channel).
+  final int Function() _newId;
   RelayBuffer({
     this.ahead = RelayConstants.relayAheadBytes,
     this.back = RelayConstants.relayBackBytes,
     this.pin = RelayConstants.relayPinBytes,
     this.waitLimit = const Duration(seconds: RelayConstants.relayWaitSecs),
-  });
+    int Function()? nextId,
+  }) : _newId = nextId ?? _counter();
+
+  static int Function() _counter() {
+    var n = 0;
+    return () => ++n;
+  }
 
   static const slice = RelayConstants.relaySliceBytes;
 
@@ -118,7 +131,7 @@ class RelayBuffer {
   final _blocked = <int, int>{}; // slice -> wait start (us)
   final _viewers = <String, _Viewer>{};
   _Pull? _pull;
-  var _nextId = 1, _reqSeq = 0;
+  var _reqSeq = 0;
   var _disposed = false;
   Completer<void> _kick = Completer();
   final Completer<void> _ready = Completer();
@@ -217,6 +230,7 @@ class RelayBuffer {
   }
 
   void feedFail(int id, String reason) {
+    if (_pull?.id != id) return;
     _log.warning('relay pull $id failed: $reason');
     feedEnd(id);
   }
@@ -323,7 +337,7 @@ class RelayBuffer {
         while (e + 1 < _nSlices && !_slices.containsKey(e + 1) && _wanted(e + 1)) {
           e++;
         }
-        final pl = _Pull(_nextId++, s * slice, _sliceEnd(e));
+        final pl = _Pull(_newId(), s * slice, _sliceEnd(e));
         _pull = pl;
         feed.pull(pl.id, pl.start, pl.end);
       }

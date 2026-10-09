@@ -11,19 +11,22 @@ import 'logging.dart';
 // The relay channel: a member's machine (the source) serves the current
 // media's bytes to the server, which buffers them for every viewer (`/r/...`).
 // The source dials out (works behind NAT/CGNAT) on its own WebSocket, so
-// video bytes never queue behind `/sync` messages.
+// video bytes never queue behind `/sync` messages. A media is one track (a
+// file) or several (a page's separate video and audio).
 //
-//   source -> server  {"t":"info","size":N}               first frame
+//   source -> server  {"t":"info","size":N}               first frame, one track
+//                     {"t":"info","tracks":[{"kind":"video","size":N},...]}
 //                     binary [u32 BE pull id][bytes]      in order per pull
 //                     {"t":"end","id":1}                  pull complete
 //                     {"t":"fail","id":1,"reason":"..."}  cannot read
-//   server -> source  {"t":"pull","id":1,"start":0,"end":N}  bytes start..end
+//   server -> source  {"t":"pull","id":1,"track":0,"start":0,"end":N}
+//                                                         bytes start..end
 //                     {"t":"ack","id":1,"n":65536}         n bytes arrived
 //                     {"t":"cancel","id":1}               stop this pull
 //
-// Flow control is on the source: one adaptive in-flight budget per
-// connection (see [RelayWindow]); a cancelled pull's unacked bytes are
-// written off.
+// Pull ids are unique across tracks. Flow control is on the source: one
+// adaptive in-flight budget per connection (see [RelayWindow]), shared by
+// the tracks; a cancelled pull's unacked bytes are written off.
 
 final _log = createLogger('relay');
 
@@ -31,6 +34,21 @@ final _log = createLogger('relay');
 /// slashes made `_` first (a page title can hold a URL, and an encoded
 /// slash still splits the path). The server ignores the segment.
 String relayUrlName(String name) => Uri.encodeComponent(name.replaceAll(RegExp(r'[/\\]'), '_'));
+
+/// What a viewer opens for relayed media at [base]
+/// (`http://<host>/r/<sid>/<token>/<mediaId>`): `<base>/<name>` for one
+/// track, else an mpv EDL playing `<base>/<i>/<name>` of every track
+/// together (see [mpvEdl]).
+String relayViewerUrl(String base, String name, {int tracks = 1}) {
+  final n = relayUrlName(name);
+  return tracks <= 1 ? '$base/$n' : mpvEdl([for (var i = 0; i < tracks; i++) '$base/$i/$n']);
+}
+
+/// An mpv `edl://` URL playing [urls] as the streams of one file (a video
+/// track and its audio track), each `%<byte length>%`-framed so `;` and
+/// `,` inside a URL are safe.
+String mpvEdl(List<String> urls) =>
+    'edl://${urls.map((u) => '!no_clip;%${utf8.encode(u).length}%$u').join(';!new_stream;')}';
 
 /// Binary relay frame: 4-byte big-endian pull id, then payload.
 Uint8List encodeRelayFrame(int id, List<int> payload) {
@@ -78,13 +96,17 @@ class UpstreamHttpException extends HttpException {
 }
 
 /// An HTTP(S) resource with Range support, e.g. a link or a Jellyfin
-/// stream; [headers] (auth) never leave this machine.
+/// stream; [headers] (auth) never leave this machine. A read is one GET
+/// per [chunkSize] bytes, back to back (see
+/// [RelayConstants.relayUpstreamChunkBytes]).
 class HttpRelayBytes implements RelayBytes {
   final Uri url;
   final Map<String, String> headers;
+  final int chunkSize;
   final HttpClient _client;
   int? _size;
-  HttpRelayBytes(this.url, {this.headers = const {}, HttpClient? client})
+  HttpRelayBytes(this.url,
+      {this.headers = const {}, this.chunkSize = RelayConstants.relayUpstreamChunkBytes, HttpClient? client})
       : _client = client ?? HttpClient();
 
   Future<HttpClientResponse> _get(String range) async {
@@ -118,11 +140,33 @@ class HttpRelayBytes implements RelayBytes {
 
   @override
   Stream<List<int>> read(int start, int end) async* {
-    final res = await _get('bytes=$start-$end');
-    if (res.statusCode == 200 && start > 0) {
-      throw HttpException('upstream ignores Range', uri: url);
+    var pos = start;
+    while (pos <= end) {
+      final last = chunkSize > 0 ? min(end, pos + chunkSize - 1) : end;
+      final res = await _get('bytes=$pos-$last');
+      if (res.statusCode == 200) {
+        if (pos > 0) {
+          await res.drain<void>().catchError((_) {});
+          throw HttpException('upstream ignores Range', uri: url);
+        }
+        // The whole file from 0: take what was asked in this one answer.
+        await for (final c in res) {
+          final take = min(c.length, end - pos + 1);
+          yield take == c.length ? c : c.sublist(0, take);
+          pos += take;
+          if (pos > end) return;
+        }
+        if (pos <= end) throw HttpException('upstream ended early', uri: url);
+        return;
+      }
+      await for (final c in res) {
+        final take = min(c.length, last - pos + 1);
+        if (take <= 0) break;
+        yield take == c.length ? c : c.sublist(0, take);
+        pos += take;
+      }
+      if (pos <= last) throw HttpException('upstream ended early', uri: url);
     }
-    yield* res;
   }
 
   @override
@@ -200,6 +244,38 @@ class RelayWindow {
   }
 }
 
+/// One byte stream of a relayed media: [kind] is `video` or `audio` when
+/// a media has several, empty for a single file.
+class RelayTrack {
+  final String kind;
+  final RelayBytes bytes;
+  const RelayTrack(this.kind, this.bytes);
+}
+
+/// What a relay serves: one track, or several played together (a page's
+/// separate video and audio).
+abstract interface class RelayMedia {
+  /// The tracks, in order; a link is resolved on the first call. Throws
+  /// with the reason when it cannot be relayed.
+  Future<List<RelayTrack>> open();
+
+  Future<void> close();
+
+  /// One file.
+  factory RelayMedia.single(RelayBytes bytes) = _SingleRelayMedia;
+}
+
+class _SingleRelayMedia implements RelayMedia {
+  final RelayBytes bytes;
+  _SingleRelayMedia(this.bytes);
+
+  @override
+  Future<List<RelayTrack>> open() async => [RelayTrack('', bytes)];
+
+  @override
+  Future<void> close() => bytes.close();
+}
+
 class _Pull {
   final int id;
   var sent = 0, acked = 0;
@@ -213,14 +289,14 @@ class _Pull {
 /// the current media": the source stops instead of reconnecting.
 const relayCloseNotSource = 4001;
 
-/// Serves [bytes] on the relay channel at [url] (`ws://host/r/<sid>/<token>/source`)
+/// Serves [media] on the relay channel at [url] (`ws://host/r/<sid>/<token>/source`)
 /// until [close]. Reconnects with backoff when the channel drops; stops for
 /// good when the server closes it with [relayCloseNotSource].
 class RelaySource {
   final Uri url;
-  final RelayBytes bytes;
+  final RelayMedia media;
   final Duration Function(int attempt) backoff;
-  RelaySource(this.url, this.bytes, {Duration Function(int attempt)? backoff})
+  RelaySource(this.url, this.media, {Duration Function(int attempt)? backoff})
       : backoff = backoff ?? ((a) => Duration(milliseconds: min(8000, 500 * (1 << min(a, 4)))));
 
   final window = RelayWindow();
@@ -235,12 +311,26 @@ class RelaySource {
   /// Bytes sent to the server, for stats.
   int bytesSent = 0;
 
+  var _tracks = const <RelayTrack>[];
+
+  /// Opens the media (a page is resolved) and starts serving; throws
+  /// when it cannot be read.
   Future<void> start() async {
-    final size = await bytes.size();
-    unawaited(_loop(size));
+    final tracks = await media.open();
+    final sizes = [for (final t in tracks) await t.bytes.size()];
+    _tracks = tracks;
+    unawaited(_loop({
+      't': 'info',
+      if (tracks.length == 1)
+        'size': sizes.single
+      else
+        'tracks': [
+          for (var i = 0; i < tracks.length; i++) {'kind': tracks[i].kind, 'size': sizes[i]},
+        ],
+    }));
   }
 
-  Future<void> _loop(int size) async {
+  Future<void> _loop(Map<String, Object?> info) async {
     var attempt = 0;
     while (!_closed) {
       try {
@@ -251,7 +341,7 @@ class RelaySource {
         }
         _ws = ws;
         attempt = 0;
-        ws.add(jsonEncode({'t': 'info', 'size': size}));
+        ws.add(jsonEncode(info));
         await for (final m in ws) {
           if (m is String) _onText(ws, m);
         }
@@ -268,7 +358,7 @@ class RelaySource {
       await Future<void>.delayed(backoff(attempt++));
     }
     _abandonAll();
-    await bytes.close();
+    await media.close();
     if (!_done.isCompleted) _done.complete();
   }
 
@@ -283,11 +373,12 @@ class RelaySource {
     if (id is! int) return;
     switch (j['t']) {
       case 'pull':
-        final start = j['start'], end = j['end'];
+        final start = j['start'], end = j['end'], track = j['track'] ?? 0;
         if (start is! int || end is! int || start < 0 || end < start) return;
+        if (track is! int || track < 0 || track >= _tracks.length) return;
         final p = _Pull(id);
         _pulls[id] = p;
-        unawaited(_serve(ws, p, start, end));
+        unawaited(_serve(ws, p, _tracks[track].bytes, start, end));
       case 'ack':
         final p = _pulls[id];
         final n = j['n'];
@@ -307,7 +398,8 @@ class RelaySource {
     p.cancelled = true;
     window.writeOff(p.sent - p.acked);
     p.acked = p.sent;
-    unawaited(p.it?.cancel());
+    // A read cut off mid-request (the client closing) errors here: moot.
+    unawaited(p.it?.cancel().catchError((_) {}));
   }
 
   void _abandonAll() {
@@ -317,7 +409,7 @@ class RelaySource {
     _pulls.clear();
   }
 
-  Future<void> _serve(WebSocket ws, _Pull p, int start, int end) async {
+  Future<void> _serve(WebSocket ws, _Pull p, RelayBytes bytes, int start, int end) async {
     final it = p.it = StreamIterator(bytes.read(start, end));
     final pending = BytesBuilder(copy: false);
     const frame = RelayConstants.relayFrameBytes;
@@ -352,7 +444,7 @@ class RelaySource {
     } finally {
       p.finished = true;
       if (p.settled) _pulls.remove(p.id);
-      await it.cancel();
+      await it.cancel().catchError((_) {});
     }
   }
 

@@ -149,24 +149,42 @@ class HelloMedia {
 /// or, with [fetch], the server reads the swap's link itself. A swap sends
 /// `{}` or `{"fetch":true}`; the server fills in [source] (the swapper's
 /// member id, empty with [fetch]) and whether bytes can flow ([live]).
+/// [tracks]: the kinds (`video`, `audio`) of a media relayed as several
+/// tracks played together; empty for one file. A member swap names them,
+/// the server fills them in for [fetch] once it has read the link.
 class MediaRelay {
   final String source;
   final bool fetch;
   final bool live;
-  const MediaRelay({this.source = '', this.fetch = false, this.live = false});
+  final List<String> tracks;
+  const MediaRelay({this.source = '', this.fetch = false, this.live = false, this.tracks = const []});
 
-  MediaRelay copyWith({bool? live}) => MediaRelay(source: source, fetch: fetch, live: live ?? this.live);
+  static const trackKinds = {'video', 'audio'};
+  static const maxTracks = 4;
+
+  MediaRelay copyWith({bool? live, List<String>? tracks}) =>
+      MediaRelay(source: source, fetch: fetch, live: live ?? this.live, tracks: tracks ?? this.tracks);
 
   Map<String, Object?> toJson() => {
         if (source.isNotEmpty) 'source': source,
         if (fetch) 'fetch': true,
         if (live) 'live': true,
+        if (tracks.length > 1) 'tracks': [for (final k in tracks) {'kind': k}],
       };
 
-  factory MediaRelay.fromJson(Map<String, Object?> json) => MediaRelay(
-      source: json['source'] is String ? json['source'] as String : '',
-      fetch: json['fetch'] == true,
-      live: json['live'] == true);
+  /// Unknown kinds, a single entry or too many make it one file.
+  factory MediaRelay.fromJson(Map<String, Object?> json) {
+    final t = json['tracks'];
+    final kinds = t is List
+        ? [for (final e in t) e is Map && e['kind'] is String ? e['kind'] as String : '']
+        : <String>[];
+    final ok = kinds.length > 1 && kinds.length <= maxTracks && kinds.every(trackKinds.contains);
+    return MediaRelay(
+        source: json['source'] is String ? json['source'] as String : '',
+        fetch: json['fetch'] == true,
+        live: json['live'] == true,
+        tracks: ok ? List.unmodifiable(kinds) : const []);
+  }
 }
 
 class HelloMessage {

@@ -1,4 +1,4 @@
-# Protocol (proto = 10)
+# Protocol (proto = 11)
 
 Wire format only. Behavior (gate, clock, timeouts) is in
 [ARCHITECTURE.md](ARCHITECTURE.md). Source of truth:
@@ -30,7 +30,7 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
 ## Client to server
 
 ```
-{"t":"hello","proto":10,"secret":"","user":{"name":"","avatar":""},
+{"t":"hello","proto":11,"secret":"","user":{"name":"","avatar":""},
  "media":{"name":"","size":0,"duration":0,"url":null},"hostKey":"...",
  "resume":"<token>"}
 {"t":"ready","ready":true,"source":"manual"}      source: manual | auto
@@ -218,9 +218,19 @@ flow control, cases) is in [ARCHITECTURE.md](ARCHITECTURE.md), "Relay".
 
 ```
 swap  media.relay = {}               the swapper's machine serves the bytes
+      media.relay = {"tracks":[{"kind":"video"},{"kind":"audio"}]}
+                                     the same, as two tracks played together
       media.relay = {"fetch":true}   the server reads media.url itself
 state media.relay = {"source":"m2","live":true}   or {"fetch":true,"live":true}
+      media.relay = {"fetch":true,"live":true,"tracks":[{"kind":"video"},{"kind":"audio"}]}
 ```
+
+Tracks: a relayed media is one file, or several byte tracks (a page's
+separate video and audio files) that viewers play as one. `tracks` lists
+them in order, 2 to 4 entries of `kind` `video` or `audio`; absent (or
+anything else) means one file. Every track is a Range-readable byte
+stream; other kinds of track (e.g. segmented playlists) would add a field
+to the entry.
 
 - `swap`: `relay` with `jellyfin` keeps the ref (the swapper serves it to
   viewers without an account; `fetch` is ignored there). `relay` without
@@ -231,19 +241,32 @@ state media.relay = {"source":"m2","live":true}   or {"fetch":true,"live":true}
   for anyone). A web page `url` is read through the server's yt-dlp; when
   the server cannot read the link, the swapper later gets `The server
   can't fetch this link: <reason>`. Any later swap ends the relay.
+  `tracks` on a member's swap names the tracks its source will serve; the
+  server ignores it with `fetch` and with `jellyfin`.
 - `state.media.relay.source`: member id of the source (absent with
   `fetch`). `live` (omitted when false): bytes can flow (the source's
-  channel is connected, or the server could read the link).
+  channel is connected, or the server could read the link). `tracks`: as
+  the swap named them, or, with `fetch`, set once the server has read the
+  link (together with `live`).
 - `welcome.mediaUrl` for relayed media without `jellyfin`: this member's
-  `/r/` URL; absent for the source itself (it plays its own copy). Clients build it after a swap like the `/m` one:
+  `/r/` URL; absent for the source itself (it plays its own copy) and for
+  a fetched link the server has not read yet (clients open it on `live`).
+  Clients build it after a swap like the `/m` one:
   `http://<host>/r/default/<token>/<mediaId>/<name>` (name with `/` and
-  `\` made `_`, then URL-encoded; the server ignores it).
-- `GET /r/<sid>/<token>/<mediaId>/<name>`: the media, Range table as for
-  `/m`. Errors: 401 bad token, 403 kicked, 404 not the current relayed
+  `\` made `_`, then URL-encoded; the server ignores it). With `tracks`,
+  it is an mpv EDL of every track's URL
+  `http://<host>/r/default/<token>/<mediaId>/<i>/<name>`, each framed by
+  its byte length:
+  `edl://!no_clip;%<len>%<track 0 url>;!new_stream;!no_clip;%<len>%<track 1 url>`.
+- `GET /r/<sid>/<token>/<mediaId>/<name>`: the media (one file), Range
+  table as for `/m`. `GET /r/<sid>/<token>/<mediaId>/<i>/<name>`: track
+  `i` (from 0) of a media with `tracks` (track 0 of a one-file media
+  too). Errors: 401 bad token, 403 kicked, 404 not the current relayed
   media (a player still on an older `mediaId` gets 404, never the new
-  bytes), 410 unknown session, 503 + `retry-after` the source never
-  connected (60 s). A request whose bytes do not arrive within 60 s ends
-  early. Bytes count toward `bytesServed`.
+  bytes) or no such track (the one-file URL of a media with `tracks`), 410
+  unknown session, 503 + `retry-after` the source never connected or the
+  server could not read the link (60 s). A request whose bytes do not
+  arrive within 60 s ends early. Bytes count toward `bytesServed`.
 - `GET /r/<sid>/<token>/source` (WebSocket): the source's relay channel,
   dialled by the source (works behind NAT). Only the current source's
   token is accepted; anyone else, or the source after the next swap, is
@@ -251,15 +274,22 @@ state media.relay = {"source":"m2","live":true}   or {"fetch":true,"live":true}
   Frames:
 
 ```
-source -> server  {"t":"info","size":<bytes>}            first frame
+source -> server  {"t":"info","size":<bytes>}            first frame, one file
+                  {"t":"info","tracks":[{"kind":"video","size":<bytes>},
+                                        {"kind":"audio","size":<bytes>}]}
+                                                         first frame, tracks
                   binary: [u32 big-endian pull id][bytes]  in order per pull
                   {"t":"end","id":1}  {"t":"fail","id":1,"reason":"..."}
-server -> source  {"t":"pull","id":1,"start":0,"end":1048575}  inclusive
+server -> source  {"t":"pull","id":1,"track":0,"start":0,"end":1048575}
+                                                         inclusive; no track: 0
                   {"t":"ack","id":1,"n":65536}             bytes arrived
                   {"t":"cancel","id":1}                    stop that pull
 ```
 
-  A `size` different from the one before (a reconnect) drops the buffer.
+  Pull ids are unique across the tracks of a connection; `track` is sent
+  only for a media with `tracks`. An `info` whose track count differs
+  from the swap's `tracks` closes the channel with 4001. A track `size`
+  different from the one before (a reconnect) drops that track's buffer.
 
 ## Join and reconnect
 

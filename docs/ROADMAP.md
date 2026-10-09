@@ -15,10 +15,26 @@ off by deleting it in the same commit as the code. Wire changes also edit
    countdown). Later: tracking for file series.
 
 3. **yt-dlp follow-ups** (see ARCHITECTURE "yt-dlp"): check that the
-   bundled Windows libmpv has the ytdl hook (Lua); if not, resolve in the
-   app and open the single-file format. YouTube: yt-dlp wants a JS runtime
-   (deno) for full extraction, and it only has split streams, so relaying
-   it would need muxing. Formats that need yt-dlp's cookies.
+   bundled Windows libmpv has the ytdl hook (Lua) and plays `edl://` URLs
+   through media_kit; if not, resolve in the app and open the relay
+   tracks' formats. YouTube: yt-dlp wants a JS runtime (deno) for full
+   extraction. Formats that need yt-dlp's cookies.
+   - Relay "pieces" tracks for pages with only HLS/DASH (`m3u8_native`,
+     `http_dash_segments`): a track served as a synthesized VOD media
+     playlist whose entries are pieces (one segment, init `EXT-X-MAP` or
+     AES-128 key = one upstream GET, served whole, Range inside a piece
+     honoured), with a piece buffer per track (pieces by index, filled
+     like `RelayBuffer`: a blocked viewer, the init piece, then ahead of
+     the slowest viewer; evicted by distance); `EXT-X-BYTERANGE` folded
+     into pieces (it also avoids mpv's seek hang on byte-range fMP4
+     playlists); yt-dlp's DASH `fragments` turned into the same playlist,
+     so no MPD parser. Wire: a track entry gains `"as":"pieces"`, `info`
+     lists piece durations, a pull names a piece. Refuse DRM
+     (`skd:`/SAMPLE-AES/Widevine). Measured in a spike: piece relay of
+     Mux/Apple/Akamai HLS/DASH opened in 1.5 to 2.2 s, seeks 0.02 to 2.4 s.
+   - Live streams through the relay (today refused: the sync model needs a
+     fixed duration and seeking).
+   - `tool/relay_e2e.dart`: a two-track case over a shaped source link.
 
 4. **AniList account**: sign in (OAuth via a localhost callback), "My list"
    filter on the Schedule; today's "Following" (AnimeFlow's monitored

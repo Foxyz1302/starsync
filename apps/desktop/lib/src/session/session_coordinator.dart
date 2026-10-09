@@ -525,21 +525,23 @@ class SessionCoordinator {
     }
   }
 
-  String _relayMediaUrlFor(String name, int mediaId) =>
-      'http://$_wsHost:$_wsPort/r/default/${sync.token}/$mediaId/${relayUrlName(name)}';
+  /// This viewer's `/r/` URL; an mpv EDL of every track when there are
+  /// several (a page's separate video and audio).
+  String _relayMediaUrlFor(String name, int mediaId, [int tracks = 1]) =>
+      relayViewerUrl('http://$_wsHost:$_wsPort/r/default/${sync.token}/$mediaId', name, tracks: tracks);
 
-  /// Serves [bytes] for media [mediaId] on this member's relay channel.
+  /// Serves [media] for media [mediaId] on this member's relay channel.
   /// The server only pulls while someone watches through it.
-  void _startRelaySource(int mediaId, RelayBytes bytes, {bool announce = false}) {
+  void _startRelaySource(int mediaId, RelayMedia media, {bool announce = false}) {
     // Back after a reconnect on the same media: it is still serving (and
     // redials by itself).
     if (_relaySource != null && _relaySourceMediaId == mediaId) {
-      unawaited(bytes.close());
+      unawaited(media.close());
       return;
     }
     _stopRelaySource();
     final src = RelaySource(
-        Uri.parse('ws://$_wsHost:$_wsPort/r/default/${sync.token}/source'), bytes);
+        Uri.parse('ws://$_wsHost:$_wsPort/r/default/${sync.token}/source'), media);
     _relaySource = src;
     _relaySourceMediaId = mediaId;
     relaying.value = true;
@@ -646,11 +648,11 @@ class SessionCoordinator {
               memberRelayUrl: relay != null && !mine ? _relayMediaUrlFor(name, r.mediaId) : null);
         } else if (origin is _FileOrigin) {
           await _openMedia(origin.path);
-          _startRelaySource(r.mediaId, FileRelayBytes(File(origin.path)), announce: true);
+          _startRelaySource(r.mediaId, RelayMedia.single(FileRelayBytes(File(origin.path))), announce: true);
         } else if (origin is _LinkOrigin) {
           await _openMedia(origin.url);
           _startRelaySource(
-              r.mediaId, LinkRelayBytes(Uri.parse(origin.url), ytDlp: origin.ytDlp, probe: origin.probe),
+              r.mediaId, LinkRelayMedia(Uri.parse(origin.url), ytDlp: origin.ytDlp, probe: origin.probe),
               announce: true);
         } else if (relay != null && !mine) {
           if (relay.fetch && !relay.live) {
@@ -660,7 +662,7 @@ class SessionCoordinator {
             _awaitLiveFor = r.mediaId;
             health.value = const HealthStatus(HealthSeverity.info, 'the server is getting the video…');
           } else {
-            await _openMedia(_relayMediaUrlFor(name, r.mediaId));
+            await _openMedia(_relayMediaUrlFor(name, r.mediaId, relay.tracks.length));
           }
         } else {
           var url = stateMediaUrl(r);
@@ -679,7 +681,8 @@ class SessionCoordinator {
       _clearPendingSeek();
     } else if (_awaitLiveFor == r.mediaId && (stateMediaRelay(r)?.live ?? false)) {
       _awaitLiveFor = -1;
-      await _openMedia(_relayMediaUrlFor((r.media?['name'] as String?) ?? '', r.mediaId));
+      await _openMedia(
+          _relayMediaUrlFor((r.media?['name'] as String?) ?? '', r.mediaId, stateMediaRelay(r)!.tracks.length));
     }
     _jellyfinTransport(r);
     _relayStatus(r);
@@ -1152,29 +1155,36 @@ class SessionCoordinator {
       return null;
     }
     if (relay == LinkRelay.me) {
-      // This computer reads it: a file, or a page's single-file format.
+      // This computer reads it: a file, or a page's formats (one file, or
+      // separate video and audio tracks).
       if (probe == null) return 'cannot pass this link on: $probeError';
       final problem = probe.relayProblem;
       if (problem != null) return problem;
       final y = await ytDlp.ytDlp;
-      final check = LinkRelayBytes(uri, ytDlp: y, probe: probe);
-      final int size;
+      final check = LinkRelayMedia(uri, ytDlp: y, probe: probe);
+      var size = 0;
+      final List<String> kinds;
       try {
-        size = await check.size().timeout(const Duration(seconds: 15));
+        final tracks = await check.open().timeout(const Duration(seconds: 15));
+        for (final t in tracks) {
+          size += await t.bytes.size().timeout(const Duration(seconds: 15));
+        }
+        kinds = [for (final t in tracks) t.kind];
       } catch (e) {
         return 'cannot pass this link on: $e';
       } finally {
         await check.close();
       }
       _pendingOrigin = _LinkOrigin(url, probe, y);
-      _swap(HelloMedia(name: name, size: size, duration: 0, relay: const MediaRelay()));
+      _swap(HelloMedia(
+          name: name, size: size, duration: 0, relay: MediaRelay(tracks: kinds.length > 1 ? kinds : const [])));
       return null;
     }
     // The server reads it with its own yt-dlp; only a page this app knows
-    // has no single file is refused here (the server may reach what this
-    // computer cannot).
-    if (probe != null && probe.isPage && probe.info != null && probe.info!.single == null) {
-      return noSingleFileText;
+    // it cannot relay (live, no video file) is refused here (the server
+    // may reach what this computer cannot).
+    if (probe != null && probe.isPage && probe.info != null && probe.relayProblem != null) {
+      return probe.relayProblem;
     }
     _swap(HelloMedia(
         name: name, size: max(0, probe?.size ?? 0), duration: 0, url: url, relay: const MediaRelay(fetch: true)));
@@ -1377,10 +1387,10 @@ class SessionCoordinator {
     // its own sign-in, else the pasted link (played directly here too).
     if (origin != null) {
       if (plan is OwnPlay) {
-        _startRelaySource(r.mediaId, HttpRelayBytes(Uri.parse(plan.url), headers: plan.headers));
+        _startRelaySource(r.mediaId, RelayMedia.single(HttpRelayBytes(Uri.parse(plan.url), headers: plan.headers)));
       } else if (origin.link != null) {
         plan = RelayPlay(origin.link!);
-        _startRelaySource(r.mediaId, HttpRelayBytes(Uri.parse(origin.link!)));
+        _startRelaySource(r.mediaId, RelayMedia.single(HttpRelayBytes(Uri.parse(origin.link!))));
       }
     }
     jellyfinPlan.value = plan;

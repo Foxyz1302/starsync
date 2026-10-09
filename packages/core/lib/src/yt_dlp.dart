@@ -31,8 +31,31 @@ class YtDlpFormat {
   final Map<String, String> headers;
   final int? height;
   final String ext;
-  const YtDlpFormat({required this.id, required this.url, this.headers = const {}, this.height, this.ext = ''});
+  /// yt-dlp's `downloader_options.http_chunk_size`: the longest GET the
+  /// site serves at full speed.
+  final int? chunkSize;
+  const YtDlpFormat(
+      {required this.id, required this.url, this.headers = const {}, this.height, this.ext = '', this.chunkSize});
+
+  static YtDlpFormat _of(Map f) {
+    final headers = f['http_headers'];
+    final opts = f['downloader_options'];
+    final chunk = opts is Map ? opts['http_chunk_size'] : null;
+    final h = f['height'] is num ? (f['height'] as num).toInt() : 0;
+    return YtDlpFormat(
+      id: '${f['format_id'] ?? ''}',
+      url: Uri.parse(f['url'] as String),
+      headers: headers is Map ? {for (final e in headers.entries) '${e.key}': '${e.value}'} : const {},
+      height: h == 0 ? null : h,
+      ext: '${f['ext']}',
+      chunkSize: chunk is num && chunk > 0 ? chunk.toInt() : null,
+    );
+  }
 }
+
+/// A format a relay plays as one of a media's tracks ([kind] `video` or
+/// `audio`; empty for a single file holding both).
+typedef YtDlpTrack = ({String kind, YtDlpFormat format});
 
 /// What `yt-dlp -J` says about a page.
 class YtDlpInfo {
@@ -43,10 +66,15 @@ class YtDlpInfo {
   /// Seconds; null when unknown (a live stream).
   final double? duration;
   final String? thumbnail;
-  /// The best format holding video and audio in one http(s) file (what a
-  /// relay can range-read); null when the page only has split or HLS
-  /// streams.
-  final YtDlpFormat? single;
+  /// A live stream (never relayed).
+  final bool isLive;
+  /// What a relay range-reads (see [pickTracks]): one file, or a video and
+  /// an audio file; empty when the page has neither (only streaming
+  /// playlists, or live).
+  final List<YtDlpTrack> tracks;
+  /// Every plain http(s) format by id, to find [tracks] again after a
+  /// re-resolve.
+  final Map<String, YtDlpFormat> formats;
   const YtDlpInfo({
     required this.title,
     this.uploader = '',
@@ -54,7 +82,9 @@ class YtDlpInfo {
     this.webpageUrl = '',
     this.duration,
     this.thumbnail,
-    this.single,
+    this.isLive = false,
+    this.tracks = const [],
+    this.formats = const {},
   });
 
   /// Parses `yt-dlp -J` output; a playlist answer uses its first entry.
@@ -67,6 +97,7 @@ class YtDlpInfo {
     }
     String str(String k) => j[k] is String ? (j[k] as String).trim() : '';
     final formats = j['formats'] is List ? (j['formats'] as List) : [if (j['url'] is String) j];
+    final isLive = j['is_live'] == true || j['live_status'] == 'is_live' || j['live_status'] == 'is_upcoming';
     return YtDlpInfo(
       title: str('title').isNotEmpty ? str('title') : str('fulltitle'),
       uploader: str('uploader').isNotEmpty ? str('uploader') : str('channel'),
@@ -74,53 +105,122 @@ class YtDlpInfo {
       webpageUrl: str('webpage_url'),
       duration: j['duration'] is num ? (j['duration'] as num).toDouble() : null,
       thumbnail: str('thumbnail').isEmpty ? null : str('thumbnail'),
-      single: pickSingleFile(formats),
+      isLive: isLive,
+      tracks: isLive ? const [] : pickTracks(formats),
+      formats: {
+        for (final f in formats)
+          if (_httpUrl(f) && f is Map) '${f['format_id'] ?? ''}': YtDlpFormat._of(f),
+      },
     );
   }
 }
 
 const _singleFileExts = {'mp4', 'webm', 'mov', 'm4v', 'mkv'};
+const _audioExts = {'m4a', 'mp4', 'webm', 'opus', 'ogg', 'mp3'};
+
+/// A plain http(s) format with a URL, not DRM-protected.
+bool _httpUrl(Object? f) {
+  if (f is! Map || f['has_drm'] == true) return false;
+  final url = f['url'];
+  final protocol = f['protocol'];
+  if (url is! String || (protocol != 'http' && protocol != 'https')) return false;
+  final uri = Uri.tryParse(url);
+  return uri != null && (uri.isScheme('http') || uri.isScheme('https'));
+}
+
+int _height(Map f) => f['height'] is num ? (f['height'] as num).toInt() : 0;
+double _tbr(Map f) =>
+    f['tbr'] is num ? (f['tbr'] as num).toDouble() : (f['abr'] is num ? (f['abr'] as num).toDouble() : 0);
+
+/// Height order: up to [maxHeight] the tallest first, then the shortest
+/// above it.
+int _byHeight(int ha, int hb, int maxHeight) {
+  final ina = ha <= maxHeight, inb = hb <= maxHeight;
+  if (ina != inb) return ina ? -1 : 1;
+  return ha == hb ? 0 : (ina ? hb.compareTo(ha) : ha.compareTo(hb));
+}
 
 /// The best single-file format of [formats] (yt-dlp format maps): video
 /// and audio both present (or not known to be absent), plain http(s), a
 /// video container; the tallest up to [maxHeight], else the shortest above
 /// it; mp4/webm and higher bitrate break ties.
 YtDlpFormat? pickSingleFile(List<Object?> formats, {int maxHeight = 1080}) {
-  final ok = <(Map, int)>[];
-  for (final f in formats) {
-    if (f is! Map) continue;
-    final url = f['url'];
-    final protocol = f['protocol'];
-    if (url is! String || (protocol != 'http' && protocol != 'https')) continue;
-    if (f['vcodec'] == 'none' || f['acodec'] == 'none') continue;
-    if (!_singleFileExts.contains(f['ext'])) continue;
-    final uri = Uri.tryParse(url);
-    if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) continue;
-    ok.add((f, f['height'] is num ? (f['height'] as num).toInt() : 0));
-  }
+  final ok = [
+    for (final f in formats)
+      if (_httpUrl(f) && (f as Map)['vcodec'] != 'none' && f['acodec'] != 'none' && _singleFileExts.contains(f['ext']))
+        f,
+  ];
   if (ok.isEmpty) return null;
-  double tbr(Map f) => f['tbr'] is num ? (f['tbr'] as num).toDouble() : 0;
-  int rank((Map, int) a, (Map, int) b) {
-    final (fa, ha) = a;
-    final (fb, hb) = b;
-    final ina = ha <= maxHeight, inb = hb <= maxHeight;
-    if (ina != inb) return ina ? -1 : 1;
-    if (ha != hb) return ina ? hb.compareTo(ha) : ha.compareTo(hb);
-    final ma = fa['ext'] == 'mp4' || fa['ext'] == 'webm', mb = fb['ext'] == 'mp4' || fb['ext'] == 'webm';
-    if (ma != mb) return ma ? -1 : 1;
-    return tbr(fb).compareTo(tbr(fa));
-  }
+  bool mp4(Map f) => f['ext'] == 'mp4' || f['ext'] == 'webm';
+  ok.sort((a, b) {
+    final h = _byHeight(_height(a), _height(b), maxHeight);
+    if (h != 0) return h;
+    if (mp4(a) != mp4(b)) return mp4(a) ? -1 : 1;
+    return _tbr(b).compareTo(_tbr(a));
+  });
+  return YtDlpFormat._of(ok.first);
+}
 
-  ok.sort(rank);
-  final (f, h) = ok.first;
-  final headers = f['http_headers'];
-  return YtDlpFormat(
-    id: '${f['format_id'] ?? ''}',
-    url: Uri.parse(f['url'] as String),
-    headers: headers is Map ? {for (final e in headers.entries) '${e.key}': '${e.value}'} : const {},
-    height: h == 0 ? null : h,
-    ext: '${f['ext']}',
-  );
+int _videoCodecRank(Map f) {
+  final c = '${f['vcodec']}'.toLowerCase();
+  if (c.startsWith('avc') || c.startsWith('h264')) return 0;
+  if (c.startsWith('vp9') || c.startsWith('vp09')) return 1;
+  if (c.startsWith('av01')) return 2;
+  return 3;
+}
+
+/// The best video-only + audio-only pair of plain http(s) files (YouTube's
+/// DASH formats), or null. Video: the tallest up to [maxHeight] (else the
+/// shortest above), avc1 before vp9 before av01 (hardware decoding), then
+/// bitrate. Audio: the original language, not a `-drc` variant, m4a/aac
+/// before others (opus), then bitrate.
+(YtDlpFormat, YtDlpFormat)? pickSplit(List<Object?> formats, {int maxHeight = 1080}) {
+  final video = [
+    for (final f in formats)
+      if (_httpUrl(f) && (f as Map)['acodec'] == 'none' && f['vcodec'] is String && f['vcodec'] != 'none' &&
+          _singleFileExts.contains(f['ext']))
+        f,
+  ];
+  final audio = [
+    for (final f in formats)
+      if (_httpUrl(f) && (f as Map)['vcodec'] == 'none' && f['acodec'] is String && f['acodec'] != 'none' &&
+          _audioExts.contains(f['ext']))
+        f,
+  ];
+  if (video.isEmpty || audio.isEmpty) return null;
+  video.sort((a, b) {
+    final h = _byHeight(_height(a), _height(b), maxHeight);
+    if (h != 0) return h;
+    final c = _videoCodecRank(a).compareTo(_videoCodecRank(b));
+    return c != 0 ? c : _tbr(b).compareTo(_tbr(a));
+  });
+  bool drc(Map f) => '${f['format_id']}'.contains('drc');
+  int lang(Map f) => f['language_preference'] is num ? (f['language_preference'] as num).toInt() : 0;
+  bool aac(Map f) => f['ext'] == 'm4a' || '${f['acodec']}'.startsWith('mp4a');
+  audio.sort((a, b) {
+    if (drc(a) != drc(b)) return drc(a) ? 1 : -1;
+    final l = lang(b).compareTo(lang(a));
+    if (l != 0) return l;
+    if (aac(a) != aac(b)) return aac(a) ? -1 : 1;
+    return _tbr(b).compareTo(_tbr(a));
+  });
+  return (YtDlpFormat._of(video.first), YtDlpFormat._of(audio.first));
+}
+
+/// What a relay reads of [formats]: the single file ([pickSingleFile])
+/// unless a video + audio pair ([pickSplit]) is taller (both by the
+/// [maxHeight] rule); empty when there is neither.
+List<YtDlpTrack> pickTracks(List<Object?> formats, {int maxHeight = 1080}) {
+  final single = pickSingleFile(formats, maxHeight: maxHeight);
+  final split = pickSplit(formats, maxHeight: maxHeight);
+  if (split != null &&
+      (single == null ||
+          (single.height != null &&
+              split.$1.height != null &&
+              _byHeight(split.$1.height!, single.height!, maxHeight) < 0))) {
+    return [(kind: 'video', format: split.$1), (kind: 'audio', format: split.$2)];
+  }
+  return single == null ? const [] : [(kind: '', format: single)];
 }
 
 /// The official standalone build for this platform, or null if there is

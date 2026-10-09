@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'constants.dart';
 import 'relay.dart';
 import 'yt_dlp.dart';
 
@@ -70,9 +71,12 @@ String _unescape(String s) => s
 String notAVideoText(String? ytDlpError) =>
     ytDlpError == null ? 'Not a video' : "Not a video (and yt-dlp couldn't read it: $ytDlpError)";
 
-/// The text for a page with only split or HLS streams.
-const noSingleFileText = 'This page has no single-file video to pass on (only separate video and audio '
-    "streams). Choose 'Everyone fetches it' instead.";
+/// The text for a page with no video file a relay can read.
+const noRelayFormatText = 'This page has no video file to pass on (only streaming playlists). '
+    "Choose 'Everyone fetches it' instead.";
+
+/// The text for a live stream.
+const liveStreamText = "Live streams can't be passed on. Choose 'Everyone fetches it' instead.";
 
 class LinkProbeException implements Exception {
   final String message;
@@ -115,9 +119,11 @@ class LinkProbe {
       ? null
       : info == null
           ? notAVideoText(ytDlpError)
-          : info!.single == null
-              ? noSingleFileText
-              : null;
+          : info!.isLive
+              ? liveStreamText
+              : info!.tracks.isEmpty
+                  ? noRelayFormatText
+                  : null;
 }
 
 const _probeLimit = 512 * 1024;
@@ -184,72 +190,94 @@ Future<String> _readText(HttpClientResponse res) async {
   return utf8.decode(out.takeBytes(), allowMalformed: true);
 }
 
-/// A page's single-file format (see [YtDlpInfo.single]), range-read with
-/// yt-dlp's headers. Format URLs expire: on 403/410 the page is resolved
-/// again once and the read goes on from where it stopped.
-class PageRelayBytes implements RelayBytes {
+/// A page's relay tracks (see [YtDlpInfo.tracks]: one file, or video +
+/// audio), range-read with yt-dlp's headers in GETs of the format's
+/// `http_chunk_size`. Format URLs expire: on 403/410 from any track the
+/// page is resolved again once for all tracks (same formats, same sizes)
+/// and the read goes on from where it stopped.
+class PageRelayMedia implements RelayMedia {
   final Uri page;
   final YtDlp ytDlp;
-  YtDlpFormat? _format;
-  HttpRelayBytes? _inner;
-  int? _size;
+  List<YtDlpTrack>? _picked;
+  List<HttpRelayBytes?> _inner = const [];
+  List<RelayTrack>? _tracks;
+  final _sizes = <int, int>{};
   var _gen = 0;
   Future<void>? _refreshing;
-  PageRelayBytes(this.page, this.ytDlp, {YtDlpFormat? format}) : _format = format;
+  PageRelayMedia(this.page, this.ytDlp, {List<YtDlpTrack>? tracks}) : _picked = tracks;
 
-  Future<YtDlpFormat> _resolve() async {
-    final f = (await ytDlp.resolve(page.toString())).single;
-    if (f == null) throw const LinkProbeException(noSingleFileText);
-    return f;
+  Future<YtDlpInfo> _info() async {
+    final info = await ytDlp.resolve(page.toString());
+    if (info.isLive) throw const LinkProbeException(liveStreamText);
+    return info;
   }
 
-  Future<HttpRelayBytes> _open() async =>
-      _inner ??= () {
-        final f = _format!;
-        return HttpRelayBytes(f.url, headers: f.headers);
+  @override
+  Future<List<RelayTrack>> open() async {
+    if (_tracks != null) return _tracks!;
+    final picked = _picked ??= (await _info()).tracks;
+    if (picked.isEmpty) throw const LinkProbeException(noRelayFormatText);
+    _inner = List.filled(picked.length, null, growable: false);
+    return _tracks = [for (var i = 0; i < picked.length; i++) RelayTrack(picked[i].kind, _PageTrack(this, i))];
+  }
+
+  HttpRelayBytes _open(int i) => _inner[i] ??= () {
+        final f = _picked![i].format;
+        return HttpRelayBytes(f.url,
+            headers: f.headers, chunkSize: f.chunkSize ?? RelayConstants.relayUpstreamChunkBytes);
       }();
 
   static bool _expired(Object e) => e is UpstreamHttpException && (e.status == 403 || e.status == 410);
 
+  /// Resolves the page again: the same format ids with the same sizes,
+  /// else the video changed.
   Future<void> _refresh(int gen) {
     if (gen != _gen) return Future.value();
     return _refreshing ??= () async {
       try {
-        final f = await _resolve();
+        final info = await _info();
+        final next = <YtDlpTrack>[];
+        for (final t in _picked!) {
+          final f = info.formats[t.format.id];
+          if (f == null) throw const LinkProbeException('the video changed on the page');
+          next.add((kind: t.kind, format: f));
+        }
         final old = _inner;
-        _format = f;
-        _inner = null;
+        _picked = next;
+        _inner = List.filled(next.length, null, growable: false);
+        for (final e in _sizes.entries) {
+          if (await _open(e.key).size() != e.value) throw const LinkProbeException('the video changed on the page');
+        }
         _gen++;
-        await old?.close();
+        for (final b in old) {
+          await b?.close();
+        }
       } finally {
         _refreshing = null;
       }
     }();
   }
 
-  @override
-  Future<int> size() async {
-    if (_size != null) return _size!;
-    _format ??= await _resolve();
+  Future<int> _size(int i) async {
+    final known = _sizes[i];
+    if (known != null) return known;
     final gen = _gen;
     try {
-      return _size = await (await _open()).size();
+      return _sizes[i] = await _open(i).size();
     } catch (e) {
       if (!_expired(e)) rethrow;
       await _refresh(gen);
-      return _size = await (await _open()).size();
+      return _sizes[i] = await _open(i).size();
     }
   }
 
-  @override
-  Stream<List<int>> read(int start, int end) async* {
+  Stream<List<int>> _read(int i, int start, int end) async* {
     var pos = start;
     var retried = false;
     while (true) {
       final gen = _gen;
-      final inner = await _open();
       try {
-        await for (final chunk in inner.read(pos, end)) {
+        await for (final chunk in _open(i).read(pos, end)) {
           pos += chunk.length;
           yield chunk;
         }
@@ -258,45 +286,59 @@ class PageRelayBytes implements RelayBytes {
         if (retried || !_expired(e)) rethrow;
         retried = true;
         await _refresh(gen);
-        final n = await (await _open()).size();
-        if (_size != null && n != _size) throw const LinkProbeException('the video changed on the page');
       }
     }
   }
 
   @override
-  Future<void> close() async => _inner?.close();
+  Future<void> close() async {
+    for (final b in _inner) {
+      await b?.close();
+    }
+  }
 }
 
-/// A link of either kind: probed on first [size] (or given [probe]), then
-/// read as a file ([HttpRelayBytes]) or a page ([PageRelayBytes]). Throws
-/// [LinkProbeException] with the reason when it cannot be relayed.
-class LinkRelayBytes implements RelayBytes {
+class _PageTrack implements RelayBytes {
+  final PageRelayMedia media;
+  final int index;
+  _PageTrack(this.media, this.index);
+
+  @override
+  Future<int> size() => media._size(index);
+
+  @override
+  Stream<List<int>> read(int start, int end) => media._read(index, start, end);
+
+  /// The media closes its tracks.
+  @override
+  Future<void> close() async {}
+}
+
+/// A link of either kind, probed on first [open] (or given [probe]): a
+/// file as one track ([HttpRelayBytes]), a page as its picked formats
+/// ([PageRelayMedia]). Throws [LinkProbeException] with the reason when it
+/// cannot be relayed.
+class LinkRelayMedia implements RelayMedia {
   final Uri url;
   final YtDlp? ytDlp;
   LinkProbe? _probe;
-  RelayBytes? _inner;
-  LinkRelayBytes(this.url, {this.ytDlp, LinkProbe? probe}) : _probe = probe;
+  RelayMedia? _inner;
+  LinkRelayMedia(this.url, {this.ytDlp, LinkProbe? probe}) : _probe = probe;
 
-  /// The probe, after [size].
+  /// The probe, after [open].
   LinkProbe? get probe => _probe;
 
   @override
-  Future<int> size() async {
+  Future<List<RelayTrack>> open() async {
     if (_inner == null) {
       final probe = _probe ??= await probeLink(url, ytDlp: ytDlp);
       final problem = probe.relayProblem;
       if (problem != null) throw LinkProbeException(problem);
-      _inner = probe.isPage ? PageRelayBytes(url, ytDlp!, format: probe.info!.single) : HttpRelayBytes(url);
+      _inner = probe.isPage
+          ? PageRelayMedia(url, ytDlp!, tracks: probe.info!.tracks)
+          : RelayMedia.single(HttpRelayBytes(url));
     }
-    return _inner!.size();
-  }
-
-  @override
-  Stream<List<int>> read(int start, int end) {
-    final inner = _inner;
-    if (inner == null) return Stream.error(StateError('size() first'));
-    return inner.read(start, end);
+    return _inner!.open();
   }
 
   @override

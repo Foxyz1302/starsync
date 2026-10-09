@@ -123,7 +123,7 @@ void main() {
     expect(bob.relaying.peek(), isTrue);
     await playTogether([alice, bob]);
     final relay = server.hub.relay!;
-    expect(relay.buffer.bytesToViewers, greaterThan(0), reason: 'alice played through the relay');
+    expect(relay.buffers.single.bytesToViewers, greaterThan(0), reason: 'alice played through the relay');
     expect(relay.sourceToken, bob.sync.token);
 
     // The next swap retires bob's source and the buffer.
@@ -144,7 +144,7 @@ void main() {
       await _poll(() => stateMediaRelay(alice.serverState.peek()!)?.source == bob.sync.memberId, 'me state');
       expect(alice.serverState.peek()!.toJson().toString(), isNot(contains('SECRET')));
       await playTogether([alice, bob]);
-      expect(server.hub.relay!.buffer.bytesToViewers, greaterThan(0));
+      expect(server.hub.relay!.buffers.single.bytesToViewers, greaterThan(0));
 
       final before = hits.length;
       expect(await alice.swapPicked(LinkMedia(link, relay: LinkRelay.server)), isNull);

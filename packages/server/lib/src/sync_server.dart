@@ -48,11 +48,12 @@ class SyncServer {
   /// Upstream connections of the Jellyfin relay; created on first use.
   HttpClient? _relayClient;
 
-  SyncServer(this.config) {
+  /// [ytDlp] replaces the server's own (tests).
+  SyncServer(this.config, {YtDlp? ytDlp}) {
     hub = ServerHub(sessions, config.secret,
         hostKey: config.hostKey,
         jellyfin: config.jellyfin,
-        ytDlp: YtDlp(serverYtDlpDir(config.ytDlpDir), enabled: config.ytDlp));
+        ytDlp: ytDlp ?? YtDlp(serverYtDlpDir(config.ytDlpDir), enabled: config.ytDlp));
   }
 
   bool get isRunning => _server != null;
@@ -103,8 +104,8 @@ class SyncServer {
       return 'http://${authority(dialledHost)}/m/$sid/$token/$name';
     }, relayUrlBuilder: (sid, token, itemId, dialledHost) =>
         'http://${authority(dialledHost)}/j/$sid/$token/${Uri.encodeComponent(itemId)}',
-        relayMediaUrlBuilder: (sid, token, mediaId, name, dialledHost) =>
-            'http://${authority(dialledHost)}/r/$sid/$token/$mediaId/${relayUrlName(name)}');
+        relayMediaUrlBuilder: (sid, token, mediaId, name, tracks, dialledHost) =>
+            relayViewerUrl('http://${authority(dialledHost)}/r/$sid/$token/$mediaId', name, tracks: tracks));
     _app.fallback = (final req) => Response.notFound(
           body: Body.fromString('not found'),
         );
