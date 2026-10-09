@@ -8,7 +8,6 @@ import 'package:hive_ce/hive.dart';
 import 'package:sync_relay_core/core.dart';
 
 import '../screens/home/picked_media.dart';
-import '../screens/home/ui.dart' show appName;
 import '../update/updater.dart' show appVersion;
 
 // Linked Jellyfin servers, one account per ServerId, in their own Hive box.
@@ -215,7 +214,8 @@ class JellyfinAccounts extends ChangeNotifier {
   String get deviceId => _deviceId;
 
   JellyfinClientInfo get clientInfo => JellyfinClientInfo(
-        client: appName,
+        // The old name on purpose: Jellyfin lists devices under it.
+        client: 'Watch Together',
         device: deviceName ?? _hostname(),
         deviceId: _deviceId.isEmpty ? 'unknown' : _deviceId,
         version: appVersion,

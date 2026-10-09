@@ -44,7 +44,7 @@ Future<void> installDesktopEntry({String? executable, String? dataHome, String? 
 @visibleForTesting
 String desktopEntryText(String exe) => '''[Desktop Entry]
 Type=Application
-Name=Watch together
+Name=Starsync
 Comment=Watch videos in sync with friends
 Exec="$exe"
 Icon=$appId

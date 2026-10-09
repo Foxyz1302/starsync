@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 /// Product name (working title). Change it here only.
-const appName = 'Watch Together';
+const appName = 'Starsync';
 
 const repoUrl = 'https://git.example.org/Foxyz/sync_replay_project';
 

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="apps/desktop/assets/icon/icon_256.png" width="128" height="128" alt="watch-together icon">
+  <img src="apps/desktop/assets/icon/icon_256.png" width="128" height="128" alt="Starsync icon">
 </p>
 
-<h1 align="center">watch-together</h1>
+<h1 align="center">Starsync</h1>
 
 Watch a video with friends, in sync, with the quality of a real mpv player.
 Pick from your Jellyfin library, paste any direct video link, or pick a file on your own disk;
