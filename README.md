@@ -337,7 +337,7 @@ shows its version and has "Update now"), so there is nothing to install.
 Sites that refuse guests (Bilibili answers "HTTP Error 412", YouTube may
 ask to sign in) need cookies: Settings → Player → yt-dlp → Cookies reads
 them from a browser, or from a cookies.txt or a cookie extension's JSON
-export (picked or dropped; tick the sites to keep). They stay on this
+export (picked or dropped; every site in it is kept). They stay on this
 computer and are used by its yt-dlp only (your own playback, "through
 me", and a server you host). Cookies log yt-dlp in as you on those
 sites: keep the file private, and for YouTube consider a throwaway

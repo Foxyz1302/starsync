@@ -560,8 +560,8 @@ all three link modes. Nothing is bundled or installed by hand.
   registrable domain by a short rule, with google.com filed under
   youtube.com and bilibili's CDNs under bilibili.com). The app: Settings
   → Player → yt-dlp → Cookies (a browser and profile, or a file picked or
-  dropped, then the sites to keep, bilibili.com and youtube.com ticked
-  when present; "Remove cookies"); its hosted server shares the folder,
+  dropped, kept whole: every site in it; "Remove cookies"; the shell's
+  own drop target is off on Settings so only this box takes the file); its hosted server shares the folder,
   so it uses them too. mpv's hook gets the same as `ytdl-raw-options`
   (`cookies=%N%<path>` / `cookies-from-browser=%N%<spec>`, length-quoted),
   re-set before each external link when it changed. The dedicated

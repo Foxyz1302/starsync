@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:fox_utils/fox_utils.dart' show DesktopDropX, DropTarget;
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart'
-    show CookieBrowser, CookieFile, NetscapeCookie, YtDlp, YtDlpCookies, cookieBrowsers, cookiesBySite, parseCookies, suggestedCookieSites;
+    show CookieBrowser, CookieFile, NetscapeCookie, YtDlp, YtDlpCookies, cookieBrowsers, parseCookies;
 
 import '../controls/player_settings.dart';
 import '../jellyfin/accounts.dart';
@@ -461,7 +461,8 @@ class _YtDlpCookieSettingsState extends State<YtDlpCookieSettings> {
   }
 
   String get _summary => switch (_source) {
-        CookieFile f => '${f.count} cookie${f.count == 1 ? '' : 's'} for ${f.sites.join(', ')}',
+        CookieFile f => '${f.count} cookie${f.count == 1 ? '' : 's'} for '
+            '${f.sites.length <= 3 ? f.sites.join(', ') : '${f.sites.length} sites'}',
         CookieBrowser b => 'From ${b.browser}${b.profile.isEmpty ? '' : ' (profile ${b.profile})'}',
         _ => 'No cookies: yt-dlp visits sites as a guest',
       };
@@ -494,14 +495,9 @@ class _YtDlpCookieSettingsState extends State<YtDlpCookieSettings> {
       return;
     }
     if (!mounted) return;
-    final bySite = cookiesBySite(all);
-    final sites = await showDialog<Set<String>>(
-      context: context,
-      builder: (_) => _CookieSitesDialog(bySite: {for (final e in bySite.entries) e.key: e.value.length}),
-    );
-    if (sites == null || sites.isEmpty) return;
+    // Every site in the file: an export is "my logins", not a pick list.
     try {
-      await widget.cookies.saveFile([for (final s in sites) ...?bySite[s]]);
+      await widget.cookies.saveFile(all);
       _reload();
     } catch (e) {
       _reload('Could not keep the cookies: $e');
@@ -586,7 +582,7 @@ class _YtDlpCookieSettingsState extends State<YtDlpCookieSettings> {
             const SizedBox(height: 8),
             Text(
               'For sites that refuse guests (Bilibili, YouTube asking to sign in). Drop a cookies.txt or a '
-              'cookie-extension JSON export here, or pick one; only the sites you tick are kept, on this computer only. '
+              'cookie-extension JSON export here, or pick one; all of it is kept, on this computer only. '
               'Cookies log yt-dlp in as you on those sites. Keep the file private; for YouTube consider a '
               'throwaway account (Google may flag accounts used with yt-dlp).',
               style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
@@ -598,51 +594,6 @@ class _YtDlpCookieSettingsState extends State<YtDlpCookieSettings> {
   }
 }
 
-/// Which sites of an imported cookie file to keep; pops the ticked ones.
-class _CookieSitesDialog extends StatefulWidget {
-  /// Site -> number of cookies.
-  final Map<String, int> bySite;
-  const _CookieSitesDialog({required this.bySite});
-
-  @override
-  State<_CookieSitesDialog> createState() => _CookieSitesDialogState();
-}
-
-class _CookieSitesDialogState extends State<_CookieSitesDialog> {
-  late final _on = {for (final s in widget.bySite.keys) if (suggestedCookieSites.contains(s)) s};
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Keep cookies for'),
-      content: SizedBox(
-        width: 380,
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            for (final e in widget.bySite.entries)
-              CheckboxListTile(
-                dense: true,
-                value: _on.contains(e.key),
-                title: Text(e.key),
-                subtitle: Text('${e.value} cookie${e.value == 1 ? '' : 's'}'),
-                onChanged: (v) => setState(() => v == true ? _on.add(e.key) : _on.remove(e.key)),
-              ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        FilledButton(
-          onPressed: _on.isEmpty ? null : () => Navigator.pop(context, {..._on}),
-          child: const Text('Keep'),
-        ),
-      ],
-    );
-  }
-}
-
-/// Which browser (and profile) yt-dlp reads cookies from.
 class _CookieBrowserDialog extends StatefulWidget {
   final CookieBrowser? initial;
   const _CookieBrowserDialog({this.initial});

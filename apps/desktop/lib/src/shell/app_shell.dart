@@ -501,7 +501,9 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     _selectTab(ShellTab.library);
   }
 
+  // Off on Settings: its own drop targets (cookies) take the files there.
   Widget _dropTarget(Widget child) => DropTarget(
+        enable: _tab != ShellTab.settings,
         onDragEntered: (_) => setState(() => _dragging = _onTop),
         onDragExited: (_) => setState(() => _dragging = false),
         onDragDone: (d) {
