@@ -79,7 +79,9 @@ anyone except the host.
 
 ## Where video comes from
 
-- **Link**: you paste an http(s) URL. Every app plays it directly with mpv.
+- **Link**: you paste an http(s) URL. Every app plays it directly with mpv;
+  a web page (YouTube, X, ...) goes through yt-dlp, which the app and the
+  server download and update by themselves.
   A pasted Jellyfin link becomes the Jellyfin item below when possible.
 - **Jellyfin item**: picked in the app's library browser. Shared as "this
   item on this Jellyfin server", never as a link with someone's sign-in.

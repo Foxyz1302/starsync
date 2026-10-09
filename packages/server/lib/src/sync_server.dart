@@ -12,6 +12,29 @@ import 'relay_routes.dart';
 import 'server_hub.dart';
 import 'session.dart';
 
+/// [configured], else systemd's `$STATE_DIRECTORY/yt-dlp`, else `yt-dlp`
+/// next to the server binary when that is writable (not under `dart run`),
+/// else `~/.cache/watch-together/yt-dlp`.
+String serverYtDlpDir(String configured) {
+  if (configured.isNotEmpty) return configured;
+  final sep = Platform.pathSeparator;
+  final state = (Platform.environment['STATE_DIRECTORY'] ?? '').split(':').first;
+  if (state.isNotEmpty) return '$state${sep}yt-dlp';
+  final exe = File(Platform.resolvedExecutable);
+  final name = exe.uri.pathSegments.last.toLowerCase();
+  if (name != 'dart' && name != 'dart.exe' && name != 'dartaotruntime') {
+    final dir = Directory('${exe.parent.path}${sep}yt-dlp');
+    try {
+      dir.createSync(recursive: true);
+      final probe = File('${dir.path}$sep.writable')..writeAsStringSync('');
+      probe.deleteSync();
+      return dir.path;
+    } catch (_) {}
+  }
+  final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
+  return '$home$sep.cache${sep}watch-together${sep}yt-dlp';
+}
+
 class SyncServer {
   final AppConfig config;
   final pkg_logging.Logger _log = createLogger('sync_server');
@@ -26,7 +49,10 @@ class SyncServer {
   HttpClient? _relayClient;
 
   SyncServer(this.config) {
-    hub = ServerHub(sessions, config.secret, hostKey: config.hostKey, jellyfin: config.jellyfin);
+    hub = ServerHub(sessions, config.secret,
+        hostKey: config.hostKey,
+        jellyfin: config.jellyfin,
+        ytDlp: YtDlp(serverYtDlpDir(config.ytDlpDir), enabled: config.ytDlp));
   }
 
   bool get isRunning => _server != null;
@@ -78,7 +104,7 @@ class SyncServer {
     }, relayUrlBuilder: (sid, token, itemId, dialledHost) =>
         'http://${authority(dialledHost)}/j/$sid/$token/${Uri.encodeComponent(itemId)}',
         relayMediaUrlBuilder: (sid, token, mediaId, name, dialledHost) =>
-            'http://${authority(dialledHost)}/r/$sid/$token/$mediaId/${Uri.encodeComponent(name)}');
+            'http://${authority(dialledHost)}/r/$sid/$token/$mediaId/${relayUrlName(name)}');
     _app.fallback = (final req) => Response.notFound(
           body: Body.fromString('not found'),
         );

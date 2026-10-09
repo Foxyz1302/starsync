@@ -8,6 +8,7 @@ import 'package:sync_relay_core/core.dart';
 
 import '../jellyfin/accounts.dart';
 import '../jellyfin/session_media.dart';
+import '../playback/yt_dlp_app.dart';
 import '../sfx/sfx.dart';
 import '../sfx/synth_sfx.dart';
 import '../session/health.dart';
@@ -165,6 +166,16 @@ class SessionState {
   /// Set when the hosted server died mid-session; Home shows it on the
   /// Host card and clears it.
   final serverCrash = signal<String?>(null);
+
+  /// The app's yt-dlp folder for the hosted server; '' (the server's own
+  /// default) when the app-support folder is not available.
+  static Future<String> _sharedYtDlpDir() async {
+    try {
+      return (await AppYtDlp.instance.ytDlp).dir;
+    } catch (_) {
+      return '';
+    }
+  }
   ServerIsolate? _server;
   String? _setupCrash;
 
@@ -258,6 +269,7 @@ class SessionState {
             mediaPath: params.mediaPath,
             hostKey: hostKey,
             jellyfin: relay,
+            ytDlpDir: await _sharedYtDlpDir(),
           ),
           onLog: (line) => debugPrint('[server] $line'),
           onCrash: (cause) => _onServerCrash(server, cause),

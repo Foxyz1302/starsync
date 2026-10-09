@@ -2,10 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:sync_relay_core/core.dart' show YtDlp;
 
 import '../controls/player_settings.dart';
 import '../jellyfin/accounts.dart';
 import '../jellyfin/accounts_panel.dart';
+import '../playback/yt_dlp_app.dart';
 import '../schedule/animeflow.dart';
 import '../screens/home/about_page.dart';
 import '../screens/home/settings_page.dart';
@@ -107,6 +109,7 @@ class SettingsTab extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: playerSettingRows()),
           ),
           const SettingsPanel(title: 'Custom shaders', child: CustomShaderFiles()),
+          const SettingsPanel(title: 'yt-dlp', child: YtDlpSettings()),
         ];
       case SettingsSection.integrations:
         final accounts = jellyfin ?? JellyfinAccounts.instance;
@@ -348,6 +351,67 @@ class RecentServersPanel extends StatelessWidget {
           ],
         );
       }),
+    );
+  }
+}
+
+/// The app's yt-dlp (web page links): its version, "Update now", and the
+/// last error.
+class YtDlpSettings extends StatefulWidget {
+  /// Defaults to [AppYtDlp.instance]'s.
+  final Future<YtDlp>? ytDlp;
+  const YtDlpSettings({super.key, this.ytDlp});
+
+  @override
+  State<YtDlpSettings> createState() => _YtDlpSettingsState();
+}
+
+class _YtDlpSettingsState extends State<YtDlpSettings> {
+  late final Future<YtDlp> _y = widget.ytDlp ?? AppYtDlp.instance.ytDlp;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return FutureBuilder<YtDlp>(
+      future: _y,
+      builder: (context, snap) {
+        final y = snap.data;
+        if (y == null) return const SizedBox.shrink();
+        return StreamBuilder<void>(
+          stream: y.changes,
+          builder: (context, _) {
+            final err = y.lastError;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.travel_explore),
+                  title: Text(y.busy
+                      ? 'Downloading…'
+                      : y.version == null
+                          ? 'Not downloaded yet'
+                          : 'Version ${y.version}'),
+                  subtitle: err == null
+                      ? null
+                      : Text(err, key: const ValueKey('ytdlp-error'), style: TextStyle(color: scheme.error)),
+                  trailing: TextButton(
+                    onPressed: y.busy
+                        ? null
+                        : () => y.path == null ? y.ensure() : y.update(force: true),
+                    child: const Text('Update now'),
+                  ),
+                ),
+                Text(
+                  'Plays links to web pages (YouTube, X, …) in all three link modes. '
+                  'Downloaded and kept up to date by the app; checked once a day.',
+                  style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

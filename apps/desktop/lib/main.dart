@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,8 @@ import 'package:sync_relay_core/core.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
+import 'src/playback/yt_dlp_app.dart';
+import 'src/platform/desktop_entry.dart';
 import 'src/screens/home/ui.dart';
 import 'src/state/session_state.dart';
 import 'src/state/settings.dart';
@@ -60,6 +63,10 @@ Future<void> main(List<String> args) async {
     debugPrint('load connect form failed: $e\n$st');
   }
   MediaKit.ensureInitialized();
+  // yt-dlp for web page links: downloaded on first run, kept current.
+  AppYtDlp.instance.warmUp();
+  // Linux: the launcher entry and icon Wayland needs (release installs).
+  unawaited(installDesktopEntry());
   runApp(const WatchTogetherApp());
 }
 

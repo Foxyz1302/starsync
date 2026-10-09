@@ -228,13 +228,16 @@ state media.relay = {"source":"m2","live":true}   or {"fetch":true,"live":true}
   `url` (else `relay fetch needs an http(s) url`), which the server keeps
   to itself, and a server with a password (else `server fetch needs a
   server password`: an open server would fetch any address it can reach
-  for anyone). Any later swap ends the relay.
+  for anyone). A web page `url` is read through the server's yt-dlp; when
+  the server cannot read the link, the swapper later gets `The server
+  can't fetch this link: <reason>`. Any later swap ends the relay.
 - `state.media.relay.source`: member id of the source (absent with
   `fetch`). `live` (omitted when false): bytes can flow (the source's
   channel is connected, or the server could read the link).
 - `welcome.mediaUrl` for relayed media without `jellyfin`: this member's
   `/r/` URL; absent for the source itself (it plays its own copy). Clients build it after a swap like the `/m` one:
-  `http://<host>/r/default/<token>/<mediaId>/<name>` (name URL-encoded).
+  `http://<host>/r/default/<token>/<mediaId>/<name>` (name with `/` and
+  `\` made `_`, then URL-encoded; the server ignores it).
 - `GET /r/<sid>/<token>/<mediaId>/<name>`: the media, Range table as for
   `/m`. Errors: 401 bad token, 403 kicked, 404 not the current relayed
   media (a player still on an older `mediaId` gets 404, never the new

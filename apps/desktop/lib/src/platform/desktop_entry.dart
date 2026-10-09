@@ -1,0 +1,54 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+
+import '../update/updater.dart' show findInstallRoot;
+
+/// The app's id: GTK's application id, so the Wayland `app_id` the
+/// compositor matches to [desktopFileName] for the window's icon.
+const appId = 'moe.senkochan.watch_together';
+const desktopFileName = '$appId.desktop';
+
+/// Linux release installs (an unpacked tarball) carry no launcher entry, so
+/// Wayland shows a generic icon. On start: write the `.desktop` file into
+/// `~/.local/share/applications` (Exec = this binary) and the icon into
+/// the hicolor theme, only when something changed (a moved install, a new
+/// icon). Never in debug runs; failures only log.
+Future<void> installDesktopEntry({String? executable, String? dataHome, String? home}) async {
+  if (!Platform.isLinux || kDebugMode) return;
+  try {
+    final exe = executable ?? Platform.resolvedExecutable;
+    final root = findInstallRoot(exe, windows: false);
+    if (root == null) return;
+    final share = dataHome ?? Platform.environment['XDG_DATA_HOME'] ??
+        '${home ?? Platform.environment['HOME']}/.local/share';
+    final icons = '${root.path}/data/flutter_assets/assets/icon';
+    for (final size in const [16, 32, 48, 64, 128, 256, 512]) {
+      final src = File('$icons/icon_$size.png');
+      if (!src.existsSync()) continue;
+      final dst = File('$share/icons/hicolor/${size}x$size/apps/$appId.png');
+      if (dst.existsSync() && dst.lengthSync() == src.lengthSync()) continue;
+      await dst.parent.create(recursive: true);
+      await src.copy(dst.path);
+    }
+    final entry = desktopEntryText(exe);
+    final file = File('$share/applications/$desktopFileName');
+    if (file.existsSync() && file.readAsStringSync() == entry) return;
+    await file.parent.create(recursive: true);
+    await file.writeAsString(entry);
+  } catch (e) {
+    debugPrint('desktop entry: $e');
+  }
+}
+
+@visibleForTesting
+String desktopEntryText(String exe) => '''[Desktop Entry]
+Type=Application
+Name=Watch together
+Comment=Watch videos in sync with friends
+Exec="$exe"
+Icon=$appId
+StartupWMClass=$appId
+Categories=AudioVideo;Video;Player;Network;
+Terminal=false
+''';

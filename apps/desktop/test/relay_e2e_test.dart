@@ -7,6 +7,7 @@ import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
 import 'package:watch_together/src/jellyfin/accounts.dart';
 import 'package:watch_together/src/jellyfin/track_prefs.dart';
+import 'package:watch_together/src/playback/yt_dlp_app.dart';
 import 'package:watch_together/src/screens/home/picked_media.dart';
 import 'package:watch_together/src/session/session_coordinator.dart';
 
@@ -67,7 +68,10 @@ void main() {
   Future<SessionCoordinator> member(String name) async {
     final acc = JellyfinAccounts(store: MemoryJellyfinStore());
     await acc.ensureLoaded(validate: false);
-    final c = SessionCoordinator(jellyfin: acc, trackPrefs: TrackPrefs(store: MemoryJellyfinStore()));
+    final c = SessionCoordinator(
+        jellyfin: acc,
+        trackPrefs: TrackPrefs(store: MemoryJellyfinStore()),
+        ytDlp: AppYtDlp(YtDlp('$_tmp/relay_e2e_no_ytdlp', enabled: false)));
     all.add(c);
     await c.connect(ConnectParams(host: '127.0.0.1', port: server.boundPort, secret: 'pw', name: name));
     await c.playback.player.setVolume(0);
@@ -150,7 +154,7 @@ void main() {
       await playTogether([alice, bob]);
       expect(hits.length, greaterThan(before));
 
-      // A page instead of a file is refused up front.
+      // A page yt-dlp cannot read is refused up front.
       final page = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       page.listen((r) {
         r.response.headers.contentType = ContentType.html;
@@ -158,7 +162,7 @@ void main() {
         r.response.close();
       });
       expect(await alice.swapPicked(LinkMedia('http://127.0.0.1:${page.port}/watch?v=x', relay: LinkRelay.me)),
-          contains('cannot pass this link on'));
+          contains('Not a video'));
       await page.close(force: true);
     } finally {
       await origin.close(force: true);

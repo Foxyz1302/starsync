@@ -1,4 +1,8 @@
-# watch-together
+<p align="center">
+  <img src="apps/desktop/assets/icon/icon_256.png" width="128" height="128" alt="watch-together icon">
+</p>
+
+<h1 align="center">watch-together</h1>
 
 Watch a video with friends, in sync, with the quality of a real mpv player.
 Pick from your Jellyfin library, paste any direct video link, or pick a file on your own disk;
@@ -22,7 +26,8 @@ How it fits together: [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md).
 From the Releases page of this repo:
 
 - Linux: `watch-together-<version>-linux-x64.tar.gz`. Extract, run
-  `watch_together`. Needs mpv's library installed (`mpv` or `libmpv2`).
+  `watch_together`. On start it adds itself to your app launcher (and its
+  icon), so the window shows its own icon on Wayland. Needs mpv's library installed (`mpv` or `libmpv2`).
 - Windows: `watch-together-<version>-windows-x64.zip`. Extract, run
   `watch_together.exe`. mpv is bundled. New and not yet tried on a real
   Windows desktop; reports welcome.
@@ -103,8 +108,10 @@ folder to Files, or fill Link).
   details open on the right with "Put it up · S1E3", mark watched /
   unwatched, remove from Continue and the episode list (click an episode
   to choose it). Double-click a card or an episode to put it up at once.
-- **Link**: paste an http(s) link. The preview shows what it is (title and
-  thumbnail for YouTube, else the file name); in a server, pick how the
+- **Link**: paste an http(s) link: a video file, or a web page with a
+  video (YouTube, X, and whatever else yt-dlp knows). The preview shows
+  what it is (a page's title, uploader, length and thumbnail, else the
+  file name); in a server, pick how the
   others get it (everyone fetches it, the server fetches it, or through
   you). Your last 12 links are listed under it.
 - **Files**: video folders you add on this computer, grouped by series
@@ -130,7 +137,9 @@ then everyone (you included) uses Join.
 | `--name` | `server` | name reported by `/health` |
 | `--media` | none | local file to serve as the starting video |
 | `--advertise-host` | none | host put in file URLs instead of the one each viewer dialled |
-| `--config` | none | YAML or JSON file with the same settings (`port`, `secret`, `name`, `mediaPath`, `advertiseHost`); replaces the flags |
+| `--[no-]yt-dlp` | on | read web pages (YouTube, X, …) with yt-dlp when the server fetches a link |
+| `--yt-dlp-dir` | next to the binary | writable folder for the server's yt-dlp (systemd: the unit's `StateDirectory`) |
+| `--config` | none | YAML or JSON file with the same settings (`port`, `secret`, `name`, `mediaPath`, `advertiseHost`, `ytDlp`, `ytDlpDir`); replaces the flags |
 
 It prints `READY port=... name=...` once listening and stops cleanly on
 Ctrl+C or SIGTERM. A dedicated server has no host: anyone can kick anyone.
@@ -291,7 +300,12 @@ the others get it:
 - Through me: your computer downloads it and passes it on, for links only
   you can open.
 
-The last two need a link to a video file (not a page like YouTube) and
+Web pages work in all three: the app and the dedicated server each
+download [yt-dlp](https://github.com/yt-dlp/yt-dlp) by themselves (checked
+against the release's checksums, updated once a day; Settings → Player
+shows its version and has "Update now"), so there is nothing to install.
+The last two need a page with a single-file video (X has one; YouTube only
+has separate video and audio streams, so use "Everyone fetches it") and
 never show the link to anyone. Your upload has to beat the video's
 bitrate: a 25-minute 2 GB episode is about 11 Mbit/s.
 

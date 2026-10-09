@@ -43,7 +43,7 @@ size (`ServerIsolate.setFile`): the host's in-session File swap then sends a
 - **Dedicated server**: `bin/server.dart` compiled with `dart compile exe`
   and shipped next to the app as `watch-together-server`. It parses flags
   (`--port`, `--secret`, `--name`, `--media`, `--advertise-host`,
-  `--jellyfin <file>`, `--config`; default port 8080) into the same map and calls `serve`;
+  `--jellyfin <file>`, `--[no-]yt-dlp`, `--yt-dlp-dir`, `--config`; default port 8080) into the same map and calls `serve`;
   SIGINT and SIGTERM stop it. A Flutter binary cannot run without a
   display, which is why the server is its own build.
 
@@ -160,7 +160,8 @@ Three sources, same sync. Any of them can also go through the relay
 
 - **Link**: the media field holds an http(s) URL. It travels as `media.url`
   in `swap` and `state`, and as `mediaUrl` in `welcome`. Each app plays it
-  directly; the server is only the clock. A pasted link that
+  directly (a web page through mpv's yt-dlp hook, see "yt-dlp"); the
+  server is only the clock. A pasted link that
   `parseJellyfinLink` recognises goes up as a Jellyfin ref instead when the
   ServerId is known (in the link, else `/System/Info/Public`), so its
   `api_key` is never shared (`mediaForLink`, host and swap alike).
@@ -394,14 +395,14 @@ What gets relayed (`SessionCoordinator.swapPicked`):
 | Link, "Through me" | relayed from that member's computer; for links only they can open |
 | Jellyfin item (browser pick or pasted link) | own account first, then the server's login (`/j`), then relayed from the member who put it up (with their sign-in, or the pasted link's key, which stays on their machine) |
 
-Relayed links must be one file the relay can range-read: a `text/*`
-response (YouTube and other pages, which only the player resolves) is
-refused before the swap.
+Relayed links are range-read as one file: a media file as is, a web page
+as yt-dlp's single-file format, resolved where the bytes are fetched (see
+"yt-dlp"); the swap carries only the page URL and the mode.
 
 How bytes move:
 - The source dials `/r/.../source` (outbound, so NAT/CGNAT are fine) and
   answers the server's pulls from the file or the URL (`RelaySource`,
-  `FileRelayBytes`, `HttpRelayBytes`; a Jellyfin source sends its own
+  `FileRelayBytes`, `HttpRelayBytes`, `LinkRelayBytes`; a Jellyfin source sends its own
   `Authorization` header from this machine). Viewers only ever talk HTTP
   to the server, so the source never sees mpv's request pattern.
 - The server keeps one `RelayBuffer` per relayed media: 1 MiB slices in
@@ -455,6 +456,62 @@ so for quick seeks. Rejected along the way: a fixed per-request window
 (seeks of 14 s on slow links, data for abandoned positions clogging the
 pipe), one shared window across requests (deadlocked on mpv's unread
 requests), Dart `http2` (connection window stuck at 64 KiB).
+
+## yt-dlp
+
+Web pages with a video (YouTube, Twitter/X, ...) play through yt-dlp in
+all three link modes. Nothing is bundled or installed by hand.
+
+- **Manager** (`YtDlp`, `packages/core/lib/src/yt_dlp.dart`, used by the
+  app and the server): the managed copy in its folder (`yt-dlp` /
+  `yt-dlp.exe`) first; if missing it downloads the official standalone
+  build for the platform (`ytDlpAssetName`: `yt-dlp_linux`,
+  `yt-dlp_linux_aarch64`, musl variants, `yt-dlp.exe`, ...) from the tag
+  `releases/latest` redirects to, checks it against that release's
+  `SHA2-256SUMS`, makes it executable (not on Windows) and renames it into
+  place. If the download fails, a `yt-dlp` on PATH is the fallback. After
+  that, at most once a day (`last-check` stamp in the folder) and in the
+  background, a newer tag is downloaded the same way; nothing waits for
+  it. `version`, `lastError`, `busy` and `changes` feed Settings → Player
+  → yt-dlp ("Update now" forces the check). Every failure is non-fatal.
+  Folders: the app's is `<app support>/yt-dlp` (`AppYtDlp`, warmed up at
+  start), shared with its hosted server; the dedicated server's is
+  `--yt-dlp-dir`, else `$STATE_DIRECTORY/yt-dlp` (systemd), else
+  `yt-dlp` next to the binary if writable, else
+  `~/.cache/watch-together/yt-dlp`.
+- **Resolve** (`YtDlp.resolve`): `yt-dlp -J --no-playlist --no-warnings
+  --ignore-config`, 25 s timeout: title, uploader, duration, thumbnail,
+  and the best single-file format (`pickSingleFile`: video and audio not
+  `none`, plain http(s), a video container, tallest up to 1080p) with its
+  URL and `http_headers`; none when the page has only split or HLS
+  streams (YouTube today).
+- **Probe** (`probeLink`, `link_probe.dart`): a `Range: bytes=0-0` GET; a
+  video/audio type, or a generic one on a media file name, is a file
+  (`looksLikeMediaFile`); anything else goes to yt-dlp, and when yt-dlp
+  cannot read it the page's `og:title` / `<title>` is kept with yt-dlp's
+  reason ("Not a video (and yt-dlp couldn't read it: ...)"). The app
+  probes on paste (`AppYtDlp.probe`, remembered 10 minutes) for the Link
+  preview and the swap: a page is named by its title, never its URL tail,
+  and its thumbnail goes up as the banner (no poster).
+- **Everyone fetches it**: the swap sends the page URL. Before opening an
+  external link every app points mpv's hook at its managed copy
+  (`script-opts=ytdl_hook-ytdl_path=...`, `ytdl-format=bv*[height<=1080]+ba/b`,
+  once per player), waiting for the download unless the URL names a media
+  file. A hook error shows as "can't open this link: ...".
+- **Through me**: the putter's probe must give a single-file format, else
+  the swap is refused with a hint to use "Everyone fetches it". Its relay
+  source reads that format with yt-dlp's headers (`PageRelayBytes`); on
+  403/410 (expired format URL) it resolves the page again once and goes
+  on from where it stopped.
+- **Server fetches it**: the server probes the link itself
+  (`LinkRelayBytes`) with its own yt-dlp (off with `--no-yt-dlp` /
+  `ytDlp: false`) and relays the single-file format the same way. The
+  putter only refuses a page its own yt-dlp says has no single file (the
+  server may reach what the putter cannot); when the server cannot read
+  it, the putter gets an `err` with the reason. Viewers open a fetched
+  link's `/r/` URL only once `relay.live` is set ("the server is getting
+  the video…" until then): resolving takes seconds and media_kit's mpv
+  gives up on a silent request after 5 s (`network-timeout`).
 
 ## Jellyfin in a session
 
@@ -581,8 +638,8 @@ always scrolls the page). Space never presses a focused button
   watched / unwatched, remove from Continue, overview, the episode list
   (click picks the episode, double-click puts it up). A double-click on a
   card puts it up (a series: `playableFor`, its next episode). Link
-  (`library_link.dart`): paste field, a preview (YouTube oEmbed title and
-  thumbnail, else the file name), the three relay modes online, and the
+  (`library_link.dart`): paste field, a preview (a page's yt-dlp title,
+  uploader, length and thumbnail, else the file name; see "yt-dlp"), the three relay modes online, and the
   last 12 links put up (`recentLinks` in the `connect_form` box). Files
   is `FilesPage` (`files/`): watched folders (`FolderStore`) scanned in
   an isolate, videos grouped by series; series start collapsed, a header
@@ -695,8 +752,8 @@ always scrolls the page). Space never presses a focused button
 Settings persist in two Hive boxes: `connect_form` (last form, recent
 servers and links, the profile picture and colour; saved even when a join
 fails) and
-`settings`. Link media names are derived from the URL path and never
-contain a query string.
+`settings`. Link media names are a web page's title (see "yt-dlp"), else
+derived from the URL path, never containing a query string.
 
 Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
 - `accounts.dart`: `JellyfinAccounts` (singleton `instance`), one
@@ -810,6 +867,18 @@ displayable state. The server's `GET /health` returns JSON (`ok`, `name`,
 `proto`, `viewers`, `bytesServed`, `uptimeSecs`); it is unauthenticated, so
 it carries nothing sensitive. The Join card's recent servers poll it for live
 status.
+
+## App icon and launcher entry
+
+`assets/icon/icon.svg` is the source; `icon_<size>.png` and the Windows
+`app_icon.ico` are rendered from it (rsvg-convert, magick). The GTK
+application id is `moe.senkochan.watch_together`, which Wayland uses as the
+window's `app_id`; compositors take the icon from the `.desktop` file of
+that id. A tarball install has none, so on start a Linux release build
+(`platform/desktop_entry.dart`, skipped in debug) writes
+`~/.local/share/applications/moe.senkochan.watch_together.desktop` (Exec =
+the running binary) and the icons into the hicolor theme, only when they
+changed. The runner also sets the window icon from the bundle (X11).
 
 ## Updater
 

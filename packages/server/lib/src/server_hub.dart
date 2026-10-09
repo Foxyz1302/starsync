@@ -20,9 +20,11 @@ class ServerHub {
   final Map<String, RelicWebSocket> sockets = {};
   /// The server's Jellyfin login for the `/j/...` relay; null = no relay.
   JellyfinCredential? jellyfin;
+  /// Reads web pages for "the server fetches it"; null = files only.
+  final YtDlp? ytDlp;
 
   ServerHub(this.sessions, this.expectedSecret,
-      {SyncEngine? engine, this.hostKey = '', this.jellyfin})
+      {SyncEngine? engine, this.hostKey = '', this.jellyfin, this.ytDlp})
       : engine = engine ?? SyncEngine();
 
   /// The current media is a Jellyfin ref on the server [jellyfin] logs in to.
@@ -356,7 +358,9 @@ void mountSyncRoute(
                 late final ActiveRelay active;
                 active = relayReq.fetch
                     ? ActiveRelay.fetch(hub.engine.mediaId, name, link!,
-                        onLiveChanged: () => hub.relayLiveChanged(active))
+                        ytDlp: hub.ytDlp,
+                        onLiveChanged: () => hub.relayLiveChanged(active),
+                        onFail: (why) => wsErr(ws, "The server can't fetch this link: $why"))
                     : _memberRelay(hub, token, name);
                 hub.setRelay(active);
                 hub.changed();

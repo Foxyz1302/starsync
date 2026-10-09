@@ -34,11 +34,15 @@ class ActiveRelay {
           {RelayBuffer? buffer, required void Function() onLiveChanged}) =>
       ActiveRelay._(mediaId, name, sourceToken, buffer ?? RelayBuffer(), null, onLiveChanged);
 
-  /// The server reads [url] itself.
+  /// The server reads [url] itself: a media file as is, a web page
+  /// through [ytDlp]. [onFail] gets the reason when it cannot.
   static ActiveRelay fetch(int mediaId, String name, Uri url,
-      {RelayBuffer? buffer, required void Function() onLiveChanged}) {
+      {RelayBuffer? buffer,
+      YtDlp? ytDlp,
+      required void Function() onLiveChanged,
+      void Function(String reason)? onFail}) {
     final b = buffer ?? RelayBuffer();
-    final local = LocalRelayFeed(HttpRelayBytes(url), b);
+    final local = LocalRelayFeed(LinkRelayBytes(url, ytDlp: ytDlp), b);
     final r = ActiveRelay._(mediaId, name, null, b, local, onLiveChanged);
     unawaited(() async {
       try {
@@ -48,6 +52,7 @@ class ActiveRelay {
         onLiveChanged();
       } catch (e) {
         _log.warning('relay fetch: cannot read the link: $e');
+        if (!r._disposed) onFail?.call('$e');
       }
     }());
     return r;

@@ -19,6 +19,12 @@ Future<void> main(List<String> args) async {
     ..addOption('jellyfin',
         help: 'YAML or JSON file with a Jellyfin login (baseUrl, token, client, device, deviceId, version[, serverId]) '
             'to relay Jellyfin media to viewers without an account. The device fields must be the ones the token was issued with.')
+    ..addFlag('yt-dlp',
+        defaultsTo: true,
+        help: 'Read web pages (YouTube, Twitter/X, ...) for "the server fetches it" with yt-dlp, '
+            'downloaded on first use.')
+    ..addOption('yt-dlp-dir',
+        defaultsTo: '', help: 'Writable folder for that yt-dlp (default: yt-dlp next to this binary).')
     ..addOption('config', help: 'YAML or JSON config file (keys as in AppConfig); overrides the other flags.')
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show this help.');
   final ArgResults parsed;
@@ -52,6 +58,8 @@ Future<void> main(List<String> args) async {
         name: '${parsed['name']}',
         mediaPath: '${parsed['media']}',
         advertiseHost: '${parsed['advertise-host']}',
+        ytDlp: parsed['yt-dlp'] as bool,
+        ytDlpDir: '${parsed['yt-dlp-dir']}',
       );
     }
     final jellyfinPath = parsed['jellyfin'] as String?;
@@ -66,6 +74,8 @@ Future<void> main(List<String> args) async {
         advertiseHost: c.advertiseHost,
         hostKey: c.hostKey,
         jellyfin: await JellyfinCredential.loadFile(jellyfinPath),
+        ytDlp: c.ytDlp,
+        ytDlpDir: c.ytDlpDir,
       );
     }
   } on ConfigException catch (e) {

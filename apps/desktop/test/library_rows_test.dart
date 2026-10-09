@@ -189,23 +189,21 @@ void main() {
       expect(decodeRecentLinks(jsonEncode([{'url': ''}, {'url': 'https://a/b.mkv'}])).single.title, 'b.mkv');
     });
 
-    test('preview: YouTube via oEmbed, other links by file name, failures fall back', () async {
-      Uri? asked;
-      final yt = await previewLink('https://www.youtube.com/watch?v=abc', get: (uri) async {
-        asked = uri;
-        return jsonEncode({'title': 'A video', 'author_name': 'Chan', 'thumbnail_url': 'https://i.ytimg/x.jpg'});
-      });
-      expect(asked!.host, 'www.youtube.com');
-      expect(asked!.path, '/oembed');
-      expect(asked!.queryParameters, {'url': 'https://www.youtube.com/watch?v=abc', 'format': 'json'});
-      expect((yt!.title, yt.subtitle, yt.thumbnail), ('A video', 'youtube.com · Chan', 'https://i.ytimg/x.jpg'));
+    test('preview: a page by yt-dlp, a file by its name, else why not', () async {
+      final yt = await previewLink('https://www.youtube.com/watch?v=abc',
+          probe: (url) async => LinkProbe.page(Uri.parse(url),
+              info: const YtDlpInfo(
+                  title: 'A video', uploader: 'Chan', duration: 187, thumbnail: 'https://i.ytimg/x.jpg')));
+      expect((yt!.title, yt.subtitle, yt.thumbnail), ('A video', 'youtube.com · Chan · 3:07', 'https://i.ytimg/x.jpg'));
 
       final file = await previewLink('https://cdn.example/dir/My%20Movie.mkv?sig=1',
-          get: (_) => throw StateError('no lookup for plain links'));
+          probe: (url) async => LinkProbe.file(Uri.parse(url), 10));
       expect((file!.title, file.subtitle, file.thumbnail), ('My Movie.mkv', 'cdn.example', null));
 
-      final down = await previewLink('https://youtu.be/abc', get: (_) async => throw Exception('offline'));
-      expect((down!.title, down.subtitle), ('abc', 'youtu.be'));
+      final page = await previewLink('https://example.com/a',
+          probe: (url) async => LinkProbe.page(Uri.parse(url), pageTitle: 'Example', ytDlpError: 'Unsupported URL'));
+      expect((page!.title, page.subtitle),
+          ('Example', "example.com · Not a video (and yt-dlp couldn't read it: Unsupported URL)"));
       expect(await previewLink('not a link'), isNull);
     });
 

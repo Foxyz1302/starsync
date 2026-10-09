@@ -16,6 +16,7 @@ import '../sync/state_diff.dart';
 import '../sync/user_seek.dart';
 import 'frame_watchdog.dart';
 import 'media_marks.dart';
+import 'yt_dlp_app.dart' show ytdlFormat;
 
 /// Owns one mpv [Player] (and its [VideoController]) per session: created
 /// by [init] on join, released by [dispose] on leave, swapped by
@@ -59,6 +60,26 @@ class PlaybackController {
 
   /// Called once when the watchdog sees a frozen picture.
   void Function()? onFrozen;
+
+  /// mpv's yt-dlp hook could not open the current link (its error text).
+  void Function(String error)? onYtdlError;
+
+  /// Points mpv's yt-dlp hook at [path] (the app's managed copy) for web
+  /// page links, at most 1080p. Once per player.
+  Future<void> useYtDlp(String path) async {
+    final p = _player;
+    if (p == null || identical(p, _ytdlSetOn)) return;
+    try {
+      final dynamic platform = p.platform;
+      await platform?.setProperty('script-opts', 'ytdl_hook-ytdl_path=$path');
+      await platform?.setProperty('ytdl-format', ytdlFormat);
+      _ytdlSetOn = p;
+    } catch (e) {
+      debugPrint('yt-dlp path not set: $e');
+    }
+  }
+
+  Player? _ytdlSetOn;
 
   /// Fingerprint of the picture on screen, installed by the video view
   /// (`ShownFrameProbe.sample`). Without it the watchdog stays idle.
@@ -298,6 +319,11 @@ class PlaybackController {
   // an error there while shaders are on is a shader that failed to load
   // or compile (mpv then renders without it).
   void _onLog(PlayerLog log) {
+    if (log.prefix == 'ytdl_hook' && (log.level == 'error' || log.level == 'fatal')) {
+      final text = log.text.trim().replaceFirst(RegExp(r'^ERROR:\s*'), '');
+      if (text.isNotEmpty) onYtdlError?.call(text);
+      return;
+    }
     if (log.prefix != 'libmpv_render') return;
     if (log.text.contains('suspected software renderer')) {
       _setRenderMode(RenderMode.softwareGl);

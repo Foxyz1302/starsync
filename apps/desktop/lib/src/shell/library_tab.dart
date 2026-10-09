@@ -83,7 +83,7 @@ class LibraryTab extends StatefulWidget {
   final VoidCallback? onOpenIntegrations;
   /// Defaults to [RecentLinks.instance].
   final RecentLinks? recentLinks;
-  final OEmbedGetter oembed;
+  final LinkProber probe;
   /// The Files source (tests inject one); defaults to [FilesPage].
   final Widget Function(BuildContext context, {required bool online, required bool relayed,
       required Future<String?> Function(String path) onPlay, String? nowPlayingPath})? filesBuilder;
@@ -100,7 +100,7 @@ class LibraryTab extends StatefulWidget {
     this.jellyfinStart,
     this.onOpenIntegrations,
     this.recentLinks,
-    this.oembed = defaultOEmbedGet,
+    this.probe = defaultLinkProber,
     this.filesBuilder,
     this.now = DateTime.now,
   });
@@ -245,7 +245,7 @@ class _LibraryTabState extends State<LibraryTab> {
           controller: _c,
           offlineHint: _hint,
           recents: widget.recentLinks ?? RecentLinks.instance,
-          oembed: widget.oembed,
+          probe: widget.probe,
           onPutUp: _put,
         ),
       MediaKind.file => _files(context),

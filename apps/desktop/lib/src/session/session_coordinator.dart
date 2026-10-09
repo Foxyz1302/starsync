@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/widgets.dart';
 import 'package:signals/signals_flutter.dart';
@@ -12,6 +13,7 @@ import '../jellyfin/session_media.dart';
 import '../jellyfin/track_prefs.dart';
 import '../playback/media_marks.dart';
 import '../playback/playback_controller.dart';
+import '../playback/yt_dlp_app.dart';
 import '../schedule/anilist.dart';
 import '../screens/home/picked_media.dart';
 import '../sfx/sfx.dart';
@@ -132,7 +134,10 @@ final class _FileOrigin extends _RelayOrigin {
 
 final class _LinkOrigin extends _RelayOrigin {
   final String url;
-  const _LinkOrigin(this.url);
+  /// What the link is (a page goes through [ytDlp]).
+  final LinkProbe probe;
+  final YtDlp ytDlp;
+  const _LinkOrigin(this.url, this.probe, this.ytDlp);
 }
 
 /// A Jellyfin item: served with this install's account, else with the
@@ -159,6 +164,8 @@ class SessionCoordinator {
   /// Set by the hosting app: makes a local file the hosted one (File swap);
   /// null when this app is not the host.
   Future<({String name, int size})?> Function(String path)? hostFile;
+  /// The app's yt-dlp and link probes (tests pass their own).
+  final AppYtDlp ytDlp;
   final SyncClient sync = SyncClient();
   /// Member pictures by `avatarHash`, fetched from the server.
   late final AvatarCache avatars = AvatarCache(sync);
@@ -293,8 +300,9 @@ class SessionCoordinator {
   bool _jellyfinListening = false;
 
   SessionCoordinator(
-      {this.sfx = const NoopSfxService(), JellyfinAccounts? jellyfin, TrackPrefs? trackPrefs})
-      : jellyfin = jellyfin ?? JellyfinAccounts.instance,
+      {this.sfx = const NoopSfxService(), JellyfinAccounts? jellyfin, TrackPrefs? trackPrefs, AppYtDlp? ytDlp})
+      : ytDlp = ytDlp ?? AppYtDlp.instance,
+        jellyfin = jellyfin ?? JellyfinAccounts.instance,
         trackPrefs = trackPrefs ?? TrackPrefs();
 
   /// Player lifetime = one session: created here on connect, disposed by
@@ -304,6 +312,7 @@ class SessionCoordinator {
     if (_playerReady) return;
     try {
       playback.onFrozen = () => unawaited(reloadVideo(auto: true));
+      playback.onYtdlError = (e) => health.value = HealthStatus(HealthSeverity.error, "can't open this link: $e");
       playback.onUserSeek = (d) => _userSeek(d.inMicroseconds / 1e6);
       await playback.init();
       _playerReady = true;
@@ -456,6 +465,7 @@ class SessionCoordinator {
     diff.reset();
     _opening = true;
     try {
+      await _prepareYtDlp(url);
       await playback.openUrl(url, headers: headers);
       health.value =
           const HealthStatus(HealthSeverity.ok, 'connected');
@@ -470,7 +480,29 @@ class SessionCoordinator {
     }
   }
 
+  /// A web link (not this server's): mpv's yt-dlp hook gets the app's
+  /// managed yt-dlp, downloaded first if needed; a media file name does
+  /// not wait for that.
+  Future<void> _prepareYtDlp(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) return;
+    if (uri.host == _wsHost && uri.port == _wsPort) return;
+    try {
+      final y = await ytDlp.ytDlp;
+      final ready = y.ensure();
+      final path = hasMediaExtension(uri)
+          ? y.path
+          : await ready.timeout(const Duration(seconds: 90), onTimeout: () => null);
+      if (path != null) await playback.useYtDlp(path);
+    } catch (e) {
+      debugPrint('yt-dlp not ready: $e');
+    }
+  }
+
   bool _relayWaitShown = false;
+
+  /// The server-fetched media this viewer opens once it is live.
+  int _awaitLiveFor = -1;
 
   /// Relayed through a member whose channel is down: say who everyone is
   /// waiting for (the buffer still plays what it has).
@@ -494,7 +526,7 @@ class SessionCoordinator {
   }
 
   String _relayMediaUrlFor(String name, int mediaId) =>
-      'http://$_wsHost:$_wsPort/r/default/${sync.token}/$mediaId/${Uri.encodeComponent(name)}';
+      'http://$_wsHost:$_wsPort/r/default/${sync.token}/$mediaId/${relayUrlName(name)}';
 
   /// Serves [bytes] for media [mediaId] on this member's relay channel.
   /// The server only pulls while someone watches through it.
@@ -617,9 +649,19 @@ class SessionCoordinator {
           _startRelaySource(r.mediaId, FileRelayBytes(File(origin.path)), announce: true);
         } else if (origin is _LinkOrigin) {
           await _openMedia(origin.url);
-          _startRelaySource(r.mediaId, HttpRelayBytes(Uri.parse(origin.url)), announce: true);
+          _startRelaySource(
+              r.mediaId, LinkRelayBytes(Uri.parse(origin.url), ytDlp: origin.ytDlp, probe: origin.probe),
+              announce: true);
         } else if (relay != null && !mine) {
-          await _openMedia(_relayMediaUrlFor(name, r.mediaId));
+          if (relay.fetch && !relay.live) {
+            // The server is still getting it (yt-dlp takes seconds; mpv
+            // gives up on a silent request after 5): open once it is live.
+            _openUrl = null;
+            _awaitLiveFor = r.mediaId;
+            health.value = const HealthStatus(HealthSeverity.info, 'the server is getting the video…');
+          } else {
+            await _openMedia(_relayMediaUrlFor(name, r.mediaId));
+          }
         } else {
           var url = stateMediaUrl(r);
           if ((url == null || url.isEmpty) && sync.token.isNotEmpty) {
@@ -635,6 +677,9 @@ class SessionCoordinator {
       }
       _seekGate.reset();
       _clearPendingSeek();
+    } else if (_awaitLiveFor == r.mediaId && (stateMediaRelay(r)?.live ?? false)) {
+      _awaitLiveFor = -1;
+      await _openMedia(_relayMediaUrlFor((r.media?['name'] as String?) ?? '', r.mediaId));
     }
     _jellyfinTransport(r);
     _relayStatus(r);
@@ -1060,8 +1105,11 @@ class SessionCoordinator {
       if (ref != null && client != null) {
         bytes = await jellyfinArt(client, ref.itemId);
       } else if (ref == null && (media.url ?? '').isNotEmpty) {
-        // A web link: its name is a URL tail ("1"), not a show; never guess.
-        bytes = null;
+        // A web link is not a show: never guess. A page's thumbnail is
+        // its banner.
+        final thumb = (await _probeFor(media.url!))?.info?.thumbnail;
+        final uri = thumb == null ? null : Uri.tryParse(thumb);
+        bytes = uri == null ? null : (banner: await fetchImage(uri, const {}, RelayConstants.maxBannerBytes), poster: null);
       } else {
         final name = ref == null ? media.name : jellyfinTitle(ref.title, ref.subtitle).$1;
         bytes = await aniListArt(_aniList ??= AniListClient(), name);
@@ -1089,31 +1137,56 @@ class SessionCoordinator {
       _swap(media.copyWith(relay: const MediaRelay()));
       return null;
     }
+    LinkProbe? probe;
+    String? probeError;
+    try {
+      probe = await ytDlp.probe(url).timeout(const Duration(seconds: 45));
+    } catch (e) {
+      probeError = '$e';
+    }
+    // A page is named by its title, never its URL tail ("1", "watch").
+    final uri = Uri.tryParse(url) ?? Uri();
+    final name = probe?.title ?? (probe != null || hasMediaExtension(uri) || uri.host.isEmpty ? media.name : uri.host);
     if (relay == LinkRelay.direct) {
-      _swap(media);
+      _swap(HelloMedia(name: name, size: 0, duration: 0, url: url));
       return null;
     }
-    // Relayed: it must be a single file the relay can range-read (not a
-    // page like YouTube, which only the player can resolve).
-    final probe = HttpRelayBytes(Uri.parse(url));
-    final int size;
-    try {
-      size = await probe.size().timeout(const Duration(seconds: 15));
-    } catch (e) {
-      return relay == LinkRelay.me
-          ? 'cannot pass this link on: $e'
-          : 'cannot check this link: $e';
-    } finally {
-      await probe.close();
-    }
     if (relay == LinkRelay.me) {
-      _pendingOrigin = _LinkOrigin(url);
-      _swap(HelloMedia(name: media.name, size: size, duration: 0, relay: const MediaRelay()));
-    } else {
-      _swap(HelloMedia(
-          name: media.name, size: size, duration: 0, url: url, relay: const MediaRelay(fetch: true)));
+      // This computer reads it: a file, or a page's single-file format.
+      if (probe == null) return 'cannot pass this link on: $probeError';
+      final problem = probe.relayProblem;
+      if (problem != null) return problem;
+      final y = await ytDlp.ytDlp;
+      final check = LinkRelayBytes(uri, ytDlp: y, probe: probe);
+      final int size;
+      try {
+        size = await check.size().timeout(const Duration(seconds: 15));
+      } catch (e) {
+        return 'cannot pass this link on: $e';
+      } finally {
+        await check.close();
+      }
+      _pendingOrigin = _LinkOrigin(url, probe, y);
+      _swap(HelloMedia(name: name, size: size, duration: 0, relay: const MediaRelay()));
+      return null;
     }
+    // The server reads it with its own yt-dlp; only a page this app knows
+    // has no single file is refused here (the server may reach what this
+    // computer cannot).
+    if (probe != null && probe.isPage && probe.info != null && probe.info!.single == null) {
+      return noSingleFileText;
+    }
+    _swap(HelloMedia(
+        name: name, size: max(0, probe?.size ?? 0), duration: 0, url: url, relay: const MediaRelay(fetch: true)));
     return null;
+  }
+
+  Future<LinkProbe?> _probeFor(String url) async {
+    try {
+      return await ytDlp.probe(url).timeout(const Duration(seconds: 45));
+    } catch (_) {
+      return null;
+    }
   }
 
   /// A Jellyfin pick (browser, next / previous episode) goes up as a ref,

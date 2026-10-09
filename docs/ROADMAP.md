@@ -14,9 +14,11 @@ off by deleting it in the same commit as the code. Wire changes also edit
 2. **Files**: next episode from Files (by parsed episode, with the
    countdown). Later: tracking for file series.
 
-3. **yt-dlp** (epic): players that open links themselves use mpv's ytdl
-   hook (bundled on Windows); then relay of single-file formats; then a
-   resolver for the Link preview (title, thumbnail, duration).
+3. **yt-dlp follow-ups** (see ARCHITECTURE "yt-dlp"): check that the
+   bundled Windows libmpv has the ytdl hook (Lua); if not, resolve in the
+   app and open the single-file format. YouTube: yt-dlp wants a JS runtime
+   (deno) for full extraction, and it only has split streams, so relaying
+   it would need muxing. Formats that need yt-dlp's cookies.
 
 4. **AniList account**: sign in (OAuth via a localhost callback), "My list"
    filter on the Schedule; today's "Following" (AnimeFlow's monitored

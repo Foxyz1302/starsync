@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:sync_relay_core/core.dart' show LinkProbe, hasMediaExtension, notAVideoText;
 
+import '../playback/yt_dlp_app.dart';
 import '../screens/home/media_picker.dart';
 import '../state/connect_prefs.dart';
 import 'motion.dart';
@@ -109,49 +110,49 @@ class LinkPreview {
   const LinkPreview({required this.title, required this.subtitle, this.thumbnail});
 }
 
-/// GET [uri] and return the body (oEmbed).
-typedef OEmbedGetter = Future<String> Function(Uri uri);
+/// What a link is (see [AppYtDlp.probe]).
+typedef LinkProber = Future<LinkProbe> Function(String url);
 
-Future<String> defaultOEmbedGet(Uri uri) async {
-  final client = HttpClient()..connectionTimeout = const Duration(seconds: 6);
-  try {
-    final req = await client.getUrl(uri);
-    final res = await req.close().timeout(const Duration(seconds: 8));
-    if (res.statusCode != 200) throw HttpException('status ${res.statusCode}', uri: uri);
-    return await res.transform(utf8.decoder).join().timeout(const Duration(seconds: 8));
-  } finally {
-    client.close(force: true);
-  }
-}
-
-bool isYouTubeLink(Uri uri) {
-  final h = uri.host.toLowerCase();
-  return h == 'youtu.be' || h == 'youtube.com' || h.endsWith('.youtube.com');
-}
+Future<LinkProbe> defaultLinkProber(String url) => AppYtDlp.instance.probe(url);
 
 String _host(Uri uri) => uri.host.startsWith('www.') ? uri.host.substring(4) : uri.host;
 
-/// The preview of [url]: YouTube links ask YouTube's oEmbed for the title,
-/// channel and thumbnail; anything else (or a failed lookup) shows the
-/// file name and host. Null for text that is not an http(s) link.
-Future<LinkPreview?> previewLink(String url, {OEmbedGetter get = defaultOEmbedGet}) async {
+/// "3:07", "1:02:03".
+String clockText(double seconds) {
+  final s = seconds.round();
+  final h = s ~/ 3600, m = s % 3600 ~/ 60, sec = (s % 60).toString().padLeft(2, '0');
+  return h > 0 ? '$h:${m.toString().padLeft(2, '0')}:$sec' : '$m:$sec';
+}
+
+/// The preview of [url]: a web page shows yt-dlp's title, uploader,
+/// duration and thumbnail (or why it is not a video); a media file (by
+/// name or by probe) its file name and host. Null for text that is not an http(s) link.
+Future<LinkPreview?> previewLink(String url, {LinkProber probe = defaultLinkProber}) async {
   final uri = Uri.tryParse(url.trim());
   if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https') || uri.host.isEmpty) return null;
-  final plain = LinkPreview(title: LinkMedia(url.trim()).label, subtitle: _host(uri));
-  if (!isYouTubeLink(uri)) return plain;
+  final host = _host(uri);
+  // A media file name needs no lookup.
+  if (hasMediaExtension(uri)) return LinkPreview(title: LinkMedia(url.trim()).label, subtitle: host);
+  final LinkProbe p;
   try {
-    final body = await get(Uri.https('www.youtube.com', '/oembed', {'url': url.trim(), 'format': 'json'}));
-    final j = jsonDecode(body);
-    if (j is! Map || j['title'] is! String) return plain;
-    final author = j['author_name'];
-    return LinkPreview(
-      title: j['title'] as String,
-      subtitle: [_host(uri), if (author is String && author.isNotEmpty) author].join(' · '),
-      thumbnail: j['thumbnail_url'] is String ? j['thumbnail_url'] as String : null,
-    );
-  } catch (_) {
-    return plain;
+    p = await probe(url.trim());
+  } catch (e) {
+    return LinkPreview(title: LinkMedia(url.trim()).label, subtitle: '$host · $e');
   }
+  final info = p.info;
+  if (!p.isPage) return LinkPreview(title: LinkMedia(url.trim()).label, subtitle: host);
+  if (info == null) {
+    return LinkPreview(title: p.title ?? host, subtitle: '$host · ${notAVideoText(p.ytDlpError)}');
+  }
+  return LinkPreview(
+    title: p.title ?? host,
+    subtitle: [
+      host,
+      if (info.uploader.isNotEmpty) info.uploader,
+      if (info.duration case final d? when d > 0) clockText(d),
+    ].join(' · '),
+    thumbnail: info.thumbnail,
+  );
 }
 
 /// "today", "yesterday", "3 days ago", "last week", "5 weeks ago", ...
@@ -195,14 +196,14 @@ class LibraryLinkSource extends StatefulWidget {
   /// Puts the link up; returns an error text, or null when sent.
   final Future<String?> Function(LinkMedia media) onPutUp;
   final RecentLinks recents;
-  final OEmbedGetter oembed;
+  final LinkProber probe;
   const LibraryLinkSource({
     super.key,
     required this.controller,
     required this.onPutUp,
     required this.recents,
     this.offlineHint,
-    this.oembed = defaultOEmbedGet,
+    this.probe = defaultLinkProber,
   });
 
   @override
@@ -246,7 +247,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
       if (mounted) setState(() {});
       return;
     }
-    final p = await previewLink(url, get: widget.oembed);
+    final p = await previewLink(url, probe: widget.probe);
     _previews[url] = p;
     if (mounted) setState(() {});
   }
@@ -272,7 +273,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
       error = '$e';
     }
     if (error == null) {
-      final p = _previews[url] ?? await previewLink(url, get: widget.oembed);
+      final p = _previews[url] ?? await previewLink(url, probe: widget.probe);
       unawaited(widget.recents.add(RecentLink(
         url: url,
         title: p?.title ?? LinkMedia(url).label,
@@ -346,7 +347,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
               Text('Watch from a link', textAlign: TextAlign.center, style: t.headlineSmall),
               const SizedBox(height: 6),
               Text(
-                'A video file, YouTube, a Jellyfin link… Ctrl+V or drop it anywhere to bring it here.',
+                'A video file, a page (YouTube, X, …) or a Jellyfin link. Ctrl+V or drop it anywhere to bring it here.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: scheme.onSurfaceVariant),
               ),

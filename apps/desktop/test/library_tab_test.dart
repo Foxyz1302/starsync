@@ -108,10 +108,9 @@ Future<Harness> pumpLibrary(
         jellyfinStart: start,
         recentLinks: h.recents,
         now: () => fixtureNow,
-        oembed: (uri) async => jsonEncode({
-          'title': 'A video',
-          'author_name': 'Chan',
-        }),
+        probe: (url) async => url.endsWith('.mkv')
+            ? LinkProbe.file(Uri.parse(url), 1)
+            : LinkProbe.page(Uri.parse(url), info: const YtDlpInfo(title: 'A video', uploader: 'Chan')),
         filesBuilder: (context, {required online, required relayed, required onPlay, nowPlayingPath}) =>
             FilesStub(online: online, relayed: relayed, onPlay: onPlay),
         onPutUp: (m) async {

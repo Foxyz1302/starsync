@@ -105,6 +105,12 @@ class AppConfig {
   final String hostKey;
   /// Optional login for relaying Jellyfin media to guests; null = no relay.
   final JellyfinCredential? jellyfin;
+  /// "The server fetches it" reads web pages (YouTube, Twitter/X, ...)
+  /// through its own yt-dlp, downloaded on first use.
+  final bool ytDlp;
+  /// Where that yt-dlp lives (writable); empty: a `yt-dlp` folder next to
+  /// the server binary, else `~/.cache/watch-together/yt-dlp`.
+  final String ytDlpDir;
 
   const AppConfig({
     required this.port,
@@ -115,6 +121,8 @@ class AppConfig {
     this.advertiseHost = '',
     this.hostKey = '',
     this.jellyfin,
+    this.ytDlp = true,
+    this.ytDlpDir = '',
   });
 
   factory AppConfig.defaults() =>
@@ -131,6 +139,8 @@ class AppConfig {
         advertiseHost: (map['advertiseHost'] as String?) ?? '',
         hostKey: (map['hostKey'] as String?) ?? '',
         jellyfin: JellyfinCredential.fromMap(map['jellyfin']),
+        ytDlp: (map['ytDlp'] as bool?) ?? true,
+        ytDlpDir: (map['ytDlpDir'] as String?) ?? '',
       );
     } on ConfigException {
       rethrow;
@@ -148,6 +158,8 @@ class AppConfig {
         'advertiseHost': advertiseHost,
         'hostKey': hostKey,
         if (jellyfin != null) 'jellyfin': jellyfin!.toMap(),
+        'ytDlp': ytDlp,
+        'ytDlpDir': ytDlpDir,
       };
 
   static Future<AppConfig> loadFile(String path) async =>

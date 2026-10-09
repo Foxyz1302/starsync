@@ -4,7 +4,9 @@
 # /etc/systemd/system/, then `systemctl enable --now watch-together`.
 # Flags: --port <n> (default 8080), --secret <password> (empty = open
 # server, anyone who can reach the port can join), --name, --media <file>,
-# --advertise-host <host>, --config <file.yaml|json>. See README.
+# --advertise-host <host>, --no-yt-dlp, --yt-dlp-dir <dir>, --config
+# <file.yaml|json>. See README. The server's yt-dlp (for web page links it
+# fetches) is downloaded into the state directory below.
 # Prefer --config with a root-only file over --secret here: unit files and
 # process lists are readable by other users.
 
@@ -17,6 +19,7 @@ Wants=network-online.target
 ExecStart=/opt/watch-together/watch-together-server --port 8080 --secret change-me
 Restart=on-failure
 DynamicUser=true
+StateDirectory=watch-together
 NoNewPrivileges=true
 
 [Install]

@@ -27,6 +27,11 @@ import 'logging.dart';
 
 final _log = createLogger('relay');
 
+/// The `<name>` segment of a `/r/` URL: the media name URL-encoded, its
+/// slashes made `_` first (a page title can hold a URL, and an encoded
+/// slash still splits the path). The server ignores the segment.
+String relayUrlName(String name) => Uri.encodeComponent(name.replaceAll(RegExp(r'[/\\]'), '_'));
+
 /// Binary relay frame: 4-byte big-endian pull id, then payload.
 Uint8List encodeRelayFrame(int id, List<int> payload) {
   final out = Uint8List(4 + payload.length);
@@ -66,6 +71,12 @@ class FileRelayBytes implements RelayBytes {
   Future<void> close() async {}
 }
 
+/// A non-2xx answer from an [HttpRelayBytes] upstream.
+class UpstreamHttpException extends HttpException {
+  final int status;
+  UpstreamHttpException(this.status, Uri url) : super('upstream HTTP $status', uri: url);
+}
+
 /// An HTTP(S) resource with Range support, e.g. a link or a Jellyfin
 /// stream; [headers] (auth) never leave this machine.
 class HttpRelayBytes implements RelayBytes {
@@ -85,7 +96,7 @@ class HttpRelayBytes implements RelayBytes {
     final res = await req.close().timeout(const Duration(seconds: 20));
     if (res.statusCode != 200 && res.statusCode != 206) {
       await res.drain<void>().catchError((_) {});
-      throw HttpException('upstream HTTP ${res.statusCode}', uri: url);
+      throw UpstreamHttpException(res.statusCode, url);
     }
     return res;
   }
