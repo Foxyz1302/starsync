@@ -63,6 +63,23 @@ void main() {
       expect(out[2].onJellyfin, isFalse);
     });
 
+    test('anilist_map: a season split into two AniList entries is on Jellyfin', () {
+      final item = AnimeFlowLibraryItem.fromJson({
+        'jellyfin_series_id': 'jfJ',
+        'name': 'JoJo',
+        'anilist_ids': {'6': 190327},
+        'anilist_map': [
+          {'season': 6, 'anilist_id': 190327, 'first_episode': 1, 'offset': 0},
+          {'season': 6, 'anilist_id': 210482, 'first_episode': 2, 'offset': 1},
+        ],
+      });
+      final out = matchSchedule([airing(210482, 3, DateTime(2026, 10, 6, 18))],
+          schedule: const [], library: [item], now: now);
+      expect(out.single.status, ScheduleStatus.inLibrary);
+      expect(out.single.jellyfinSeriesId, 'jfJ');
+      expect(out.single.season, 6);
+    });
+
     test("AnimeFlow's anilist_episode wins over TVDB numbering (split cour)", () {
       // S2E13 in TVDB is part 2 (AniList 300) episode 1.
       final out = matchSchedule(

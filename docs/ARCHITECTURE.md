@@ -592,7 +592,8 @@ always scrolls the page). Space never presses a focused button
   from AniList's airing schedule (`anilist.dart`: pages cached 10 min in
   memory and 1 h on disk, stale data shown on 429 or failure) matched
   against AnimeFlow (`animeflow.dart`, app API with the Jellyfin token;
-  `/library` marks shows on Jellyfin it doesn't track) into a status per
+  `/library` marks shows on Jellyfin it doesn't track, through every AniList
+  entry of a season (`anilist_map`: a season AniList splits has several)) into a status per
   episode (`schedule_model.dart`); requests and the owner's inbox are in
   `requests_sheet.dart`. It refreshes every minute; mouse drag and
   Shift+wheel scroll the board sideways, the plain wheel scrolls a column.

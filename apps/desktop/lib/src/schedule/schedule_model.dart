@@ -102,6 +102,9 @@ List<ScheduleEntry> matchSchedule(
   final lib = <int, (String, int)>{};
   for (final item in library) {
     if (item.jellyfinSeriesId.isEmpty) continue;
+    for (final r in item.anilistMap) {
+      lib[r.anilistId] ??= (item.jellyfinSeriesId, r.season);
+    }
     for (final e in item.anilistIds.entries) {
       lib[e.value] ??= (item.jellyfinSeriesId, e.key);
     }

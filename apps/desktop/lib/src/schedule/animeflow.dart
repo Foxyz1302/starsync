@@ -148,13 +148,17 @@ class AnimeFlowLibraryItem {
   final String name;
   /// Set when AnimeFlow tracks it.
   final int? seriesId;
-  /// AniList entry per TVDB season.
+  /// AniList entry per TVDB season (the first, when a season spans more).
   final Map<int, int> anilistIds;
+  /// Every AniList entry per season with its episode run (`anilist_map`):
+  /// a season AniList splits (one cour as two entries) has several rows.
+  final List<AniListRun> anilistMap;
   const AnimeFlowLibraryItem({
     required this.jellyfinSeriesId,
     required this.name,
     this.seriesId,
     this.anilistIds = const {},
+    this.anilistMap = const [],
   });
 
   static AnimeFlowLibraryItem fromJson(Map j) => AnimeFlowLibraryItem(
@@ -165,7 +169,28 @@ class AnimeFlowLibraryItem {
           for (final e in ((j['anilist_ids'] as Map?) ?? const {}).entries)
             if (int.tryParse('${e.key}') case final season? when _int(e.value) != null) season: _int(e.value)!,
         },
+        anilistMap: [
+          for (final r in (j['anilist_map'] as List?) ?? const [])
+            if (r is Map && _int(r['season']) != null && _int(r['anilist_id']) != null)
+              AniListRun(
+                season: _int(r['season'])!,
+                anilistId: _int(r['anilist_id'])!,
+                firstEpisode: _int(r['first_episode']) ?? 1,
+                offset: _int(r['offset']) ?? 0,
+              ),
+        ],
       );
+}
+
+/// One AniList entry's run within a TVDB season: TVDB episode e (from
+/// [firstEpisode] to the next run of that season) is AniList episode
+/// e - [offset].
+class AniListRun {
+  final int season;
+  final int anilistId;
+  final int firstEpisode;
+  final int offset;
+  const AniListRun({required this.season, required this.anilistId, this.firstEpisode = 1, this.offset = 0});
 }
 
 class AnimeFlowEpisode {
@@ -206,7 +231,9 @@ class AnimeFlowEpisode {
         absolute: _int(j['absolute']),
         title: _str(j['episode_title']),
         airDate: _time(j['air_date']),
-        anilistId: _int(j['anilist_id']),
+        // The episode's own entry (a split season rolls into its sequel),
+        // else the series' one.
+        anilistId: _int(j['episode_anilist_id']) ?? _int(j['anilist_id']),
         anilistEpisode: _int(j['anilist_episode']),
         status: EpisodeStatus.parse(j['status']),
         progress: (j['progress'] as num?)?.toDouble(),
