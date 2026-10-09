@@ -80,14 +80,22 @@ Loosely modeled on Syncplay, with a different readiness design.
   server stores `buffered` and liveness, and takes the first reported
   duration for the current media (swap resets it); a report with `eventId`
   older than current has its position ignored.
-- **Ready gate** (HELD to PLAYING): the in-set is non-empty, every in-set
-  member is ready, fresh and has `buffered >= need`, and quorum holds: in-set
-  size >= 2, unless at most one member is fresh. `need` is 4 s
-  (`minBufferSecs`), or near the end what is left minus 2 s (`endSlackSecs`,
-  floor 0), since mpv cannot buffer past the end. So a lone viewer plays
-  alone; with a second viewer present one Space waits for the other. Joining
-  members start with `inSet=false, ready=false` and never block. Disconnect
-  removes from the set; swap clears everyone.
+- **Ready gate** (HELD to PLAYING): the in-set is non-empty and every
+  in-set member is ready, fresh and has `buffered >= need`. `need` is 4 s
+  (`minBufferSecs`), or near the end what is left minus 2 s
+  (`endSlackSecs`, floor 0), since mpv cannot buffer past the end. So a
+  lone viewer plays alone; with others present everyone must ready.
+- **In-set** (who the gate waits for): a member joins it on joining, or
+  on coming back from stale, while not PLAYING (any media, the one the
+  server started with included); joining while PLAYING it stays out
+  (`ready=false`) until it readies: a late joiner never pauses anyone. A
+  swap puts every fresh member in the set and keeps everyone's ready flag,
+  so the next video starts once everyone ready has buffered (the client
+  setting "Unready when the video changes", `AppSettings.unreadyOnSwap`,
+  default off, sends `ready=false` itself on a new `mediaId`; not for the
+  first state of a session, and a reconnect does not restore a ready that
+  a swap meanwhile would have dropped). Stale, leave and kick remove from
+  the set.
 - **Pause**: while PLAYING, any in-set member who becomes not ready, under
   `need` buffered or stale flips the server to HELD (feed action `pause` by
   `server`). Recovery resumes by itself when the gate passes.
@@ -119,7 +127,8 @@ Loosely modeled on Syncplay, with a different readiness design.
   user is not seeking.
 - **Liveness**: WS ping every 5 s; silent over 15 s means stale (out of the
   gate, `stale` feed); over 30 s the socket is closed and the member removed.
-  A stale member that was ready goes back into the set with its next frame.
+  A stale member goes back into the set with its next frame if it is ready
+  (also one stale at a swap) or the server is not PLAYING.
   Closed sockets are polled with `isClosed` every second: Relic's server-side
   `onDone` does not fire for dead peers, so presence never relies on it.
 - **Resume**: a reconnecting client sends its previous token as
@@ -137,7 +146,7 @@ Loosely modeled on Syncplay, with a different readiness design.
   moment playback stopped. While HELD and self ready: warning at 8 min,
   auto-unready at 10 min, and never less than 2 min after the warning.
 - **Deviations from Syncplay**: clock never follows the slowest watcher; no
-  pause-on-leave; anyone can force ready/unready (all or one); quorum gate;
+  pause-on-leave; anyone can force ready/unready (all or one); presence gate;
   the clock is server time (clients correct for their offset to it).
 
 Additive wire changes only; bump `proto` and PROTOCOL.md in the same commit.
@@ -285,8 +294,9 @@ Skip rules (pure, `media_marks.dart`):
 - `skipOfferAt` (the coordinator's `skipOffer`, null at `finished`): inside
   the opening (up to its last second) "Skip OP" to its end; inside the
   ending "Skip ED" to its end only (no guessing about previews: the viewer
-  decides). Without any opening and with media over 20 min, "Skip 1:30"
-  during the first 6 min.
+  decides). Without any opening, without chapters (a chaptered file
+  without an OP chapter has none on purpose) and with media over 20 min,
+  "Skip 1:30" during the first 6 min.
 - +1:30 (`skipForward`: the pill, the controls' "1:30" button,
   Shift+Right) is a `nudge`, so repeated presses add up.
 - Chapter steps (PgUp / PgDn, `chapterStepTarget`): forward to the next
@@ -516,7 +526,7 @@ and scale in from where they open; they scroll when the window is short)
 and `HScroll` (horizontal rows: mouse drag, the vertical wheel scrolls them
 sideways until an end, then the page).
 
-- **Party strip** (`party_strip.dart`, 60 px): your avatar (profile card),
+- **Party strip** (`party_strip.dart`, 60 px): your avatar (profile card; 42 px like the party's),
   the Library / Schedule / Settings tabs with a growing underline (an
   `HScroll` when narrow), the update indicator, then offline Join and Host
   (connect cards), online the party: `AvatarStack` (host first, then
@@ -571,8 +581,10 @@ sideways until an end, then the page).
   (`library_link.dart`): paste field, a preview (YouTube oEmbed title and
   thumbnail, else the file name), the three relay modes online, and the
   last 12 links put up (`recentLinks` in the `connect_form` box). Files
-  is `FilesPage` (`files/`). Ctrl+V outside a field pastes a link into
-  Link. Offline everything browses; the buttons say "Join or host to
+  is `FilesPage` (`files/`): watched folders (`FolderStore`) scanned in
+  an isolate, videos grouped by series; series start collapsed, a header
+  click opens one and open ones stay open for the app session
+  (`showFilesFolder` opens a folder from outside). Offline everything browses; the buttons say "Join or host to
   watch together". Schedule (`schedule/`) is a week of day columns built
   from AniList's airing schedule (`anilist.dart`: pages cached 10 min in
   memory and 1 h on disk, stale data shown on 429 or failure) matched
@@ -589,6 +601,17 @@ sideways until an end, then the page).
   Jellyfin & integrations (linked servers, AnimeFlow's `/me` via
   `AnimeFlowClient.fromAccounts`, auto-advance), notifications & sounds
   (what pops up; no switches), updates, shortcuts, about.
+- **Drop and paste** (`handoff.dart`, `fox_utils`): the shell is one
+  `DropTarget` (a "Drop to open" overlay while dragging) and a
+  `HardwareKeyboard` handler for Ctrl+V outside a text field (clipboard
+  files first, then text). `classifyHandoff` (pure) turns paths or text
+  into videos (the Files extensions, `kindOf`), a folder, an http(s) link,
+  an image or nothing; videos win over folders, folders over images.
+  `HandoffCard` opens as a popover at the pointer: a video goes up through
+  the shell's put-up (offline: into Files → Recent) or adds its folder to
+  Files; a folder is added to Files and opened; a link fills Library →
+  Link (online the relay mode is picked there). Images are ignored.
+  Nothing happens while a dialog or popover is over the shell.
 - **Sounds** (`sfx/`): the coordinator plays an `SfxCue` for ready,
   unready, force-ready, join, leave, kick, swap and others' chat (feed
   events), the idle warning, and connection lost / back (once per drop).
@@ -614,7 +637,13 @@ sideways until an end, then the page).
   is `windowManager.setFullScreen` with the strip hidden (party avatars in
   a corner while paused); F, Esc and double-click on the picture toggle it.
   The player keys (Settings → Keyboard shortcuts) work while the player is
-  full and nothing is in front of it. Something coming up while the player
+  full and nothing is in front of it; ↑ / ↓ step the volume. Space (ready)
+  and Tab (chat) are app-wide: `AppKeys` (`widgets/app_keys.dart`, around
+  the shell) takes them first while in a server, unless a text field has
+  focus or a dialog or menu is in front. Tab reaches the shell's chat
+  toggle through `ChatKey` (the strip while shown, the player in
+  fullscreen). The app's shortcuts map Tab / Shift+Tab to nothing, so focus
+  never lands on a button Space would press. Something coming up while the player
   is closed opens it: full right after joining or after putting it up
   here, else mini. Both control designs show `NowPlayingTitle` top left
   (`now_playing_title.dart`: 2:3 cover, title, episode line from
@@ -644,7 +673,12 @@ sideways until an end, then the page).
   `WindowButtons` to the top bar while the controls are up (restore
   leaves fullscreen).
 - **Chat** (`chat_panel.dart`): a 340 px panel sliding in at the right
-  (strip button or Tab): chat with avatars, other activity as quiet lines.
+  (strip button or Tab): chat with avatars; the "Activity" chip (off by
+  default, `showActivity`, kept for the app's run only) adds the other
+  feed lines between them. Opening focuses the field; Tab or Esc in it
+  close the panel and focus goes back where it was. Unread chat badges
+  the strip's and both player designs' chat buttons; in fullscreen with
+  the controls down a glass chip (`PlayerGlass`) top right shows it.
   **Toasts** (`toasts.dart`): the coordinator's toasts bottom left, with
   the avatar of their `ToastItem.actor` (feed and chat toasts; the app's
   own have none); each
@@ -719,8 +753,14 @@ sits in the bottom bar, which is taller by the bar's height (the top bar
 keeps its row at the top). A drag sends no hover events, so the bar keeps
 the controls up through a guarded dynamic `onHover()` on media_kit's
 private controls state (`keepVideoControlsAwake`). Pills (Skip OP / ED /
-1:30, Next episode) and cards live outside the auto-hiding controls, so
-they stay up when the controls hide.
+1:30, Next episode) and cards live outside the auto-hiding controls. The
+Next episode pill and the cards stay up; the skip pill (`SkipPillGate`)
+shows for 5 s when an offer of a new kind appears, then only while the
+controls are up (`ControlsHoverProbe` for this design, `UoscControls.shown`
+for uosc) or the mouse is on it. Volume (`controls/volume.dart`, both
+designs): mpv's `volume-max` is pinned to `PlaybackController.maxVolume`
+(150) per player; `VolumeBar` runs 0..150 with a tick at 100 and the part
+above in amber; the wheel and ↑ / ↓ step 5 %, clamped.
 
 The uosc player design (`controls/uosc/`, after mpv's uosc theme;
 "Player design" = `AppSettings.mpvControls`, default Standard): the `Video`'s
@@ -799,7 +839,8 @@ this repo, written by `tool/release.sh`.
 - Host by key, not by address: loopback detection broke behind a
   same-machine reverse proxy or tunnel.
 - Server owns the clock; reports never move it: avoids ping-pong between clients.
-- Quorum gate: a lone viewer must be able to watch; two or more must start together.
+- Presence gate: a lone viewer must be able to watch; everyone present
+  while the video is stopped must ready before it starts.
 - Relic for the server, `web_socket_channel` for the client; packages are
   chosen on merit, not locked.
 - Plain `ws://`, no TLS: friends use LAN, VPN or a forwarded port; TLS

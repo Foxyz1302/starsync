@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart' show kPrimaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,7 +13,8 @@ import '../controls/player_settings.dart';
 import '../controls/uosc/buttons.dart';
 import '../controls/uosc/controls.dart';
 import '../controls/uosc/timeline.dart';
-import '../playback/media_marks.dart' show SkipOffer, formatClock;
+import '../controls/volume.dart';
+import '../playback/media_marks.dart' show SkipKind, SkipOffer, formatClock;
 import '../screens/session/jellyfin_widgets.dart';
 import '../screens/session/player_controls.dart';
 import '../session/session_coordinator.dart';
@@ -18,6 +22,7 @@ import '../shaders/shader_menu.dart';
 import '../shaders/shader_presets.dart';
 import '../state/session_state.dart';
 import '../state/settings.dart';
+import '../widgets/app_keys.dart';
 import '../widgets/shown_frame_probe.dart';
 import '../widgets/text_focus.dart';
 import '../widgets/window_buttons.dart';
@@ -96,9 +101,10 @@ class _SessionPlayerState extends State<SessionPlayer> {
   int _toastSeq = 0;
   int _shaderNoticeSeen = 0;
   bool _miniHover = false;
-  // Whether the standard controls are up (tracked like media_kit does:
-  // shown on mount and on mouse movement, hidden 3 s later or on exit).
-  final _standardShown = ValueNotifier(true);
+  // Whether the controls are up: the standard ones tracked like media_kit
+  // does (shown on mount and on mouse movement, hidden 3 s later or on
+  // exit), the uosc ones reporting it.
+  final _controlsShown = ValueNotifier(true);
 
   SessionCoordinator get _coord => SessionState.instance.coordinator;
   bool get _full => widget.mode == PlayerMode.full;
@@ -109,6 +115,8 @@ class _SessionPlayerState extends State<SessionPlayer> {
     _coord.jellyfin.ensureLoaded();
     _coord.playback.shownFrame = _frameProbe.sample;
     HardwareKeyboard.instance.addHandler(_globalKey);
+    // Tab (AppKeys) reaches the chat through here in fullscreen.
+    AppKeys.addChatToggle(_toggleChat);
     // Shader messages (preset changes, load failures) become toasts.
     _shaderNoticeSeen = _coord.playback.shaderNotice.peek()?.id ?? 0;
     _stopShaderWatch = effect(() {
@@ -122,11 +130,12 @@ class _SessionPlayerState extends State<SessionPlayer> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_globalKey);
+    AppKeys.removeChatToggle(_toggleChat);
     final playback = _coord.playback;
     if (playback.shownFrame == _frameProbe.sample) playback.shownFrame = null;
     _stopShaderWatch();
     _noFocus.dispose();
-    _standardShown.dispose();
+    _controlsShown.dispose();
     super.dispose();
   }
 
@@ -152,7 +161,8 @@ class _SessionPlayerState extends State<SessionPlayer> {
   }
 
   /// The player keys, while the player fills the body and nothing (a
-  /// dialog, a card, a text field) is in front of it.
+  /// dialog, a card, a text field) is in front of it. Space and Tab are
+  /// app-wide ([AppKeys]).
   bool _globalKey(KeyEvent event) {
     if (event is! KeyDownEvent || !mounted || !_full) return false;
     if (SessionState.instance.route.peek() != AppRoute.session) return false;
@@ -184,11 +194,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
       _reloadVideo();
       return true;
     }
-    if (key == LogicalKeyboardKey.space) {
-      _lastKeyAt = now;
-      coord.toggleReady();
-      return true;
-    }
     // mpv's playlist keys (< >) and Shift+P / Shift+N: Jellyfin episodes.
     final shift = HardwareKeyboard.instance.isShiftPressed;
     if (event.character == '>' || (shift && key == LogicalKeyboardKey.keyN)) {
@@ -213,9 +218,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
       coord.skipForward();
       return true;
     }
-    if (key == LogicalKeyboardKey.tab) {
-      _lastKeyAt = now;
-      _toggleChat();
+    if (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.arrowDown) {
+      final player = coord.playback.player;
+      player.setVolume(stepVolume(player.state.volume, key == LogicalKeyboardKey.arrowUp ? 5 : -5));
       return true;
     }
     if (key == LogicalKeyboardKey.arrowRight) {
@@ -282,7 +287,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                 _status(),
                 _progressLine(),
                 _jellyfinOverlay(),
-                if (widget.fullscreen) _pausedParty(),
+                if (widget.fullscreen) ...[_pausedParty(), _unreadChip()],
               ] else
                 _miniOverlay(),
             ],
@@ -340,7 +345,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
             final s = AppSettings.instance;
             if (s.mpvControls.value || !s.progressLine.value) return const SizedBox.shrink();
             return ValueListenableBuilder<bool>(
-              valueListenable: _standardShown,
+              valueListenable: _controlsShown,
               builder: (context, shown, _) => shown
                   ? const SizedBox.shrink()
                   : const _MiniSeekBar(key: ValueKey('progress-line-standard'), thin: true),
@@ -437,7 +442,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
           onPressed: coord.playNextEpisode,
         ),
       ),
-      const MaterialDesktopVolumeButton(),
+      VolumeButton(player: playback.player, focusNode: _noFocus),
       _ReadyControlButton(focusNode: _noFocus),
       _BarTextButton(
         focusNode: _noFocus,
@@ -504,7 +509,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
   Widget _controlsSwitch(VideoState state) {
     return SessionControlsSwitch(
       material: (_) => ControlsHoverProbe(
-        shown: _standardShown,
+        shown: _controlsShown,
         hideAfter: _controlsHide,
         child: DoubleClickListener(
           onDoubleClick: widget.onToggleFullscreen,
@@ -536,12 +541,19 @@ class _SessionPlayerState extends State<SessionPlayer> {
           );
         });
     return UoscControls(
+      shown: _controlsShown,
       onDoubleTap: widget.onToggleFullscreen,
       topLeft: const NowPlayingTitle(),
       top: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          UoscButton(icon: Icons.chat_bubble_outline_rounded, tooltip: 'Chat & activity (Tab)', onPressed: _toggleChat),
+          UoscButton(
+            key: const ValueKey('uosc-chat'),
+            icon: widget.chatOpen ? Icons.chat_bubble_rounded : Icons.chat_bubble_outline_rounded,
+            tooltip: 'Chat & activity (Tab)',
+            badge: widget.unread,
+            onPressed: _toggleChat,
+          ),
           UoscButton(
             icon: widget.fullscreen ? Icons.fullscreen_exit_rounded : Icons.close_fullscreen_rounded,
             tooltip: widget.fullscreen ? 'Exit fullscreen (Esc)' : 'Back to the library (keeps playing)',
@@ -653,7 +665,8 @@ class _SessionPlayerState extends State<SessionPlayer> {
 
   /// Jellyfin: the blocked card, the end-of-episode card (countdown) and
   /// the "Next episode" pill; for any media the skip pill (Skip OP / ED /
-  /// 1:30) above it. Outside the auto-hiding controls, so they stay up.
+  /// 1:30) above it ([SkipPillGate]). Outside the auto-hiding controls, so
+  /// they stay up.
   Widget _jellyfinOverlay() {
     final coord = _coord;
     return Positioned.fill(
@@ -695,7 +708,13 @@ class _SessionPlayerState extends State<SessionPlayer> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     spacing: 10,
                     children: [
-                      if (skip != null) SkipPill(offer: skip, onPressed: () => coord.skip(skip)),
+                      if (skip != null)
+                        SkipPillGate(
+                          key: const ValueKey('skip-gate'),
+                          offer: skip,
+                          controlsShown: _controlsShown,
+                          child: SkipPill(offer: skip, onPressed: () => coord.skip(skip)),
+                        ),
                       if (showNext) NextEpisodePill(episode: next, onPressed: coord.playNextEpisode),
                     ],
                   ),
@@ -721,6 +740,40 @@ class _SessionPlayerState extends State<SessionPlayer> {
             child: IgnorePointer(child: AvatarStack(members: partyAvatars(_coord))),
           );
         }),
+      );
+
+  /// Fullscreen hides the strip and its chat badge: while there is unread
+  /// chat and the controls are down, a small glass chip says so top right.
+  Widget _unreadChip() => Positioned(
+        right: 16,
+        top: 16,
+        child: IgnorePointer(
+          child: ValueListenableBuilder<bool>(
+            valueListenable: _controlsShown,
+            builder: (context, shown, _) {
+              final on = widget.unread > 0 && !widget.chatOpen && !shown;
+              return AnimatedOpacity(
+                duration: easeTime,
+                curve: ease,
+                opacity: on ? 1 : 0,
+                child: PlayerGlass(
+                  key: const ValueKey('unread-chip'),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.chat_bubble_rounded, size: 14, color: Colors.white70),
+                        const SizedBox(width: 6),
+                        Text('${widget.unread}', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
       );
 
   /// Mini: title, expand and close on hover; ready, time and a seekable
@@ -805,6 +858,75 @@ class _SessionPlayerState extends State<SessionPlayer> {
             const Positioned(left: 0, right: 0, bottom: 0, child: _MiniSeekBar(thin: true)),
         ],
       ),
+    );
+  }
+}
+
+/// The skip pill's visibility: up for [firstShown] after an offer
+/// appears (a new kind: OP, ED, 1:30), then only while the controls are
+/// up or the mouse is on it; gone with the offer (the parent drops it).
+class SkipPillGate extends StatefulWidget {
+  static const firstShown = Duration(seconds: 5);
+  final SkipOffer offer;
+  final ValueListenable<bool> controlsShown;
+  final Widget child;
+  const SkipPillGate({super.key, required this.offer, required this.controlsShown, required this.child});
+
+  @override
+  State<SkipPillGate> createState() => _SkipPillGateState();
+}
+
+class _SkipPillGateState extends State<SkipPillGate> {
+  SkipKind? _kind;
+  bool _fresh = false;
+  bool _hover = false;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _arm();
+  }
+
+  @override
+  void didUpdateWidget(SkipPillGate old) {
+    super.didUpdateWidget(old);
+    if (widget.offer.kind != _kind) _arm();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _arm() {
+    _kind = widget.offer.kind;
+    _fresh = true;
+    _timer?.cancel();
+    _timer = Timer(SkipPillGate.firstShown, () {
+      if (mounted) setState(() => _fresh = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // The pill covers the controls' hover area: on it, they may hide while
+    // it stays.
+    return ValueListenableBuilder<bool>(
+      valueListenable: widget.controlsShown,
+      builder: (context, shown, child) {
+        final on = _fresh || shown || _hover;
+        return IgnorePointer(
+          ignoring: !on,
+          child: MouseRegion(
+            onEnter: (_) => setState(() => _hover = true),
+            onExit: (_) => setState(() => _hover = false),
+            child: AnimatedOpacity(duration: easeTime, curve: ease, opacity: on ? 1 : 0, child: child),
+          ),
+        );
+      },
+      child: widget.child,
     );
   }
 }

@@ -79,7 +79,23 @@ class SettingsTab extends StatelessWidget {
           ),
         ];
       case SettingsSection.network:
-        return const [HostDefaultsPanel(), RecentServersPanel()];
+        return [
+          const HostDefaultsPanel(),
+          const RecentServersPanel(),
+          SettingsPanel(
+            title: 'Watching',
+            child: SignalBuilder(
+              builder: (context) => SwitchListTile(
+                key: const ValueKey('unready-on-swap'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Unready when the video changes'),
+                subtitle: const Text('Otherwise you stay ready and the next video starts once everyone ready has buffered'),
+                value: AppSettings.instance.unreadyOnSwap.value,
+                onChanged: AppSettings.instance.setUnreadyOnSwap,
+              ),
+            ),
+          ),
+        ];
       case SettingsSection.player:
         return [
           const SettingsHintCard(

@@ -52,14 +52,14 @@ Friends join either way with Join in the strip at the top of the window.
    (version, password, name, avatar). Wrong password or version: refused with
    a reason. Otherwise the server answers with a welcome and the current state.
 2. **Catch up.** The app opens the current video, jumps to where the server
-   says we are, and buffers. A new arrival is not ready yet and never holds
-   anyone back.
+   says we are, and buffers. Arriving while the video is stopped, you are
+   waited for; arriving while it plays, you never hold anyone back.
 3. **Ready gate.** Press Space to say you are ready. The server starts
    playback only when everyone who is ready has at least 4 seconds buffered
    (or what is left, near the end). At the end everyone stops and the server
    stays finished until someone seeks back or changes the video.
-   If two or more people are ready, one person alone cannot start it for the
-   others. A lone viewer can play alone.
+   Everyone who was there before it started must be ready, so one person
+   alone cannot start it for the others. A lone viewer can play alone.
 4. **Play.** The server owns the clock. Each app compares its mpv position
    to the clock: a small lead slows mpv a little (0.95x), a big gap (over 5 s)
    jumps. If someone's buffer runs dry the server pauses everyone and resumes
@@ -67,7 +67,8 @@ Friends join either way with Join in the strip at the top of the window.
 5. **Seek.** Anyone can seek, anytime. The server moves the clock and
    everybody follows. Seeking does not change anyone's ready flag.
 6. **Swap.** Anyone can change the video by pasting another link. Everybody
-   stops at 0, ready flags clear, and the gate runs again.
+   stops at 0 and the gate runs again for everyone there; ready flags stay
+   as they were (a setting unreadies you instead).
 7. **Leave.** Closing or leaving drops you from the server; the others keep
    going. If you vanish without saying goodbye, you are marked stale after 15 s
    (stops blocking) and removed after 30 s. The app reconnects by itself and

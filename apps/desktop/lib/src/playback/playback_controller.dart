@@ -32,6 +32,9 @@ class PlaybackController {
   /// Back buffer (media_kit sets it to bufferSize too): enough for a short
   /// seek back without holding another 256 MiB.
   static const maxBackBytes = 64 * 1024 * 1024;
+  /// mpv's `volume-max` (its default is 130): the volume controls go
+  /// this far, past 100 % amplified.
+  static const maxVolume = 150;
 
   SyncPlayer? _player;
   VideoController? _video;
@@ -163,6 +166,7 @@ class PlaybackController {
     _logSub = _player!.stream.log.listen(_onLog);
     _watchMarks(_player!);
     await _pinBufferProps();
+    await _pin('volume-max', '$maxVolume');
     await applyShaders();
     _watchdog.reset();
     _watchTimer = Timer.periodic(const Duration(seconds: 1), (_) => _watch());

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'src/screens/home/ui.dart';
 import 'src/shell/app_shell.dart';
+import 'src/widgets/app_keys.dart';
 
 class WatchTogetherApp extends StatelessWidget {
   const WatchTogetherApp({super.key});
@@ -11,7 +12,8 @@ class WatchTogetherApp extends StatelessWidget {
     return MaterialApp(
       title: appName,
       theme: ThemeData.dark(),
-      home: const AppShell(),
+      shortcuts: appShortcuts,
+      home: const AppKeys(child: AppShell()),
     );
   }
 }

@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart' show HelloMedia, JellyfinException, JellyfinItem;
 
@@ -189,32 +188,6 @@ class _LibraryTabState extends State<LibraryTab> {
     }
   }
 
-  // -------------------------------------------------------------- paste
-
-  KeyEventResult _onKey(FocusNode node, KeyEvent e) {
-    final ctrl = HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isMetaPressed;
-    if (e is! KeyDownEvent || !ctrl || e.logicalKey != LogicalKeyboardKey.keyV) {
-      return KeyEventResult.ignored;
-    }
-    // A focused text field handles its own paste.
-    final inField =
-        FocusManager.instance.primaryFocus?.context?.findAncestorStateOfType<EditableTextState>() != null;
-    if (inField) return KeyEventResult.ignored;
-    unawaited(_pasteLink());
-    return KeyEventResult.handled;
-  }
-
-  /// Ctrl+V outside a field: an http(s) link goes to the Link source.
-  Future<void> _pasteLink() async {
-    String? text;
-    try {
-      text = (await Clipboard.getData(Clipboard.kTextPlain))?.text?.trim();
-    } catch (_) {}
-    if (text == null || !(text.startsWith('http://') || text.startsWith('https://'))) return;
-    _c.link.text = text;
-    _c.source = MediaKind.link;
-  }
-
   // -------------------------------------------------------------- build
 
   @override
@@ -306,10 +279,10 @@ class _LibraryTabState extends State<LibraryTab> {
           child: AnimatedOpacity(duration: easeTime, curve: ease, opacity: open ? 1 : 0, child: child),
         );
 
+    // Holds focus so the shell's shortcuts (Ctrl+,) work.
     return Focus(
       key: const ValueKey('library-tab'),
       autofocus: true,
-      onKeyEvent: _onKey,
       child: LayoutBuilder(builder: (context, box) {
         if (box.maxWidth >= detailsDockFrom) {
           return Row(

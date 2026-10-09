@@ -216,6 +216,31 @@ void main() {
     });
   });
 
+  testWidgets('Ctrl+V outside a field: a link asks, then fills Library → Link', (tester) async {
+    await pumpShell(tester, const Size(1280, 800));
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.getData') return {'text': 'https://cdn.example/b.mkv'};
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    // fox_utils' clipboard files: none.
+    const pasteboard = MethodChannel('pasteboard');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(pasteboard, (call) async => const <String>[]);
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(pasteboard, null));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('handoff-card')), findsOneWidget);
+    expect(find.text('Open in Link'), findsOneWidget); // offline
+    await tester.tap(find.byKey(const ValueKey('handoff-openLink')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('handoff-card')), findsNothing);
+    final field = tester.widget<TextField>(find.byKey(const ValueKey('link-field')));
+    expect(field.controller!.text, 'https://cdn.example/b.mkv');
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('profile rename goes to the server through the hook', (tester) async {
     final pushed = <String?>[];
     final p = Profile.instance;

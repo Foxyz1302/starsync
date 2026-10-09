@@ -62,8 +62,11 @@ a video first plays, its banner fills the picture until playback starts.
 One pill above the controls says what playback waits for ("Press Space
 when you're ready", "Waiting for Bob and Mika · 2/3 ready", "Bob is
 loading…") or what went wrong, with Retry or Cancel when it helps. Chat and activity open in a panel on the right (chat button or
-Tab); joins, leaves, chat and other news also pop up bottom left with the
-person's avatar.
+Tab), ready to type; it shows messages, and its "Activity" toggle adds
+joins, ready, seeks and the like between them. Joins, leaves, chat and
+other news also pop up bottom left with the person's avatar. Unread chat
+shows as a count on the chat buttons and, in fullscreen with the controls
+hidden, as a small chip top right.
 
 Your name and picture change for everyone in the server right away; the
 colour is yours only.
@@ -83,8 +86,10 @@ disk. Nothing is uploaded or stored anywhere.
 
 ## Library
 
-What to watch, from three sources (the switch at the top; Ctrl+V outside
-a field pastes a link into Link):
+What to watch, from three sources (the switch at the top). Drop a video,
+a folder or a link anywhere on the window, or press Ctrl+V outside a
+text field, and a small card asks how to open it (put it up, add the
+folder to Files, or fill Link).
 
 - **Jellyfin**: your linked servers (see below). Library chips beside the
   switch, then one **Continue** row (what you were watching and what comes
@@ -102,8 +107,8 @@ a field pastes a link into Link):
   thumbnail for YouTube, else the file name); in a server, pick how the
   others get it (everyone fetches it, the server fetches it, or through
   you). Your last 12 links are listed under it.
-- **Files**: video folders you add on this computer, grouped by series,
-  or any file through Browse. The others stream it from you.
+- **Files**: video folders you add on this computer, grouped by series
+  (click a series to list its episodes), or any file through Browse. The others stream it from you.
 
 Put it up and the player opens. Offline the library browses but nothing
 goes up until you join or host ("Join or host to watch together").
@@ -162,8 +167,9 @@ hardware decoding (auto, off or custom; the env var `SYNC_RELAY_HWDEC`
 overrides it); in the player also the subtitle and audio track. Every
 change applies right away.
 
-Keys while the player fills the window: Space = ready / unready, Tab =
-chat & activity, Left/Right = seek 10 s, Shift+Right = skip 1:30,
+Anywhere in a server (unless you are typing): Space = ready / unready,
+Tab = chat & activity (Tab never moves between buttons). Keys while the
+player fills the window: Left/Right = seek 10 s, Up/Down = volume, Shift+Right = skip 1:30,
 PgUp/PgDn = previous / next chapter (as in mpv), F = fullscreen, Esc =
 close the chat or fullscreen, else ask to leave, Ctrl+R = reload video,
 `<` / `>` or Shift+P / Shift+N = previous / next Jellyfin episode,
@@ -174,7 +180,9 @@ Controls: the seek bar marks chapter starts with a diamond; hovering it
 shows the time and the chapter title. The chapters button lists them
 (current one checked; click to jump). "1:30" skips ahead 1:30. Audio and
 Subtitles buttons (with the track count) list tracks as "Japanese · E-AC3
-2.0 · title"; subtitles have Off.
+2.0 · title"; subtitles have Off. Volume (hover the speaker, scroll on
+it, or Up/Down) goes to 150 % like mpv: past the tick at 100 % the bar
+turns amber and mpv amplifies.
 
 The uosc player design (⚙ → Player design, Standard by default,
 switches right away): video controls modeled on mpv's uosc theme. A thick
@@ -189,12 +197,14 @@ the same.
 
 Skipping: during the opening a "Skip OP" button floats in the corner (it
 jumps to the end of the opening), during the ending "Skip ED" (to the end
-of the ending only; what comes after is yours to skip). The opening and
+of the ending only; what comes after is yours to skip). Any skip button
+(also "Skip 1:30") shows for 5 seconds when it comes up, then only while
+the controls are up (move the mouse). The opening and
 ending come from Jellyfin's intro / outro segments when your Jellyfin has
 them (needs a segment plugin, e.g. Intro Skipper), else from chapter names
-(OP, Opening, Intro / ED, Ending, Credits, Outro). Without an opening, on
-anything longer than 20 minutes, "Skip 1:30" floats there during the first
-6 minutes.
+(OP, Opening, Intro / ED, Ending, Credits, Outro). Without an opening or
+any chapters, on anything longer than 20 minutes, "Skip 1:30" floats there
+during the first 6 minutes.
 
 ## Ports
 

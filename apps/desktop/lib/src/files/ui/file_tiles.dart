@@ -35,7 +35,11 @@ Widget _offlineTip(bool offline, Widget child) =>
 class SeriesHeader extends StatelessWidget {
   final SeriesGroup group;
   final ThumbCache thumbs;
-  const SeriesHeader({super.key, required this.group, required this.thumbs});
+  /// Its episodes are listed below; [onTap] opens or closes them.
+  final bool expanded;
+  final VoidCallback? onTap;
+  const SeriesHeader(
+      {super.key, required this.group, required this.thumbs, this.expanded = true, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -49,34 +53,48 @@ class SeriesHeader extends StatelessWidget {
       ?first.parsed.group,
     ].join(' · ');
     return Padding(
-      padding: const EdgeInsets.only(top: 18, bottom: 4),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: ThumbBuilder(
-              cache: thumbs,
-              path: first.path,
-              builder: (context, t, _) => ThumbImage(t, width: 96, height: 54),
-            ),
+      padding: const EdgeInsets.only(top: 14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: ThumbBuilder(
+                  cache: thumbs,
+                  path: first.path,
+                  builder: (context, t, _) => ThumbImage(t, width: 96, height: 54),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(group.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium),
+                    Text(detail,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+                  ],
+                ),
+              ),
+              if (onTap != null)
+                AnimatedRotation(
+                  turns: expanded ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Icon(Icons.expand_more, color: scheme.onSurfaceVariant),
+                ),
+              const SizedBox(width: 8),
+            ],
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(group.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium),
-                Text(detail,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

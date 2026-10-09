@@ -1,5 +1,5 @@
 abstract class RelayConstants {
-  static const int protoVersion = 9;
+  static const int protoVersion = 10;
 
   // Relay (`/r/...`): a member's bytes through the server's buffer.
   static const int relaySliceBytes = 1 << 20;

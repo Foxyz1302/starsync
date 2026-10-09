@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:io' show File;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:fox_utils/fox_utils.dart' show ClipboardX, DesktopDropX, DropTarget;
 import 'package:signals/signals_flutter.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../files/folder_store.dart';
+import '../files/ui/files_page.dart' show showFilesFolder;
 import '../jellyfin/accounts.dart';
 import '../jellyfin/browse_scope.dart' show BrowseStart;
 import '../jellyfin/session_media.dart';
@@ -18,6 +22,7 @@ import '../state/settings.dart';
 import '../update/update_controller.dart';
 import 'chat_panel.dart';
 import 'connect_cards.dart';
+import 'handoff.dart';
 import 'library_tab.dart';
 import 'motion.dart';
 import 'party_strip.dart';
@@ -36,6 +41,9 @@ import 'toasts.dart';
 /// hidden), mini it is a 384x216 box snapped to a corner. A mode change
 /// fades the layer out, moves it while invisible and fades it back in, so
 /// the video is never mounted twice nor remounted.
+///
+/// A drop anywhere on the window or Ctrl+V outside a text field is a
+/// [Handoff]: a card near the pointer asks how to open it.
 class AppShell extends StatefulWidget {
   final UpdateController? updates;
   final bool autoUpdateCheck;
@@ -88,6 +96,11 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   Offset? _drag; // mini top-left while dragging
   bool _snapping = false;
 
+  /// Last pointer position in the window (where a paste's card opens).
+  Offset? _pointer;
+  bool _dragging = false;
+  bool _handoffOpen = false;
+
   final _flow = ConnectFlow();
   late final _join = JoinFields(SessionState.instance.lastForm);
   late final _host = HostFields(SessionState.instance.lastForm);
@@ -128,6 +141,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     _jellyfin.ensureLoaded();
     if (widget.autoUpdateCheck) _autoCheck();
     _flow.onKicked = _showKicked;
+    HardwareKeyboard.instance.addHandler(_onKey);
     final session = SessionState.instance;
     final coord = session.coordinator;
     _feedSeen = coord.feedLog.peek().length;
@@ -195,6 +209,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     for (final stop in _stops) {
       stop();
     }
+    HardwareKeyboard.instance.removeHandler(_onKey);
     _fade.dispose();
     _online.dispose();
     _hasMedia.dispose();
@@ -368,6 +383,122 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     return null;
   }
 
+  // --------------------------------------------------------------- handoff
+
+  /// Nothing (a dialog, a popover) is over the shell.
+  bool get _onTop => !_handoffOpen && (ModalRoute.of(context)?.isCurrent ?? true);
+
+  /// Ctrl+V outside a text field (a focused field pastes on its own).
+  bool _onKey(KeyEvent e) {
+    if (e is! KeyDownEvent || e.logicalKey != LogicalKeyboardKey.keyV) return false;
+    final keys = HardwareKeyboard.instance;
+    if (!(keys.isControlPressed || keys.isMetaPressed) || keys.isShiftPressed || keys.isAltPressed) return false;
+    if (!mounted || !_onTop) return false;
+    final inField =
+        FocusManager.instance.primaryFocus?.context?.findAncestorStateOfType<EditableTextState>() != null;
+    if (inField) return false;
+    unawaited(_paste());
+    return true;
+  }
+
+  /// Clipboard files first, then text (a link or absolute paths). A pasted
+  /// image has no taker yet, so the clipboard's image data is not read.
+  Future<void> _paste() async {
+    var files = const <String>[];
+    String? text;
+    try {
+      files = await ClipboardX.readFiles();
+    } catch (_) {}
+    if (files.isEmpty) {
+      try {
+        text = await ClipboardX.readText();
+      } catch (_) {}
+    }
+    await _handOff(classifyHandoff(paths: files, text: text), _pointer);
+  }
+
+  Future<void> _handOff(Handoff item, Offset? at) async {
+    if (!mounted || !_onTop || item is HandoffNothing || item is HandoffImage) return;
+    final size = MediaQuery.sizeOf(context);
+    final align = at == null || size.isEmpty
+        ? Alignment.center
+        : Alignment((at.dx / size.width * 2 - 1).clamp(-1, 1), (at.dy / size.height * 2 - 1).clamp(-1, 1));
+    final online = _online.peek();
+    _handoffOpen = true;
+    final HandoffAction? action;
+    try {
+      action = await showPopover<HandoffAction>(context, at: align, child: HandoffCard(item: item, online: online));
+    } finally {
+      _handoffOpen = false;
+    }
+    if (action == null || !mounted) return;
+    switch ((item, action)) {
+      case (HandoffVideos(:final paths), HandoffAction.putUp):
+        final error = await _putUp(FileMedia(paths.first));
+        if (error != null) {
+          SessionState.instance.coordinator.showToast(error);
+        } else {
+          await FolderStore.instance.ensureLoaded();
+          FolderStore.instance.addRecent(paths.first);
+        }
+      case (HandoffVideos(:final paths), HandoffAction.openInFiles):
+        await FolderStore.instance.ensureLoaded();
+        FolderStore.instance.addRecent(paths.first);
+        _openFiles(null);
+      case (HandoffVideos(:final paths), HandoffAction.addFolder):
+        await _addFolder(File(paths.first).parent.path);
+      case (HandoffFolder(:final path), _):
+        await _addFolder(path);
+      case (HandoffLink(:final url), _):
+        _picker.link.text = url;
+        _openLibrary(MediaKind.link);
+      default:
+    }
+  }
+
+  Future<void> _addFolder(String dir) async {
+    await FolderStore.instance.ensureLoaded();
+    FolderStore.instance.addFolder(dir);
+    _openFiles(dir);
+  }
+
+  /// Library → Files on [dir] (null: Recent).
+  void _openFiles(String? dir) {
+    showFilesFolder(dir);
+    _openLibrary(MediaKind.file);
+  }
+
+  void _openLibrary(MediaKind source) {
+    if (!mounted) return;
+    _picker.source = source;
+    _selectTab(ShellTab.library);
+  }
+
+  Widget _dropTarget(Widget child) => DropTarget(
+        onDragEntered: (_) => setState(() => _dragging = _onTop),
+        onDragExited: (_) => setState(() => _dragging = false),
+        onDragDone: (d) {
+          setState(() => _dragging = false);
+          _handOff(classifyHandoff(paths: DesktopDropX.pathsOf(d.files)), d.localPosition);
+        },
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            child,
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedOpacity(
+                  duration: easeTime,
+                  curve: ease,
+                  opacity: _dragging ? 1 : 0,
+                  child: const _DropOverlay(),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+
   // --------------------------------------------------------------- dialogs
 
   Future<void> _confirmLeave() async {
@@ -426,7 +557,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return CallbackShortcuts(
+    final shell = CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.comma, control: true): () => _selectTab(ShellTab.settings),
       },
@@ -473,6 +604,11 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
           );
         }),
       ),
+    );
+    return Listener(
+      onPointerHover: (e) => _pointer = e.localPosition,
+      onPointerDown: (e) => _pointer = e.localPosition,
+      child: _dropTarget(shell),
     );
   }
 
@@ -613,6 +749,42 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Over the window while something is dragged over it.
+class _DropOverlay extends StatelessWidget {
+  const _DropOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey('drop-overlay'),
+      margin: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: scheme.surface.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.7), width: 2),
+      ),
+      alignment: Alignment.center,
+      child: Material(
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(14),
+        elevation: 8,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.file_download_outlined, color: scheme.primary),
+              const SizedBox(width: 10),
+              Text('Drop to open', style: Theme.of(context).textTheme.titleMedium),
+            ],
           ),
         ),
       ),

@@ -102,6 +102,17 @@ class ToastItem {
 
 const _toastActions = {'join', 'leave', 'kick', 'swap', 'chat'};
 
+/// "Unready when the video changes": a state with a newer [mediaId] than
+/// the last one this session saw ([lastMediaId], -1 before the first) while
+/// self is ready (or a reconnect is restoring it). A swap keeps the
+/// server's ready flags, so the client unreadies itself.
+bool unreadyForNewMedia(
+        {required bool enabled,
+        required int lastMediaId,
+        required int mediaId,
+        required bool ready}) =>
+    enabled && lastMediaId >= 0 && mediaId != lastMediaId && ready;
+
 /// `media.relay` of a state, or null when the media is not relayed.
 MediaRelay? stateMediaRelay(StateBroadcast state) {
   final r = state.media?['relay'];
@@ -184,7 +195,7 @@ class SessionCoordinator {
   final autoAdvance = signal<AutoAdvance?>(null);
 
   /// The skip pill for the current position ([skipOfferAt]: Skip OP,
-  /// Skip ED, or Skip 1:30 without opening info); null while nothing
+  /// Skip ED, or Skip 1:30 without opening info or chapters); null while nothing
   /// is open or at `finished`. Press it with [skip].
   late final Computed<SkipOffer?> skipOffer = computed(() {
     final r = serverState.value;
@@ -195,6 +206,7 @@ class SessionCoordinator {
       duration: duration,
       opening: playback.opening.value,
       ending: playback.ending.value,
+      chaptered: playback.chapters.value.isNotEmpty,
     );
   });
 
@@ -223,6 +235,9 @@ class SessionCoordinator {
   // Set after a reconnect until the server echoes the restored ready, so
   // the fresh member's ready=false doesn't overwrite [_lastReady].
   bool _restoringReady = false;
+  // Last mediaId seen in a state; unlike [_mediaId] it survives a
+  // reconnect, so only a real swap counts as a new video.
+  int _seenMediaId = -1;
   // Bumped by every connect/leave/cancel/retry: stale attempts no-op.
   int _epoch = 0;
   Timer? _reconnectTimer;
@@ -356,6 +371,7 @@ class SessionCoordinator {
     _openUrl = null;
     _lastReady = false;
     _restoringReady = false;
+    _seenMediaId = -1;
     _wasPlayAllowed = false;
     _everConnected = false;
     _lostSounded = false;
@@ -668,11 +684,26 @@ class SessionCoordinator {
   void _trackSelfReady(StateBroadcast r) {
     final self = selfMember.peek();
     if (self == null) return;
-    if (r.mediaId != _mediaId) _restoringReady = false;
+    // [_seenMediaId], not [_mediaId]: that one is -1 after a lost
+    // connection, which would end the restore before its echo.
+    if (_seenMediaId >= 0 && r.mediaId != _seenMediaId) _restoringReady = false;
     if (_restoringReady) {
       if (self.ready) _restoringReady = false;
     } else {
       _lastReady = self.ready;
+    }
+    final last = _seenMediaId;
+    _seenMediaId = r.mediaId;
+    // A ready restored by a reconnect may not have echoed yet: unready
+    // anyway (it was sent first, so this one lands last).
+    if (unreadyForNewMedia(
+        enabled: AppSettings.instance.unreadyOnSwap.peek(),
+        lastMediaId: last,
+        mediaId: r.mediaId,
+        ready: self.ready || _restoringReady)) {
+      _lastReady = false;
+      _restoringReady = false;
+      sync.sendReady(false, source: 'auto');
     }
   }
 
@@ -1497,7 +1528,8 @@ class SessionCoordinator {
       reconnecting.value = false;
       return;
     }
-    final wantReady = _lastReady;
+    var wantReady = _lastReady;
+    final seenBefore = _seenMediaId;
     try {
       health.value = const HealthStatus(
           HealthSeverity.info, 'reconnecting…');
@@ -1528,6 +1560,15 @@ class SessionCoordinator {
       if (stale()) return;
       // The server forgot the dropped member; restore the ready flag it
       // last reported (not a local guess: others may have forced it).
+      // Not when the video changed meanwhile and the user unreadies then.
+      if (unreadyForNewMedia(
+          enabled: AppSettings.instance.unreadyOnSwap.peek(),
+          lastMediaId: seenBefore,
+          mediaId: sync.lastState?.mediaId ?? seenBefore,
+          ready: wantReady)) {
+        wantReady = false;
+        _lastReady = false;
+      }
       if (wantReady) {
         _lastReady = true;
         _restoringReady = true;

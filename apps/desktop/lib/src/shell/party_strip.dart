@@ -10,6 +10,7 @@ import '../screens/home/update_indicator.dart';
 import '../screens/session/jellyfin_widgets.dart' show ViaHostBadge;
 import '../state/session_state.dart';
 import '../update/update_controller.dart';
+import '../widgets/app_keys.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/window_buttons.dart';
 import 'avatar.dart';
@@ -26,6 +27,9 @@ enum ShellTab {
 }
 
 const partyStripHeight = 60.0;
+
+/// Every avatar in the strip, yours and the party's.
+const stripAvatarSize = 42.0;
 
 /// Below this window width the strip shows 3 avatars and no server text,
 /// so the tabs keep their room.
@@ -95,7 +99,7 @@ class PartyStrip extends StatelessWidget {
                     ready: self?.ready ?? false,
                     host: online && coord.hostFile != null,
                   ),
-                  size: 32,
+                  size: stripAvatarSize,
                   ring: online,
                 ),
               ),
@@ -139,25 +143,30 @@ class PartyStrip extends StatelessWidget {
                   key: const ValueKey('party-avatars'),
                   members: partyAvatars(coord),
                   shown: compact ? 3 : 5,
+                  size: stripAvatarSize,
                   onTap: () => showMembersCard(context),
                 ),
               ),
               const SizedBox(width: 10),
               if (!compact) _ServerLabel(scheme: scheme),
               const SizedBox(width: 6),
-              Badge(
-                isLabelVisible: unread > 0,
-                label: Text('$unread'),
-                child: IconButton(
-                  key: const ValueKey('strip-chat'),
-                  tooltip: 'Chat & activity',
-                  isSelected: chatOpen,
-                  onPressed: onChat,
-                  icon: const Icon(Icons.chat_bubble_outline, size: 20),
-                  selectedIcon: Icon(
-                    Icons.chat_bubble,
-                    size: 20,
-                    color: scheme.primary,
+              // Tab toggles the chat while the strip is shown.
+              ChatKey(
+                onToggle: onChat,
+                child: Badge(
+                  isLabelVisible: unread > 0,
+                  label: Text('$unread'),
+                  child: IconButton(
+                    key: const ValueKey('strip-chat'),
+                    tooltip: 'Chat & activity (Tab)',
+                    isSelected: chatOpen,
+                    onPressed: onChat,
+                    icon: const Icon(Icons.chat_bubble_outline, size: 20),
+                    selectedIcon: Icon(
+                      Icons.chat_bubble,
+                      size: 20,
+                      color: scheme.primary,
+                    ),
                   ),
                 ),
               ),

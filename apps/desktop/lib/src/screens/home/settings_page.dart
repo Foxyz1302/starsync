@@ -7,11 +7,12 @@ import '../../update/update_controller.dart';
 import 'ui.dart';
 import 'update_indicator.dart';
 
-/// Player keys, as handled by the session player's key handler (while
-/// the player fills the window).
+/// Session keys: Space and Tab anywhere in a server (`AppKeys`), the
+/// rest by the session player's key handler (while it fills the window).
 const sessionShortcuts = [
   ('Space', 'Toggle ready'),
   ('← / →', 'Seek back / forward 10 s'),
+  ('↑ / ↓', 'Volume up / down (up to 150 %)'),
   ('Shift+→', 'Skip 1:30 (for everyone)'),
   ('PgUp / PgDn', 'Previous / next chapter'),
   ('F', 'Toggle fullscreen'),

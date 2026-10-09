@@ -193,7 +193,7 @@ class _PlayerStatusState extends State<PlayerStatus> {
                   child: GestureDetector(
                     key: const ValueKey('player-status'),
                     onTap: ready ? coord.toggleReady : null,
-                    child: _Glass(
+                    child: PlayerGlass(
                       child: AnimatedSize(
                         duration: easeTime,
                         curve: ease,
@@ -217,9 +217,10 @@ class _PlayerStatusState extends State<PlayerStatus> {
   }
 }
 
-class _Glass extends StatelessWidget {
+/// Frosted dark glass in a pill: the status pill, the unread chip.
+class PlayerGlass extends StatelessWidget {
   final Widget child;
-  const _Glass({required this.child});
+  const PlayerGlass({super.key, required this.child});
 
   @override
   Widget build(BuildContext context) {

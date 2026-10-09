@@ -10,6 +10,7 @@ import '../../screens/session/player_controls.dart' show TrackPick;
 import '../../shaders/shader_menu.dart';
 import '../../shaders/shader_presets.dart';
 import '../../state/settings.dart';
+import '../volume.dart';
 import 'controls.dart';
 import 'menu.dart';
 import 'style.dart';
@@ -166,9 +167,10 @@ class _UoscBadgeButtonState extends State<UoscBadgeButton> {
   }
 }
 
-/// Volume: click mutes / unmutes, the wheel steps 5 %.
+/// Volume: click mutes / unmutes, hovering shows a [VolumeBar] up to
+/// [maxVolume], the wheel steps 5 %.
 class UoscVolumeButton extends StatefulWidget {
-  /// 0..100.
+  /// 0..[maxVolume].
   final double volume;
   final ValueChanged<double> onChanged;
   const UoscVolumeButton({super.key, required this.volume, required this.onChanged});
@@ -179,29 +181,55 @@ class UoscVolumeButton extends StatefulWidget {
 
 class _UoscVolumeButtonState extends State<UoscVolumeButton> {
   double _beforeMute = 100;
+  bool _hover = false;
 
   @override
   Widget build(BuildContext context) {
     final v = widget.volume;
     final icon = v <= 0 ? Icons.volume_off_rounded : (v < 50 ? Icons.volume_down_rounded : Icons.volume_up_rounded);
-    return Listener(
-      onPointerSignal: (e) {
-        if (e is PointerScrollEvent && e.scrollDelta.dy != 0) {
-          widget.onChanged((v + (e.scrollDelta.dy < 0 ? 5 : -5)).clamp(0.0, 100.0));
-        }
-      },
-      child: UoscButton(
-        key: const ValueKey('uosc-volume'),
-        icon: icon,
-        tooltip: 'Volume ${v.round()} % (scroll to change)',
-        onPressed: () {
-          if (v > 0) {
-            _beforeMute = v;
-            widget.onChanged(0);
-          } else {
-            widget.onChanged(_beforeMute <= 0 ? 100 : _beforeMute);
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: Listener(
+        onPointerSignal: (e) {
+          if (e is PointerScrollEvent && e.scrollDelta.dy != 0) {
+            widget.onChanged(stepVolume(v, e.scrollDelta.dy < 0 ? 5 : -5));
           }
         },
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedSize(
+              duration: const Duration(milliseconds: 150),
+              child: _hover
+                  ? Padding(
+                      padding: const EdgeInsets.only(left: 6, right: 2),
+                      child: VolumeBar(
+                        key: const ValueKey('uosc-volume-bar'),
+                        volume: v,
+                        onChanged: widget.onChanged,
+                        color: UoscStyle.text,
+                        trackColor: UoscStyle.dim.withValues(alpha: 0.5),
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+            UoscButton(
+              key: const ValueKey('uosc-volume'),
+              icon: icon,
+              color: v > 100 ? boostColor : null,
+              tooltip: 'Volume ${v.round()} % (scroll to change)',
+              onPressed: () {
+                if (v > 0) {
+                  _beforeMute = v;
+                  widget.onChanged(0);
+                } else {
+                  widget.onChanged(_beforeMute <= 0 ? 100 : _beforeMute);
+                }
+              },
+            ),
+          ],
+        ),
       ),
     );
   }

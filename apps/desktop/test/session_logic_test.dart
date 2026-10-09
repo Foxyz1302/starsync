@@ -91,4 +91,14 @@ void main() {
       expect(n.contains('SECRET'), isFalse);
     });
   });
+
+  test('unreadyForNewMedia: only a real swap while ready, setting on', () {
+    bool u({bool enabled = true, int last = 2, int id = 3, bool ready = true}) =>
+        unreadyForNewMedia(enabled: enabled, lastMediaId: last, mediaId: id, ready: ready);
+    expect(u(), isTrue);
+    expect(u(enabled: false), isFalse);
+    expect(u(ready: false), isFalse);
+    expect(u(id: 2), isFalse, reason: 'same media');
+    expect(u(last: -1), isFalse, reason: 'first state of a session is no swap');
+  });
 }

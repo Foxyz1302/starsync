@@ -186,12 +186,17 @@ class SyncEngine {
     return left.clamp(0.0, full).toDouble();
   }
 
-  /// Any frame from a member: fresh again, and a ready member the stale
-  /// sweep took out of the set goes back in (ready && !inSet only arises
-  /// from that sweep).
+  /// Any frame from a member: fresh again. Back in the set: a ready member
+  /// the stale sweep (or a swap while it was stale) took out (ready &&
+  /// !inSet only arises from those), and any member back from stale while
+  /// not playing (like a join then).
   void _seen(EngineMember member) {
+    final wasStale = isStale(member);
     member.lastSeen = now;
-    if (member.ready && !member.inSet) member.inSet = true;
+    if (!member.inSet &&
+        (member.ready || (wasStale && transport != Transport.playing))) {
+      member.inSet = true;
+    }
   }
 
   /// Heartbeat: stale sweep, end of media.
@@ -202,8 +207,11 @@ class SyncEngine {
 
   String applyJoin(String token, String name, String avatar) {
     final id = 'm${_nextId++}';
+    // Joining while not playing: in the set, so the start waits for them;
+    // while playing, out until they ready (a late joiner never pauses).
     members[token] =
-        EngineMember(id: id, token: token, name: name, avatar: avatar, now: now);
+        EngineMember(id: id, token: token, name: name, avatar: avatar, now: now)
+          ..inSet = transport != Transport.playing;
     feed.add(FeedMessage(actor: name, action: 'join', at: now));
     return id;
   }
@@ -367,9 +375,11 @@ class SyncEngine {
     serverTime = now;
     eventId++;
     transport = Transport.held;
+    // Ready flags stay; everyone here now waits for everyone else here now
+    // (a stale member rejoins the set with its next frame if still ready).
+    final t = now;
     for (final member in members.values) {
-      member.ready = false;
-      member.inSet = false;
+      member.inSet = !isStale(member, t);
       member.buffered = 0;
     }
     feed.add(FeedMessage(actor: actor?.name ?? '?', action: 'swap', at: now));
@@ -448,12 +458,9 @@ class SyncEngine {
     }
     final inSet = members.values.where((m) => m.inSet).toList();
     if (inSet.isEmpty) return;
-    final freshCount =
-        members.values.where((m) => !isStale(m, t)).length;
-    final quorum = inSet.length >= 2 || freshCount <= 1;
     final allGood = inSet.every(
         (m) => m.ready && m.buffered >= need && !isStale(m, t));
-    if (allGood && quorum) {
+    if (allGood) {
       serverTime = t;
       eventId++;
       transport = Transport.playing;

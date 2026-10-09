@@ -111,8 +111,14 @@ void main() {
   group('skip offers', () {
     final op = SkipRange(s(30), m(2), SkipSource.chapter);
     final ed = SkipRange(m(20), m(21, 30), SkipSource.chapter);
-    SkipOffer? at(Duration p, {SkipRange? opening, SkipRange? ending, Duration? duration}) => skipOfferAt(
-        position: p, duration: duration ?? m(24), opening: opening, ending: ending);
+    SkipOffer? at(Duration p,
+            {SkipRange? opening, SkipRange? ending, Duration? duration, bool chaptered = false}) =>
+        skipOfferAt(
+            position: p,
+            duration: duration ?? m(24),
+            opening: opening,
+            ending: ending,
+            chaptered: chaptered);
 
     test('Skip OP inside the opening, to its end', () {
       expect(at(s(29), opening: op, ending: ed), isNull);
@@ -141,6 +147,9 @@ void main() {
       expect(at(m(1), ending: ed), SkipOffer(SkipKind.fixed, m(2, 30)));
       // An opening known (but not playing) means no fallback.
       expect(at(m(3), opening: op), isNull);
+      // Chapters without an OP chapter: no opening on purpose.
+      expect(at(m(1), chaptered: true), isNull);
+      expect(at(m(20, 10), ending: ed, chaptered: true), SkipOffer(SkipKind.ending, m(21, 30)));
     });
   });
 

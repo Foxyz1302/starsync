@@ -346,7 +346,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
               Text('Watch from a link', textAlign: TextAlign.center, style: t.headlineSmall),
               const SizedBox(height: 6),
               Text(
-                'A video file, YouTube, a Jellyfin link… Ctrl+V anywhere pastes it here.',
+                'A video file, YouTube, a Jellyfin link… Ctrl+V or drop it anywhere to bring it here.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: scheme.onSurfaceVariant),
               ),

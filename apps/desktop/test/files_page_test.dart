@@ -74,6 +74,12 @@ Future<void> openFolder(WidgetTester tester, String name) async {
   await frames(tester);
 }
 
+/// Series start collapsed: a click on the header lists the episodes.
+Future<void> openSeries(WidgetTester tester, [String title = 'Show']) async {
+  await tester.tap(find.descendant(of: find.byType(SeriesHeader), matching: find.text(title)));
+  await frames(tester);
+}
+
 void main() {
   setUp(() async {
     tmp = Directory.systemTemp.createTempSync('files_page_');
@@ -147,6 +153,9 @@ void main() {
     expect(find.byType(SeriesHeader), findsOneWidget);
     expect(find.text('Show'), findsOneWidget);
     expect(find.text('3 episodes · 1 extra · Grp'), findsOneWidget);
+    // Collapsed until clicked; open for the rest of the session.
+    expect(find.text('E01'), findsNothing);
+    await openSeries(tester);
     for (final l in ['E01', 'E02', 'E03', 'NCOP1']) {
       expect(find.text(l), findsOneWidget);
     }
@@ -157,6 +166,13 @@ void main() {
     // Durations come from the thumbnail.
     expect(find.text('24:00 · 1 KB'), findsNWidgets(4));
     expect(find.text('24:00'), findsOneWidget); // card badge
+
+    await openFolder(tester, 'Recent');
+    await openFolder(tester, 'anime');
+    expect(find.text('E01'), findsOneWidget);
+    await openSeries(tester);
+    expect(find.text('E01'), findsNothing);
+    expect(find.byType(VideoCard), findsOneWidget);
   });
 
   testWidgets('hidden files are counted and some can be shown', (tester) async {
@@ -180,6 +196,7 @@ void main() {
     store.addFolder(anime);
     await pumpPage(tester);
     await openFolder(tester, 'anime');
+    await openSeries(tester);
     touch('$anime/[Grp] Show - 04.mkv');
     expect(find.text('E04'), findsNothing);
     await tester.tap(find.text('Rescan'));
@@ -197,6 +214,7 @@ void main() {
       return null;
     });
     await openFolder(tester, 'anime');
+    await openSeries(tester);
     expect(find.text('E01'), findsOneWidget);
     await tester.tap(find.text('E01'));
     await tester.tap(find.text('Some Movie (2019)'));
@@ -216,6 +234,7 @@ void main() {
     });
     expect(find.textContaining('Keep the app open while it plays'), findsOneWidget);
     await openFolder(tester, 'anime');
+    await openSeries(tester);
 
     await tester.tap(find.text('E02'));
     await frames(tester);
@@ -254,6 +273,7 @@ void main() {
     ));
     await frames(tester);
     await openFolder(tester, 'anime');
+    await openSeries(tester);
     expect(find.text('now playing'), findsOneWidget);
     expect(find.byIcon(Icons.graphic_eq), findsOneWidget);
   });
@@ -267,6 +287,7 @@ void main() {
     await tester.tap(find.widgetWithText(InputChip, 'anime'));
     await frames(tester);
     expect(find.text('$anime/'), findsOneWidget);
+    await openSeries(tester);
     expect(find.text('E01'), findsOneWidget);
     // The chip's x removes the folder, like the sidebar's.
     await tester.tap(find.byTooltip('Remove folder'));
@@ -287,6 +308,7 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('anime').first);
       await frames(tester);
+      await openSeries(tester);
       expect(find.text('E01'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('Show some'));
@@ -312,6 +334,7 @@ void main() {
       return Completer<Thumbnail?>().future; // never finishes
     });
     await openFolder(tester, 'big');
+    await openSeries(tester, 'Long Show');
     expect(find.text('E01'), findsOneWidget);
     final first = thumbRequests.toSet();
     expect(first, isNotEmpty);

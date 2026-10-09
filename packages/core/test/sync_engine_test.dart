@@ -37,12 +37,12 @@ void main() {
   });
 
   group('membership + gate', () {
-    test('join lands out-of-set, playback stays held', () {
+    test('join while held lands in the set, playback stays held', () {
       join('a', 'alice');
       expect(engine.transport, Transport.held);
-      expect(engine.members['a']!.inSet, isFalse);
+      expect(engine.members['a']!.inSet, isTrue);
       final state = engine.broadcast();
-      expect(state.members.single.inSet, isFalse);
+      expect(state.members.single.inSet, isTrue);
     });
 
     test('single ready + buffered auto-plays', () {
@@ -126,7 +126,22 @@ void main() {
     });
   });
 
-  group('quorum gate', () {
+  group('presence gate', () {
+    test('initial media: three join while held, two ready stays held', () {
+      engine.media = const HelloMedia(name: 'f', size: 1, duration: 0);
+      join('a', 'alice');
+      join('b', 'bob');
+      join('c', 'cara');
+      engine.applyReady('a', true);
+      engine.applyReady('b', true);
+      buffer('a', 6.0);
+      buffer('b', 6.0);
+      buffer('c', 6.0);
+      expect(engine.transport, Transport.held);
+      engine.applyReady('c', true);
+      expect(engine.transport, Transport.playing);
+    });
+
     test('one ready of two fresh stays held', () {
       join('a', 'alice');
       join('b', 'bob');
@@ -153,6 +168,7 @@ void main() {
       t = t.add(const Duration(seconds: 16));
       engine.applyReady('a', true);
       buffer('a', 6.0);
+      engine.tick();
       expect(engine.transport, Transport.playing);
     });
 
@@ -257,19 +273,66 @@ void main() {
     });
   });
 
-  group('swap resets everything', () {
-    test('swap bumps mediaId, clears sets, holds', () {
+  group('swap', () {
+    const ep2 = HelloMedia(name: 'Ep02.mkv', size: 9, duration: 90.0);
+
+    test('swap bumps mediaId, holds, keeps ready, fresh members in set', () {
       join('a', 'alice');
       engine.applyReady('a', true);
       buffer('a', 4.0);
       expect(engine.transport, Transport.playing);
-      engine.applySwap('a',
-          const HelloMedia(name: 'Ep02.mkv', size: 9, duration: 9.0));
+      engine.applySwap('a', ep2);
       expect(engine.mediaId, 2);
       expect(engine.transport, Transport.held);
       expect(engine.positionAt(), 0);
-      expect(engine.members['a']!.inSet, isFalse);
-      expect(engine.members['a']!.ready, isFalse);
+      expect(engine.members['a']!.inSet, isTrue);
+      expect(engine.members['a']!.ready, isTrue);
+      expect(engine.members['a']!.buffered, 0);
+      buffer('a', 4.0);
+      expect(engine.transport, Transport.playing);
+    });
+
+    test('a member present at the swap blocks until ready', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      join('c', 'cara');
+      engine.applySwap('a', ep2);
+      engine.applyReady('a', true);
+      engine.applyReady('b', true);
+      buffer('a', 6.0);
+      buffer('b', 6.0);
+      buffer('c', 6.0);
+      expect(engine.transport, Transport.held);
+      expect(engine.members['c']!.inSet, isTrue);
+      engine.applyReady('c', true);
+      expect(engine.transport, Transport.playing);
+    });
+
+    test('a joiner while playing never holds anyone back', () {
+      join('a', 'alice');
+      engine.applySwap('a', ep2);
+      engine.applyReady('a', true);
+      buffer('a', 6.0);
+      expect(engine.transport, Transport.playing);
+      join('b', 'bob');
+      buffer('b', 0);
+      expect(engine.members['b']!.inSet, isFalse);
+      expect(engine.transport, Transport.playing);
+    });
+
+    test('a stale member stays out, rejoins with its next frame if ready', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applyReady('b', true);
+      t = t.add(const Duration(seconds: 16));
+      engine.applyReady('a', true);
+      engine.applySwap('a', ep2);
+      expect(engine.members['b']!.inSet, isFalse);
+      buffer('a', 6.0);
+      expect(engine.transport, Transport.playing);
+      buffer('b', 0);
+      expect(engine.members['b']!.inSet, isTrue);
+      expect(engine.transport, Transport.held);
     });
   });
 
@@ -427,10 +490,13 @@ void main() {
           isTrue);
     });
 
-    test('unready member does not rejoin on reports', () {
+    test('unready late joiner does not join on reports', () {
       join('a', 'alice');
+      engine.applyReady('a', true);
       buffer('a', 6.0);
-      expect(engine.members['a']!.inSet, isFalse);
+      join('b', 'bob');
+      buffer('b', 6.0);
+      expect(engine.members['b']!.inSet, isFalse);
     });
   });
 

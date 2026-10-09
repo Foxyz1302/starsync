@@ -26,6 +26,8 @@ class UoscControls extends StatefulWidget {
   final Widget? topLeft;
   final VoidCallback? onDoubleTap;
   final Duration hideAfter;
+  /// Follows whether the controls are up (for overlays outside them).
+  final ValueNotifier<bool>? shown;
   const UoscControls({
     super.key,
     required this.timeline,
@@ -35,6 +37,7 @@ class UoscControls extends StatefulWidget {
     this.topLeft,
     this.onDoubleTap,
     this.hideAfter = const Duration(seconds: 3),
+    this.shown,
   });
 
   static const buttonRowHeight = 40.0;
@@ -58,6 +61,10 @@ class UoscControlsState extends State<UoscControls> {
   @override
   void initState() {
     super.initState();
+    // Not during this build: an overlay listening to [shown] may be built.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.shown?.value = true;
+    });
     _hideLater();
   }
 
@@ -69,7 +76,10 @@ class UoscControlsState extends State<UoscControls> {
 
   /// Show the controls and restart the hide countdown.
   void wake() {
-    if (!_visible && mounted) setState(() => _visible = true);
+    if (!_visible && mounted) {
+      setState(() => _visible = true);
+      widget.shown?.value = true;
+    }
     _hideLater();
   }
 
@@ -98,6 +108,7 @@ class UoscControlsState extends State<UoscControls> {
   void _hide() {
     if (!mounted || _holds > 0 || !_visible) return;
     setState(() => _visible = false);
+    widget.shown?.value = false;
   }
 
   @override

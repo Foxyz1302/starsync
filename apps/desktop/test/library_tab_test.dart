@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:watch_together/src/jellyfin/accounts.dart';
@@ -278,7 +277,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('link: preview, how the others get it, put up, recent links, Ctrl+V', (tester) async {
+  testWidgets('link: preview, how the others get it, put up, recent links', (tester) async {
     final h = await pumpLibrary(tester, const Size(1400, 1000), source: MediaKind.link);
     expect(find.text('How the others get it'), findsOneWidget);
     const url = 'https://www.youtube.com/watch?v=abc';
@@ -304,23 +303,6 @@ void main() {
     await settle(tester, 10);
     expect(h.controller.link.text, url);
 
-    // Ctrl+V outside a field, on another source: the link lands in Link.
-    await tester.tap(find.text('Jellyfin'));
-    await settle(tester, 10);
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
-      if (call.method == 'Clipboard.getData') return {'text': 'https://cdn.example/b.mkv'};
-      return null;
-    });
-    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
-    FocusManager.instance.primaryFocus?.unfocus();
-    Focus.of(tester.element(find.byKey(const ValueKey('media-source')))).requestFocus();
-    await tester.pump();
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-    await settle(tester, 10);
-    expect(h.controller.source, MediaKind.link);
-    expect(h.controller.link.text, 'https://cdn.example/b.mkv');
     expect(tester.takeException(), isNull);
   });
 

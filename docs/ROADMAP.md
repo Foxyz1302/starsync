@@ -6,56 +6,33 @@ off by deleting it in the same commit as the code. Wire changes also edit
 
 ## Backlog
 
-1. **Ready gate and swap (protocol bump).** Bug: three in a server, a file
-   relayed from one; two readied and it played, the third (not ready) was
-   dragged along frame by frame. Members present at a swap must all count
-   for the gate (a joiner after the swap still counts only once ready);
-   a swap keeps everyone's ready flag, with a per-user "Unready when the
-   video changes" setting. Shared auto-skip lives here too (below).
+1. **Auto-skip OP/ED** (undecided): who decides and how (shared for the
+   server, personal, per show) is open. Constraint: a skip is a seek and
+   seeks are shared, and only real ranges (segments, OP/ED chapters) should
+   ever be skipped.
 
-2. **Quick UI**
-   - Tab no longer moves focus (Tab toggles chat, then Space pressed a
-     random button); Space is always ready outside text fields.
-   - Opening chat focuses its field; Esc/Tab hands focus back.
-   - Unread badge on uosc's chat button; an unread hint in fullscreen.
-   - Your avatar in the strip the same size as the party's.
-   - Chat panel: people's messages only, a toggle shows activity.
-   - Skip OP/ED: no "Skip 1:30" guess when the file has chapters (a
-     missing OP chapter is on purpose); the pill shows for the first 5 s
-     of the range and again when the mouse moves (like the controls).
-   - Auto-skip OP/ED: a server-wide setting in `state` (anyone toggles it,
-     the feed says who); exactly one client seeks (the media's `swapBy`,
-     else the lowest fresh member id), only for real ranges (segments or
-     OP/ED chapters), as a normal user seek.
-   - Volume above 100% like mpv.
+2. **Files**: next episode from Files (by parsed episode, with the
+   countdown). Later: tracking for file series.
 
-3. **Drag & drop and paste** (`fox_utils`): drop or Ctrl+V anywhere; a
-   small card asks how to open it (file: put up / add its folder to Files;
-   link: put up with the link modes; image: the avatar editor when open).
-
-4. **Files**: detected series groups start collapsed (big libraries);
-   next episode from Files (by parsed episode, with the countdown). Later:
-   tracking for file series.
-
-5. **yt-dlp** (epic): players that open links themselves use mpv's ytdl
+3. **yt-dlp** (epic): players that open links themselves use mpv's ytdl
    hook (bundled on Windows); then relay of single-file formats; then a
    resolver for the Link preview (title, thumbnail, duration).
 
-6. **AniList account**: sign in (OAuth via a localhost callback), "My list"
+4. **AniList account**: sign in (OAuth via a localhost callback), "My list"
    filter on the Schedule; today's "Following" (AnimeFlow's monitored
    shows) becomes "On the server".
 
-7. **Ops**: `watch-together-server --upgrade` (a VPS has no GTK for the
+5. **Ops**: `watch-together-server --upgrade` (a VPS has no GTK for the
    app's updater); check shaders on Windows; the relay e2e "source drops
    uncleanly and resumes" fails about half the time under the full suite.
 
-8. **Windows: first real use.** CI builds and publishes
+6. **Windows: first real use.** CI builds and publishes
    `watch-together-<ver>-windows-x64.zip` (libmpv bundled) and runs the
    updater tests on NTFS; a friend has joined from it. Still unchecked:
    fullscreen controls, hosting (firewall prompt), in-app update from one
    release to the next. The rest of the desktop tests are not in CI.
 
-9. **Relay follow-ups** (see ARCHITECTURE "Relay"). First real use: owner's
+7. **Relay follow-ups** (see ARCHITECTURE "Relay"). First real use: owner's
    PC -> VPS -> friend, Jellyfin and a file. Then:
    - Source takeover: when the source leaves, another member with an
      account on that Jellyfin (or the same file: name, size, hash) takes
@@ -65,9 +42,9 @@ off by deleting it in the same commit as the code. Wire changes also edit
    - Show who is relaying and how fast in the member list; warn the source
      when its upload is below the media's bitrate.
 
-10. **Jellyfin** (epic, below).
+8. **Jellyfin** (epic, below).
 
-11. **Smaller items**
+9. **Smaller items**
    - Video output robustness: if media_kit's hardware path regresses to
      software (see ARCHITECTURE, Media: render mode), vendor a
      media_kit_video fix that builds the EGL display from GDK's native

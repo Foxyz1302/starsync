@@ -1,4 +1,4 @@
-# Protocol (proto = 9)
+# Protocol (proto = 10)
 
 Wire format only. Behavior (gate, clock, timeouts) is in
 [ARCHITECTURE.md](ARCHITECTURE.md). Source of truth:
@@ -30,7 +30,7 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
 ## Client to server
 
 ```
-{"t":"hello","proto":9,"secret":"","user":{"name":"","avatar":""},
+{"t":"hello","proto":10,"secret":"","user":{"name":"","avatar":""},
  "media":{"name":"","size":0,"duration":0,"url":null},"hostKey":"...",
  "resume":"<token>"}
 {"t":"ready","ready":true,"source":"manual"}      source: manual | auto
@@ -84,6 +84,9 @@ Field notes:
 - `swap.media.url` is the link; `name`, `size`, `duration` are informational.
   `swap.media.jellyfin` makes it Jellyfin media (see below); then `url` is
   dropped. `swap.media.relay` makes it relayed media (see "Relay").
+  A swap keeps every member's `ready` and puts every fresh member in the
+  set (`inSet`); clients that want to be unready for the new media send
+  `ready` themselves (gate: ARCHITECTURE.md, "Ready gate").
 - Frames before `welcome` (other than `hello`) are ignored; unparsable or
   unknown frames are ignored silently.
 
@@ -258,8 +261,9 @@ server -> source  {"t":"pull","id":1,"start":0,"end":1048575}  inclusive
 ## Join and reconnect
 
 `hello` then `welcome`, then the app opens `mediaUrl`, seeks to the server
-position and buffers. A joining member is `ready=false, inSet=false` until
-the first `ready`. A socket the server sees close loses its token; reconnect
+position and buffers. A joining member is `ready=false`; it is `inSet`
+at once unless the server is `playing`, then from its first `ready`
+(members present at a swap are put in the set by it). A socket the server sees close loses its token; reconnect
 is a fresh `hello` (with `resume` = the old token), after which the client
 re-sends its prior ready flag. If the old member was still there (unclean
 drop), `resume` takes it over and the token and media URL stay the same.

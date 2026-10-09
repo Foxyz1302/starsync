@@ -501,7 +501,8 @@ void main() {
         expect(a.jellyfinPlan.peek(), isA<OwnPlay>());
         expect(a.relaying.peek(), isTrue);
         expect(b.jellyfinBlocked.peek(), isNull);
-        for (final x in [a, b]) {
+        // Everyone present counts for the gate, Dave too.
+        for (final x in [a, b, d]) {
           x.toggleReady();
         }
         await _poll(() => a.playback.player.state.playing && b.playback.player.state.playing, 'playing');
@@ -511,7 +512,7 @@ void main() {
         expect(jelly.streams('ATOKEN'), isNotEmpty);
         expect(jelly.calls.where((c) => c.path.startsWith('/Videos/')).every((c) =>
             _FakeJellyfin.authFields(c.auth)['Token'] == 'ATOKEN'), isTrue);
-        for (final x in [a, b]) {
+        for (final x in [a, b, d]) {
           x.toggleReady();
         }
 

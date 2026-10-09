@@ -17,7 +17,8 @@ export 'thumb.dart' show ThumbnailLoader;
 // The Files source: watched folders on the left (chips on top when
 // narrow), the open one on the right grouped into series and loose
 // videos, or Recent. A folder is scanned when first opened and on Rescan;
-// scans are kept for the app session. Playing goes through [onPlay].
+// scans are kept for the app session. Series start collapsed; the ones
+// opened stay open for the app session. Playing goes through [onPlay].
 
 /// Below this width the sidebar turns into chips above the list.
 const filesNarrowWidth = 700.0;
@@ -26,12 +27,23 @@ const filesNarrowWidth = 700.0;
 final _scans = <String, FolderScan>{};
 final _running = <String, Future<FolderScan>>{};
 String? _lastOpen;
+/// Series opened this session, by `folder\nseries key`.
+final _expanded = <String>{};
+final _showRequests = ValueNotifier(0);
 
-/// Forgets the session's scans and the open folder.
+/// Opens [dir] (null: Recent) in the Files page: now if one is showing,
+/// else when it next opens.
+void showFilesFolder(String? dir) {
+  _lastOpen = dir;
+  _showRequests.value++;
+}
+
+/// Forgets the session's scans, open series and the open folder.
 @visibleForTesting
 void resetFilesPageSession() {
   _scans.clear();
   _running.clear();
+  _expanded.clear();
   _lastOpen = null;
 }
 
@@ -73,22 +85,21 @@ class FilesPage extends StatefulWidget {
 /// A scan grouped for display, made once per scan.
 class _Library {
   final GroupedVideos grouped;
-  /// Series rows in order: a header (video null), then its episodes and
-  /// extras.
-  final List<(SeriesGroup, VideoFile?)> rows;
   final int subtitleFiles;
 
   _Library(FolderScan scan)
       : grouped = groupBySeries(scan.videos),
-        rows = [],
-        subtitleFiles = {for (final l in scan.subtitles.values) ...l}.length {
-    for (final g in grouped.series) {
-      rows.add((g, null));
-      for (final v in [...g.episodes, ...g.extras]) {
-        rows.add((g, v));
-      }
-    }
-  }
+        subtitleFiles = {for (final l in scan.subtitles.values) ...l}.length;
+
+  /// Series rows in order: a header (video null), then, for the series
+  /// [open] says, its episodes and extras.
+  List<(SeriesGroup, VideoFile?)> rows(bool Function(SeriesGroup g) open) => [
+        for (final g in grouped.series) ...[
+          (g, null),
+          if (open(g))
+            for (final v in [...g.episodes, ...g.extras]) (g, v),
+        ],
+      ];
 }
 
 final _libraries = Expando<_Library>();
@@ -107,6 +118,7 @@ class _FilesPageState extends State<FilesPage> {
   @override
   void initState() {
     super.initState();
+    _showRequests.addListener(_shown);
     _store.ensureLoaded().then((_) {
       if (!mounted) return;
       final open = _open;
@@ -117,6 +129,14 @@ class _FilesPageState extends State<FilesPage> {
       }
     });
   }
+
+  @override
+  void dispose() {
+    _showRequests.removeListener(_shown);
+    super.dispose();
+  }
+
+  void _shown() => _select(_lastOpen);
 
   Future<FolderScan> _runScan(String dir) => (widget.scan ?? scanFolder)(dir);
 
@@ -477,6 +497,8 @@ class _FilesPageState extends State<FilesPage> {
       if (scan.truncated) 'stopped after $maxScannedFiles files',
     ].join(' · ');
     final loose = lib.grouped.loose;
+    String seriesId(SeriesGroup g) => '$dir\n${g.key}';
+    final rows = lib.rows((g) => _expanded.contains(seriesId(g)));
     return [
       SliverToBoxAdapter(
         child: Wrap(
@@ -547,13 +569,21 @@ class _FilesPageState extends State<FilesPage> {
                   'It may have been moved, renamed or be on a drive that is not connected.',
                 ),
         ),
-      // Series: files whose names carry an episode number.
+      // Series: files whose names carry an episode number; a header
+      // click opens or closes its episodes.
       SliverList.builder(
-        itemCount: lib.rows.length,
+        itemCount: rows.length,
         itemBuilder: (context, i) {
-          final (group, v) = lib.rows[i];
+          final (group, v) = rows[i];
           if (v == null) {
-            return SeriesHeader(key: ValueKey('series:${group.key}'), group: group, thumbs: _thumbs);
+            final id = seriesId(group);
+            return SeriesHeader(
+              key: ValueKey('series:${group.key}'),
+              group: group,
+              thumbs: _thumbs,
+              expanded: _expanded.contains(id),
+              onTap: () => setState(() => _expanded.contains(id) ? _expanded.remove(id) : _expanded.add(id)),
+            );
           }
           return FileRow(
             key: ValueKey(v.path),

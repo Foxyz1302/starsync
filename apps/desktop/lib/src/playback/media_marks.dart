@@ -243,18 +243,20 @@ const _skipTail = Duration(seconds: 1);
 /// The skip pill at [position]: inside the opening "Skip OP" (to its end),
 /// inside the ending "Skip ED" (to its end only: what follows, preview or
 /// more episode, is the viewer's call). Without any opening info on media
-/// longer than [fallbackMinDuration], "Skip 1:30" during the first
-/// [fallbackWindow]. Null otherwise.
+/// longer than [fallbackMinDuration] and without chapters ([chaptered]: a
+/// chaptered file without an OP chapter has none on purpose), "Skip 1:30"
+/// during the first [fallbackWindow]. Null otherwise.
 SkipOffer? skipOfferAt({
   required Duration position,
   required Duration duration,
   required SkipRange? opening,
   required SkipRange? ending,
+  bool chaptered = false,
 }) {
   bool inside(SkipRange r) => position >= r.start && position < r.end - _skipTail;
   if (opening != null && inside(opening)) return SkipOffer(SkipKind.opening, opening.end);
   if (ending != null && inside(ending)) return SkipOffer(SkipKind.ending, ending.end);
-  if (opening == null && duration > fallbackMinDuration && position < fallbackWindow) {
+  if (opening == null && !chaptered && duration > fallbackMinDuration && position < fallbackWindow) {
     final to = position + fallbackSkip;
     return SkipOffer(SkipKind.fixed, to < duration ? to : duration);
   }

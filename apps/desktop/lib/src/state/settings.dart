@@ -22,6 +22,7 @@ const _keyHideReReleases = 'hideReReleases';
 const _keyProgressLine = 'progressLine';
 const _keySoundVolume = 'soundVolume';
 const _keySoundsOff = 'soundsOff';
+const _keyUnreadyOnSwap = 'unreadyOnSwap';
 
 enum HwdecMode { auto, off, custom }
 
@@ -33,6 +34,9 @@ class AppSettings {
   final autoCheckUpdates = signal(true);
   /// Jellyfin episodes: at the end, count down 10 s and put up the next.
   final autoAdvance = signal(true);
+  /// Session: send ready=false when the video changes (a swap keeps the
+  /// server's ready flags).
+  final unreadyOnSwap = signal(false);
   /// Player design: the uosc controls (`controls/uosc/`) instead of the
   /// standard ones (media_kit's with our bars). Applies live.
   final mpvControls = signal(false);
@@ -82,6 +86,8 @@ class AppSettings {
       if (auto is bool) autoCheckUpdates.value = auto;
       final advance = box.get(_keyAutoAdvance);
       if (advance is bool) autoAdvance.value = advance;
+      final unready = box.get(_keyUnreadyOnSwap);
+      if (unready is bool) unreadyOnSwap.value = unready;
       final mpv = box.get(_keyMpvControls);
       if (mpv is bool) mpvControls.value = mpv;
       final hideRe = box.get(_keyHideReReleases);
@@ -127,6 +133,11 @@ class AppSettings {
   void setAutoAdvance(bool on) {
     autoAdvance.value = on;
     _put(_keyAutoAdvance, on);
+  }
+
+  void setUnreadyOnSwap(bool on) {
+    unreadyOnSwap.value = on;
+    _put(_keyUnreadyOnSwap, on);
   }
 
   void setMpvControls(bool on) {
