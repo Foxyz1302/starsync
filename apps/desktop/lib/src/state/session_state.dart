@@ -10,6 +10,7 @@ import '../jellyfin/accounts.dart';
 import '../jellyfin/session_media.dart';
 import '../playback/yt_dlp_app.dart';
 import '../sfx/sfx.dart';
+import '../sfx/sound_bank.dart';
 import '../sfx/synth_sfx.dart';
 import '../session/health.dart';
 import '../session/session_coordinator.dart';
@@ -159,6 +160,7 @@ class SessionState {
   final SfxService sfx = SynthSfx(
     volume: () => AppSettings.instance.soundVolume.peek(),
     enabled: (k) => !AppSettings.instance.soundsOff.peek().contains(k.name),
+    presetFor: soundPresetFor,
   );
   late final SessionCoordinator coordinator = SessionCoordinator(sfx: sfx);
   final lastForm = ConnectForm();
@@ -398,4 +400,12 @@ class SessionState {
     status.value = const HealthStatus(HealthSeverity.info, 'idle');
     route.value = AppRoute.home;
   }
+}
+
+/// The sound set [kind] plays from: its own pick in Settings, else the
+/// overall one.
+SoundPreset soundPresetFor(SfxKind kind) {
+  final s = AppSettings.instance;
+  final name = s.soundPresetFor.peek()[kind.name] ?? s.soundPreset.peek();
+  return SoundPreset.values.where((p) => p.name == name).firstOrNull ?? defaultPreset;
 }

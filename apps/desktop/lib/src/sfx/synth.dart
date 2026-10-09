@@ -1,10 +1,11 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-// A tiny offline synthesizer for UI sounds, voiced as a Japanese house:
-// koto strings (Karplus-Strong), a glass wind chime (furin), a singing
-// bowl (rin), bamboo knocks, wooden clappers (hyoshigi) and the air of a
-// sliding door (shoji). Renders to 16-bit mono WAV bytes. Pure Dart.
+// A tiny offline synthesizer for UI sounds. The current palette is
+// spacious: FM star bells, bubble drops, slow pads, a sub that falls away,
+// stardust and a long dark space tail. Older voices (plucked string, glass
+// and bowl bells, wood) stay available. Renders to 16-bit mono WAV bytes.
+// Pure Dart.
 
 const sampleRate = 44100;
 
@@ -22,6 +23,19 @@ enum Voice {
   /// Breathy air sweeping up (a sliding door); [Note.hz]→[Note.to] is the
   /// sweep of its band.
   slide,
+  /// FM bell: strikes glassy, settles to a pure hanging tone; [Note.bright]
+  /// scales the strike, [Note.to] glides it.
+  star,
+  /// A bubble: the pitch rises into the note fast; [Note.to] flicks it on.
+  drop,
+  /// Slow detuned swell (in over a third of its length, then out);
+  /// [Note.bright] adds overtones, [Note.to] glides it.
+  pad,
+  /// Deep round tone that falls from [Note.hz] to [Note.to].
+  sub,
+  /// A scatter of tiny pings on the scale above [Note.hz], drifting
+  /// towards [Note.to].
+  dust,
 }
 
 class Note {
@@ -44,12 +58,15 @@ class SoundSpec {
   final double cutoff;
   /// Peak level after normalising, dBFS (quiet by design).
   final double peakDb;
-  /// Room tail mix (0..1): the veranda, not a hall.
+  /// Space tail mix (0..1).
   final double room;
-  const SoundSpec(this.notes, {this.cutoff = 6000, this.peakDb = -17, this.room = 0.14});
+  /// Space tail decay to -60 dB (s); the sound keeps about half of it.
+  final double tail;
+  const SoundSpec(this.notes,
+      {this.cutoff = 6000, this.peakDb = -17, this.room = 0.14, this.tail = 1.4});
 
   double get length =>
-      notes.fold<double>(0, (m, n) => math.max(m, n.at + n.len)) + (room > 0 ? 0.25 : 0.02);
+      notes.fold<double>(0, (m, n) => math.max(m, n.at + n.len)) + (room > 0 ? tail * 0.55 : 0.02);
 }
 
 /// Semitones from A4 (440 Hz) to Hz.
@@ -69,13 +86,18 @@ Float64List render(SoundSpec spec, {int seed = 7}) {
       Voice.bamboo => _bamboo(n, rnd),
       Voice.clack => _clack(n, rnd),
       Voice.slide => _slide(n, rnd),
+      Voice.star => _star(n),
+      Voice.drop => _drop(n),
+      Voice.pad => _pad(n, rnd),
+      Voice.sub => _sub(n),
+      Voice.dust => _dust(n, rnd),
     };
     for (var i = 0; i < s.length && start + i < total; i++) {
       out[start + i] += n.gain * s[i];
     }
   }
   _lowpass(out, spec.cutoff);
-  if (spec.room > 0) _room(out, spec.room);
+  if (spec.room > 0) _space(out, spec.room, spec.tail);
   // 1 ms in, 10 ms out: no clicks at either end.
   final fadeIn = (0.001 * sampleRate).round();
   for (var i = 0; i < fadeIn && i < total; i++) {
@@ -276,20 +298,149 @@ void _lowpass(Float64List out, double cutoff) {
   }
 }
 
-/// A few feedback delays: wood and paper walls, a short tail.
-void _room(Float64List out, double mix) {
-  const taps = [0.029, 0.041, 0.059];
-  final dry = Float64List.fromList(out);
-  for (final d in taps) {
+/// Space: four damped feedback combs and two allpasses (a dark, smooth
+/// tail decaying to -60 dB in [tail] s) after a short pre-delay.
+void _space(Float64List out, double mix, double tail) {
+  const combs = [0.0297, 0.0371, 0.0411, 0.0437];
+  const damp = 0.35;
+  final len = out.length;
+  final pre = _n(0.018);
+  final dry = Float64List(len);
+  for (var i = pre; i < len; i++) {
+    dry[i] = out[i - pre];
+  }
+  final wet = Float64List(len);
+  for (final d in combs) {
     final delay = _n(d);
-    final buf = Float64List(out.length);
-    for (var i = delay; i < out.length; i++) {
-      buf[i] = dry[i - delay] + 0.42 * buf[i - delay];
-    }
-    for (var i = 0; i < out.length; i++) {
-      out[i] += mix / taps.length * buf[i];
+    final g = math.pow(0.001, d / tail).toDouble();
+    final y = Float64List(len);
+    var lp = 0.0;
+    for (var i = 0; i < len; i++) {
+      final back = i >= delay ? y[i - delay] : 0.0;
+      lp = back * (1 - damp) + lp * damp;
+      y[i] = dry[i] + g * lp;
+      wet[i] += y[i] / combs.length;
     }
   }
+  for (final d in const [0.005, 0.0017]) {
+    final delay = _n(d);
+    final x = Float64List.fromList(wet);
+    for (var i = 0; i < len; i++) {
+      final xd = i >= delay ? x[i - delay] : 0.0;
+      final yd = i >= delay ? wet[i - delay] : 0.0;
+      wet[i] = -0.5 * x[i] + xd + 0.5 * yd;
+    }
+  }
+  for (var i = 0; i < len; i++) {
+    out[i] += mix * wet[i];
+  }
+}
+
+/// [Note.hz] gliding to [Note.to] over the first ~60% of the note.
+double _glide(Note n, double t) =>
+    n.to == null ? n.hz : n.hz * math.pow(n.to! / n.hz, _smooth(math.min(1, t * 1.6))).toDouble();
+
+Float64List _star(Note n) {
+  final len = _n(n.len);
+  final out = Float64List(len);
+  final k = math.log(100) / len;
+  final attack = _n(0.004);
+  final index0 = 0.3 + 3.0 * n.bright;
+  final idxTau = _n(0.09 + 0.12 * n.bright);
+  const ratio = 3.5;
+  var c1 = 0.0, c2 = 0.0, m1 = 0.0, m2 = 0.0;
+  for (var i = 0; i < len; i++) {
+    final hz = _glide(n, i / len);
+    final w = 2 * math.pi * hz / sampleRate;
+    c1 += w;
+    c2 += w * 1.0017;
+    m1 += w * ratio;
+    m2 += w * ratio * 1.0017;
+    final idx = index0 * math.exp(-i / idxTau);
+    final env = math.exp(-k * i) * (i < attack ? _smooth(i / attack) : 1);
+    out[i] = env * 0.5 * (math.sin(c1 + idx * math.sin(m1)) + math.sin(c2 + idx * math.sin(m2)));
+  }
+  return out;
+}
+
+Float64List _drop(Note n) {
+  final len = _n(n.len);
+  final out = Float64List(len);
+  final k = math.log(100) / len;
+  final attack = _n(0.002);
+  final riseTau = _n(0.016);
+  var ph = 0.0;
+  for (var i = 0; i < len; i++) {
+    final t = i / len;
+    final base = n.to == null ? n.hz : n.hz * math.pow(n.to! / n.hz, _smooth(math.min(1, t * 2.5)));
+    final hz = base * (0.62 + 0.38 * (1 - math.exp(-i / riseTau)));
+    ph += 2 * math.pi * hz / sampleRate;
+    final env = math.exp(-k * i) * (i < attack ? _smooth(i / attack) : 1);
+    out[i] = env * (math.sin(ph) + 0.15 * math.sin(2 * ph));
+  }
+  return out;
+}
+
+Float64List _pad(Note n, math.Random rnd) {
+  final len = _n(n.len);
+  final out = Float64List(len);
+  const detune = [-9.0, -3.0, 4.0, 10.0];
+  final ph = [for (var j = 0; j < detune.length + 1; j++) rnd.nextDouble() * 2 * math.pi];
+  final ratios = [for (final c in detune) math.pow(2, c / 1200).toDouble(), 0.5];
+  final amps = [for (final _ in detune) 1.0, 0.45];
+  const a = 0.33;
+  for (var i = 0; i < len; i++) {
+    final t = i / len;
+    final env = t < a ? _smooth(t / a) : math.pow(1 - _smooth((t - a) / (1 - a)), 2).toDouble();
+    final vib = 1 + 0.002 * math.sin(2 * math.pi * 0.3 * i / sampleRate);
+    final hz = _glide(n, t) * vib;
+    var v = 0.0;
+    for (var j = 0; j < ratios.length; j++) {
+      ph[j] += 2 * math.pi * hz * ratios[j] / sampleRate;
+      v += amps[j] * (math.sin(ph[j]) + n.bright * (0.25 * math.sin(2 * ph[j]) + 0.1 * math.sin(3 * ph[j])));
+    }
+    out[i] = env * v / ratios.length;
+  }
+  return out;
+}
+
+Float64List _sub(Note n) {
+  final len = _n(n.len);
+  final out = Float64List(len);
+  final k = math.log(100) / len;
+  final attack = _n(0.025);
+  var ph = 0.0;
+  for (var i = 0; i < len; i++) {
+    final t = i / len;
+    final hz = n.to == null ? n.hz : n.hz * math.pow(n.to! / n.hz, _smooth(t));
+    ph += 2 * math.pi * hz / sampleRate;
+    final env = math.exp(-k * i) * (i < attack ? _smooth(i / attack) : 1);
+    // Overtones so it still reads on small speakers.
+    out[i] = env * (math.sin(ph) + 0.35 * math.sin(2 * ph) + 0.12 * math.sin(3 * ph));
+  }
+  return out;
+}
+
+Float64List _dust(Note n, math.Random rnd) {
+  final len = _n(n.len);
+  final out = Float64List(len);
+  const steps = [0, 2, 4, 7, 9, 12, 14];
+  final count = math.max(4, (n.len * 14).round());
+  for (var g = 0; g < count; g++) {
+    final tg = (g + rnd.nextDouble() * 0.6) / count * 0.75;
+    final start = _n(tg * n.len);
+    final centre = n.to == null ? n.hz : n.hz * math.pow(n.to! / n.hz, tg);
+    final f = centre * math.pow(2, steps[rnd.nextInt(steps.length)] / 12);
+    final glen = math.min(_n(0.1 + 0.15 * rnd.nextDouble()), len - start);
+    if (glen <= 0) continue;
+    final amp = (1 - tg) * (0.5 + 0.5 * rnd.nextDouble());
+    final k = math.log(100) / glen;
+    final w = 2 * math.pi * f / sampleRate;
+    for (var i = 0; i < glen; i++) {
+      out[start + i] += amp * math.exp(-k * i) * (i < 88 ? i / 88 : 1) * math.sin(w * i);
+    }
+  }
+  return out;
 }
 
 /// 16-bit PCM mono WAV.

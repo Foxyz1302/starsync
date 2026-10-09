@@ -164,7 +164,7 @@ password, recent servers with remove); Player (below); Jellyfin &
 integrations (linked Jellyfin servers, below, the AnimeFlow connection:
 "connected as <name>" with what you may do, or why not, and playing the
 next episode automatically); Notifications & sounds (what pops up; the sound
-volume, and every sound with a preview and its own switch); Updates; Keyboard shortcuts (read-only); About
+volume and sound set, and every sound with a preview, its own set and a switch); Updates; Keyboard shortcuts (read-only); About
 (the version).
 
 Player settings live in the player: ⚙ at the right end of its controls

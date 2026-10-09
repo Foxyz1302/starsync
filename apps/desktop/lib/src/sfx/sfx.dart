@@ -17,6 +17,8 @@ enum SfxKind {
   /// The connection to the server dropped / came back.
   lost,
   back,
+  /// Someone pokes you for attention; plays only on your end.
+  nudge,
 }
 
 class SfxCue {

@@ -26,20 +26,26 @@ double _pitch(List<double> x, int from) {
 
 void main() {
   test('every sound is described, quiet, short and clean', () {
-    for (final k in SfxKind.values) {
-      expect(soundInfo[k], isNotNull, reason: k.name);
-      final r = render(soundFor(k));
-      final peak = r.fold<double>(0, (m, v) => math.max(m, v.abs()));
-      expect(20 * math.log(peak) / math.ln10, lessThanOrEqualTo(-16.9), reason: '${k.name} peak');
-      expect(r.length / sampleRate, lessThan(3), reason: '${k.name} length');
-      expect(r.every((v) => v.isFinite), isTrue, reason: k.name);
-      expect(r.first.abs() + r.last.abs(), lessThan(1e-3), reason: '${k.name} clicks');
+    for (final p in SoundPreset.values) {
+      expect(presetInfo[p], isNotNull, reason: p.name);
+      for (final k in SfxKind.values) {
+        final name = '${p.name}/${k.name}';
+        expect(soundInfo[k], isNotNull, reason: name);
+        final r = render(soundFor(k, preset: p));
+        final peak = r.fold<double>(0, (m, v) => math.max(m, v.abs()));
+        expect(20 * math.log(peak) / math.ln10, lessThanOrEqualTo(-16.9), reason: '$name peak');
+        expect(r.length / sampleRate, lessThan(3), reason: '$name length');
+        expect(r.every((v) => v.isFinite), isTrue, reason: name);
+        expect(r.first.abs() + r.last.abs(), lessThan(1e-3), reason: '$name clicks');
+      }
     }
   });
 
   test('the ready ladder climbs and stays in range', () {
-    expect(render(readySound(0)), render(readySound(1)));
-    expect(render(readySound(99)), render(readySound(6)));
+    for (final p in SoundPreset.values) {
+      expect(render(readySound(0, preset: p)), render(readySound(1, preset: p)));
+      expect(render(readySound(99, preset: p)), render(readySound(6, preset: p)));
+    }
   });
 
   test('koto strings are in tune', () {

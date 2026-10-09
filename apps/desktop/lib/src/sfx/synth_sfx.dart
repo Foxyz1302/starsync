@@ -16,7 +16,11 @@ import 'synth.dart';
 class SynthSfx implements SfxService {
   final double Function() volume;
   final bool Function(SfxKind kind) enabled;
-  SynthSfx({required this.volume, bool Function(SfxKind kind)? enabled}) : enabled = enabled ?? ((_) => true);
+  /// Which sound set each sound plays from.
+  final SoundPreset Function(SfxKind kind) presetFor;
+  SynthSfx({required this.volume, bool Function(SfxKind kind)? enabled, SoundPreset Function(SfxKind kind)? presetFor})
+      : enabled = enabled ?? ((_) => true),
+        presetFor = presetFor ?? ((_) => defaultPreset);
 
   static const _poolSize = 3;
   final List<Player> _pool = [];
@@ -27,12 +31,19 @@ class SynthSfx implements SfxService {
   @override
   Future<void> play(SfxCue cue) async {
     if (!enabled(cue.kind)) return;
-    await playSpec('${cue.kind.name}-${cue.readyIndex}', soundFor(cue.kind, readyIndex: cue.readyIndex));
+    final preset = presetFor(cue.kind);
+    await playSpec('${preset.name}-${cue.kind.name}-${cue.readyIndex}',
+        soundFor(cue.kind, readyIndex: cue.readyIndex, preset: preset));
   }
 
-  /// Plays [kind] even when it is switched off (Settings' preview).
-  Future<void> preview(SfxKind kind, {int readyIndex = 1}) =>
-      playSpec('${kind.name}-$readyIndex', soundFor(kind, readyIndex: readyIndex));
+  /// Plays [kind] even when it is switched off (Settings' preview), always
+  /// freshly rendered: an edited spec plays after a hot reload.
+  Future<void> preview(SfxKind kind, {int readyIndex = 1, SoundPreset? preset}) {
+    final p = preset ?? presetFor(kind);
+    final key = '${p.name}-${kind.name}-$readyIndex';
+    _files.remove(key);
+    return playSpec(key, soundFor(kind, readyIndex: readyIndex, preset: p));
+  }
 
   /// Plays [spec], cached under [key] (same key = same sound).
   Future<void> playSpec(String key, SoundSpec spec) async {

@@ -22,6 +22,8 @@ const _keyHideReReleases = 'hideReReleases';
 const _keyProgressLine = 'progressLine';
 const _keySoundVolume = 'soundVolume';
 const _keySoundsOff = 'soundsOff';
+const _keySoundPreset = 'soundPreset';
+const _keySoundPresetFor = 'soundPresetFor';
 const _keyUnreadyOnSwap = 'unreadyOnSwap';
 
 enum HwdecMode { auto, off, custom }
@@ -50,6 +52,11 @@ class AppSettings {
   final soundVolume = signal(1.0);
   /// `SfxKind` names switched off one by one.
   final soundsOff = signal<Set<String>>(const {});
+  /// The sound set (`SoundPreset` name) every sound uses unless
+  /// [soundPresetFor] picks another one for it.
+  final soundPreset = signal('cosmic');
+  /// `SfxKind` name -> `SoundPreset` name, per-sound overrides.
+  final soundPresetFor = signal<Map<String, String>>(const {});
 
   /// Video shaders: one choice, used on join and changed both here and
   /// in the session (Ctrl+0..6, the shader button).
@@ -98,6 +105,15 @@ class AppSettings {
       if (vol is num) soundVolume.value = vol.toDouble().clamp(0, 1);
       final off = box.get(_keySoundsOff);
       if (off is List) soundsOff.value = Set.unmodifiable(off.whereType<String>());
+      final soundSet = box.get(_keySoundPreset);
+      if (soundSet is String) soundPreset.value = soundSet;
+      final per = box.get(_keySoundPresetFor);
+      if (per is Map) {
+        soundPresetFor.value = Map.unmodifiable({
+          for (final e in per.entries)
+            if (e.key is String && e.value is String) e.key as String: e.value as String,
+        });
+      }
       final preset = box.get(_keyShaderPreset);
       shaderPreset.value =
           ShaderPreset.values.where((p) => p.name == preset).firstOrNull ??
@@ -158,6 +174,19 @@ class AppSettings {
   void setSoundOn(String kind, bool on) {
     soundsOff.value = Set.unmodifiable(on ? ({...soundsOff.value}..remove(kind)) : {...soundsOff.value, kind});
     _put(_keySoundsOff, soundsOff.value.toList());
+  }
+
+  void setSoundPreset(String preset) {
+    soundPreset.value = preset;
+    _put(_keySoundPreset, preset);
+  }
+
+  /// [preset] null: the sound follows [soundPreset] again.
+  void setSoundPresetFor(String kind, String? preset) {
+    final m = {...soundPresetFor.value};
+    preset == null ? m.remove(kind) : m[kind] = preset;
+    soundPresetFor.value = Map.unmodifiable(m);
+    _put(_keySoundPresetFor, m);
   }
 
   void setHideReReleases(bool on) {

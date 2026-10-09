@@ -714,15 +714,19 @@ always scrolls the page). Space never presses a focused button
   unready, force-ready, join, leave, kick, swap and others' chat (feed
   events), the idle warning, and connection lost / back (once per drop).
   Nothing for what the video already says (play, pause, seeks, the end).
-  The set is synthesized, not sampled: `synth.dart` renders Japanese-house
-  voices (Karplus-Strong koto with bends, furin chime, rin bowl, bamboo,
-  hyoshigi clappers, a shoji slide of filtered noise) through a low-pass
-  and a short room to quiet WAVs; `sound_bank.dart` voices each event in
-  the Yo scale on D. `SynthSfx` renders a sound on first use into the temp
-  dir and plays it on a pool of three audio-only mpv players, at
+  The sounds are synthesized, not sampled: `synth.dart` renders voices
+  (plucked strings with bends, glass and star bells, a singing bowl,
+  hollow knocks, wooden clacks, filtered-noise air and stardust, a long
+  dark space reverb) to quiet WAVs; `sound_bank.dart` voices every event
+  in three presets (`SoundPreset`: Cosmic, Abyss, Wood & glass) in one
+  shared key, so mixed presets still agree. `SynthSfx` renders a sound on
+  first use into the temp dir (cache key: preset, sound, ready index) and
+  plays it on a pool of three audio-only mpv players, at
   `AppSettings.soundVolume` (square curve) unless switched off in
-  `soundsOff`. Settings → Notifications & sounds has the volume and a
-  preview and switch per sound.
+  `soundsOff`. Settings → Notifications & sounds has the volume, the
+  overall sound set (`soundPreset`), and per sound a preview, its own set
+  (`soundPresetFor`, else the overall one) and a switch; a preview always
+  re-renders, so an edited spec plays after a hot reload.
 - **Player** (`session_player.dart`): `SessionPlayer` holds the one
   `Video` of the current player (a new `GlobalKey` per player generation).
   The shell keeps it in one layer of the body at one place in the element

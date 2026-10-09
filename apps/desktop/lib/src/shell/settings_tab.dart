@@ -523,7 +523,8 @@ class NotificationsInfo extends StatelessWidget {
   }
 }
 
-/// Volume, then every sound with a preview button and its own switch.
+/// Volume and the sound set, then every sound with a preview button, its
+/// own set (or the overall one) and its own switch.
 class SoundSettings extends StatelessWidget {
   const SoundSettings({super.key});
 
@@ -540,6 +541,8 @@ class SoundSettings extends StatelessWidget {
     return SignalBuilder(builder: (context) {
       final volume = s.soundVolume.value;
       final off = s.soundsOff.value;
+      final overall = s.soundPreset.value;
+      final per = s.soundPresetFor.value;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -560,6 +563,26 @@ class SoundSettings extends StatelessWidget {
           ),
           Text('Soft cues for people and readiness; the video itself covers play, pause and the end. '
               'Letting go of the slider plays the ready sound.', style: muted),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Expanded(child: Text('Sound set')),
+              DropdownButton<String>(
+                key: const ValueKey('sound-preset'),
+                value: overall,
+                onChanged: (v) {
+                  if (v == null) return;
+                  s.setSoundPreset(v);
+                  _preview(SfxKind.ready);
+                },
+                items: [
+                  for (final MapEntry(key: p, value: (name, _)) in presetInfo.entries)
+                    DropdownMenuItem(value: p.name, child: Text(name)),
+                ],
+              ),
+            ],
+          ),
+          Text(presetInfo.entries.where((e) => e.key.name == overall).firstOrNull?.value.$2 ?? '', style: muted),
           const SizedBox(height: 8),
           for (final MapEntry(key: kind, value: (name, help)) in soundInfo.entries)
             Padding(
@@ -578,6 +601,21 @@ class SoundSettings extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [Text(name), Text(help, style: muted)],
                     ),
+                  ),
+                  DropdownButton<String?>(
+                    key: ValueKey('sound-preset-${kind.name}'),
+                    value: per[kind.name],
+                    underline: const SizedBox.shrink(),
+                    style: muted,
+                    onChanged: (v) {
+                      s.setSoundPresetFor(kind.name, v);
+                      if (volume > 0) _preview(kind);
+                    },
+                    items: [
+                      const DropdownMenuItem<String?>(value: null, child: Text('Same as set')),
+                      for (final MapEntry(key: p, value: (name, _)) in presetInfo.entries)
+                        DropdownMenuItem<String?>(value: p.name, child: Text(name)),
+                    ],
                   ),
                   Switch(
                     key: ValueKey('sound-on-${kind.name}'),
