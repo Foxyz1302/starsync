@@ -7,9 +7,9 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 
 | Path | What | Rule |
 |---|---|---|
-| `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client | pure Dart, no Flutter |
+| `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client, updater | pure Dart, no Flutter |
 | `packages/server` | Relic HTTP + WebSocket server (`SyncServer`, `ServerHub`, `Session`, media endpoint, relay buffer, Jellyfin relay), the `serve()` entrypoint, `bin/server.dart` (dedicated server) | pure Dart, no Flutter |
-| `apps/desktop` | Flutter app: UI, `SyncClient`, `SessionCoordinator`, `PlaybackController` (media_kit/mpv), `ServerIsolate`, updater | ships with `watch-together-server` |
+| `apps/desktop` | Flutter app: UI, `SyncClient`, `SessionCoordinator`, `PlaybackController` (media_kit/mpv), `ServerIsolate`, update UI (`UpdateController`) | ships with `watch-together-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
 | `deploy` | systemd unit for the dedicated server | |
 
@@ -60,7 +60,8 @@ size (`ServerIsolate.setFile`): the host's in-session File swap then sends a
 - **Dedicated server**: `bin/server.dart` compiled with `dart compile exe`
   and shipped next to the app as `watch-together-server`. It parses flags
   (`--port`, `--secret`, `--name`, `--media`, `--advertise-host`,
-  `--jellyfin <file>`, `--[no-]yt-dlp`, `--yt-dlp-dir`, `--yt-dlp-cookies`, `--config`; default port 8080) into the same map and calls `serve`;
+  `--jellyfin <file>`, `--[no-]yt-dlp`, `--yt-dlp-dir`, `--yt-dlp-cookies`, `--config`; default port 8080) into the same map and calls `serve`
+  (`--upgrade` / `--check-update` run the [updater](#updater) instead);
   SIGINT and SIGTERM stop it. A Flutter binary cannot run without a
   display, which is why the server is its own build.
 
@@ -1056,23 +1057,31 @@ changed. The runner also sets the window icon from the bundle (X11).
 
 ## Updater
 
-`apps/desktop/lib/src/update/updater.dart` (no Flutter imports, unit tested).
-Reads a manifest (`version`, `protocol`, `url`, optional `sha256`, `notes`)
+One implementation, `packages/core/lib/src/updater.dart` (pure Dart, tested
+in `packages/core/test/updater_test.dart`), with two front ends: the app and
+the dedicated server. Both binaries ship in the same archive, so either one
+updates the whole install folder. Reads a manifest (`version`, `protocol`, `url`, optional `sha256`, `notes`)
 from `updateManifestUrl`, compares versions, downloads the tarball, checks
 sha256 when present, then extracts into a staging dir inside the install
 folder (same filesystem, so moves are renames; the folder must be
 user-writable). Each top-level entry is moved aside and the new one moved in,
 with rollback on failure (writing the running executable fails with ETXTBSY;
 rename works). A packaged install is detected by `data/` and `lib/` next to
-the binary; anything else exits with "update manually". A manifest whose
+the binary (app or server, same folder); anything else exits with "update
+manually". A manifest whose
 protocol is newer than the local one is a required update. Windows apply
 renames in-use files to `*.old` (swept on next start); CI tests it against a
 running exe on NTFS. The manifest's `assets` maps `linux-x64` /
 `windows-x64` to archive URLs; top-level `url` (Linux) is for builds <= 0.2.1. The version is
-stamped with `--dart-define=APP_VERSION` (dev runs report `0.0.0-dev` and skip
-checks). `watch_together --upgrade` (or the shipped `update.sh`) runs it from
-the CLI; `UpdateController` runs the same code for the strip's update indicator,
-which opens the update card, and restarts the app ("Update and restart").
+stamped into both binaries with `APP_VERSION` (`--dart-define` for the app,
+`--define` for `dart compile exe`; dev runs report `0.0.0-dev` and the app
+skips checks). CLI: `watch-together-server --upgrade` (no display needed;
+the shipped `update.sh` / `update.bat` run it), `--check-update` prints only;
+it ends with "restart the server to run <version>". `watch_together --upgrade`
+does the same from the app binary. In the app, `UpdateController`
+(`apps/desktop/lib/src/update/`) runs the same code for the strip's update
+indicator, which opens the update card, and restarts the app ("Update and
+restart", closing Hive first).
 Settings has Check now and an auto-check toggle. The manifest is `updates/manifest.json` in
 this repo, written by `tool/release.sh`.
 

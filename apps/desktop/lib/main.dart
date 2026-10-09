@@ -13,7 +13,7 @@ import 'src/platform/desktop_entry.dart';
 import 'src/screens/home/ui.dart';
 import 'src/state/session_state.dart';
 import 'src/state/settings.dart';
-import 'src/update/updater.dart';
+import 'src/update/update_controller.dart' show launchArgs;
 
 Future<void> main(List<String> args) async {
   launchArgs = List.unmodifiable(args);

@@ -4,11 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
-import 'updater.dart';
-
 // In-app update flow behind the Home update indicator. Same code path as
-// `--upgrade` (downloadAndApply); this adds state for the UI and the
-// restart. Check failures are logged only — the banner shows up just when
+// `--upgrade` (core's updater, downloadAndApply); this adds state for the
+// UI and the restart. Check failures are logged only — the banner shows up just when
 // there is something to install.
 
 final _log = createLogger('update');
@@ -25,6 +23,19 @@ class UpdateStatus {
   final bool canInstall;
   const UpdateStatus(this.phase,
       {this.manifest, this.progress, this.error, this.canInstall = false});
+}
+
+// Process args as main() received them — restart relaunches with these.
+List<String> launchArgs = const [];
+
+// Relaunch the (now replaced) binary detached with the same args, then
+// exit this process.
+Future<Never> restartApp(String executable, List<String> args) async {
+  final keep = args.where((a) => a != '--upgrade').toList();
+  await Process.start(executable, keep,
+      mode: ProcessStartMode.detached,
+      workingDirectory: Directory.current.path);
+  exit(0);
 }
 
 typedef RestartFn = Future<void> Function(String executable, List<String> args);

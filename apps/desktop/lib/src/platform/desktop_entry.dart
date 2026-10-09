@@ -1,8 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-
-import '../update/updater.dart' show findInstallRoot;
+import 'package:sync_relay_core/core.dart' show findInstallRoot;
 
 /// The app's id: GTK's application id, so the Wayland `app_id` the
 /// compositor matches to [desktopFileName] for the window's icon.

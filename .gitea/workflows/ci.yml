@@ -55,5 +55,8 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tool/setup_flutter_windows.ps1
       - name: Updater tests
         shell: powershell
-        working-directory: apps/desktop
-        run: flutter test test/updater_test.dart
+        working-directory: packages/core
+        run: |
+          dart pub get
+          if ($LASTEXITCODE) { exit 1 }
+          dart test test/updater_test.dart

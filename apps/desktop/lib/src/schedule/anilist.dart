@@ -6,7 +6,6 @@ import 'dart:ui' show Color;
 import 'package:path_provider/path_provider.dart';
 import 'package:sync_relay_core/core.dart';
 
-import '../update/updater.dart' show appVersion;
 
 // AniList airing schedule (public GraphQL, no login): every episode airing
 // in a time range, with covers, banners and popularity; and a title search

@@ -17,11 +17,11 @@ cd apps/desktop && flutter pub get && flutter run -d linux
 cd apps/desktop && flutter build linux --release --dart-define=APP_VERSION=<x.y.z>
 tool/package_linux.sh [--skip-build] [--noupload]    # dist/*.tar.gz
 powershell -File tool/package_windows.ps1 [-SkipBuild]  # dist/*.zip (on Windows)
-cd packages/server && dart compile exe bin/server.dart -o watch-together-server
+cd packages/server && dart compile exe --define=APP_VERSION=<x.y.z> bin/server.dart -o watch-together-server
 ```
 
-`APP_VERSION` defaults to `0.0.0-dev`; `package_linux.sh` stamps it from the
-desktop pubspec. Setting `DISCORD_WEBHOOK_URL` makes the packager post the
+`APP_VERSION` defaults to `0.0.0-dev`; the packagers stamp it from the
+desktop pubspec into both the app and the server. Setting `DISCORD_WEBHOOK_URL` makes the packager post the
 tarball to Discord (never commit it). The packager always compiles the
 dedicated server (with the Flutter SDK's `dart`) into the tarball as
 `watch-together-server`, also with `--skip-build`.

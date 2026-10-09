@@ -36,8 +36,7 @@ off by deleting it in the same commit as the code. Wire changes also edit
    filter on the Schedule; today's "Following" (AnimeFlow's monitored
    shows) becomes "On the server".
 
-5. **Ops**: `watch-together-server --upgrade` (a VPS has no GTK for the
-   app's updater); check shaders on Windows; the relay e2e "source drops
+5. **Ops**: check shaders on Windows; the relay e2e "source drops
    uncleanly and resumes" fails about half the time under the full suite.
 
 6. **Windows: first real use.** CI builds and publishes

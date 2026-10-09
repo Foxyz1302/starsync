@@ -1,3 +1,4 @@
 #!/bin/sh
 # Update this install in place (same as clicking Update in the app).
-cd "$(dirname "$0")" && exec ./watch_together --upgrade "$@"
+# The server binary runs the updater: it needs no GTK/display (VPS).
+cd "$(dirname "$0")" && exec ./watch-together-server --upgrade "$@"

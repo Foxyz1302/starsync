@@ -8,7 +8,6 @@ import 'package:hive_ce/hive.dart';
 import 'package:sync_relay_core/core.dart';
 
 import '../screens/home/picked_media.dart';
-import '../update/updater.dart' show appVersion;
 
 // Linked Jellyfin servers, one account per ServerId, in their own Hive box.
 //

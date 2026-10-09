@@ -3,12 +3,15 @@ import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
-import 'package:sync_relay_core/core.dart';
 
-// Zero Flutter imports: this file must stay unit-testable with plain
-// `flutter test` (no widgets, no media_kit). One code path for both the
-// CLI (`watch_together --upgrade`) and the in-app banner: fetch manifest,
-// download, verify sha256, apply over the live install.
+import 'constants.dart';
+import 'logging.dart';
+
+// The one updater for both programs: the app (`watch_together --upgrade`
+// and the in-app update card, via UpdateController) and the dedicated
+// server (`watch-together-server --upgrade`). Both ship in the same
+// release archive, so either one swaps the whole install folder: fetch
+// manifest, download, verify sha256, apply over the live install.
 //
 // Apply stages inside the install root (same filesystem, so every move is
 // a rename — /tmp is often tmpfs and rename across filesystems fails).
@@ -27,9 +30,6 @@ const updateManifestUrl =
 
 const appVersion = String.fromEnvironment('APP_VERSION',
     defaultValue: '0.0.0-dev');
-
-// Process args as main() received them — restart relaunches with these.
-List<String> launchArgs = const [];
 
 // Key into the manifest's `assets` map, e.g. linux-x64, windows-x64.
 final updatePlatform = '${Platform.operatingSystem}-x64';
@@ -518,29 +518,24 @@ Future<void> downloadAndApply(UpdateManifest manifest, Directory root,
   }
 }
 
-// Relaunch the (now replaced) binary detached with the same args, then
-// exit this process.
-Future<Never> restartApp(String executable, List<String> args) async {
-  final keep = args.where((a) => a != '--upgrade').toList();
-  await Process.start(executable, keep,
-      mode: ProcessStartMode.detached,
-      workingDirectory: Directory.current.path);
-  exit(0);
-}
-
 String requiredUpdateNote(UpdateManifest m) =>
     'Required update: servers on ${m.version} speak protocol ${m.protocol}, '
     'this build speaks ${RelayConstants.protoVersion} and cannot join them.';
 
 // Returns a process exit code: 0 ok / already current, 1 failure,
-// 2 not a packaged install (update manually).
+// 2 not a packaged install (update manually). [program] names the front
+// end in the first line; [restartNote] is the last line after an update.
+// [checkOnly] reports what is available and changes nothing.
 Future<int> runUpgrade(
     {String currentVersion = appVersion,
     String manifestUrl = updateManifestUrl,
     HttpClient? http,
     String? executablePath,
-    Directory? installRoot}) async {
-  stdout.writeln('watch-together $currentVersion (proto ${RelayConstants.protoVersion})');
+    Directory? installRoot,
+    String program = 'watch-together',
+    String Function(String version)? restartNote,
+    bool checkOnly = false}) async {
+  stdout.writeln('$program $currentVersion (proto ${RelayConstants.protoVersion})');
   late final UpdateManifest manifest;
   try {
     manifest = await fetchManifest(http: http, url: manifestUrl);
@@ -559,6 +554,7 @@ Future<int> runUpgrade(
   if (manifest.isRequired) {
     stdout.writeln(requiredUpdateNote(manifest));
   }
+  if (checkOnly) return 0;
   final exe = executablePath ?? currentExecutablePath();
   final root = installRoot ?? findInstallRoot(exe);
   if (root == null) {
@@ -575,6 +571,7 @@ Future<int> runUpgrade(
     stdout.writeln('update failed: $e');
     return 1;
   }
-  stdout.writeln('updated to ${manifest.version} — restart the app to use it.');
+  stdout.writeln(restartNote?.call(manifest.version) ??
+      'updated to ${manifest.version} — restart the app to use it.');
   return 0;
 }

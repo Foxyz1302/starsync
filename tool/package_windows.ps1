@@ -2,10 +2,11 @@
 # Usage: powershell -File tool/package_windows.ps1 [-SkipBuild]
 # Output: dist/watch-together-<version>-windows-x64.zip containing one
 # top-level folder with watch_together.exe, its DLLs and data/ as built,
-# plus update.bat (runs the exe with --upgrade) and
+# plus update.bat (runs watch-together-server.exe --upgrade) and
 # watch-together-server.exe (dedicated server, `dart compile exe` of
-# packages/server/bin/server.dart). Same layout as tool/package_linux.sh;
-# the in-app updater strips the top-level folder.
+# packages/server/bin/server.dart; both binaries stamped with APP_VERSION).
+# Same layout as tool/package_linux.sh; the updater strips the top-level
+# folder.
 # Needs: flutter on PATH, tar.exe (ships with Windows 10+, writes zip).
 param([switch]$SkipBuild)
 $ErrorActionPreference = 'Stop'
@@ -45,7 +46,7 @@ Copy-Item "$App/lib/src/update/bundle/update.bat" "$Stage/$Folder/update.bat"
 Push-Location (Join-Path $Root 'packages/server')
 try {
   Invoke-Checked 'dart pub get' { dart pub get | Out-Null }
-  Invoke-Checked 'dart compile exe' { dart compile exe bin/server.dart -o "$Stage/$Folder/watch-together-server.exe" }
+  Invoke-Checked 'dart compile exe' { dart compile exe "--define=APP_VERSION=$Version" bin/server.dart -o "$Stage/$Folder/watch-together-server.exe" }
 } finally { Pop-Location }
 
 if (Test-Path $Zip) { Remove-Item -Force $Zip }

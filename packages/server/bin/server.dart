@@ -30,6 +30,11 @@ Future<void> main(List<String> args) async {
         help: 'cookies.txt or browser-extension JSON export to log that yt-dlp in (sites that refuse guests). '
             'An account login: keep it private. Copied into --yt-dlp-dir at start.')
     ..addOption('config', help: 'YAML or JSON config file (keys as in AppConfig); overrides the other flags.')
+    ..addFlag('upgrade',
+        negatable: false,
+        help: 'Update this install (the whole folder, app included) to the latest release, then exit. '
+            'Restart the server afterwards to run it.')
+    ..addFlag('check-update', negatable: false, help: 'Print whether a newer release exists, then exit.')
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show this help.');
   final ArgResults parsed;
   try {
@@ -41,7 +46,14 @@ Future<void> main(List<String> args) async {
   }
   if (parsed['help'] as bool) {
     // ignore: avoid_print
-    print('watch-together-server (proto ${RelayConstants.protoVersion})\n\n${parser.usage}');
+    print('watch-together-server $appVersion (proto ${RelayConstants.protoVersion})\n\n${parser.usage}');
+    return;
+  }
+  if (parsed['upgrade'] as bool || parsed['check-update'] as bool) {
+    exitCode = await runUpgrade(
+        program: 'watch-together-server',
+        checkOnly: !(parsed['upgrade'] as bool),
+        restartNote: (v) => 'updated to $v — restart the server to run $v.');
     return;
   }
 

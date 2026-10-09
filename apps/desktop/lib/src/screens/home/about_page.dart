@@ -2,9 +2,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:sync_relay_core/core.dart';
 
 import '../../update/update_controller.dart';
-import '../../update/updater.dart';
 import 'settings_page.dart';
 import 'ui.dart';
 import 'update_indicator.dart';

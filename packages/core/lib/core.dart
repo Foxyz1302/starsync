@@ -11,6 +11,7 @@ export 'src/yt_dlp.dart';
 export 'src/cookies.dart';
 export 'src/media_source.dart';
 export 'src/sync_engine.dart';
+export 'src/updater.dart';
 export 'src/jellyfin/client.dart';
 export 'src/jellyfin/client_info.dart';
 export 'src/jellyfin/http.dart';

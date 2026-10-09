@@ -36,7 +36,10 @@ Update from the app: when a newer version exists, an update indicator
 appears in the strip at the top of the window and opens the update card. "Update and restart" downloads,
 verifies, applies in place and restarts; the install folder must be writable
 by you. Settings has Check now and an auto-check toggle. From a terminal:
-`watch_together --upgrade`, or the shipped `update.sh` / `update.bat`. A
+`./watch-together-server --upgrade` (no display needed, so it works on a
+server box too), `watch_together --upgrade`, or the shipped `update.sh` /
+`update.bat` (which run the first). Each updates the whole folder, app and
+server; restart whichever is running to use the new version. A
 release with a newer protocol is a required update: everyone on a server
 must run the same protocol version, and a mismatch is refused with a message
 telling you to update.
@@ -170,6 +173,8 @@ then everyone (you included) uses Join.
 | `--yt-dlp-dir` | next to the binary | writable folder for the server's yt-dlp (systemd: the unit's `StateDirectory`) |
 | `--yt-dlp-cookies` | none | cookies.txt or cookie-extension JSON export for that yt-dlp (sites that refuse guests); copied into the yt-dlp folder at start, removed from it when not given. **An account login**: keep it private, use a throwaway account for YouTube |
 | `--config` | none | YAML or JSON file with the same settings (`port`, `secret`, `name`, `mediaPath`, `advertiseHost`, `ytDlp`, `ytDlpDir`, `ytDlpCookies`); replaces the flags |
+| `--upgrade` | | update the install folder to the latest release ([Install and update](#install-and-update)), then exit |
+| `--check-update` | | print whether a newer release exists, then exit |
 
 It prints `READY port=... name=...` once listening and stops cleanly on
 Ctrl+C or SIGTERM. A dedicated server has no host.

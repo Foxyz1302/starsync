@@ -5,7 +5,6 @@ import 'dart:io';
 import 'package:sync_relay_core/core.dart';
 
 import '../jellyfin/accounts.dart';
-import '../update/updater.dart' show appVersion;
 
 // AnimeFlow app API: what the media server tracks, has, downloads and was
 // asked for. Authenticated with the user's own Jellyfin access token

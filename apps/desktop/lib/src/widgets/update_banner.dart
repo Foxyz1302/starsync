@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:sync_relay_core/core.dart';
 
 import '../update/update_controller.dart';
-import '../update/updater.dart';
 
 // "Update available" card (Home update indicator dialog). Kicks off the one
 // background check on first build; renders nothing until there is an
