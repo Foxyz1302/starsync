@@ -423,7 +423,8 @@ errors leave it out).
 
 A member's media through the server's memory, for viewers who cannot
 reach it themselves (`packages/core/lib/src/relay.dart` for the wire and
-the source, `packages/server/lib/src/relay_buffer.dart`,
+the source, `relay_pieces.dart` for segmented streams,
+`packages/server/lib/src/relay_buffer.dart`, `piece_buffer.dart`,
 `relay_routes.dart`; wire in [PROTOCOL.md](PROTOCOL.md) "Relay").
 
 What gets relayed (`SessionCoordinator.swapPicked`):
@@ -450,6 +451,27 @@ streams in sync across seeks; one URL keeps the app's "one media URL"
 path (sync, swap, reopen) as is. The source member plays the page
 itself (yt-dlp hook) like any other link.
 
+A page with only segmented streams (HLS `m3u8_native`, DASH
+`http_dash_segments`, e.g. X's HLS, generic `.m3u8`/`.mpd`) is relayed as
+**pieces** tracks (`"as":"pieces"`, one muxed playlist or video + audio):
+the fetcher parses the upstream media playlist (`parseHlsPlaylist`), or
+yt-dlp's DASH `fragments` (`dashPieces`: a first fragment without a
+duration is the init section, so no MPD parser), into a
+`RelayPieceList`: each segment, `EXT-X-MAP` init section and AES-128 key
+is a piece, one upstream GET, with `EXT-X-BYTERANGE` folded into the
+piece. The server serves a VOD media playlist it writes itself from that
+list (`RelayPieceList.playlist`: durations, media sequence,
+discontinuities, MAP, AES-128 keys with their IVs; every URI its own
+`p/<i>`), so a source can never point viewers anywhere else. One URL per
+piece also avoids mpv's seek hang on byte-range fMP4 playlists (Apple's
+`bipbop` hung on the first seek read directly). Refused: DRM (SAMPLE-AES,
+`skd:`, any non-identity key format, `EXT-X-SESSION-KEY`, yt-dlp's
+`has_drm`), a live playlist (no `EXT-X-ENDLIST`; yt-dlp's `is_live`
+first), a master or I-frame playlist. A remux on the fetcher (ffmpeg
+`-c copy` into one pipe) and yt-dlp's own download + merge were rejected:
+the size is unknown until the end, a seek past the written part cannot be
+served, and it needs ffmpeg or disk.
+
 How bytes move:
 - The source dials `/r/.../source` (outbound, so NAT/CGNAT are fine) and
   answers the server's pulls from the file or the URL (`RelaySource` over
@@ -467,8 +489,8 @@ How bytes move:
   8.6 to 12.5 MB/s); chunked, a 1080p relay seeks in under 0.8 s (4 to
   6.6 s unchunked) and even beats mpv reading YouTube directly, since the
   buffer reads ahead at full speed.
-- The server keeps one `RelayBuffer` per track of a relayed media (one
-  for a file): 1 MiB slices in
+- The server keeps one buffer per track of a relayed media (one for a
+  file), a `RelayBuffer` for bytes: 1 MiB slices in
   memory, filled by one sequential pull at a time. Kept: the first and
   last 2 MiB (container indexes; mpv reads both on open and on seeks),
   64 MiB behind the slowest viewer and 256 MiB past the furthest, the
@@ -480,9 +502,27 @@ How bytes move:
   each, which keeps both windows at the same playback distance (1080p
   video + aac: about 246 + 10 MiB ahead); each pins its own head and
   tail. A viewer is its token in every track's buffer.
-- Filling: a viewer blocked on a slice first (oldest wait first, handing
-  the source over at slice boundaries), then the pinned slices, then
-  read-ahead from the slowest viewer. Nothing is fetched while nobody
+- A pieces track gets a `PieceBuffer`: whole pieces by index, each one
+  pull (a piece names its index on the channel), served whole with Range
+  inside a piece. A viewer's position is its newest requested segment
+  (opening the playlist puts a new viewer at the first one, so its first
+  pieces are fetched before it asks). Filled: a blocked viewer's piece
+  (oldest wait first; a pull nobody waits on gives way at once), the init
+  and key pieces the viewers' segments use, then segments ahead of each
+  viewer up to the ahead budget, slowest first. Init and key pieces are
+  kept; segments are evicted by distance (behind costs 4x), sizes
+  estimated from the bytes per second of the pieces in so far (before
+  that 4 Mbit/s video, 160 kbit/s audio, which also splits the budget).
+  A failed pull is retried after 1 s. Measured (mpv 0.41 through the
+  dedicated server, loopback, ~30 MB/s upstream): Mux's TS HLS (1080p,
+  one muxed playlist) opened in 0.8 s, seeks 0.07 to 1.1 s; Akamai's DASH
+  (1080p + aac, two playlists, EDL) 1.3 s, seeks 0.03 to 1.4 s; an X
+  video's HLS video + audio 0.3 to 0.75 s, seeks 0.03 to 0.4 s; A/V sync
+  within 0.2 ms after every seek; a second viewer of the same pieces
+  opened in 0.02 s from the buffer.
+- Filling a byte buffer: a viewer blocked on a slice first (oldest wait
+  first, handing the source over at slice boundaries), then the pinned
+  slices, then read-ahead from the slowest viewer. Nothing is fetched while nobody
   watches through the relay (a Jellyfin source with only account holders
   uploads nothing).
 - mpv leaves superseded requests open but unread after a seek: only a
@@ -498,7 +538,8 @@ How bytes move:
   stop. A crash frees it with the process.
 - Source away: viewers keep playing from the buffer; a request waits up
   to 60 s for missing bytes. The source reconnects with backoff (same
-  token after a resume); a different size drops that track's buffer.
+  token after a resume); a different size (or piece count and roles)
+  drops that track's buffer.
   `state.media.relay.live` follows the channel, and viewers show "waiting
   for <name> to pass the video on" while it is down.
 
@@ -581,7 +622,12 @@ all three link modes. Nothing is bundled or installed by hand.
     and the server buffer, and mpv decodes them all), then bitrate; audio the original language, not a
     `-drc` variant unless alone, m4a/aac before opus, then bitrate.
     YouTube has only these (299 + 140 for a 1080p60 video).
-  - Neither (only HLS/DASH playlists) or a live stream: nothing to relay.
+  - Neither: segmented streams (`pickPieces`: `m3u8_native`/`m3u8` with a
+    media playlist URL, or `http_dash_segments` with http(s) `fragments`;
+    not `has_drm`): one muxed playlist (video and audio not known to be
+    absent) unless a video-only + audio-only pair is taller, with the
+    same height, codec and audio rules. Relayed as pieces (see "Relay").
+  - A live stream, or nothing of the above: nothing to relay.
 - **Probe** (`probeLink`, `link_probe.dart`): a `Range: bytes=0-0` GET; a
   video/audio type, or a generic one on a media file name, is a file
   (`looksLikeMediaFile`); anything else goes to yt-dlp, and when yt-dlp
@@ -595,14 +641,16 @@ all three link modes. Nothing is bundled or installed by hand.
   (`script-opts=ytdl_hook-ytdl_path=...`, `ytdl-format=bv*[height<=1080]+ba/b`,
   once per player), waiting for the download unless the URL names a media
   file. A hook error shows as "can't open this link: ...".
-- **Through me**: the putter's probe must give tracks, else the swap is
-  refused ("Live streams can't be passed on", or no video file: only
-  streaming playlists) with a hint to use "Everyone fetches it". The swap
-  names the tracks; its relay source reads them with yt-dlp's headers
-  (`PageRelayMedia`). On 403/410 (expired format URLs, 6 h on YouTube) from
-  any track it resolves the page again once for all tracks, finds the
-  same format ids with the same sizes (else "the video changed on the
-  page") and goes on from where it stopped. Format URLs are bound to the
+- **Through me**: the putter's probe must give tracks, and a pieces
+  track's playlist must be readable, else the swap is refused ("Live
+  streams can't be passed on", DRM, or nothing a relay can read) with a
+  hint to use "Everyone fetches it". The swap names the tracks; its relay
+  source reads them with yt-dlp's headers (`PageRelayMedia`). On 403/410
+  (expired format URLs, 6 h on YouTube; signed segment URLs) from any
+  track it resolves the page again once for all tracks, finds the same
+  format ids with the same sizes and piece counts and roles (playlists
+  re-read and re-mapped by index; else "the video changed on the page")
+  and goes on from where it stopped. Format URLs are bound to the
   resolving machine's address, so they never leave it.
 - **Server fetches it**: the server probes the link itself
   (`LinkRelayMedia`) with its own yt-dlp (off with `--no-yt-dlp` /

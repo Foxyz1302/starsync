@@ -5,6 +5,7 @@ export 'src/clock_sync.dart';
 export 'src/config.dart';
 export 'src/protocol.dart';
 export 'src/relay.dart';
+export 'src/relay_pieces.dart';
 export 'src/link_probe.dart';
 export 'src/yt_dlp.dart';
 export 'src/cookies.dart';

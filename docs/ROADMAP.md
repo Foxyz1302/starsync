@@ -19,22 +19,18 @@ off by deleting it in the same commit as the code. Wire changes also edit
    through media_kit; if not, resolve in the app and open the relay
    tracks' formats. YouTube: yt-dlp wants a JS runtime (deno) for full
    extraction. Formats that need yt-dlp's cookies.
-   - Relay "pieces" tracks for pages with only HLS/DASH (`m3u8_native`,
-     `http_dash_segments`): a track served as a synthesized VOD media
-     playlist whose entries are pieces (one segment, init `EXT-X-MAP` or
-     AES-128 key = one upstream GET, served whole, Range inside a piece
-     honoured), with a piece buffer per track (pieces by index, filled
-     like `RelayBuffer`: a blocked viewer, the init piece, then ahead of
-     the slowest viewer; evicted by distance); `EXT-X-BYTERANGE` folded
-     into pieces (it also avoids mpv's seek hang on byte-range fMP4
-     playlists); yt-dlp's DASH `fragments` turned into the same playlist,
-     so no MPD parser. Wire: a track entry gains `"as":"pieces"`, `info`
-     lists piece durations, a pull names a piece. Refuse DRM
-     (`skd:`/SAMPLE-AES/Widevine). Measured in a spike: piece relay of
-     Mux/Apple/Akamai HLS/DASH opened in 1.5 to 2.2 s, seeks 0.02 to 2.4 s.
    - Live streams through the relay (today refused: the sync model needs a
      fixed duration and seeking).
-   - `tool/relay_e2e.dart`: a two-track case over a shaped source link.
+   - `tool/relay_e2e.dart`: a two-track case (bytes and pieces) over a
+     shaped source link. Pieces on a slow source: a cold piece can take
+     longer than media_kit's 5 s `network-timeout`; if it does, fetch the
+     first pieces before setting `relay.live`.
+   - Pieces, unverified so far: the 403/410 re-resolve against a real
+     expiring HLS (signed segment URLs), HLS discontinuities / ad
+     splicing, Windows' bundled ffmpeg with extensionless piece URLs
+     (`p/<i>`; fine with ffmpeg 9 on Linux).
+   - Thumbnails and scrubbing previews of a relayed media with tracks
+     should open the video track's URL alone, not the EDL.
 
 4. **AniList account**: sign in (OAuth via a localhost callback), "My list"
    filter on the Schedule; today's "Following" (AnimeFlow's monitored

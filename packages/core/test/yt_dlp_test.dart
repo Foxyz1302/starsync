@@ -101,7 +101,8 @@ void main() {
       final single = _f('22', 'https', 'avc1', 'mp4a', 720);
       expect(pickTracks([single, ...youtube]).map((x) => x.kind), ['video', 'audio']);
       expect(pickTracks([_f('18', 'https', 'avc1', 'mp4a', 1080), ...youtube]).single.format.id, '18');
-      expect(pickTracks([_f('96', 'm3u8_native', 'avc1', 'mp4a', 1080)]), isEmpty);
+      expect(pickTracks([_f('96', 'm3u8_native', 'avc1', 'mp4a', 1080)]).single.format.isPieces, isTrue);
+      expect(pickTracks([_f('96', 'rtmp', 'avc1', 'mp4a', 1080)]), isEmpty);
       final live = YtDlpInfo.parse({'title': 'x', 'is_live': true, 'formats': youtube});
       expect(live.isLive, isTrue);
       expect(live.tracks, isEmpty);
@@ -117,8 +118,10 @@ void main() {
   test('viewer URL: one track plain, several an mpv EDL with %length% framing', () {
     expect(relayViewerUrl('http://h:1/r/default/t/3', 'a/b c'), 'http://h:1/r/default/t/3/a_b%20c');
     const v = 'http://h:1/r/default/t/3/0/x', a = 'http://h:1/r/default/t/3/1/x';
-    expect(relayViewerUrl('http://h:1/r/default/t/3', 'x', tracks: 2),
+    expect(relayViewerUrl('http://h:1/r/default/t/3', 'x', tracks: const [RelayTrackSpec('video'), RelayTrackSpec('audio')]),
         'edl://!no_clip;%${v.length}%$v;!new_stream;!no_clip;%${a.length}%$a');
+    expect(relayViewerUrl('http://h:1/r/default/t/3', 'x', tracks: const [RelayTrackSpec('video', pieces: true)]),
+        'http://h:1/r/default/t/3/0/x.m3u8');
     expect(mpvEdl(['http://x/a;b,c']), 'edl://!no_clip;%14%http://x/a;b,c');
   });
 
@@ -191,7 +194,7 @@ void main() {
     expect(probe.title, startsWith('a girl.'));
     expect(probe.relayProblem, isNull);
     final media = LinkRelayMedia(url, ytDlp: y, probe: probe);
-    final bytes = (await media.open()).single.bytes;
+    final bytes = (await media.open()).single.bytes!;
     final size = await bytes.size();
     var n = 0;
     await for (final c in bytes.read(0, size - 1)) {
@@ -200,6 +203,33 @@ void main() {
     await media.close();
     expect(n, size);
   }, timeout: const Timeout(Duration(minutes: 3)), skip: Platform.environment['YTDLP_LIVE'] == '1' ? false : 'YTDLP_LIVE not set');
+
+  test('pieces only without a file: the tweet\'s HLS video + audio; DASH fragments; muxed HLS', () {
+    final tweet = [
+      _f('hls-audio-128000-Audio', 'm3u8_native', 'none', null, null, tbr: 128),
+      _f('hls-430', 'm3u8_native', 'avc1.64001F', 'none', 598, tbr: 430),
+    ];
+    expect([for (final t in pickTracks(tweet)) (t.kind, t.format.id, t.format.isPieces)],
+        [('video', 'hls-430', true), ('audio', 'hls-audio-128000-Audio', true)]);
+    // A byte file (even a shorter one) comes first.
+    expect(pickTracks([...tweet, _f('http-832', 'https', null, null, 360)]).single.format.id, 'http-832');
+    final dash = _f('v', 'http_dash_segments', 'avc1', 'none', 1080, extra: {
+      'fragment_base_url': 'https://cdn.example/b/',
+      'fragments': [
+        {'path': 'init.mp4'},
+        {'path': 's1.m4s', 'duration': 4.0},
+        {'url': 'https://other.example/s2.m4s', 'duration': 2.5},
+      ],
+    });
+    final t = pickTracks([dash, _f('a', 'http_dash_segments', 'none', 'mp4a', null, extra: {'fragments': [{'url': 'https://cdn.example/a', 'duration': 6.5}]})]);
+    final p = dashPieces(t.first.format.fragments!);
+    expect(p.sources.map((s) => '${s.url}'), ['https://cdn.example/b/init.mp4', 'https://cdn.example/b/s1.m4s', 'https://other.example/s2.m4s']);
+    expect((p.list.pieces.first.role, p.list.pieces[2].map, p.list.duration), (RelayPieceRole.init, 0, 6.5));
+    // A muxed playlist wins unless the pair is taller.
+    final muxed = _f('m', 'm3u8_native', 'avc1', 'mp4a', 720);
+    expect(pickTracks([muxed, ...tweet]).single.format.id, 'm');
+    expect(pickTracks([muxed, ...tweet]).single.kind, 'video');
+  });
 
   test('codec order: HEVC, then AV1, then VP9, then h264 at the same height', () {
     final audio = _f('140', 'https', 'none', 'mp4a.40.2', null);

@@ -342,10 +342,12 @@ computer and are used by its yt-dlp only (your own playback, "through
 me", and a server you host). Cookies log yt-dlp in as you on those
 sites: keep the file private, and for YouTube consider a throwaway
 account (Google may flag accounts used with yt-dlp).
-YouTube works in all three too. The last two never show the link to
-anyone; they can't pass on live streams or pages that only offer streaming
-playlists (use "Everyone fetches it" for those). Your upload has to beat the video's
-bitrate: a 25-minute 2 GB episode is about 11 Mbit/s.
+YouTube works in all three too, and so do pages and links that only
+offer streaming playlists (HLS `.m3u8`, DASH `.mpd`, the HLS of X videos).
+The last two never show the link to anyone; they can't pass on live
+streams or DRM-protected video (use "Everyone fetches it" for live).
+Your upload has to beat the video's bitrate: a 25-minute 2 GB episode is
+about 11 Mbit/s.
 
 ## Video quality and shaders
 

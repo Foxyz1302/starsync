@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'constants.dart';
 import 'relay.dart';
+import 'relay_pieces.dart';
 import 'yt_dlp.dart';
 
 // What a pasted link is: a media file (range-readable as is) or a web page
@@ -71,12 +72,8 @@ String _unescape(String s) => s
 String notAVideoText(String? ytDlpError) =>
     ytDlpError == null ? 'Not a video' : "Not a video (and yt-dlp couldn't read it: $ytDlpError)";
 
-/// The text for a page with no video file a relay can read.
-const noRelayFormatText = 'This page has no video file to pass on (only streaming playlists). '
-    "Choose 'Everyone fetches it' instead.";
-
-/// The text for a live stream.
-const liveStreamText = "Live streams can't be passed on. Choose 'Everyone fetches it' instead.";
+/// The text for a page with no video a relay can read.
+const noRelayFormatText = "This page has no video a relay can read. Choose 'Everyone fetches it' instead.";
 
 class LinkProbeException implements Exception {
   final String message;
@@ -190,18 +187,22 @@ Future<String> _readText(HttpClientResponse res) async {
   return utf8.decode(out.takeBytes(), allowMalformed: true);
 }
 
-/// A page's relay tracks (see [YtDlpInfo.tracks]: one file, or video +
-/// audio), range-read with yt-dlp's headers in GETs of the format's
-/// `http_chunk_size`. Format URLs expire: on 403/410 from any track the
-/// page is resolved again once for all tracks (same formats, same sizes)
-/// and the read goes on from where it stopped.
+/// A page's relay tracks (see [YtDlpInfo.tracks]: one file, video +
+/// audio, or segmented playlists). A byte track is range-read with
+/// yt-dlp's headers in GETs of the format's `http_chunk_size`; a pieces
+/// track's playlist (or DASH fragments) is read on first use, then each
+/// piece is one GET. Format URLs expire: on 403/410 from any track the page
+/// is resolved again once for all tracks (same format ids, same sizes and
+/// piece counts) and the read goes on from where it stopped.
 class PageRelayMedia implements RelayMedia {
   final Uri page;
   final YtDlp ytDlp;
   List<YtDlpTrack>? _picked;
   List<HttpRelayBytes?> _inner = const [];
+  List<UpstreamPieces?> _pieces = const [];
   List<RelayTrack>? _tracks;
   final _sizes = <int, int>{};
+  final _http = HttpClient();
   var _gen = 0;
   Future<void>? _refreshing;
   PageRelayMedia(this.page, this.ytDlp, {List<YtDlpTrack>? tracks}) : _picked = tracks;
@@ -218,7 +219,13 @@ class PageRelayMedia implements RelayMedia {
     final picked = _picked ??= (await _info()).tracks;
     if (picked.isEmpty) throw const LinkProbeException(noRelayFormatText);
     _inner = List.filled(picked.length, null, growable: false);
-    return _tracks = [for (var i = 0; i < picked.length; i++) RelayTrack(picked[i].kind, _PageTrack(this, i))];
+    _pieces = List.filled(picked.length, null, growable: false);
+    return _tracks = [
+      for (var i = 0; i < picked.length; i++)
+        picked[i].format.isPieces
+            ? RelayTrack.pieces(picked[i].kind, _PagePieces(this, i))
+            : RelayTrack(picked[i].kind, _PageTrack(this, i)),
+    ];
   }
 
   HttpRelayBytes _open(int i) => _inner[i] ??= () {
@@ -227,26 +234,45 @@ class PageRelayMedia implements RelayMedia {
             headers: f.headers, chunkSize: f.chunkSize ?? RelayConstants.relayUpstreamChunkBytes);
       }();
 
+  /// Reads track [i]'s playlist (or DASH fragments) into pieces.
+  Future<UpstreamPieces> _loadPieces(YtDlpFormat f) async {
+    final frags = f.fragments;
+    if (f.protocol == 'http_dash_segments') {
+      if (frags == null) throw const RelayPiecesException('no DASH fragments');
+      return dashPieces(frags);
+    }
+    return fetchHlsPlaylist(_http, f.url, f.headers);
+  }
+
   static bool _expired(Object e) => e is UpstreamHttpException && (e.status == 403 || e.status == 410);
 
-  /// Resolves the page again: the same format ids with the same sizes,
-  /// else the video changed.
+  /// Resolves the page again: the same format ids with the same sizes and
+  /// piece shapes, else the video changed.
   Future<void> _refresh(int gen) {
     if (gen != _gen) return Future.value();
     return _refreshing ??= () async {
       try {
+        const changed = LinkProbeException('the video changed on the page');
         final info = await _info();
         final next = <YtDlpTrack>[];
         for (final t in _picked!) {
           final f = info.formats[t.format.id];
-          if (f == null) throw const LinkProbeException('the video changed on the page');
+          if (f == null || f.isPieces != t.format.isPieces) throw changed;
           next.add((kind: t.kind, format: f));
+        }
+        final pieces = List<UpstreamPieces?>.filled(next.length, null, growable: false);
+        for (var i = 0; i < next.length; i++) {
+          final had = _pieces[i];
+          if (had == null) continue;
+          final p = pieces[i] = await _loadPieces(next[i].format);
+          if (!p.list.sameShape(had.list)) throw changed;
         }
         final old = _inner;
         _picked = next;
+        _pieces = pieces;
         _inner = List.filled(next.length, null, growable: false);
         for (final e in _sizes.entries) {
-          if (await _open(e.key).size() != e.value) throw const LinkProbeException('the video changed on the page');
+          if (await _open(e.key).size() != e.value) throw changed;
         }
         _gen++;
         for (final b in old) {
@@ -271,6 +297,19 @@ class PageRelayMedia implements RelayMedia {
     }
   }
 
+  Future<UpstreamPieces> _piecesOf(int i) async {
+    final known = _pieces[i];
+    if (known != null) return known;
+    final gen = _gen;
+    try {
+      return _pieces[i] = await _loadPieces(_picked![i].format);
+    } catch (e) {
+      if (!_expired(e)) rethrow;
+      await _refresh(gen);
+      return _pieces[i] ??= await _loadPieces(_picked![i].format);
+    }
+  }
+
   Stream<List<int>> _read(int i, int start, int end) async* {
     var pos = start;
     var retried = false;
@@ -290,11 +329,31 @@ class PageRelayMedia implements RelayMedia {
     }
   }
 
+  /// Piece [index] of track [i]; on expiry once more after a re-resolve
+  /// (nothing was sent yet: an expired URL fails before its first byte).
+  Stream<List<int>> _readPiece(int i, int index) async* {
+    var retried = false;
+    while (true) {
+      final gen = _gen;
+      final p = await _piecesOf(i);
+      if (index >= p.sources.length) throw RangeError.index(index, p.sources, 'piece');
+      try {
+        yield* readPiece(_http, p.sources[index], _picked![i].format.headers);
+        return;
+      } catch (e) {
+        if (retried || !_expired(e)) rethrow;
+        retried = true;
+        await _refresh(gen);
+      }
+    }
+  }
+
   @override
   Future<void> close() async {
     for (final b in _inner) {
       await b?.close();
     }
+    _http.close(force: true);
   }
 }
 
@@ -308,6 +367,22 @@ class _PageTrack implements RelayBytes {
 
   @override
   Stream<List<int>> read(int start, int end) => media._read(index, start, end);
+
+  /// The media closes its tracks.
+  @override
+  Future<void> close() async {}
+}
+
+class _PagePieces implements RelayPieces {
+  final PageRelayMedia media;
+  final int index;
+  _PagePieces(this.media, this.index);
+
+  @override
+  Future<RelayPieceList> list() async => (await media._piecesOf(index)).list;
+
+  @override
+  Stream<List<int>> read(int piece) => media._readPiece(index, piece);
 
   /// The media closes its tracks.
   @override

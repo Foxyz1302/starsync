@@ -7,28 +7,54 @@ import 'package:sync_relay_core/core.dart';
 
 final _log = createLogger('relay');
 
-/// What feeds a [RelayBuffer]: a member's relay channel, or the server
+/// One track's buffer on the server: a byte stream ([RelayBuffer]) or
+/// pieces ([PieceBuffer]).
+abstract interface class TrackBuffer {
+  /// Budgets, set by the relay when a media's tracks share them.
+  abstract int ahead, back;
+  bool get live;
+  int get cachedBytes;
+  int get bytesFromFeed;
+  int get bytesToViewers;
+  /// Waits for the feed's first connect, up to the wait limit.
+  Future<bool> ready();
+  void detach(RelayFeed feed);
+  void dispose();
+  void feedBytes(int id, Uint8List data);
+  void feedEnd(int id);
+  void feedFail(int id, String reason);
+}
+
+/// What feeds a [TrackBuffer]: a member's relay channel, or the server
 /// itself fetching a link ([LocalRelayFeed]).
 abstract class RelayFeed {
-  /// Ask for bytes [start]..[end]; they arrive via [RelayBuffer.feedBytes]
-  /// in order, then [RelayBuffer.feedEnd].
+  /// Ask for bytes [start]..[end]; they arrive via [TrackBuffer.feedBytes]
+  /// in order, then [TrackBuffer.feedEnd].
   void pull(int id, int start, int end);
+
+  /// Ask for piece [index] of a pieces track, whole (arrives like [pull]).
+  void pullPiece(int id, int index);
   void cancel(int id);
 
   /// Bytes of [id] reached the buffer (the remote feed acks them).
   void arrived(int id, int n) {}
 }
 
-/// Fetches from [bytes] in this process (the "server fetches it" mode).
+/// Fetches [track] in this process (the "server fetches it" mode).
 class LocalRelayFeed extends RelayFeed {
-  final RelayBytes bytes;
-  final RelayBuffer buffer;
+  final RelayTrack track;
+  final TrackBuffer buffer;
   final _subs = <int, StreamSubscription<List<int>>>{};
-  LocalRelayFeed(this.bytes, this.buffer);
+  LocalRelayFeed(this.track, this.buffer);
 
   @override
-  void pull(int id, int start, int end) {
-    _subs[id] = bytes.read(start, end).listen(
+  void pull(int id, int start, int end) => _listen(id, track.bytes!.read(start, end));
+
+  @override
+  void pullPiece(int id, int index) => _listen(id, track.pieces!.read(index));
+
+  void _listen(int id, Stream<List<int>> data) {
+    _subs[id] = data.listen(
           (c) => buffer.feedBytes(id, c is Uint8List ? c : Uint8List.fromList(c)),
           onError: (Object e) {
             unawaited(_subs.remove(id)?.cancel().catchError((_) {}));
@@ -51,7 +77,8 @@ class LocalRelayFeed extends RelayFeed {
       await s.cancel().catchError((_) {});
     }
     _subs.clear();
-    await bytes.close();
+    await track.bytes?.close();
+    await track.pieces?.close();
   }
 }
 
@@ -65,6 +92,10 @@ class ChannelRelayFeed extends RelayFeed {
   @override
   void pull(int id, int start, int end) =>
       send(jsonEncode({'t': 'pull', 'id': id, if (track != null) 'track': track, 'start': start, 'end': end}));
+
+  @override
+  void pullPiece(int id, int index) =>
+      send(jsonEncode({'t': 'pull', 'id': id, if (track != null) 'track': track, 'piece': index}));
 
   @override
   void cancel(int id) => send(jsonEncode({'t': 'cancel', 'id': id}));
@@ -102,8 +133,9 @@ class _Viewer {
 /// - Only a viewer's newest request moves its position or asks the feed
 ///   for anything; older ones still get bytes once they are buffered.
 /// Everything lives in memory: dropping the buffer is the cleanup.
-class RelayBuffer {
+class RelayBuffer implements TrackBuffer {
   /// Set by the relay when a media's tracks share the budget.
+  @override
   int ahead, back;
   final int pin;
   final Duration waitLimit;
@@ -137,9 +169,12 @@ class RelayBuffer {
   final Completer<void> _ready = Completer();
 
   /// Totals, for logs and tests.
+  @override
   int bytesFromFeed = 0, bytesToViewers = 0;
 
+  @override
   bool get live => _feed != null && size > 0;
+  @override
   int get cachedBytes => _slices.values.fold(0, (a, s) => a + s.length);
   int get _nSlices => (size + slice - 1) ~/ slice;
   int _sliceEnd(int s) => min((s + 1) * slice, size) - 1;
@@ -163,6 +198,7 @@ class RelayBuffer {
   }
 
   /// The feed went away; buffered slices keep serving.
+  @override
   void detach(RelayFeed feed) {
     if (!identical(_feed, feed)) return;
     _feed = null;
@@ -170,6 +206,7 @@ class RelayBuffer {
     _wake();
   }
 
+  @override
   void dispose() {
     _disposed = true;
     _feed = null;
@@ -191,6 +228,7 @@ class RelayBuffer {
 
   // ------------------------------------------------------------ feed input
 
+  @override
   void feedBytes(int id, Uint8List data) {
     final pl = _pull;
     if (pl == null || pl.id != id || _disposed) return;
@@ -221,6 +259,7 @@ class RelayBuffer {
     }
   }
 
+  @override
   void feedEnd(int id) {
     final pl = _pull;
     if (pl != null && pl.id == id) {
@@ -229,6 +268,7 @@ class RelayBuffer {
     }
   }
 
+  @override
   void feedFail(int id, String reason) {
     if (_pull?.id != id) return;
     _log.warning('relay pull $id failed: $reason');
@@ -376,6 +416,7 @@ class RelayBuffer {
   // ---------------------------------------------------------------- viewers
 
   /// Waits for the size (the feed's first connect), up to [waitLimit].
+  @override
   Future<bool> ready() async {
     if (size > 0) return true;
     await _ready.future.timeout(waitLimit, onTimeout: () {});

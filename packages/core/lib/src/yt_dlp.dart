@@ -25,7 +25,8 @@ class YtDlpException implements Exception {
 }
 
 /// One playable format of a resolved page: a URL and the headers yt-dlp
-/// says to send with it.
+/// says to send with it. A segmented format ([isPieces]) is an HLS media
+/// playlist at [url], or DASH [fragments].
 class YtDlpFormat {
   final String id;
   final Uri url;
@@ -35,8 +36,23 @@ class YtDlpFormat {
   /// yt-dlp's `downloader_options.http_chunk_size`: the longest GET the
   /// site serves at full speed.
   final int? chunkSize;
+  /// yt-dlp's `protocol`: `https`/`http` (a file), `m3u8_native`/`m3u8`
+  /// (an HLS media playlist), `http_dash_segments` ([fragments]).
+  final String protocol;
+  /// DASH fragments (a first one without a duration is the init section).
+  final List<({Uri url, double? duration})>? fragments;
   const YtDlpFormat(
-      {required this.id, required this.url, this.headers = const {}, this.height, this.ext = '', this.chunkSize});
+      {required this.id,
+      required this.url,
+      this.headers = const {},
+      this.height,
+      this.ext = '',
+      this.chunkSize,
+      this.protocol = 'https',
+      this.fragments});
+
+  /// Relayed as pieces (see relay_pieces.dart), not as a byte stream.
+  bool get isPieces => _piecesProtocols.contains(protocol);
 
   static YtDlpFormat _of(Map f) {
     final headers = f['http_headers'];
@@ -50,9 +66,33 @@ class YtDlpFormat {
       height: h == 0 ? null : h,
       ext: '${f['ext']}',
       chunkSize: chunk is num && chunk > 0 ? chunk.toInt() : null,
+      protocol: '${f['protocol']}',
+      fragments: f['protocol'] == 'http_dash_segments' ? _fragments(f) : null,
     );
   }
+
+  /// yt-dlp's `fragments` (`url`, or `path` under `fragment_base_url`),
+  /// or null when one is not plain http(s).
+  static List<({Uri url, double? duration})>? _fragments(Map f) {
+    final raw = f['fragments'];
+    final base = Uri.tryParse('${f['fragment_base_url'] ?? f['url'] ?? ''}');
+    if (raw is! List || raw.isEmpty) return null;
+    final out = <({Uri url, double? duration})>[];
+    for (final fr in raw) {
+      if (fr is! Map) return null;
+      final u = fr['url'] is String
+          ? Uri.tryParse(fr['url'] as String)
+          : fr['path'] is String && base != null
+              ? base.resolve(fr['path'] as String)
+              : null;
+      if (u == null || (!u.isScheme('http') && !u.isScheme('https'))) return null;
+      out.add((url: u, duration: fr['duration'] is num ? (fr['duration'] as num).toDouble() : null));
+    }
+    return out;
+  }
 }
+
+const _piecesProtocols = {'m3u8_native', 'm3u8', 'http_dash_segments'};
 
 /// A format a relay plays as one of a media's tracks ([kind] `video` or
 /// `audio`; empty for a single file holding both).
@@ -69,11 +109,11 @@ class YtDlpInfo {
   final String? thumbnail;
   /// A live stream (never relayed).
   final bool isLive;
-  /// What a relay range-reads (see [pickTracks]): one file, or a video and
-  /// an audio file; empty when the page has neither (only streaming
-  /// playlists, or live).
+  /// What a relay reads (see [pickTracks]): one file, a video and an
+  /// audio file, or segmented playlists; empty when there is nothing (or
+  /// live).
   final List<YtDlpTrack> tracks;
-  /// Every plain http(s) format by id, to find [tracks] again after a
+  /// Every relayable format by id, to find [tracks] again after a
   /// re-resolve.
   final Map<String, YtDlpFormat> formats;
   const YtDlpInfo({
@@ -110,7 +150,7 @@ class YtDlpInfo {
       tracks: isLive ? const [] : pickTracks(formats),
       formats: {
         for (final f in formats)
-          if (_httpUrl(f) && f is Map) '${f['format_id'] ?? ''}': YtDlpFormat._of(f),
+          if ((_httpUrl(f) || _piecesUrl(f)) && f is Map) '${f['format_id'] ?? ''}': YtDlpFormat._of(f),
       },
     );
   }
@@ -127,6 +167,16 @@ bool _httpUrl(Object? f) {
   if (url is! String || (protocol != 'http' && protocol != 'https')) return false;
   final uri = Uri.tryParse(url);
   return uri != null && (uri.isScheme('http') || uri.isScheme('https'));
+}
+
+/// A segmented format (HLS playlist or DASH fragments) over http(s), not
+/// DRM-protected (the playlist's keys are checked when it is read).
+bool _piecesUrl(Object? f) {
+  if (f is! Map || f['has_drm'] == true || !_piecesProtocols.contains(f['protocol'])) return false;
+  final url = f['url'];
+  final uri = url is String ? Uri.tryParse(url) : null;
+  if (uri == null || (!uri.isScheme('http') && !uri.isScheme('https'))) return false;
+  return f['protocol'] != 'http_dash_segments' || YtDlpFormat._fragments(f) != null;
 }
 
 int _height(Map f) => f['height'] is num ? (f['height'] as num).toInt() : 0;
@@ -180,19 +230,22 @@ int _videoCodecRank(Map f) {
 /// shortest above), HEVC before AV1 before VP9 before h264 (smallest
 /// first, see [_videoCodecRank]), then bitrate. Audio: the original language, not a `-drc` variant, m4a/aac
 /// before others (opus), then bitrate.
-(YtDlpFormat, YtDlpFormat)? pickSplit(List<Object?> formats, {int maxHeight = 1080}) {
-  final video = [
-    for (final f in formats)
-      if (_httpUrl(f) && (f as Map)['acodec'] == 'none' && f['vcodec'] is String && f['vcodec'] != 'none' &&
-          _singleFileExts.contains(f['ext']))
-        f,
-  ];
-  final audio = [
-    for (final f in formats)
-      if (_httpUrl(f) && (f as Map)['vcodec'] == 'none' && f['acodec'] is String && f['acodec'] != 'none' &&
-          _audioExts.contains(f['ext']))
-        f,
-  ];
+(YtDlpFormat, YtDlpFormat)? pickSplit(List<Object?> formats, {int maxHeight = 1080}) => _pickPair(
+      [
+        for (final f in formats)
+          if (_httpUrl(f) && (f as Map)['acodec'] == 'none' && f['vcodec'] is String && f['vcodec'] != 'none' &&
+              _singleFileExts.contains(f['ext']))
+            f,
+      ],
+      [
+        for (final f in formats)
+          if (_httpUrl(f) && (f as Map)['vcodec'] == 'none' && f['acodec'] is String && f['acodec'] != 'none' &&
+              _audioExts.contains(f['ext']))
+            f,
+      ],
+      maxHeight);
+
+(YtDlpFormat, YtDlpFormat)? _pickPair(List<Map> video, List<Map> audio, int maxHeight) {
   if (video.isEmpty || audio.isEmpty) return null;
   video.sort((a, b) {
     final h = _byHeight(_height(a), _height(b), maxHeight);
@@ -213,20 +266,44 @@ int _videoCodecRank(Map f) {
   return (YtDlpFormat._of(video.first), YtDlpFormat._of(audio.first));
 }
 
+/// The pair if its video is taller than [single] (by the [maxHeight] rule).
+bool _pairWins((YtDlpFormat, YtDlpFormat)? pair, YtDlpFormat? single, int maxHeight) =>
+    pair != null &&
+    (single == null ||
+        (single.height != null &&
+            pair.$1.height != null &&
+            _byHeight(pair.$1.height!, single.height!, maxHeight) < 0));
+
+/// Segmented formats (HLS / DASH): one muxed playlist (video and audio
+/// not known to be absent) unless a video-only + audio-only pair is
+/// taller; the same height, codec and audio rules as files.
+List<YtDlpTrack> pickPieces(List<Object?> formats, {int maxHeight = 1080}) {
+  final ok = [for (final f in formats) if (_piecesUrl(f)) f as Map];
+  final muxed = [for (final f in ok) if (f['vcodec'] != 'none' && f['acodec'] != 'none') f]..sort((a, b) {
+      final h = _byHeight(_height(a), _height(b), maxHeight);
+      return h != 0 ? h : _tbr(b).compareTo(_tbr(a));
+    });
+  final pair = _pickPair([for (final f in ok) if (f['acodec'] == 'none' && f['vcodec'] != 'none') f],
+      [for (final f in ok) if (f['vcodec'] == 'none' && f['acodec'] != 'none') f], maxHeight);
+  final single = muxed.isEmpty ? null : YtDlpFormat._of(muxed.first);
+  if (_pairWins(pair, single, maxHeight)) {
+    return [(kind: 'video', format: pair!.$1), (kind: 'audio', format: pair.$2)];
+  }
+  return single == null ? const [] : [(kind: 'video', format: single)];
+}
+
 /// What a relay reads of [formats]: the single file ([pickSingleFile])
 /// unless a video + audio pair ([pickSplit]) is taller (both by the
-/// [maxHeight] rule); empty when there is neither.
+/// [maxHeight] rule); with neither, segmented playlists ([pickPieces]);
+/// empty when there is nothing.
 List<YtDlpTrack> pickTracks(List<Object?> formats, {int maxHeight = 1080}) {
   final single = pickSingleFile(formats, maxHeight: maxHeight);
   final split = pickSplit(formats, maxHeight: maxHeight);
-  if (split != null &&
-      (single == null ||
-          (single.height != null &&
-              split.$1.height != null &&
-              _byHeight(split.$1.height!, single.height!, maxHeight) < 0))) {
-    return [(kind: 'video', format: split.$1), (kind: 'audio', format: split.$2)];
+  if (_pairWins(split, single, maxHeight)) {
+    return [(kind: 'video', format: split!.$1), (kind: 'audio', format: split.$2)];
   }
-  return single == null ? const [] : [(kind: '', format: single)];
+  if (single != null) return [(kind: '', format: single)];
+  return pickPieces(formats, maxHeight: maxHeight);
 }
 
 /// The official standalone build for this platform, or null if there is

@@ -235,17 +235,22 @@ flow control, cases) is in [ARCHITECTURE.md](ARCHITECTURE.md), "Relay".
 swap  media.relay = {}               the swapper's machine serves the bytes
       media.relay = {"tracks":[{"kind":"video"},{"kind":"audio"}]}
                                      the same, as two tracks played together
+      media.relay = {"tracks":[{"kind":"video","as":"pieces"}]}
+                                     the same, as one segmented playlist
       media.relay = {"fetch":true}   the server reads media.url itself
 state media.relay = {"source":"m2","live":true}   or {"fetch":true,"live":true}
       media.relay = {"fetch":true,"live":true,"tracks":[{"kind":"video"},{"kind":"audio"}]}
 ```
 
-Tracks: a relayed media is one file, or several byte tracks (a page's
-separate video and audio files) that viewers play as one. `tracks` lists
-them in order, 2 to 4 entries of `kind` `video` or `audio`; absent (or
-anything else) means one file. Every track is a Range-readable byte
-stream; other kinds of track (e.g. segmented playlists) would add a field
-to the entry.
+Tracks: a relayed media is one file, or tracks that viewers play as one
+(a page's separate video and audio). `tracks` lists them in order, up to
+4 entries of `kind` `video` or `audio`, each a Range-readable byte stream,
+or with `"as":"pieces"` a segmented stream (an HLS media playlist or DASH
+fragments) relayed piece by piece and served as a VOD media playlist. A
+piece is one segment, init section (`EXT-X-MAP`) or AES-128 key, fetched
+upstream whole with one GET. At least 2 entries, or 1 pieces entry (a
+muxed playlist, `kind` `video`); absent, an unknown `kind` or `as`, or
+anything else means one file.
 
 - `swap`: `relay` with `jellyfin` keeps the ref (the swapper serves it to
   viewers without an account; `fetch` is ignored there). `relay` without
@@ -269,19 +274,27 @@ to the entry.
   Clients build it after a swap like the `/m` one:
   `http://<host>/r/default/<token>/<mediaId>/<name>` (name with `/` and
   `\` made `_`, then URL-encoded; the server ignores it). With `tracks`,
-  it is an mpv EDL of every track's URL
-  `http://<host>/r/default/<token>/<mediaId>/<i>/<name>`, each framed by
-  its byte length:
+  each track's URL is `http://<host>/r/default/<token>/<mediaId>/<i>/<name>`
+  (a pieces track: `<name>.m3u8`); one track is opened as is, several as
+  an mpv EDL of them all, each framed by its byte length:
   `edl://!no_clip;%<len>%<track 0 url>;!new_stream;!no_clip;%<len>%<track 1 url>`.
 - `GET /r/<sid>/<token>/<mediaId>/<name>`: the media (one file), Range
   table as for `/m`. `GET /r/<sid>/<token>/<mediaId>/<i>/<name>`: track
   `i` (from 0) of a media with `tracks` (track 0 of a one-file media
-  too). Errors: 401 bad token, 404 not the current relayed
-  media (a player still on an older `mediaId` gets 404, never the new
-  bytes) or no such track (the one-file URL of a media with `tracks`), 410
-  unknown session, 503 + `retry-after` the source never connected or the
-  server could not read the link (60 s). A request whose bytes do not
-  arrive within 60 s ends early. Bytes count toward `bytesServed`.
+  too); for a pieces track (any name), its media playlist
+  (`application/vnd.apple.mpegurl`): `#EXT-X-PLAYLIST-TYPE:VOD`,
+  `EXT-X-MEDIA-SEQUENCE`, `EXTINF` durations, `EXT-X-DISCONTINUITY`,
+  `EXT-X-MAP` and `EXT-X-KEY:METHOD=AES-128` (with `IV` when given) as
+  upstream, `EXT-X-ENDLIST`; every URI is `p/<j>`. `GET
+  /r/<sid>/<token>/<mediaId>/<i>/p/<j>`: piece `j` of pieces track `i`,
+  whole, once it is in (a Range inside the piece answers 206). Errors: 401
+  bad token, 404 not the current relayed media (a player still on an
+  older `mediaId` gets 404, never the new bytes), no such track (the
+  one-file URL of a media with `tracks`) or piece (or `p/` of a byte
+  track), 410 unknown session, 503 + `retry-after` the source never
+  connected or the server could not read the link (60 s), or a piece did
+  not arrive within 60 s. A byte request whose bytes do not arrive within
+  60 s ends early. Bytes count toward `bytesServed`.
 - `GET /r/<sid>/<token>/source` (WebSocket): the source's relay channel,
   dialled by the source (works behind NAT). Only the current source's
   token is accepted; anyone else, or the source after the next swap, is
@@ -293,18 +306,31 @@ source -> server  {"t":"info","size":<bytes>}            first frame, one file
                   {"t":"info","tracks":[{"kind":"video","size":<bytes>},
                                         {"kind":"audio","size":<bytes>}]}
                                                          first frame, tracks
+                  {"t":"info","tracks":[{"kind":"video","as":"pieces","seq":5,
+                     "pieces":[{"init":true},{"key":true},
+                               {"d":6.0,"map":0,"key":1,"iv":"0x..."},
+                               {"d":4.5,"map":0,"disc":true}]}]}
+                                                         a pieces track
                   binary: [u32 big-endian pull id][bytes]  in order per pull
                   {"t":"end","id":1}  {"t":"fail","id":1,"reason":"..."}
 server -> source  {"t":"pull","id":1,"track":0,"start":0,"end":1048575}
                                                          inclusive; no track: 0
+                  {"t":"pull","id":2,"track":1,"piece":17} piece 17, whole
                   {"t":"ack","id":1,"n":65536}             bytes arrived
                   {"t":"cancel","id":1}                    stop that pull
 ```
 
   Pull ids are unique across the tracks of a connection; `track` is sent
-  only for a media with `tracks`. An `info` whose track count differs
-  from the swap's `tracks` closes the channel with 4001. A track `size`
-  different from the one before (a reconnect) drops that track's buffer.
+  only for a media with `tracks`. A pieces track's `pieces` are its
+  pieces in order: `{"init":true}` an init section, `{"key":true}` an
+  AES-128 key, else a segment of `d` seconds whose `map` / `key` name the
+  init and key pieces it uses, `iv` an explicit IV (`0x` + hex), `disc` a
+  discontinuity before it; `seq` (default 0) the media sequence of the
+  first segment. A piece pull's bytes end with `end` like a range pull.
+  An `info` whose tracks differ from the swap's `tracks` (count, bytes or
+  pieces), or a malformed piece list, closes the channel with 4001. A
+  track `size` or piece count/roles different from the one before (a
+  reconnect) drops that track's buffer.
 
 ## Join and reconnect
 

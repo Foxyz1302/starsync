@@ -7,20 +7,26 @@ import 'dart:typed_data';
 
 import 'constants.dart';
 import 'logging.dart';
+import 'protocol.dart';
+import 'relay_pieces.dart';
 
 // The relay channel: a member's machine (the source) serves the current
 // media's bytes to the server, which buffers them for every viewer (`/r/...`).
 // The source dials out (works behind NAT/CGNAT) on its own WebSocket, so
 // video bytes never queue behind `/sync` messages. A media is one track (a
-// file) or several (a page's separate video and audio).
+// file) or several (a page's separate video and audio); a track is a
+// byte stream or pieces (a segmented playlist, see relay_pieces.dart).
 //
 //   source -> server  {"t":"info","size":N}               first frame, one track
 //                     {"t":"info","tracks":[{"kind":"video","size":N},...]}
+//                     {"t":"info","tracks":[{"kind":"video","as":"pieces",
+//                                            "pieces":[{"init":true},{"d":6.0,"map":0},...]}]}
 //                     binary [u32 BE pull id][bytes]      in order per pull
 //                     {"t":"end","id":1}                  pull complete
 //                     {"t":"fail","id":1,"reason":"..."}  cannot read
 //   server -> source  {"t":"pull","id":1,"track":0,"start":0,"end":N}
 //                                                         bytes start..end
+//                     {"t":"pull","id":2,"track":0,"piece":17}  one piece, whole
 //                     {"t":"ack","id":1,"n":65536}         n bytes arrived
 //                     {"t":"cancel","id":1}               stop this pull
 //
@@ -37,11 +43,14 @@ String relayUrlName(String name) => Uri.encodeComponent(name.replaceAll(RegExp(r
 
 /// What a viewer opens for relayed media at [base]
 /// (`http://<host>/r/<sid>/<token>/<mediaId>`): `<base>/<name>` for one
-/// track, else an mpv EDL playing `<base>/<i>/<name>` of every track
-/// together (see [mpvEdl]).
-String relayViewerUrl(String base, String name, {int tracks = 1}) {
+/// file; with [tracks], each track's URL (`<base>/<i>/<name>`, a pieces
+/// track's playlist `<base>/<i>/<name>.m3u8`), several played together as
+/// an mpv EDL (see [mpvEdl]).
+String relayViewerUrl(String base, String name, {List<RelayTrackSpec> tracks = const []}) {
   final n = relayUrlName(name);
-  return tracks <= 1 ? '$base/$n' : mpvEdl([for (var i = 0; i < tracks; i++) '$base/$i/$n']);
+  if (tracks.isEmpty) return '$base/$n';
+  final urls = [for (var i = 0; i < tracks.length; i++) '$base/$i/$n${tracks[i].pieces ? '.m3u8' : ''}'];
+  return urls.length == 1 ? urls.single : mpvEdl(urls);
 }
 
 /// An mpv `edl://` URL playing [urls] as the streams of one file (a video
@@ -244,13 +253,39 @@ class RelayWindow {
   }
 }
 
-/// One byte stream of a relayed media: [kind] is `video` or `audio` when
-/// a media has several, empty for a single file.
+/// Where a source reads a pieces track from (see relay_pieces.dart).
+abstract interface class RelayPieces {
+  /// The track's shape; a playlist is fetched on the first call. Throws
+  /// [RelayPiecesException] when it cannot be relayed (DRM, live).
+  Future<RelayPieceList> list();
+
+  /// Piece [index], whole, in order. Cancelling stops reading.
+  Stream<List<int>> read(int index);
+
+  Future<void> close();
+}
+
+/// One track of a relayed media: [kind] is `video` or `audio` when a
+/// media has several (or is pieces), empty for a single file. Read as
+/// [bytes] (a Range-readable stream) or as [pieces].
 class RelayTrack {
   final String kind;
-  final RelayBytes bytes;
-  const RelayTrack(this.kind, this.bytes);
+  final RelayBytes? bytes;
+  final RelayPieces? pieces;
+  const RelayTrack(this.kind, RelayBytes this.bytes) : pieces = null;
+  const RelayTrack.pieces(this.kind, RelayPieces this.pieces) : bytes = null;
+
+  RelayTrackSpec get spec => RelayTrackSpec(kind.isEmpty ? 'video' : kind, pieces: pieces != null);
 }
+
+/// The wire's `relay.tracks` for [tracks]: empty for one file.
+List<RelayTrackSpec> relayTrackSpecs(List<RelayTrack> tracks) =>
+    tracks.length == 1 && tracks.single.pieces == null ? const [] : [for (final t in tracks) t.spec];
+
+/// A track's `info` entry: its kind and size, or its pieces.
+Future<Map<String, Object?>> relayTrackInfo(RelayTrack t) async => t.pieces != null
+    ? {...t.spec.toJson(), ...(await t.pieces!.list()).toJson()}
+    : {'kind': t.kind, 'size': await t.bytes!.size()};
 
 /// What a relay serves: one track, or several played together (a page's
 /// separate video and audio).
@@ -317,16 +352,11 @@ class RelaySource {
   /// when it cannot be read.
   Future<void> start() async {
     final tracks = await media.open();
-    final sizes = [for (final t in tracks) await t.bytes.size()];
+    final infos = [for (final t in tracks) await relayTrackInfo(t)];
     _tracks = tracks;
     unawaited(_loop({
       't': 'info',
-      if (tracks.length == 1)
-        'size': sizes.single
-      else
-        'tracks': [
-          for (var i = 0; i < tracks.length; i++) {'kind': tracks[i].kind, 'size': sizes[i]},
-        ],
+      if (relayTrackSpecs(tracks).isEmpty) 'size': infos.single['size'] else 'tracks': infos,
     }));
   }
 
@@ -373,12 +403,20 @@ class RelaySource {
     if (id is! int) return;
     switch (j['t']) {
       case 'pull':
-        final start = j['start'], end = j['end'], track = j['track'] ?? 0;
-        if (start is! int || end is! int || start < 0 || end < start) return;
+        final start = j['start'], end = j['end'], track = j['track'] ?? 0, piece = j['piece'];
         if (track is! int || track < 0 || track >= _tracks.length) return;
+        final t = _tracks[track];
+        final Stream<List<int>> Function() read;
+        if (piece is int) {
+          if (t.pieces == null || piece < 0) return;
+          read = () => t.pieces!.read(piece);
+        } else {
+          if (start is! int || end is! int || start < 0 || end < start || t.bytes == null) return;
+          read = () => t.bytes!.read(start, end);
+        }
         final p = _Pull(id);
         _pulls[id] = p;
-        unawaited(_serve(ws, p, _tracks[track].bytes, start, end));
+        unawaited(_serve(ws, p, read));
       case 'ack':
         final p = _pulls[id];
         final n = j['n'];
@@ -409,8 +447,8 @@ class RelaySource {
     _pulls.clear();
   }
 
-  Future<void> _serve(WebSocket ws, _Pull p, RelayBytes bytes, int start, int end) async {
-    final it = p.it = StreamIterator(bytes.read(start, end));
+  Future<void> _serve(WebSocket ws, _Pull p, Stream<List<int>> Function() read) async {
+    final it = p.it = StreamIterator(read());
     final pending = BytesBuilder(copy: false);
     const frame = RelayConstants.relayFrameBytes;
     try {

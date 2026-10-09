@@ -144,46 +144,75 @@ class HelloMedia {
   }
 }
 
+/// One track of a relayed media: [kind] `video` or `audio`; a byte stream
+/// (a Range-readable file) unless [pieces] (a segmented playlist relayed
+/// piece by piece, served as a media playlist). JSON `{"kind":"video"}`,
+/// `{"kind":"audio","as":"pieces"}`.
+class RelayTrackSpec {
+  final String kind;
+  final bool pieces;
+  const RelayTrackSpec(this.kind, {this.pieces = false});
+
+  Map<String, Object?> toJson() => {'kind': kind, if (pieces) 'as': 'pieces'};
+
+  /// Null when [j] is not a track entry this side knows.
+  static RelayTrackSpec? fromJson(Object? j) {
+    if (j is! Map || !MediaRelay.trackKinds.contains(j['kind'])) return null;
+    final as = j['as'];
+    if (as != null && as != 'bytes' && as != 'pieces') return null;
+    return RelayTrackSpec(j['kind'] as String, pieces: as == 'pieces');
+  }
+
+  @override
+  bool operator ==(Object other) => other is RelayTrackSpec && other.kind == kind && other.pieces == pieces;
+  @override
+  int get hashCode => Object.hash(kind, pieces);
+  @override
+  String toString() => pieces ? '$kind pieces' : kind;
+}
+
 /// Relayed media: the bytes go through the server's buffer (`/r/...`).
 /// Either from the [source] member's machine (it dials the relay channel),
 /// or, with [fetch], the server reads the swap's link itself. A swap sends
 /// `{}` or `{"fetch":true}`; the server fills in [source] (the swapper's
 /// member id, empty with [fetch]) and whether bytes can flow ([live]).
-/// [tracks]: the kinds (`video`, `audio`) of a media relayed as several
-/// tracks played together; empty for one file. A member swap names them,
-/// the server fills them in for [fetch] once it has read the link.
+/// [tracks]: the tracks of a media relayed as several played together, or
+/// as one segmented playlist; empty for one file. A member swap names
+/// them, the server fills them in for [fetch] once it has read the link.
 class MediaRelay {
   final String source;
   final bool fetch;
   final bool live;
-  final List<String> tracks;
+  final List<RelayTrackSpec> tracks;
   const MediaRelay({this.source = '', this.fetch = false, this.live = false, this.tracks = const []});
 
   static const trackKinds = {'video', 'audio'};
   static const maxTracks = 4;
 
-  MediaRelay copyWith({bool? live, List<String>? tracks}) =>
+  /// [tracks] as sent: several, or one pieces track; else one file.
+  static bool validTracks(List<RelayTrackSpec> t) =>
+      t.length <= maxTracks && (t.length > 1 || (t.length == 1 && t.single.pieces));
+
+  MediaRelay copyWith({bool? live, List<RelayTrackSpec>? tracks}) =>
       MediaRelay(source: source, fetch: fetch, live: live ?? this.live, tracks: tracks ?? this.tracks);
 
   Map<String, Object?> toJson() => {
         if (source.isNotEmpty) 'source': source,
         if (fetch) 'fetch': true,
         if (live) 'live': true,
-        if (tracks.length > 1) 'tracks': [for (final k in tracks) {'kind': k}],
+        if (validTracks(tracks)) 'tracks': [for (final t in tracks) t.toJson()],
       };
 
-  /// Unknown kinds, a single entry or too many make it one file.
+  /// Unknown kinds, a single byte track or too many make it one file.
   factory MediaRelay.fromJson(Map<String, Object?> json) {
     final t = json['tracks'];
-    final kinds = t is List
-        ? [for (final e in t) e is Map && e['kind'] is String ? e['kind'] as String : '']
-        : <String>[];
-    final ok = kinds.length > 1 && kinds.length <= maxTracks && kinds.every(trackKinds.contains);
+    final specs = t is List ? [for (final e in t) RelayTrackSpec.fromJson(e)] : const <RelayTrackSpec?>[];
+    final ok = !specs.contains(null) && validTracks(specs.cast<RelayTrackSpec>());
     return MediaRelay(
         source: json['source'] is String ? json['source'] as String : '',
         fetch: json['fetch'] == true,
         live: json['live'] == true,
-        tracks: ok ? List.unmodifiable(kinds) : const []);
+        tracks: ok ? List.unmodifiable(specs.cast<RelayTrackSpec>()) : const []);
   }
 }
 

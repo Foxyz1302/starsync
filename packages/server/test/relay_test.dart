@@ -283,6 +283,46 @@ void main() {
       expect(carol.welcome.mediaUrl, mpvEdl(['$carolBase/0/$name', '$carolBase/1/$name']));
     });
 
+    test('a pieces track and a bytes track: playlist, whole pieces, Range inside a piece', () async {
+      final alice = await join('alice');
+      final bob = await join('bob');
+      await swapRelay(alice, relay: {
+        'tracks': [
+          {'kind': 'video', 'as': 'pieces'},
+          {'kind': 'audio'},
+        ],
+      });
+      final pieces = [for (var i = 0; i < 4; i++) Uint8List.fromList(List.generate(1000 + i, (j) => (i * 31 + j) % 256))];
+      final shape = RelayPieceList([
+        const RelayPiece.init(),
+        for (var i = 1; i < 4; i++) const RelayPiece.segment(6, map: 0),
+      ]);
+      final reads = <int>[];
+      await startSource(alice,
+          from: _Tracks([
+            RelayTrack.pieces('video', _MemPieces(shape, pieces, reads)),
+            RelayTrack('audio', FileRelayBytes(file)),
+          ]));
+      final id = mediaIdOf(alice);
+      final base = 'http://127.0.0.1:${server.boundPort}/r/default/${bob.welcome.token}/$id';
+      final name = Uri.encodeComponent('ep 01.mkv');
+      final (ps, ph, playlist) = await get('$base/0/$name.m3u8');
+      expect(ps, 200);
+      expect(ph['content-type'], startsWith('application/vnd.apple.mpegurl'));
+      expect(utf8.decode(playlist), shape.playlist());
+      expect((await get('$base/0/p/2')).$3, pieces[2]);
+      final (rs, rh, part) = await get('$base/0/p/3', range: 'bytes=10-19');
+      expect((rs, rh['content-range']), (206, 'bytes 10-19/1003'));
+      expect(part, pieces[3].sublist(10, 20));
+      expect((await get('$base/1/$name', range: 'bytes=5-')).$3, bytes.sublist(5));
+      expect((await get('$base/0/p/4')).$1, 404);
+      expect((await get('$base/1/p/0')).$1, 404);
+      expect(reads, isNot(contains(-1)));
+      final carol = await join('carol');
+      final carolBase = base.replaceFirst(bob.welcome.token, carol.welcome.token);
+      expect(carol.welcome.mediaUrl, mpvEdl(['$carolBase/0/$name.m3u8', '$carolBase/1/$name']));
+    });
+
     test('Jellyfin swap can carry a relay', () async {
       final alice = await join('alice');
       final before = alice.raw.length;
@@ -412,7 +452,7 @@ void main() {
     setUp(() {
       buf = RelayBuffer(ahead: 2 * RelayBuffer.slice, back: RelayBuffer.slice, pin: RelayBuffer.slice);
       counted = _CountingBytes(FileRelayBytes(file));
-      feed = LocalRelayFeed(counted, buf);
+      feed = LocalRelayFeed(RelayTrack('', counted), buf);
       buf.attach(feed, bytes.length);
     });
     tearDown(() async {
@@ -466,6 +506,24 @@ class _Tracks implements RelayMedia {
   _Tracks(this.tracks);
   @override
   Future<List<RelayTrack>> open() async => tracks;
+  @override
+  Future<void> close() async {}
+}
+
+/// A pieces track from memory; [reads] logs the pieces pulled.
+class _MemPieces implements RelayPieces {
+  final RelayPieceList shape;
+  final List<Uint8List> data;
+  final List<int> reads;
+  _MemPieces(this.shape, this.data, this.reads);
+  @override
+  Future<RelayPieceList> list() async => shape;
+  @override
+  Stream<List<int>> read(int index) async* {
+    reads.add(index);
+    yield data[index];
+  }
+
   @override
   Future<void> close() async {}
 }

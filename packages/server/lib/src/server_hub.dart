@@ -58,8 +58,8 @@ class ServerHub {
     final m = engine.media;
     if (!identical(relay, r) || m?.relay == null) return;
     final was = m!.relay!;
-    if (was.live == r.live && was.tracks.join(',') == r.kinds.join(',')) return;
-    engine.media = m.copyWith(relay: was.copyWith(live: r.live, tracks: r.kinds));
+    if (was.live == r.live && was.tracks.join(',') == r.tracks.join(',')) return;
+    engine.media = m.copyWith(relay: was.copyWith(live: r.live, tracks: r.tracks));
     changed();
   }
 
@@ -244,7 +244,8 @@ void mountSyncRoute(
   String Function(String sid, String token, SessionMedia? media, String host)
       urlBuilder, {
   String Function(String sid, String token, String itemId, String host)? relayUrlBuilder,
-  String Function(String sid, String token, int mediaId, String name, int tracks, String host)? relayMediaUrlBuilder,
+  String Function(String sid, String token, int mediaId, String name, List<RelayTrackSpec> tracks, String host)?
+      relayMediaUrlBuilder,
 }) {
   app.get('/sync', (final req) {
     // Host the client dialled (Host header), so file URLs work for remote joiners.
@@ -551,7 +552,7 @@ void mountSyncRoute(
                 relayMediaUrlBuilder != null
             ? (relayed.known
                 ? relayMediaUrlBuilder(
-                    'default', activeToken, relayed.mediaId, relayed.name, relayed.buffers.length, dialledHost)
+                    'default', activeToken, relayed.mediaId, relayed.name, relayed.tracks, dialledHost)
                 : null)
             : media?.file != null
                 ? urlBuilder('default', activeToken, media, dialledHost)
@@ -577,7 +578,7 @@ void mountSyncRoute(
   });
 }
 
-ActiveRelay _memberRelay(ServerHub hub, String token, String name, List<String> tracks) {
+ActiveRelay _memberRelay(ServerHub hub, String token, String name, List<RelayTrackSpec> tracks) {
   late final ActiveRelay r;
   r = ActiveRelay.fromMember(hub.engine.mediaId, name, token,
       tracks: tracks, onLiveChanged: () => hub.relayLiveChanged(r));

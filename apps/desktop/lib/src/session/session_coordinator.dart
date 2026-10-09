@@ -544,9 +544,10 @@ class SessionCoordinator {
     }
   }
 
-  /// This viewer's `/r/` URL; an mpv EDL of every track when there are
-  /// several (a page's separate video and audio).
-  String _relayMediaUrlFor(String name, int mediaId, [int tracks = 1]) =>
+  /// This viewer's `/r/` URL; with tracks, a pieces track's playlist, or
+  /// an mpv EDL of every track when there are several (a page's separate
+  /// video and audio).
+  String _relayMediaUrlFor(String name, int mediaId, [List<RelayTrackSpec> tracks = const []]) =>
       relayViewerUrl('http://$_wsHost:$_wsPort/r/default/${sync.token}/$mediaId', name, tracks: tracks);
 
   /// Serves [media] for media [mediaId] on this member's relay channel.
@@ -687,7 +688,7 @@ class SessionCoordinator {
             _awaitLiveFor = r.mediaId;
             health.value = const HealthStatus(HealthSeverity.info, 'the server is getting the video…');
           } else {
-            await _openMedia(_relayMediaUrlFor(name, r.mediaId, relay.tracks.length));
+            await _openMedia(_relayMediaUrlFor(name, r.mediaId, relay.tracks));
           }
         } else {
           var url = stateMediaUrl(r);
@@ -707,7 +708,7 @@ class SessionCoordinator {
     } else if (_awaitLiveFor == r.mediaId && (stateMediaRelay(r)?.live ?? false)) {
       _awaitLiveFor = -1;
       await _openMedia(
-          _relayMediaUrlFor((r.media?['name'] as String?) ?? '', r.mediaId, stateMediaRelay(r)!.tracks.length));
+          _relayMediaUrlFor((r.media?['name'] as String?) ?? '', r.mediaId, stateMediaRelay(r)!.tracks));
     }
     _jellyfinTransport(r);
     _relayStatus(r);
@@ -1262,21 +1263,27 @@ class SessionCoordinator {
       return null;
     }
     if (relay == LinkRelay.me) {
-      // This computer reads it: a file, or a page's formats (one file, or
-      // separate video and audio tracks).
+      // This computer reads it: a file, or a page's formats (one file,
+      // separate video and audio tracks, or segmented playlists).
       if (probe == null) return 'cannot pass this link on: $probeError';
       final problem = probe.relayProblem;
       if (problem != null) return problem;
       final y = await ytDlp.ytDlp;
       final check = LinkRelayMedia(uri, ytDlp: y, probe: probe);
       var size = 0;
-      final List<String> kinds;
+      final List<RelayTrackSpec> specs;
       try {
         final tracks = await check.open().timeout(const Duration(seconds: 15));
         for (final t in tracks) {
-          size += await t.bytes.size().timeout(const Duration(seconds: 15));
+          // A playlist is read (DRM and live refused) but has no size.
+          final pieces = t.pieces;
+          if (pieces != null) {
+            await pieces.list().timeout(const Duration(seconds: 15));
+          } else {
+            size += await t.bytes!.size().timeout(const Duration(seconds: 15));
+          }
         }
-        kinds = [for (final t in tracks) t.kind];
+        specs = relayTrackSpecs(tracks);
       } catch (e) {
         return 'cannot pass this link on: $e';
       } finally {
@@ -1284,11 +1291,11 @@ class SessionCoordinator {
       }
       _pendingOrigin = _LinkOrigin(url, probe, y);
       _swap(HelloMedia(
-          name: name, size: size, duration: 0, relay: MediaRelay(tracks: kinds.length > 1 ? kinds : const [])));
+          name: name, size: size, duration: 0, relay: MediaRelay(tracks: specs)));
       return null;
     }
     // The server reads it with its own yt-dlp; only a page this app knows
-    // it cannot relay (live, no video file) is refused here (the server
+    // it cannot relay (live, nothing a relay can read) is refused here (the server
     // may reach what this computer cannot).
     if (probe != null && probe.isPage && probe.info != null && probe.relayProblem != null) {
       return probe.relayProblem;

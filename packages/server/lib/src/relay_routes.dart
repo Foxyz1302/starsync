@@ -8,6 +8,7 @@ import 'package:sync_relay_core/core.dart';
 import 'package:web_socket/web_socket.dart';
 
 import 'media_endpoint.dart';
+import 'piece_buffer.dart';
 import 'relay_buffer.dart';
 import 'session.dart';
 
@@ -25,6 +26,15 @@ List<(int, int)> relayBudgets(List<int> sizes,
   return [for (final n in sizes) (share(ahead, n), share(back, n))];
 }
 
+/// Bytes per second a pieces track is assumed to need before its first
+/// pieces arrive (its share of the budget, its distances): 4 Mbit/s for
+/// video, 160 kbit/s for audio.
+double _piecesRate(String kind) => kind == 'audio' ? 20000 : 500000;
+
+/// One track as the source (or the fetcher) described it: a byte size,
+/// or a piece list.
+typedef _TrackInfo = ({int? size, RelayPieceList? pieces});
+
 /// The relay of the current media: one buffer per track and where the
 /// bytes come from. One per relayed swap; [dispose] on the next swap or
 /// server stop (the buffers are memory only, so that is the whole cleanup).
@@ -35,11 +45,11 @@ class ActiveRelay {
   /// server fetches the link itself.
   final String? sourceToken;
   final void Function() onLiveChanged;
-  /// One per track, in track order; empty until the server has read a
-  /// fetched link.
-  List<RelayBuffer> buffers = const [];
-  /// `media.relay.tracks`: the kinds when there are several tracks.
-  List<String> kinds = const [];
+  /// One per track, in track order ([RelayBuffer] for bytes, [PieceBuffer]
+  /// for pieces); empty until the server has read a fetched link.
+  List<TrackBuffer> buffers = const [];
+  /// `media.relay.tracks`: empty for one file.
+  List<RelayTrackSpec> tracks = const [];
   final _known = Completer<void>();
   var _ids = 0;
   RelayMedia? _media;
@@ -51,10 +61,41 @@ class ActiveRelay {
 
   int _nextId() => ++_ids;
 
-  void _setTracks(List<String> kinds) {
-    this.kinds = kinds.length > 1 ? List.unmodifiable(kinds) : const [];
-    buffers = [for (var i = 0; i < max(1, kinds.length); i++) RelayBuffer(nextId: _nextId)];
+  void _setTracks(List<RelayTrackSpec> tracks) {
+    this.tracks = MediaRelay.validTracks(tracks) ? List.unmodifiable(tracks) : const [];
+    buffers = this.tracks.isEmpty
+        ? [RelayBuffer(nextId: _nextId)]
+        : [
+            for (final t in this.tracks)
+              t.pieces ? PieceBuffer(nextId: _nextId, rate: _piecesRate(t.kind)) : RelayBuffer(nextId: _nextId),
+          ];
     if (!_known.isCompleted) _known.complete();
+  }
+
+  /// The info of every track matches [tracks] (bytes for a byte track,
+  /// pieces for a pieces one).
+  bool _matches(List<_TrackInfo> infos) {
+    if (infos.length != buffers.length) return false;
+    for (var i = 0; i < infos.length; i++) {
+      if ((infos[i].pieces != null) != (buffers[i] is PieceBuffer)) return false;
+    }
+    return true;
+  }
+
+  /// Attaches every buffer to its feed.
+  void _attachAll(List<RelayFeed> feeds, List<_TrackInfo> infos) {
+    _budget([
+      for (var i = 0; i < infos.length; i++)
+        infos[i].size ?? (_piecesRate(tracks[i].kind) * infos[i].pieces!.duration).round(),
+    ]);
+    for (var i = 0; i < buffers.length; i++) {
+      final b = buffers[i];
+      if (b is PieceBuffer) {
+        b.attach(feeds[i], infos[i].pieces!);
+      } else if (b is RelayBuffer) {
+        b.attach(feeds[i], infos[i].size!);
+      }
+    }
   }
 
   void _budget(List<int> sizes) {
@@ -69,12 +110,12 @@ class ActiveRelay {
   /// Bytes from member [sourceToken] over its relay channel, as the
   /// [tracks] its swap named (empty: one file).
   factory ActiveRelay.fromMember(int mediaId, String name, String sourceToken,
-          {List<String> tracks = const [], required void Function() onLiveChanged}) =>
+          {List<RelayTrackSpec> tracks = const [], required void Function() onLiveChanged}) =>
       ActiveRelay._(mediaId, name, sourceToken, onLiveChanged).._setTracks(tracks);
 
   /// The server reads [url] itself: a media file as is, a web page
-  /// through [ytDlp] (one file, or video + audio tracks). [onFail] gets
-  /// the reason when it cannot.
+  /// through [ytDlp] (one file, video + audio tracks, or segmented
+  /// playlists). [onFail] gets the reason when it cannot.
   static ActiveRelay fetch(int mediaId, String name, Uri url,
       {YtDlp? ytDlp, required void Function() onLiveChanged, void Function(String reason)? onFail}) {
     final r = ActiveRelay._(mediaId, name, null, onLiveChanged);
@@ -82,14 +123,14 @@ class ActiveRelay {
     unawaited(() async {
       try {
         final tracks = await media.open();
-        final sizes = [for (final t in tracks) await t.bytes.size()];
+        final infos = <_TrackInfo>[
+          for (final t in tracks)
+            t.pieces != null ? (size: null, pieces: await t.pieces!.list()) : (size: await t.bytes!.size(), pieces: null),
+        ];
         if (r._disposed) return;
-        r._setTracks([for (final t in tracks) t.kind]);
-        r._budget(sizes);
-        r._local = [for (var i = 0; i < tracks.length; i++) LocalRelayFeed(tracks[i].bytes, r.buffers[i])];
-        for (var i = 0; i < tracks.length; i++) {
-          r.buffers[i].attach(r._local[i], sizes[i]);
-        }
+        r._setTracks(relayTrackSpecs(tracks));
+        r._local = [for (var i = 0; i < tracks.length; i++) LocalRelayFeed(tracks[i], r.buffers[i])];
+        r._attachAll(r._local, infos);
         onLiveChanged();
       } catch (e) {
         _log.warning('relay fetch: cannot read the link: $e');
@@ -113,10 +154,10 @@ class ActiveRelay {
     return known;
   }
 
-  /// The buffer of [track]; null (the single-file URL) only for a media of
-  /// one track. Null when there is no such track.
-  RelayBuffer? bufferAt(int? track) {
-    if (track == null) return buffers.length == 1 ? buffers.single : null;
+  /// The buffer of [track]; null (the single-file URL) only for one file.
+  /// Null when there is no such track.
+  TrackBuffer? bufferAt(int? track) {
+    if (track == null) return tracks.isEmpty && buffers.length == 1 ? buffers.single : null;
     return track >= 0 && track < buffers.length ? buffers[track] : null;
   }
 
@@ -139,18 +180,15 @@ class ActiveRelay {
     if (ch != null) unawaited(_closeNotSource(ch));
   }
 
-  void _attachChannel(RelicWebSocket ws, List<int> sizes) {
+  void _attachChannel(RelicWebSocket ws, List<_TrackInfo> infos) {
     final old = _channel;
     if (old != null && !identical(old, ws)) unawaited(old.tryClose());
     _channel = ws;
-    final multi = buffers.length > 1;
+    final named = tracks.isNotEmpty;
     final feeds = _channelFeeds = [
-      for (var i = 0; i < buffers.length; i++) ChannelRelayFeed((t) => ws.trySendText(t), track: multi ? i : null),
+      for (var i = 0; i < buffers.length; i++) ChannelRelayFeed((t) => ws.trySendText(t), track: named ? i : null),
     ];
-    _budget(sizes);
-    for (var i = 0; i < buffers.length; i++) {
-      buffers[i].attach(feeds[i], sizes[i]);
-    }
+    _attachAll(feeds, infos);
     onLiveChanged();
   }
 
@@ -166,17 +204,25 @@ class ActiveRelay {
   }
 }
 
-/// The track sizes of a channel's `info` frame (`size`, or `tracks[].size`),
-/// or null when malformed.
-List<int>? _infoSizes(Map j) {
+/// The tracks of a channel's `info` frame (`size`, or `tracks[]` each
+/// with a `size` or, `"as":"pieces"`, a piece list), or null when
+/// malformed.
+List<_TrackInfo>? _infoTracks(Map j) {
   final size = j['size'], tracks = j['tracks'];
-  if (size is int) return size > 0 ? [size] : null;
-  if (tracks is! List || tracks.isEmpty) return null;
-  final out = <int>[];
+  if (size is int) return size > 0 ? [(size: size, pieces: null)] : null;
+  if (tracks is! List || tracks.isEmpty || tracks.length > MediaRelay.maxTracks) return null;
+  final out = <_TrackInfo>[];
   for (final t in tracks) {
-    final n = t is Map ? t['size'] : null;
-    if (n is! int || n <= 0) return null;
-    out.add(n);
+    if (t is! Map) return null;
+    if (t['as'] == 'pieces') {
+      final list = RelayPieceList.fromJson(t);
+      if (list == null) return null;
+      out.add((size: null, pieces: list));
+    } else {
+      final n = t['size'];
+      if (n is! int || n <= 0) return null;
+      out.add((size: n, pieces: null));
+    }
   }
   return out;
 }
@@ -192,7 +238,9 @@ Future<void> _closeNotSource(RelicWebSocket ws) async {
 /// `GET /r/<sid>/<token>/source` (WebSocket): the source member's relay
 /// channel. `GET /r/<sid>/<token>/<mediaId>/<name>`: a viewer reads the
 /// relayed file, Range as for `/m`; `.../<mediaId>/<track>/<name>` one
-/// track of a media relayed as several. [relay] gives the current relay.
+/// track of a media with tracks (a pieces track's media playlist), and
+/// `.../<mediaId>/<track>/p/<i>` piece `i` of a pieces track. [relay]
+/// gives the current relay.
 void mountRelayRoutes(
   RelicApp app,
   SessionMap sessions,
@@ -230,16 +278,17 @@ void mountRelayRoutes(
             switch (j['t']) {
               case 'info':
                 if (attached) continue;
-                final sizes = _infoSizes(j);
-                if (sizes == null || sizes.length != r.buffers.length) {
+                final infos = _infoTracks(j);
+                if (infos == null || !r._matches(infos)) {
                   // Not the media this swap named: the source stops.
                   _log.warning('relay channel: info does not match the media (${r.name})');
                   await _closeNotSource(ws);
                   return;
                 }
                 attached = true;
-                _log.info('relay channel up (${r.name}, ${sizes.join(' + ')} bytes)');
-                r._attachChannel(ws, sizes);
+                _log.info('relay channel up (${r.name}, '
+                    '${infos.map((t) => t.size != null ? '${t.size} bytes' : '${t.pieces!.length} pieces').join(' + ')})');
+                r._attachChannel(ws, infos);
               case 'end':
                 if (id is int) {
                   for (final b in r.buffers) {
@@ -272,7 +321,7 @@ void mountRelayRoutes(
     });
   });
 
-  Future<Response> viewer(Request req, {required bool tracked}) async {
+  Future<Response> viewer(Request req, {required bool tracked, bool piece = false}) async {
     final stopwatch = Stopwatch()..start();
     final sid = req.pathParameters.raw[#sid] ?? '';
     final token = req.pathParameters.raw[#token] ?? '';
@@ -294,15 +343,39 @@ void mountRelayRoutes(
         headers: Headers.build((h) => h['retry-after'] = ['2']));
     if (!await r.whenKnown()) return notConnected;
     final buffer = r.bufferAt(track);
-    if (buffer == null) return _plain(404);
+    if (buffer == null || (piece && buffer is! PieceBuffer)) return _plain(404);
     if (!await buffer.ready()) return notConnected;
-    final size = buffer.size;
     final typed = req.headers.range;
     String? rangeHeader;
     if (typed != null && typed.ranges.isNotEmpty) {
       final x = typed.ranges.first;
       rangeHeader = '${typed.unit}=${x.start?.toString() ?? ''}-${x.end?.toString() ?? ''}';
     }
+    if (buffer is PieceBuffer) {
+      if (!piece) {
+        buffer.opened(token);
+        return Response(200,
+            body: Body.fromString(buffer.playlist ?? '', mimeType: MimeType('application', 'vnd.apple.mpegurl')),
+            headers: Headers.build((h) => h['cache-control'] = ['no-store']));
+      }
+      final index = int.tryParse(req.pathParameters.raw[#piece] ?? '');
+      if (index == null || index < 0 || index >= buffer.list!.length) return _plain(404);
+      final data = await buffer.piece(token, index);
+      if (data == null) return notConnected;
+      final res = resolveMediaRequest(rangeHeader: rangeHeader, size: data.length, filename: 'piece');
+      final headers = Headers.build((h) => res.headers.forEach((k, v) => h[k] = [v]));
+      if (res.status != 200 && res.status != 206) {
+        return Response(res.status, body: Body.fromString('status ${res.status}'), headers: headers);
+      }
+      final end = res.end ?? data.length - 1;
+      final n = end - res.start + 1;
+      buffer.bytesToViewers += n;
+      session.addBytes(token, n);
+      return Response(res.status,
+          body: Body.fromData(Uint8List.sublistView(data, res.start, end + 1), mimeType: MimeType.octetStream),
+          headers: headers);
+    }
+    final size = (buffer as RelayBuffer).size;
     final res = resolveMediaRequest(rangeHeader: rangeHeader, size: size, filename: r.name);
     final headers = Headers.build((h) => res.headers.forEach((k, v) => h[k] = [v]));
     if (res.status != 200 && res.status != 206) {
@@ -337,6 +410,7 @@ void mountRelayRoutes(
   // wants one parameter name per level).
   app.get('/r/:sid/:token/:mediaId/:seg', (final req) => viewer(req, tracked: false));
   app.get('/r/:sid/:token/:mediaId/:seg/:name', (final req) => viewer(req, tracked: true));
+  app.get('/r/:sid/:token/:mediaId/:seg/p/:piece', (final req) => viewer(req, tracked: true, piece: true));
 }
 
 Response _plain(int status) => Response(status, body: Body.fromString('status $status'));
