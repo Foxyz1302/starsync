@@ -228,11 +228,11 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: "v0.1.8"
-      resolved-ref: d2435a06b26d4f94c3c3777e6ef006ac84f4eef4
+      ref: "v0.1.9"
+      resolved-ref: ef96868b87e55935792f392dd5881d49bc672ce5
       url: "https://git.example.org/Foxyz/fox_utils.git"
     source: git
-    version: "0.1.8"
+    version: "0.1.9"
   hive_ce:
     dependency: "direct main"
     description:
@@ -748,14 +748,14 @@ packages:
       path: "../../packages/core"
       relative: true
     source: path
-    version: "1.0.1"
+    version: "1.1.0"
   sync_relay_server:
     dependency: "direct main"
     description:
       path: "../../packages/server"
       relative: true
     source: path
-    version: "1.0.1"
+    version: "1.1.0"
   synchronized:
     dependency: transitive
     description:

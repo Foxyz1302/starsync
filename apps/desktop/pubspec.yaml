@@ -28,7 +28,7 @@ dependencies:
   fox_utils:
     git:
       url: https://git.example.org/Foxyz/fox_utils.git
-      ref: v0.1.8
+      ref: v0.1.9
 dev_dependencies:
   flutter_test:
     sdk: flutter
