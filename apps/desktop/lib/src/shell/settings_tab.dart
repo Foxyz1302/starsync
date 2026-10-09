@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 
@@ -7,7 +9,11 @@ import '../jellyfin/accounts_panel.dart';
 import '../schedule/animeflow.dart';
 import '../screens/home/about_page.dart';
 import '../screens/home/settings_page.dart';
+import '../sfx/sfx.dart';
+import '../sfx/sound_bank.dart';
+import '../sfx/synth_sfx.dart';
 import '../state/session_state.dart';
+import '../state/settings.dart';
 import '../update/update_controller.dart';
 import 'avatar.dart';
 import 'motion.dart';
@@ -431,11 +437,78 @@ class NotificationsInfo extends StatelessWidget {
             ],
           ),
         ),
-        SettingsPanel(
-          title: 'Sounds',
-          child: line('No sounds yet', 'The app is silent; only the video makes noise'),
-        ),
+        const SettingsPanel(title: 'Sounds', child: SoundSettings()),
       ],
     );
+  }
+}
+
+/// Volume, then every sound with a preview button and its own switch.
+class SoundSettings extends StatelessWidget {
+  const SoundSettings({super.key});
+
+  void _preview(SfxKind kind) {
+    final sfx = SessionState.instance.sfx;
+    if (sfx is SynthSfx) unawaited(sfx.preview(kind, readyIndex: 2));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppSettings.instance;
+    final scheme = Theme.of(context).colorScheme;
+    final muted = TextStyle(color: scheme.onSurfaceVariant, fontSize: 12);
+    return SignalBuilder(builder: (context) {
+      final volume = s.soundVolume.value;
+      final off = s.soundsOff.value;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(volume == 0 ? Icons.volume_off_outlined : Icons.volume_down_outlined,
+                  color: scheme.onSurfaceVariant),
+              Expanded(
+                child: Slider(
+                  key: const ValueKey('sound-volume'),
+                  value: volume,
+                  onChanged: s.setSoundVolume,
+                  onChangeEnd: (_) => _preview(SfxKind.ready),
+                ),
+              ),
+              SizedBox(width: 44, child: Text('${(volume * 100).round()}%', textAlign: TextAlign.end)),
+            ],
+          ),
+          Text('Soft cues for people and readiness; the video itself covers play, pause and the end. '
+              'Letting go of the slider plays the ready sound.', style: muted),
+          const SizedBox(height: 8),
+          for (final MapEntry(key: kind, value: (name, help)) in soundInfo.entries)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  IconButton(
+                    key: ValueKey('sound-play-${kind.name}'),
+                    tooltip: 'Play',
+                    onPressed: volume == 0 ? null : () => _preview(kind),
+                    icon: const Icon(Icons.play_arrow_rounded),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [Text(name), Text(help, style: muted)],
+                    ),
+                  ),
+                  Switch(
+                    key: ValueKey('sound-on-${kind.name}'),
+                    value: !off.contains(kind.name),
+                    onChanged: volume == 0 ? null : (on) => s.setSoundOn(kind.name, on),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      );
+    });
   }
 }

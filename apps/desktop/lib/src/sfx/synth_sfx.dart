@@ -11,10 +11,12 @@ import 'synth.dart';
 
 /// Plays [SoundSpec]s: each is rendered once to a WAV in the temp dir and
 /// played on a small pool of audio-only mpv players (so two sounds can
-/// overlap). [volume] is 0..1, applied on a square curve (ears are log).
+/// overlap). [volume] (0..1) is read per play and applied on a square
+/// curve (ears are log); [enabled] filters cues.
 class SynthSfx implements SfxService {
-  double volume;
-  SynthSfx({this.volume = 0.6});
+  final double Function() volume;
+  final bool Function(SfxKind kind) enabled;
+  SynthSfx({required this.volume, bool Function(SfxKind kind)? enabled}) : enabled = enabled ?? ((_) => true);
 
   static const _poolSize = 3;
   final List<Player> _pool = [];
@@ -23,18 +25,26 @@ class SynthSfx implements SfxService {
   Directory? _dir;
 
   @override
-  Future<void> play(SfxCue cue) =>
-      playSpec('${cue.kind.name}-${cue.readyIndex}', soundFor(cue.kind, readyIndex: cue.readyIndex));
+  Future<void> play(SfxCue cue) async {
+    if (!enabled(cue.kind)) return;
+    await playSpec('${cue.kind.name}-${cue.readyIndex}', soundFor(cue.kind, readyIndex: cue.readyIndex));
+  }
+
+  /// Plays [kind] even when it is switched off (Settings' preview).
+  Future<void> preview(SfxKind kind, {int readyIndex = 1}) =>
+      playSpec('${kind.name}-$readyIndex', soundFor(kind, readyIndex: readyIndex));
 
   /// Plays [spec], cached under [key] (same key = same sound).
   Future<void> playSpec(String key, SoundSpec spec) async {
-    if (volume <= 0) return;
+    final v = volume();
+    if (v <= 0) return;
     try {
       final path = await (_files[key] ??= _write(key, spec));
       final player = await _player();
-      await player.setVolume(100 * volume * volume);
+      await player.setVolume(100 * v * v);
       await player.open(Media(path));
     } catch (e) {
+      _files.remove(key);
       debugPrint('sfx $key: $e');
     }
   }
@@ -57,9 +67,6 @@ class SynthSfx implements SfxService {
     }
     return _pool[_next++ % _poolSize];
   }
-
-  /// Drops the cached renders (after editing a spec with hot reload).
-  void forget() => _files.clear();
 
   Future<void> dispose() async {
     for (final p in _pool) {

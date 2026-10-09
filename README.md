@@ -149,8 +149,8 @@ of help: Profile; Party & network (the Host card's default port and
 password, recent servers with remove); Player (below); Jellyfin &
 integrations (linked Jellyfin servers, below, the AnimeFlow connection:
 "connected as <name>" with what you may do, or why not, and playing the
-next episode automatically); Notifications & sounds (what pops up; there
-is nothing to switch yet); Updates; Keyboard shortcuts (read-only); About
+next episode automatically); Notifications & sounds (what pops up; the sound
+volume, and every sound with a preview and its own switch); Updates; Keyboard shortcuts (read-only); About
 (the version).
 
 Player settings live in the player: ⚙ at the right end of its controls

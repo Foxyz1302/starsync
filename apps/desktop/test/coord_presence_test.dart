@@ -7,6 +7,7 @@ import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:watch_together/src/session/session_coordinator.dart';
+import 'package:watch_together/src/sfx/sfx.dart';
 import 'package:watch_together/src/state/session_state.dart';
 import 'package:watch_together/src/sync/sync_client.dart';
 
@@ -214,7 +215,8 @@ void main() {
       MediaKit.ensureInitialized();
       final server = SyncServer(const AppConfig(port: 0, secret: 'toast', name: 'toast'));
       await server.start();
-      final coord = SessionCoordinator();
+      final sounds = _RecordingSfx();
+      final coord = SessionCoordinator(sfx: sounds);
       final friend = SyncClient();
       try {
         await coord.connect(ConnectParams(
@@ -227,6 +229,12 @@ void main() {
         final toasts = coord.toasts.peek();
         expect(toasts.firstWhere((t) => t.text == 'Bob Jr joined').actor, 'Bob Jr');
         expect(toasts.firstWhere((t) => t.text == 'Bob Jr: hi there').actor, 'Bob Jr');
+        // Others' chat makes a sound, your own does not.
+        expect(sounds.kinds.where((k) => k == SfxKind.chat), hasLength(1));
+        coord.sendChat('mine');
+        await _poll(() => coord.toasts.peek().any((t) => t.text == 'Bob: mine'), 'own chat');
+        expect(sounds.kinds.where((k) => k == SfxKind.chat), hasLength(1));
+        expect(sounds.kinds, contains(SfxKind.join));
       } finally {
         await friend.dispose();
         await coord.dispose();
@@ -234,4 +242,10 @@ void main() {
       }
     },
   );
+}
+
+class _RecordingSfx implements SfxService {
+  final kinds = <SfxKind>[];
+  @override
+  Future<void> play(SfxCue cue) async => kinds.add(cue.kind);
 }

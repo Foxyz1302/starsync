@@ -260,6 +260,8 @@ class SessionCoordinator {
   int _toastId = 0;
   ConnectParams? _params;
   bool _everConnected = false;
+  /// The connection-lost sound played; the reconnected one answers it once.
+  bool _lostSounded = false;
   Map<String, String>? _openHeaders;
 
   // Jellyfin: the resolved ref, the mediaId it belongs to, a generation
@@ -356,6 +358,7 @@ class SessionCoordinator {
     _restoringReady = false;
     _wasPlayAllowed = false;
     _everConnected = false;
+    _lostSounded = false;
     _resumeToken = '';
     _seekGate.reset();
     _clearPendingSeek();
@@ -423,6 +426,7 @@ class SessionCoordinator {
       if (s == SyncStatus.closed && !_manualClose && kickReason.peek() == null) {
         health.value = const HealthStatus(
             HealthSeverity.warn, 'connection lost — retrying…');
+        _soundLost();
         _scheduleReconnect();
       }
     });
@@ -727,7 +731,9 @@ class SessionCoordinator {
       ];
     }
     final kind = sfxForFeedAction(f.action);
-    if (kind != null) {
+    // Your own message needs no sound.
+    final own = f.action == 'chat' && f.actor == selfMember.peek()?.name;
+    if (kind != null && !own) {
       var readyIndex = 0;
       if (f.action == 'ready') {
         readyIndex = serverState.peek()?.members.where((m) => m.ready).length ?? 0;
@@ -813,6 +819,7 @@ class SessionCoordinator {
       if (!reconnecting.peek()) {
         health.value = const HealthStatus(
             HealthSeverity.warn, 'connection lost — retrying…');
+        _soundLost();
         _scheduleReconnect();
       }
     }
@@ -1507,6 +1514,10 @@ class SessionCoordinator {
       if (stale()) return;
       reconnecting.value = false;
       _everConnected = true;
+      if (_lostSounded) {
+        _lostSounded = false;
+        unawaited(sfx.play(const SfxCue(SfxKind.back)));
+      }
       _resumeToken = sync.token;
       _lastStateAt = DateTime.now().toUtc();
       health.value = const HealthStatus(HealthSeverity.ok, 'connected');
@@ -1529,6 +1540,12 @@ class SessionCoordinator {
       reconnecting.value = false;
       _scheduleReconnect();
     }
+  }
+
+  void _soundLost() {
+    if (!_everConnected || _lostSounded) return;
+    _lostSounded = true;
+    unawaited(sfx.play(const SfxCue(SfxKind.lost)));
   }
 
   void _invalidateAttempts() {

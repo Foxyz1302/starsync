@@ -528,8 +528,7 @@ sideways until an end, then the page).
   of `NetworkInterface.list` (IPv4, no loopback or link-local, private
   ranges first) with the Host port, and a note that friends outside the
   LAN need a forwarded port or a reachable server). Empty strip space is the window
-  drag area; the window buttons sit at its end. Debug builds add a button
-  that opens the layout mock (`screens/demo/`).
+  drag area; the window buttons sit at its end.
 - **Avatars** (`avatar.dart`): `StatusAvatar` draws a ring outside the
   picture with a gap in the background colour (both scale with the size):
   green ready, amber buffering (with a spinner), grey not ready, dimmed
@@ -590,13 +589,19 @@ sideways until an end, then the page).
   Jellyfin & integrations (linked servers, AnimeFlow's `/me` via
   `AnimeFlowClient.fromAccounts`, auto-advance), notifications & sounds
   (what pops up; no switches), updates, shortcuts, about.
-- **Sounds** (`sfx/`): the coordinator plays an `SfxCue` per feed event
-  through `SfxService` (the app still uses `NoopSfxService`). The set is
-  synthesized, not sampled: `synth.dart` renders notes (sine/bell/pluck
-  voices, soft attacks, low-pass, short room tail) to quiet WAVs,
-  `sound_bank.dart` defines every sound in D major pentatonic, and
-  `SynthSfx` plays them on a small pool of audio-only mpv players. The
-  debug layout demo's Notifications & sounds page plays each one.
+- **Sounds** (`sfx/`): the coordinator plays an `SfxCue` for ready,
+  unready, force-ready, join, leave, kick, swap and others' chat (feed
+  events), the idle warning, and connection lost / back (once per drop).
+  Nothing for what the video already says (play, pause, seeks, the end).
+  The set is synthesized, not sampled: `synth.dart` renders Japanese-house
+  voices (Karplus-Strong koto with bends, furin chime, rin bowl, bamboo,
+  hyoshigi clappers, a shoji slide of filtered noise) through a low-pass
+  and a short room to quiet WAVs; `sound_bank.dart` voices each event in
+  the Yo scale on D. `SynthSfx` renders a sound on first use into the temp
+  dir and plays it on a pool of three audio-only mpv players, at
+  `AppSettings.soundVolume` (square curve) unless switched off in
+  `soundsOff`. Settings → Notifications & sounds has the volume and a
+  preview and switch per sound.
 - **Player** (`session_player.dart`): `SessionPlayer` holds the one
   `Video` of the current player (a new `GlobalKey` per player generation).
   The shell keeps it in one layer of the body at one place in the element

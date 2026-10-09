@@ -1,13 +1,11 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '../screens/demo/shell_demo.dart';
 import '../screens/home/update_indicator.dart';
 import '../screens/session/jellyfin_widgets.dart' show ViaHostBadge;
 import '../state/session_state.dart';
@@ -126,18 +124,6 @@ class PartyStrip extends StatelessWidget {
                 ),
               ),
             ),
-            if (kDebugMode)
-              IconButton(
-                tooltip: 'Layout demo (debug builds only)',
-                icon: const Icon(
-                  Icons.bug_report_outlined,
-                  size: 20,
-                  color: Colors.amber,
-                ),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const ShellDemo()),
-                ),
-              ),
             UpdateIndicator(controller: updates),
             const SizedBox(width: 8),
             if (online) ...[

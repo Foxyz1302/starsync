@@ -20,6 +20,8 @@ const _keyAutoAdvance = 'autoAdvance';
 const _keyMpvControls = 'mpvControls';
 const _keyHideReReleases = 'hideReReleases';
 const _keyProgressLine = 'progressLine';
+const _keySoundVolume = 'soundVolume';
+const _keySoundsOff = 'soundsOff';
 
 enum HwdecMode { auto, off, custom }
 
@@ -40,6 +42,10 @@ class AppSettings {
   /// A 2 px progress line at the bottom of the video while the controls
   /// are hidden (both designs). Applies live.
   final progressLine = signal(true);
+  /// App sounds (`sfx/`): 0..1, 0 = silent.
+  final soundVolume = signal(0.5);
+  /// `SfxKind` names switched off one by one.
+  final soundsOff = signal<Set<String>>(const {});
 
   /// Video shaders: one choice, used on join and changed both here and
   /// in the session (Ctrl+0..6, the shader button).
@@ -82,6 +88,10 @@ class AppSettings {
       if (hideRe is bool) hideReReleases.value = hideRe;
       final line = box.get(_keyProgressLine);
       if (line is bool) progressLine.value = line;
+      final vol = box.get(_keySoundVolume);
+      if (vol is num) soundVolume.value = vol.toDouble().clamp(0, 1);
+      final off = box.get(_keySoundsOff);
+      if (off is List) soundsOff.value = Set.unmodifiable(off.whereType<String>());
       final preset = box.get(_keyShaderPreset);
       shaderPreset.value =
           ShaderPreset.values.where((p) => p.name == preset).firstOrNull ??
@@ -127,6 +137,16 @@ class AppSettings {
   void setProgressLine(bool on) {
     progressLine.value = on;
     _put(_keyProgressLine, on);
+  }
+
+  void setSoundVolume(double v) {
+    soundVolume.value = v.clamp(0, 1);
+    _put(_keySoundVolume, soundVolume.value);
+  }
+
+  void setSoundOn(String kind, bool on) {
+    soundsOff.value = Set.unmodifiable(on ? ({...soundsOff.value}..remove(kind)) : {...soundsOff.value, kind});
+    _put(_keySoundsOff, soundsOff.value.toList());
   }
 
   void setHideReReleases(bool on) {

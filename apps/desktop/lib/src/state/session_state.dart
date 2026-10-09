@@ -9,11 +9,13 @@ import 'package:sync_relay_core/core.dart';
 import '../jellyfin/accounts.dart';
 import '../jellyfin/session_media.dart';
 import '../sfx/sfx.dart';
+import '../sfx/synth_sfx.dart';
 import '../session/health.dart';
 import '../session/session_coordinator.dart';
 import '../widgets/avatar_pipeline.dart';
 import 'connect_prefs.dart';
 import 'server_isolate.dart';
+import 'settings.dart';
 
 enum AppRoute {
   home,
@@ -153,7 +155,10 @@ class SessionState {
   final route = signal(AppRoute.home);
   final recents = signal<List<RecentServer>>(const []);
   final status = signal(const HealthStatus(HealthSeverity.info, 'idle'));
-  final SfxService sfx = const NoopSfxService();
+  final SfxService sfx = SynthSfx(
+    volume: () => AppSettings.instance.soundVolume.peek(),
+    enabled: (k) => !AppSettings.instance.soundsOff.peek().contains(k.name),
+  );
   late final SessionCoordinator coordinator = SessionCoordinator(sfx: sfx);
   final lastForm = ConnectForm();
   JellyfinAccounts get jellyfin => JellyfinAccounts.instance;
