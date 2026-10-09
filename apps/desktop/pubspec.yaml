@@ -25,6 +25,11 @@ dependencies:
   window_manager: ^0.5.2
   archive: ^4.0.7
   crypto: ^3.0.6
+  # Drag & drop and clipboard files/images (vendored desktop_drop + pasteboard).
+  fox_utils:
+    git:
+      url: https://git.example.org/Foxyz/fox_utils.git
+      ref: v0.1.7
 dev_dependencies:
   flutter_test:
     sdk: flutter

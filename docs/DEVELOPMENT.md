@@ -6,7 +6,11 @@ Layout and rules: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Needs the Flutter SDK (beta channel, Dart 3.13+) and, for the Linux desktop
 build, the usual GTK toolchain (clang, cmake, ninja, pkg-config, libgtk-3-dev).
-mpv libraries come from `media_kit_libs_video`.
+mpv libraries come from `media_kit_libs_video`. `fox_utils` (drag & drop,
+clipboard files and images; native Linux/Windows plugin) is the owner's
+shared package, a git dependency pinned to a tag of
+`git.example.org/Foxyz/fox_utils`: bump it by tagging there and changing
+`ref` in the desktop pubspec.
 
 ```
 cd apps/desktop && flutter pub get && flutter run -d linux
