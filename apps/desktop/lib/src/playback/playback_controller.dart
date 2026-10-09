@@ -42,7 +42,7 @@ class PlaybackController {
   bool _probing = false;
   final FrameWatchdog _watchdog = FrameWatchdog();
   StreamSubscription<PlayerLog>? _logSub;
-  final List<StreamSubscription<Duration>> _timeSubs = [];
+  final List<StreamSubscription<Object?>> _timeSubs = [];
   String _chapterJson = '';
   // `glsl-shaders` as last set on the current player ('' = none).
   String _shaders = '';
@@ -430,8 +430,17 @@ class PlaybackController {
   // track-list observed in mpv (read back as JSON).
   void _watchMarks(SyncPlayer p) {
     _timeSubs.add(p.stream.position.listen((d) {
+      // At the end the bar shows full: mpv's last position is the last
+      // frame's start (and the 250 ms steps round down), short of duration.
+      if (p.state.completed && duration.value > Duration.zero) {
+        position.value = duration.value;
+        return;
+      }
       final ms = d.inMilliseconds;
       position.value = Duration(milliseconds: ms - ms % 250);
+    }));
+    _timeSubs.add(p.stream.completed.listen((done) {
+      if (done && duration.value > Duration.zero) position.value = duration.value;
     }));
     _timeSubs.add(p.stream.buffer.listen((d) {
       final ms = d.inMilliseconds;

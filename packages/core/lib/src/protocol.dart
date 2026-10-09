@@ -556,6 +556,17 @@ class MemberView {
 }
 
 class StateBroadcast {
+  /// Buffer an in-set member needs before playback can go on, as the
+  /// server's gate counts it: [RelayConstants.minBufferSecs], less near the
+  /// end (mpv cannot buffer past it), none once finished.
+  double get bufferNeed {
+    if (transport == 'finished') return 0;
+    final d = (media?['duration'] as num?)?.toDouble() ?? 0;
+    const full = RelayConstants.minBufferSecs;
+    if (d <= 0) return full;
+    return (d - position - RelayConstants.endSlackSecs).clamp(0.0, full).toDouble();
+  }
+
   final int eventId;
   final String transport;
   final double position;

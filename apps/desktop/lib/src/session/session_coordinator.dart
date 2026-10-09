@@ -717,7 +717,7 @@ class SessionCoordinator {
       return;
     }
     for (final m in r.members) {
-      if (m.inSet && m.buffered < RelayConstants.minBufferSecs) {
+      if (m.inSet && m.buffered < r.bufferNeed) {
         starving.value =
             'waiting for ${m.name} — ${m.buffered.toStringAsFixed(1)} s buffered';
         return;

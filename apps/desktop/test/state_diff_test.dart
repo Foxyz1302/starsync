@@ -158,12 +158,15 @@ void main() {
   });
 
   group('finished', () {
-    test('stops in place: pause, no seek to the end, no drift seeks', () {
-      final diff = StateDiff();
+    test('a player just behind plays out; far behind pauses; no seeks', () {
       final t = DateTime.now().toUtc();
-      diff.diff(_state(eventId: 1, transport: 'playing', position: 100), 100, t);
       final end = _state(eventId: 2, transport: 'finished', position: 120);
-      final actions = diff.diff(end, 119.4, t);
+      final near = StateDiff()..diff(_state(eventId: 1, transport: 'playing', position: 100), 100, t);
+      final nearActions = near.diff(end, 119.4, t);
+      expect(nearActions.whereType<SeekAction>(), isEmpty);
+      expect(nearActions.whereType<TransportAction>(), isEmpty);
+      final diff = StateDiff()..diff(_state(eventId: 1, transport: 'playing', position: 100), 100, t);
+      final actions = diff.diff(end, 110, t);
       expect(actions.whereType<SeekAction>(), isEmpty);
       expect(actions.whereType<TransportAction>().single.playing, isFalse);
       // Far off and later: still nothing.

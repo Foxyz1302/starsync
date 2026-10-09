@@ -43,6 +43,10 @@ bool localPlayAllowed(StateBroadcast state, String memberId) {
   return false;
 }
 
+/// At `finished`, a player at most this far behind the end keeps playing
+/// to it.
+const finishSlackSecs = 3.0;
+
 class StateDiff {
   static const debounceWindow = Duration(seconds: 2);
 
@@ -73,7 +77,9 @@ class StateDiff {
     }
 
     // End of media: everyone stops where they are (at or just before the
-    // end). No seek to the very end and no drift correction.
+    // end). No seek to the very end and no drift correction. A player a
+    // little behind the server's clock plays its last moments out (mpv
+    // stops at the end by itself) instead of being cut short.
     if (state.transport == 'finished') {
       final first = _lastEventId == -1;
       final changed = first ||
@@ -87,7 +93,9 @@ class StateDiff {
       if (!changed) return out;
       out.add(const RateAction(1.0));
       if (first) out.add(SeekAction(serverPos > 1 ? serverPos - 1 : 0));
-      out.add(const TransportAction(false));
+      if (first || state.position - ownPosition > finishSlackSecs) {
+        out.add(const TransportAction(false));
+      }
       return out;
     }
 

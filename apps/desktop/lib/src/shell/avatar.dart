@@ -100,7 +100,7 @@ AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator 
     color: self ? Profile.instance.color.value : colorForName(m.name),
     image: memberAvatarImage(m, coord),
     ready: m.ready,
-    buffering: !m.stale && m.ready && playing && m.buffered < RelayConstants.minBufferSecs,
+    buffering: !m.stale && m.ready && playing && m.buffered < r!.bufferNeed,
     relaying: relay != null && relay.source.isNotEmpty && relay.source == m.id,
     stale: m.stale,
     // The state marks the host (`members[].host`); your own app also

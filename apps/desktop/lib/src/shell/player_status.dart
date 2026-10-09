@@ -87,16 +87,18 @@ StatusView? playerStatusFor({
   }
   // As the server holds playback: someone in the ready set short of the
   // minimum buffer.
+  final need = r.bufferNeed;
   for (final m in r.members) {
-    if (m.inSet && m.buffered < RelayConstants.minBufferSecs) {
+    if (m.inSet && m.buffered < need) {
       final you = self != null && m.id == self.id;
+      final p = (m.buffered / need).clamp(0.0, 1.0);
       return StatusView(StatusKind.loading, you ? 'Loading the video…' : '${m.name} is loading…',
-          who: [m], self: you, progress: (m.buffered / RelayConstants.minBufferSecs).clamp(0.0, 1.0));
+          who: [m], self: you, progress: p, detail: '${(p * 100).round()}%');
     }
   }
   if (self != null && !self.ready) {
     return StatusView(StatusKind.you, "Press Space when you're ready",
-        who: [self], self: true, action: StatusAction.ready, short: 'Press Space when ready');
+        who: [self], self: true, action: StatusAction.ready, detail: 'or click here', short: 'Press Space when ready');
   }
   final active = [for (final m in r.members) if (!m.stale) m];
   final others = [
@@ -251,7 +253,7 @@ class _StatusLine extends StatelessWidget {
   final ValueChanged<StatusAction> onAction;
   const _StatusLine({super.key, required this.view, required this.coord, required this.onAction});
 
-  static const _avatar = 24.0;
+  static const _avatar = 34.0;
 
   Widget? _lead() {
     final v = view;
@@ -260,7 +262,7 @@ class _StatusLine extends StatelessWidget {
       case StatusKind.problem:
         final error = v.tone == HealthSeverity.error;
         return Icon(error ? Icons.error_outline_rounded : Icons.warning_amber_rounded,
-            size: 18, color: error ? Colors.redAccent.shade100 : Colors.amber);
+            size: 20, color: error ? Colors.redAccent.shade100 : Colors.amber);
       case StatusKind.reconnecting:
         return const _Spinner(color: Colors.amber);
       case StatusKind.connecting:
@@ -276,9 +278,26 @@ class _StatusLine extends StatelessWidget {
             v.self ? selfAvatarInfo(ready: m.ready, host: m.host) : memberAvatarInfo(m, r, coord),
         ];
         if (infos.isEmpty) return null;
-        return infos.length == 1
+        final avatar = infos.length == 1
             ? StatusAvatar(info: infos.first, size: _avatar, badges: false)
             : AvatarStack(members: infos, shown: 4, size: _avatar);
+        if (v.progress == null) return avatar;
+        // Loading: the progress runs round the avatar.
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            avatar,
+            SizedBox.square(
+              dimension: _avatar + 6,
+              child: CircularProgressIndicator(
+                value: v.progress,
+                strokeWidth: 2.5,
+                color: Colors.white,
+                backgroundColor: Colors.white24,
+              ),
+            ),
+          ],
+        );
     }
   }
 
@@ -286,43 +305,45 @@ class _StatusLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final v = view;
     final lead = _lead();
+    final avatars = v.who.isNotEmpty;
     final action = v.action == StatusAction.ready ? null : v.action;
     return Padding(
-      padding: EdgeInsets.fromLTRB(lead == null ? 16 : 6, 6, action == null ? 16 : 6, 6),
+      padding: EdgeInsets.fromLTRB(lead == null ? 18 : (avatars ? 5 : 14), 5, action == null ? 18 : 6, 5),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (lead != null) ...[
-            SizedBox(height: _avatar, child: Center(child: lead)),
-            const SizedBox(width: 8),
+            SizedBox(height: _avatar + 6, child: Center(child: lead)),
+            SizedBox(width: avatars ? 10 : 8),
           ],
           Flexible(
-            child: Text(
-              v.text,
-              key: const ValueKey('player-status-text'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
-            ),
-          ),
-          if (v.progress != null) ...[
-            const SizedBox(width: 8),
-            SizedBox.square(
-              dimension: 14,
-              child: CircularProgressIndicator(
-                value: v.progress,
-                strokeWidth: 2,
-                color: Colors.white,
-                backgroundColor: Colors.white24,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: _avatar),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    v.text,
+                    key: const ValueKey('player-status-text'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600, height: 1.2),
+                  ),
+                  if (v.detail != null)
+                    Text(
+                      v.detail!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white60, fontSize: 12, fontWeight: FontWeight.w500, height: 1.2),
+                    ),
+                ],
               ),
             ),
-          ],
-          if (v.detail != null) ...[
-            const SizedBox(width: 8),
-            Text(v.detail!, style: const TextStyle(color: Colors.white54, fontSize: 13, fontWeight: FontWeight.w500)),
-          ],
+          ),
           if (action != null) ...[
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             _PillButton(
               label: action == StatusAction.cancel ? 'Cancel' : 'Retry',
               onPressed: () => onAction(action),

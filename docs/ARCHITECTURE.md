@@ -101,7 +101,9 @@ Loosely modeled on Syncplay, with a different readiness design.
   `server`). Recovery resumes by itself when the gate passes.
 - **End**: while PLAYING with a known duration, reaching it sets FINISHED
   (feed `finished` by `server`, position = duration). Clients pause where they
-  are; FINISHED never auto-resumes. A seek turns it into HELD at the new
+  are, except one within 3 s of the end (`finishSlackSecs`), which plays
+  out to mpv's own stop; at the end the position shows the full duration.
+  FINISHED never auto-resumes. A seek turns it into HELD at the new
   position (resuming at once if the gate passes); a swap resets to HELD.
 - **Seek**: allowed from any member in any transport; the server writes the
   position, bumps `eventId` and records who sent it (`seekBy`, `seekSeq` in
@@ -653,13 +655,16 @@ sideways until an end, then the page).
   under 1 s) `StartBanner` (`start_banner.dart`) lies under the controls:
   the banner (else a blur of the cover, else dark), darkened, with cover,
   big title and episode; it fades out on play and stays gone for that
-  media. One status pill (`player_status.dart`) sits bottom centre above
+  media; under 320 px tall (the mini) it drops the cover and shrinks the
+  title. One status pill (`player_status.dart`) sits bottom centre above
   the controls: `playerStatusFor` (pure) picks the most pressing of
   removed, reconnecting (Cancel), a warn/error health message (Retry),
-  connecting (only after 2 s), finished, someone loading (their avatar
-  and buffer progress), you not ready (a click marks you ready) and who
-  everyone waits for (avatars, "2/3 ready"); nothing otherwise, info
-  never. Frosted glass, colour only for problems; it fades through
+  connecting (only after 2 s), finished, someone loading (below
+  `StateBroadcast.bufferNeed`, the gate's own need: less near the end,
+  none at finished; their avatar with the progress round it), you not
+  ready (a click marks you ready) and who everyone waits for (avatars,
+  "2/3 ready"); nothing otherwise, info never. 34 px avatars, a main line
+  and a muted detail line. Frosted glass, colour only for problems; it fades through
   between kinds. The mini shows its short line in its hover bar. ⚙ in both
   control designs opens the player settings card (`controls/
   player_settings.dart`, `showPopover`): player design, progress line

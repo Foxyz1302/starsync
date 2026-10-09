@@ -26,9 +26,11 @@ class StartCard extends StatelessWidget {
     final episode = now.episode;
     return LayoutBuilder(builder: (context, box) {
       final h = box.maxHeight;
+      // Small (the mini player): no cover, a smaller title near the bottom.
+      final small = h < 320;
       final coverWidth = (h * 0.26).clamp(84.0, 240.0) / 1.5;
-      final titleSize = (h * 0.05).clamp(22.0, 44.0);
-      final side = (box.maxWidth * 0.05).clamp(20.0, 72.0);
+      final titleSize = small ? (h * 0.08).clamp(13.0, 18.0) : (h * 0.05).clamp(22.0, 44.0);
+      final side = small ? 12.0 : (box.maxWidth * 0.05).clamp(20.0, 72.0);
       return Stack(
         fit: StackFit.expand,
         children: [
@@ -76,12 +78,14 @@ class StartCard extends StatelessWidget {
           Positioned(
             left: side,
             right: side,
-            bottom: startCardBottom,
+            bottom: small ? 12 : startCardBottom,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                ArtCover(hash: now.posterHash, width: coverWidth),
-                const SizedBox(width: 24),
+                if (!small) ...[
+                  ArtCover(hash: now.posterHash, width: coverWidth),
+                  const SizedBox(width: 24),
+                ],
                 Expanded(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
