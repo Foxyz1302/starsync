@@ -1,10 +1,10 @@
 {
-  "version": "1.1.0",
+  "version": "1.1.1",
   "protocol": 11,
-  "url": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.1.0/watch-together-1.1.0-linux-x64.tar.gz",
-  "notes": "- One updater for app and server: updater in core; watch-together-server --upgrade / --check-update; update.sh uses the server",
+  "url": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.1.1/watch-together-1.1.1-linux-x64.tar.gz",
+  "notes": "- CI (Windows): fetch git dependencies fresh; the host's cached fox_utils clone was stale",
   "assets": {
-    "linux-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.1.0/watch-together-1.1.0-linux-x64.tar.gz",
-    "windows-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.1.0/watch-together-1.1.0-windows-x64.zip"
+    "linux-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.1.1/watch-together-1.1.1-linux-x64.tar.gz",
+    "windows-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.1.1/watch-together-1.1.1-windows-x64.zip"
   }
 }
