@@ -3,20 +3,30 @@ import 'dart:math';
 
 import 'package:sync_relay_core/core.dart';
 
-enum MediaGate { ok, gone, unauthorized, forbidden, offline }
+enum MediaGate { ok, gone, unauthorized, offline }
 
 class ViewerToken {
   final String token;
   /// Cleaned ([cleanMemberName]); follows `profile` renames.
   String name;
-  bool kicked = false;
   /// Sent the server's host key in hello: the hosting app's own client.
   bool isHost = false;
   int bytesServed = 0;
   DateTime lastSeen;
-  Future<void> Function(String reason)? onKick;
+  /// When this member's recent nudges went out, for the rate cap.
+  final List<DateTime> nudges = [];
   ViewerToken({required this.token, required this.name})
       : lastSeen = DateTime.now().toUtc();
+
+  /// Takes one nudge at [now] if under the caps
+  /// ([RelayConstants.nudgesPerSec] / [RelayConstants.nudgesPerMin]).
+  bool takeNudge(DateTime now) {
+    nudges.removeWhere((t) => now.difference(t) >= const Duration(minutes: 1));
+    final lastSec = nudges.where((t) => now.difference(t) < const Duration(seconds: 1)).length;
+    if (nudges.length >= RelayConstants.nudgesPerMin || lastSec >= RelayConstants.nudgesPerSec) return false;
+    nudges.add(now);
+    return true;
+  }
 
   bool isStale(Duration timeout, [DateTime? now]) =>
       (now ?? DateTime.now().toUtc()).difference(lastSeen) > timeout;
@@ -66,15 +76,7 @@ class Session {
 
   MediaGate gate(String? token) {
     if (token == null || !tokens.containsKey(token)) return MediaGate.unauthorized;
-    if (tokens[token]!.kicked) return MediaGate.forbidden;
     return MediaGate.ok;
-  }
-
-  Future<void> kick(String token, {String reason = ''}) async {
-    final viewer = tokens[token];
-    if (viewer == null) throw const AuthException('unknown token');
-    viewer.kicked = true;
-    await viewer.onKick?.call(reason);
   }
 
   void addBytes(String? token, int n) {

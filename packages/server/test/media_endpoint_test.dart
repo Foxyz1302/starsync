@@ -54,9 +54,6 @@ void main() {
           resolveMediaRequest(rangeHeader: null, size: 10, filename: 'a.mkv', gate: MediaGate.unauthorized)
               .status,
           401);
-      expect(
-          resolveMediaRequest(rangeHeader: null, size: 10, filename: 'a.mkv', gate: MediaGate.forbidden).status,
-          403);
       final off =
           resolveMediaRequest(rangeHeader: null, size: 10, filename: 'a.mkv', gate: MediaGate.offline);
       expect(off.status, 503);

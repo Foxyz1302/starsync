@@ -30,6 +30,7 @@ import 'avatar.dart';
 import 'motion.dart';
 import 'now_playing_title.dart';
 import 'player_status.dart';
+import 'sit_out_card.dart';
 import 'start_banner.dart';
 
 /// Where the session's video is shown: nowhere, the floating mini player,
@@ -298,6 +299,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
                 if (widget.fullscreen) ...[_pausedParty(), _unreadChip()],
               ] else
                 _miniOverlay(),
+              // Sitting out: nothing is loaded; the card covers the
+              // empty player (which stays mounted for joining back).
+              if (_coord.selfOut.value) _sitOut(),
             ],
           );
         }),
@@ -784,6 +788,38 @@ class _SessionPlayerState extends State<SessionPlayer> {
         ),
       );
 
+  /// [SitOutCard] with the mini's (or the full player's) expand /
+  /// collapse and close.
+  Widget _sitOut() => Positioned.fill(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            SitOutCard(key: const ValueKey('sit-out-card'), compact: !_full),
+            Positioned(
+              top: 4,
+              right: 4,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    focusNode: _noFocus,
+                    onPressed: _full ? widget.onCollapse : widget.onExpand,
+                    tooltip: _full ? 'Small player' : 'Expand',
+                    icon: Icon(_full ? Icons.close_fullscreen : Icons.open_in_full, color: Colors.white, size: 18),
+                  ),
+                  IconButton(
+                    focusNode: _noFocus,
+                    onPressed: widget.onClose,
+                    tooltip: 'Close the player',
+                    icon: const Icon(Icons.close, color: Colors.white, size: 18),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+
   /// Mini: title, expand and close on hover; ready, time and a seekable
   /// bar at the bottom. A thin progress line stays while not hovered.
   Widget _miniOverlay() {
@@ -823,7 +859,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                         IconButton(
                           focusNode: _noFocus,
                           onPressed: widget.onClose,
-                          tooltip: 'Stop watching (stay in the server)',
+                          tooltip: 'Sit out (stay in the server)',
                           icon: const Icon(Icons.close, color: Colors.white, size: 18),
                         ),
                       ],

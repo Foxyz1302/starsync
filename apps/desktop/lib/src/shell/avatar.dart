@@ -17,6 +17,8 @@ class AvatarInfo {
   final Color color;
   final ImageProvider? image;
   final bool ready, buffering, relaying, stale, host, self;
+  /// Sitting out: dimmed, with an "away" mark.
+  final bool out;
   const AvatarInfo({
     this.id = '',
     required this.name,
@@ -28,6 +30,7 @@ class AvatarInfo {
     this.stale = false,
     this.host = false,
     this.self = false,
+    this.out = false,
   });
 }
 
@@ -75,7 +78,7 @@ ImageProvider? memberAvatarImage(MemberView m, SessionCoordinator coord) {
 }
 
 /// Your own avatar from the profile (also offline).
-AvatarInfo selfAvatarInfo({bool ready = false, bool host = false}) {
+AvatarInfo selfAvatarInfo({bool ready = false, bool host = false, bool out = false}) {
   final p = Profile.instance;
   final png = p.picture.value;
   final name = p.name.value;
@@ -86,6 +89,7 @@ AvatarInfo selfAvatarInfo({bool ready = false, bool host = false}) {
     ready: ready,
     host: host,
     self: true,
+    out: out,
   );
 }
 
@@ -107,6 +111,7 @@ AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator 
     // knows before the first state.
     host: m.host || (self && coord.hostFile != null),
     self: self,
+    out: m.out,
   );
 }
 
@@ -132,7 +137,8 @@ class PartyWatch extends StatelessWidget {
 
 /// Circle avatar with a status ring outside it and a gap in the background
 /// colour, so overlapping neighbours never hide the status. Crown = host,
-/// tower = passing the video on, spinner = buffering, dimmed = stale.
+/// tower = passing the video on, spinner = buffering, dimmed = stale,
+/// dimmed with a moon = sitting out.
 class StatusAvatar extends StatelessWidget {
   final AvatarInfo info;
   final double size;
@@ -176,7 +182,7 @@ class StatusAvatar extends StatelessWidget {
                 decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
                 padding: EdgeInsets.all(stroke),
                 child: Opacity(
-                  opacity: info.stale ? 0.4 : 1,
+                  opacity: info.stale || info.out ? 0.4 : 1,
                   child: CircleAvatar(
                     radius: size / 2,
                     backgroundColor: info.color,
@@ -203,6 +209,17 @@ class StatusAvatar extends StatelessWidget {
                   color: Colors.amber,
                   shadows: const [Shadow(blurRadius: 3, color: Colors.black)],
                 ),
+              ),
+            ),
+          if (info.out)
+            Positioned(
+              key: const ValueKey('away-mark'),
+              left: -3,
+              bottom: -3,
+              child: Container(
+                padding: const EdgeInsets.all(2),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
+                child: Icon(Icons.bedtime, size: (badge * 0.8).clamp(10.0, 24.0), color: Colors.blueGrey.shade200),
               ),
             ),
           if (badges && info.relaying)
@@ -240,7 +257,7 @@ class _AvatarStackState extends State<AvatarStack> {
   @override
   Widget build(BuildContext context) {
     final size = widget.size;
-    int rank(AvatarInfo m) => m.host ? 0 : (m.ready ? 1 : 2);
+    int rank(AvatarInfo m) => m.host ? 0 : (m.out ? 3 : m.ready ? 1 : 2);
     final sorted = [...widget.members]..sort((a, b) => rank(a) - rank(b));
     final visible = sorted.take(widget.shown).toList();
     final extra = sorted.length - visible.length;

@@ -296,10 +296,10 @@ void main() {
           findsOneWidget);
       expect(find.descendant(of: find.byKey(const ValueKey('member-m2')), matching: find.text('host')),
           findsNothing);
-      // The host cannot be kicked: no Kick in its menu.
+      // The host can be sat out like anyone.
       await tester.tap(find.descendant(of: find.byKey(const ValueKey('member-m1')), matching: find.byTooltip('More')));
       await tester.pumpAndSettle();
-      expect(find.text('Kick'), findsNothing);
+      expect(find.text('Sit out'), findsOneWidget);
     });
 
     testWidgets('hosting: Copy invite address lists this machine\'s addresses', (tester) async {

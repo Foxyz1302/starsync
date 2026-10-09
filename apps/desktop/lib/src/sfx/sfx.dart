@@ -8,6 +8,7 @@ enum SfxKind {
   forceReady,
   join,
   leave,
+  /// Someone sat you out (played by the session, not from a feed action).
   kick,
   /// A new video or episode is put up.
   swap,
@@ -31,7 +32,6 @@ SfxKind? sfxForFeedAction(String action) => switch (action) {
       'ready' => SfxKind.ready,
       'unready' => SfxKind.unready,
       'force-ready' => SfxKind.forceReady,
-      'kick' => SfxKind.kick,
       'join' => SfxKind.join,
       'leave' => SfxKind.leave,
       'swap' => SfxKind.swap,

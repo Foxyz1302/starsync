@@ -11,7 +11,7 @@ import 'avatar.dart';
 import 'motion.dart';
 
 /// What the player's status pill says, most pressing first.
-enum StatusKind { kicked, reconnecting, problem, connecting, finished, loading, you, waiting }
+enum StatusKind { reconnecting, problem, connecting, finished, loading, you, waiting }
 
 /// The pill's button: stop reconnecting, retry, or mark yourself ready
 /// (the whole pill).
@@ -59,16 +59,10 @@ String _sentence(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1
 StatusView? playerStatusFor({
   required HealthStatus health,
   bool reconnecting = false,
-  String? kickReason,
   StateBroadcast? state,
   MemberView? self,
   bool slowConnect = false,
 }) {
-  if (kickReason != null) {
-    return StatusView(StatusKind.kicked,
-        kickReason.isEmpty ? 'You were removed from the server' : 'You were removed: $kickReason',
-        tone: HealthSeverity.error, short: 'Removed from the server');
-  }
   if (reconnecting) {
     return const StatusView(StatusKind.reconnecting, 'Reconnecting…',
         tone: HealthSeverity.warn, action: StatusAction.cancel);
@@ -82,6 +76,8 @@ StatusView? playerStatusFor({
   }
   final r = state;
   if (r == null || r.media == null || r.transport == 'playing') return null;
+  // Sitting out: the join-back card says it; nobody waits for you.
+  if (self != null && self.out) return null;
   if (r.transport == 'finished') {
     return const StatusView(StatusKind.finished, 'Finished · seek back or pick the next video', short: 'Finished');
   }
@@ -100,7 +96,8 @@ StatusView? playerStatusFor({
     return StatusView(StatusKind.you, "Press Space when you're ready",
         who: [self], self: true, action: StatusAction.ready, detail: 'or click here', short: 'Press Space when ready');
   }
-  final active = [for (final m in r.members) if (!m.stale) m];
+  // Members sitting out are never waited for nor counted.
+  final active = [for (final m in r.members) if (!m.stale && !m.out) m];
   final others = [
     for (final m in active)
       if ((self == null || m.id != self.id) && !(m.inSet && m.ready)) m,
@@ -117,7 +114,6 @@ StatusView? playerStatusNow({bool slowConnect = false}) {
   return playerStatusFor(
     health: c.health.value,
     reconnecting: c.reconnecting.value,
-    kickReason: c.kickReason.value,
     state: c.serverState.value,
     self: c.selfMember.value,
     slowConnect: slowConnect,
@@ -258,7 +254,6 @@ class _StatusLine extends StatelessWidget {
   Widget? _lead() {
     final v = view;
     switch (v.kind) {
-      case StatusKind.kicked:
       case StatusKind.problem:
         final error = v.tone == HealthSeverity.error;
         return Icon(error ? Icons.error_outline_rounded : Icons.warning_amber_rounded,

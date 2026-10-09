@@ -11,7 +11,6 @@ import '../screens/session/jellyfin_widgets.dart' show ViaHostBadge;
 import '../state/session_state.dart';
 import '../update/update_controller.dart';
 import '../widgets/app_keys.dart';
-import '../widgets/dialogs.dart';
 import '../widgets/window_buttons.dart';
 import 'avatar.dart';
 import 'motion.dart';
@@ -337,7 +336,8 @@ class StripTab extends StatelessWidget {
 }
 
 /// Who is in the server, from the avatars: status, host / relay pills,
-/// per member force ready and kick, and the address to invite friends.
+/// per member force ready, nudge and sit out, and the address to invite
+/// friends.
 Future<void> showMembersCard(BuildContext context) => showPopover<void>(
   context,
   at: const Alignment(0.7, -0.84),
@@ -469,6 +469,8 @@ class _MemberTile extends StatelessWidget {
     final m = member;
     final status = m.stale
         ? 'reconnecting…'
+        : m.out
+        ? 'sitting out'
         : info.buffering
         ? 'buffering ${m.buffered.toStringAsFixed(1)} s'
         : m.ready
@@ -494,27 +496,30 @@ class _MemberTile extends StatelessWidget {
       trailing: PopupMenuButton<String>(
         tooltip: 'More',
         icon: const Icon(Icons.more_vert, size: 18),
-        onSelected: (v) async {
-          if (v == 'force') {
-            coord.forceTarget(m.id, !m.ready);
-          } else if (v == 'kick') {
-            final ok = await showKickConfirmDialog(context, m.name);
-            if (ok == true) coord.kick(m.id);
+        onSelected: (v) {
+          switch (v) {
+            case 'force':
+              coord.forceTarget(m.id, !m.ready);
+            case 'nudge':
+              coord.nudgeMember(m.id);
+            case 'out':
+              coord.sitOut(m.id);
+            case 'back':
+              coord.joinBack();
           }
         },
         itemBuilder: (_) => [
-          PopupMenuItem(
-            value: 'force',
-            child: Text(m.ready ? 'Force unready' : 'Force ready'),
-          ),
-          if (!info.self && !info.host)
+          if (!m.out)
             PopupMenuItem(
-              value: 'kick',
-              child: Text(
-                'Kick',
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
+              value: 'force',
+              child: Text(m.ready ? 'Force unready' : 'Force ready'),
             ),
+          if (!info.self)
+            const PopupMenuItem(value: 'nudge', child: Text('Nudge')),
+          if (info.self && m.out)
+            const PopupMenuItem(value: 'back', child: Text('Join back'))
+          else if (!m.out)
+            const PopupMenuItem(value: 'out', child: Text('Sit out')),
         ],
       ),
     );

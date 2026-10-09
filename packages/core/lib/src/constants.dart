@@ -50,4 +50,8 @@ abstract class RelayConstants {
   static const int maxBannerBytes = 768 * 1024;
   static const int maxNameLength = 32;
   static const int maxChatLength = 500;
+  /// Nudges one member may send: at most this many per second and per
+  /// minute; the server drops the rest silently.
+  static const int nudgesPerSec = 3;
+  static const int nudgesPerMin = 20;
 }

@@ -332,13 +332,13 @@ Duration nextPromptStart(JellyfinItem? item, Duration runtime, {Duration? ending
 
 /// Who performs the auto-advance swap, so several counting clients do not
 /// swap twice: the lowest member id among members that play the item with
-/// their own account (`jf[serverId] == true`, not stale). Only what every
+/// their own account (`jf[serverId] == true`, not stale, not out). Only what every
 /// client sees in `state` decides (who put the item up is not in it: a
 /// late joiner never saw that swap), so all clients agree.
 String? autoAdvanceSwapper(List<MemberView> members, String serverId) {
   final eligible = [
     for (final m in members)
-      if (!m.stale && m.jf[serverId] == true) m
+      if (!m.stale && !m.out && m.jf[serverId] == true) m
   ];
   if (eligible.isEmpty) return null;
   eligible.sort((a, b) => compareMemberIds(a.id, b.id));

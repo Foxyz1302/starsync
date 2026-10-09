@@ -23,10 +23,6 @@ class ConnectFlow extends ChangeNotifier {
   int _attempt = 0;
   bool _disposed = false;
 
-  /// Set when an attempt ends in a kick, so the shell shows the removal
-  /// dialog.
-  void Function(String reason)? onKicked;
-
   @override
   void dispose() {
     _disposed = true;
@@ -110,12 +106,7 @@ class ConnectFlow extends ChangeNotifier {
     } catch (e) {
       if (myAttempt != _attempt) return;
       busy = null;
-      final kick = _session.coordinator.kickReason.peek();
-      if (kick != null && kick.isNotEmpty) {
-        onKicked?.call(kick);
-      } else {
-        errors[mode] = CardError('Could not connect', '$e');
-      }
+      errors[mode] = CardError('Could not connect', '$e');
       _notify();
       return;
     }

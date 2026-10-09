@@ -127,17 +127,10 @@ void main() {
     await second.ws.close();
   });
 
-  test('unknown or kicked resume token joins as a new member', () async {
+  test('unknown resume token joins as a new member', () async {
     final (a, wa) = await _Client.join(server.boundPort, 'a', resume: 'nope');
     expect(wa.token, isNot('nope'));
-    final (b, wb) = await _Client.join(server.boundPort, 'b');
-    await server.hub.kickById(wb.memberId, 'bye');
-    final (c, wc) = await _Client.join(server.boundPort, 'b', resume: wb.token);
-    expect(wc.token, isNot(wb.token));
-    expect(wc.memberId, isNot(wb.memberId));
     await a.ws.close();
-    await b.ws.close();
-    await c.ws.close();
   });
 
   test('ping gets a pong with the client stamp and the server clock', () async {

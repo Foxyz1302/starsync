@@ -25,6 +25,7 @@ const _keySoundsOff = 'soundsOff';
 const _keySoundPreset = 'soundPreset';
 const _keySoundPresetFor = 'soundPresetFor';
 const _keyUnreadyOnSwap = 'unreadyOnSwap';
+const _keyIdleSitsOut = 'idleSitsOut';
 
 enum HwdecMode { auto, off, custom }
 
@@ -39,6 +40,8 @@ class AppSettings {
   /// Session: send ready=false when the video changes (a swap keeps the
   /// server's ready flags).
   final unreadyOnSwap = signal(false);
+  /// Session: the idle auto-unready sits this member out instead.
+  final idleSitsOut = signal(false);
   /// Player design: the uosc controls (`controls/uosc/`) instead of the
   /// standard ones (media_kit's with our bars). Applies live.
   final mpvControls = signal(false);
@@ -95,6 +98,8 @@ class AppSettings {
       if (advance is bool) autoAdvance.value = advance;
       final unready = box.get(_keyUnreadyOnSwap);
       if (unready is bool) unreadyOnSwap.value = unready;
+      final idleOut = box.get(_keyIdleSitsOut);
+      if (idleOut is bool) idleSitsOut.value = idleOut;
       final mpv = box.get(_keyMpvControls);
       if (mpv is bool) mpvControls.value = mpv;
       final hideRe = box.get(_keyHideReReleases);
@@ -154,6 +159,11 @@ class AppSettings {
   void setUnreadyOnSwap(bool on) {
     unreadyOnSwap.value = on;
     _put(_keyUnreadyOnSwap, on);
+  }
+
+  void setIdleSitsOut(bool on) {
+    idleSitsOut.value = on;
+    _put(_keyIdleSitsOut, on);
   }
 
   void setMpvControls(bool on) {

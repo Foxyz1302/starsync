@@ -26,8 +26,9 @@ final png = Uint8List.fromList(const [
   0x42, 0x60, 0x82,
 ]);
 
-MemberView mv(String id, String name, {bool ready = false, bool? inSet, double buffered = 30, bool stale = false}) =>
-    MemberView(id: id, name: name, ready: ready, inSet: inSet ?? ready, buffered: buffered, stale: stale);
+MemberView mv(String id, String name,
+        {bool ready = false, bool? inSet, double buffered = 30, bool stale = false, bool out = false}) =>
+    MemberView(id: id, name: name, ready: ready, inSet: inSet ?? ready, buffered: buffered, stale: stale, out: out);
 
 StateBroadcast held(List<MemberView> members, {String transport = 'held', double position = 0, int mediaId = 1}) =>
     StateBroadcast(
@@ -55,17 +56,8 @@ void main() {
   group('status', () {
     final me = mv('me', 'Me', ready: true);
 
-    test('problems first: removed, reconnecting, health', () {
-      var v = playerStatusFor(
-          health: const HealthStatus(HealthSeverity.error, 'kicked: spam'),
-          kickReason: 'spam',
-          reconnecting: true,
-          state: held([me]));
-      expect(v!.kind, StatusKind.kicked);
-      expect(v.text, 'You were removed: spam');
-      expect(v.tone, HealthSeverity.error);
-      expect(v.action, isNull);
-      v = playerStatusFor(health: const HealthStatus(HealthSeverity.warn, 'connection lost — retrying…'),
+    test('problems first: reconnecting, health', () {
+      var v = playerStatusFor(health: const HealthStatus(HealthSeverity.warn, 'connection lost — retrying…'),
           reconnecting: true);
       expect(v!.text, 'Reconnecting…');
       expect(v.action, StatusAction.cancel);
@@ -109,11 +101,14 @@ void main() {
       expect(v.self, isTrue);
       final w = playerStatusFor(
           health: ok,
-          state: held([me, mv('b', 'Bob'), mv('m', 'Mika'), mv('z', 'Zed', stale: true)]),
+          state: held([me, mv('b', 'Bob'), mv('m', 'Mika'), mv('z', 'Zed', stale: true), mv('o', 'Ola', out: true)]),
           self: me)!;
       expect(w.kind, StatusKind.waiting);
-      expect(w.text, 'Waiting for Bob and Mika');
+      expect(w.text, 'Waiting for Bob and Mika', reason: 'nobody waits for who sits out');
       expect(w.detail, '1/3 ready');
+      final outMe = mv('me', 'Me', out: true);
+      expect(playerStatusFor(health: ok, state: held([outMe, mv('b', 'Bob')]), self: outMe), isNull,
+          reason: 'sitting out: the join-back card speaks');
       expect(w.who.map((m) => m.name), ['Bob', 'Mika']);
     });
 

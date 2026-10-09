@@ -144,7 +144,7 @@ class ServerCrashed implements Exception {
 }
 
 /// A fresh per-hosting key: the app's own client sends it in hello to be
-/// recognised as the (unkickable) host.
+/// recognised as the host (`members[].host`).
 String newHostKey() {
   final r = Random.secure();
   return base64Url.encode([for (var i = 0; i < 24; i++) r.nextInt(256)]);
@@ -159,7 +159,8 @@ class SessionState {
   final status = signal(const HealthStatus(HealthSeverity.info, 'idle'));
   final SfxService sfx = SynthSfx(
     volume: () => AppSettings.instance.soundVolume.peek(),
-    enabled: (k) => !AppSettings.instance.soundsOff.peek().contains(k.name),
+    // A nudge is an explicit poke: it ignores its switch (not the volume).
+    enabled: (k) => k == SfxKind.nudge || !AppSettings.instance.soundsOff.peek().contains(k.name),
     presetFor: soundPresetFor,
   );
   late final SessionCoordinator coordinator = SessionCoordinator(sfx: sfx);
@@ -183,7 +184,6 @@ class SessionState {
 
   @visibleForTesting
   ServerIsolate? get hostedServer => _server;
-  void Function()? _stopKickWatch;
   // Bumped by host/join/cancelPending: a cancelled setup notices at its
   // next step and unwinds instead of connecting.
   int _op = 0;
@@ -309,7 +309,6 @@ class SessionState {
         if (crash != null && e is! ConnectCancelled) throw ServerCrashed(crash);
         rethrow;
       }
-      _watchKick();
       route.value = AppRoute.session;
     } finally {
       await _saveFormQuietly();
@@ -353,15 +352,6 @@ class SessionState {
     await stopServer();
   }
 
-  /// A kicked host must not keep serving.
-  void _watchKick() {
-    _stopKickWatch?.call();
-    _stopKickWatch = effect(() {
-      // Microtask: stopServer disposes this effect, not from inside it.
-      if (coordinator.kickReason.value != null) scheduleMicrotask(stopServer);
-    });
-  }
-
   /// Saved whatever the outcome: a failed join is exactly when the user
   /// wants the form back.
   Future<void> _saveFormQuietly() async {
@@ -387,8 +377,6 @@ class SessionState {
 
   Future<void> stopServer() async {
     coordinator.hostFile = null;
-    _stopKickWatch?.call();
-    _stopKickWatch = null;
     final server = _server;
     _server = null;
     await server?.stop();

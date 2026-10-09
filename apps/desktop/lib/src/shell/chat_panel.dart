@@ -232,9 +232,11 @@ class ActivityRow extends StatelessWidget {
       return (Icons.swap_horiz, scheme.primary, 'changed the media');
     case 'stale':
       return (Icons.cloud_off, Colors.orange, 'lost signal');
-    case 'kick':
-      final reason = f.reason.isEmpty ? '' : ' · ${f.reason}';
-      return (Icons.gavel, Colors.red, 'kicked ${f.target ?? ''}$reason');
+    case 'out':
+      final who = f.target;
+      return (Icons.bedtime, Colors.blueGrey, who == null || who.isEmpty ? 'is sitting out' : 'sat $who out');
+    case 'back':
+      return (Icons.login, Colors.green, 'joined back');
     default:
       final target = f.target == null || f.target!.isEmpty ? '' : ' ${f.target}';
       return (Icons.info_outline, Colors.grey, '${f.action}$target');

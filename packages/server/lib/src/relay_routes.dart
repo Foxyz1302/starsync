@@ -139,13 +139,6 @@ class ActiveRelay {
     if (ch != null) unawaited(_closeNotSource(ch));
   }
 
-  /// Source member gone for good (kicked): stop its channel.
-  void dropChannel() {
-    final ch = _channel;
-    _channel = null;
-    if (ch != null) unawaited(_closeNotSource(ch));
-  }
-
   void _attachChannel(RelicWebSocket ws, List<int> sizes) {
     final old = _channel;
     if (old != null && !identical(old, ws)) unawaited(old.tryClose());
@@ -290,8 +283,6 @@ void mountRelayRoutes(
     switch (session.gate(token)) {
       case MediaGate.ok:
         break;
-      case MediaGate.forbidden:
-        return _plain(403);
       default:
         return _plain(401);
     }

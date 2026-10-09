@@ -66,11 +66,9 @@ class ServerHub {
   bool isHostKey(String key) => hostKey.isNotEmpty && key == hostKey;
 
   /// The member a reconnecting client may take over with its old token:
-  /// still known and not kicked.
+  /// still known.
   EngineMember? resumable(String token) {
-    if (token.isEmpty) return null;
-    final viewer = session.tokens[token];
-    if (viewer == null || viewer.kicked) return null;
+    if (token.isEmpty || !session.tokens.containsKey(token)) return null;
     return engine.members[token];
   }
 
@@ -150,24 +148,25 @@ class ServerHub {
 
   void forgetSocket(String token) {
     engine.applyLeave(token);
-    final viewer = session.tokens[token];
-    if (viewer != null && !viewer.kicked) session.tokens.remove(token);
+    session.tokens.remove(token);
     sockets.remove(token);
     changed();
   }
 
-  Future<void> kickById(String targetId, String reason) async {
-    final member = engine.byId(targetId);
-    if (member == null) throw const AuthException('unknown kick target');
-    if (session.tokens[member.token]?.isHost ?? false) {
-      throw const AuthException("can't kick the host");
-    }
-    await session.kick(member.token, reason: reason);
+  /// Passes a nudge from [fromToken] to the member [targetId] only;
+  /// over the sender's rate cap, to itself or to nobody it is dropped.
+  void nudge(String fromToken, String targetId) {
+    final from = engine.members[fromToken];
+    final target = engine.byId(targetId);
+    final viewer = session.tokens[fromToken];
+    if (from == null || target == null || viewer == null || identical(from, target)) return;
+    if (!viewer.takeNudge(engine.now)) return;
+    sockets[target.token]?.trySendText(jsonEncode(NudgeNotice(from: from.id, name: from.name).toJson()));
   }
 }
 
 /// `GET /a/<sid>/<token>/<hash>`: a current member's picture by its
-/// content hash, for members (valid, unkicked token) only. The bytes for a
+/// content hash, for members (valid token) only. The bytes for a
 /// hash never change, so clients may cache them for good.
 void mountAvatarRoute(RelicApp app, ServerHub hub) =>
     _mountPictureRoute(app, hub, 'a', hub.engine.avatarFor);
@@ -188,8 +187,6 @@ void _mountPictureRoute(RelicApp app, ServerHub hub, String prefix, Uint8List? F
     switch (session.gate(token)) {
       case MediaGate.unauthorized:
         return status(401);
-      case MediaGate.forbidden:
-        return status(403);
       default:
         break;
     }
@@ -415,7 +412,7 @@ void mountSyncRoute(
                 return;
               }
               final name = intent.name == null ? null : cleanMemberName(intent.name!);
-              // Chat and kick name the sender by its token's name.
+              // Chat names the sender by its token's name.
               if (name != null) viewer.name = name;
               hub.engine.applyProfile(token, name: name, avatar: avatar);
               hub.changed();
@@ -441,22 +438,14 @@ void mountSyncRoute(
             case 'chat':
               final chat = ChatMessage.fromJson(decoded);
               hub.broadcastChat(viewer?.name ?? '?', chat.text);
-            case 'kick':
-              final kickReq = KickRequest.fromJson(decoded);
-              final member = hub.engine.byId(kickReq.target);
-              if (member == null) {
-                wsErr(ws, 'unknown kick target');
-                return;
-              }
-              if (session.tokens[member.token]?.isHost ?? false) {
-                wsErr(ws, "can't kick the host");
-                return;
-              }
-              final by = viewer?.name ?? '?';
-              unawaited(hub.session.kick(member.token,
-                  reason: kickReq.reason.isEmpty
-                      ? 'kicked by $by'
-                      : kickReq.reason));
+            case 'out':
+              if (token == null) return;
+              final intent = OutIntent.fromJson(decoded);
+              hub.engine.applyOut(token, intent.target, intent.out);
+              hub.changed();
+            case 'nudge':
+              if (token == null) return;
+              hub.nudge(token, NudgeIntent.fromJson(decoded).target);
           }
         } on ProtocolException catch (e) {
           wsErr(ws, 'bad message: ${e.message}');
@@ -544,13 +533,6 @@ void mountSyncRoute(
       hub.engine.members[token]?.host = isHost;
       final activeToken = token;
       hub.sockets[activeToken] = ws;
-      session.tokens[activeToken]!.onKick = (reason) async {
-        if (hub.relay?.sourceToken == activeToken) hub.relay!.dropChannel();
-        ws.trySendText(jsonEncode(KickedMessage(reason: reason).toJson()));
-        await Future.delayed(const Duration(milliseconds: 200));
-        await ws.tryClose();
-        hub.forgetSocketOf(activeToken, ws);
-      };
       final media = session.media;
       final relay = hub.relayAvailable;
       final relayed = hub.relay;

@@ -166,13 +166,13 @@ void main() {
         expect(find.descendant(of: card, matching: find.text(m.name)), findsOneWidget);
       }
       expect(find.descendant(of: card, matching: find.text('reconnecting…')), findsOneWidget);
-      // The kick menu asks before kicking.
+      // Someone else: nudge or sit them out (no kicking).
       await tester.tap(find.descendant(of: find.byKey(const ValueKey('member-b')), matching: find.byTooltip('More')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Kick'));
-      await tester.pumpAndSettle();
-      expect(find.text('Remove Bob?'), findsOneWidget);
-      await tester.tap(find.text('Cancel'));
+      expect(find.text('Nudge'), findsOneWidget);
+      expect(find.text('Sit out'), findsOneWidget);
+      expect(find.text('Kick'), findsNothing);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       await tester.tapAt(const Offset(40, 700));
       await tester.pumpAndSettle();

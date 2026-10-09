@@ -74,8 +74,10 @@ Friends join either way with Join in the strip at the top of the window.
    (stops blocking) and removed after 30 s. The app reconnects by itself and
    takes over your old place (same member, ready flag and video).
 
-There are no roles: anyone can seek, swap, force-ready others and kick
-anyone except the host.
+There are no roles: anyone can seek, swap, force-ready others, nudge
+anyone, and sit anyone out (the host too). Someone sitting out stays
+connected and in the chat, but their app loads nothing and nobody waits
+for them until they join back.
 
 ## Where video comes from
 

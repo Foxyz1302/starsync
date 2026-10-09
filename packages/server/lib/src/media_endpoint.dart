@@ -58,8 +58,6 @@ MediaResolution resolveMediaRequest({
       return MediaResolution(status: 410, headers: base(contentType), start: 0, end: 0);
     case MediaGate.unauthorized:
       return MediaResolution(status: 401, headers: base(contentType), start: 0, end: 0);
-    case MediaGate.forbidden:
-      return MediaResolution(status: 403, headers: base(contentType), start: 0, end: 0);
     case MediaGate.offline:
       return MediaResolution(
           status: 503,

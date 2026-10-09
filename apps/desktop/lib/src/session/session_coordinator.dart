@@ -13,6 +13,7 @@ import '../jellyfin/session_media.dart';
 import '../jellyfin/track_prefs.dart';
 import '../playback/media_marks.dart';
 import '../playback/playback_controller.dart';
+import '../platform/attention.dart';
 import '../playback/yt_dlp_app.dart';
 import '../schedule/anilist.dart';
 import '../screens/home/picked_media.dart';
@@ -102,7 +103,7 @@ class ToastItem {
   const ToastItem({required this.id, required this.text, required this.at, this.actor});
 }
 
-const _toastActions = {'join', 'leave', 'kick', 'swap', 'chat'};
+const _toastActions = {'join', 'leave', 'swap', 'chat'};
 
 /// "Unready when the video changes": a state with a newer [mediaId] than
 /// the last one this session saw ([lastMediaId], -1 before the first) while
@@ -180,7 +181,6 @@ class SessionCoordinator {
   final feedLog = signal<List<FeedMessage>>([]);
   final toasts = signal<List<ToastItem>>([]);
   final reconnecting = signal(false);
-  final kickReason = signal<String?>(null);
   final starving = signal<String?>(null);
 
   /// The current media's Jellyfin ref (null for links and files).
@@ -226,10 +226,16 @@ class SessionCoordinator {
     return null;
   });
 
+  /// Self sits out: the player has nothing open until [joinBack].
+  late final Computed<bool> selfOut = computed(() => selfMember.value?.out ?? false);
+
+  /// Asks the desktop to point at the window (a nudge); tests swap it.
+  Future<void> Function() requestAttention = requestWindowAttention;
+
   Timer? _ticker;
   StreamSubscription? _stateSub;
   StreamSubscription? _feedSub;
-  StreamSubscription? _kickSub;
+  StreamSubscription? _nudgeSub;
   StreamSubscription? _errSub;
   StreamSubscription? _statusSub;
 
@@ -242,6 +248,13 @@ class SessionCoordinator {
   // Set after a reconnect until the server echoes the restored ready, so
   // the fresh member's ready=false doesn't overwrite [_lastReady].
   bool _restoringReady = false;
+  // Last out flag the server reported for self; a reconnect that lands
+  // as a new member sits out again.
+  bool _lastOut = false;
+  // [joinBack] ran while playing: ready once the player has buffered
+  // (or after [_joinBackWait]), so the others do not pause for the load.
+  DateTime? _joinBackAt;
+  static const _joinBackWait = Duration(seconds: 15);
   // Last mediaId seen in a state; unlike [_mediaId] it survives a
   // reconnect, so only a real swap counts as a new video.
   int _seenMediaId = -1;
@@ -372,7 +385,6 @@ class SessionCoordinator {
     if (epoch != _epoch) throw const ConnectCancelled();
     _params = params;
     _manualClose = false;
-    kickReason.value = null;
     _wsHost = params.host;
     _wsPort = params.port;
     diff.reset();
@@ -380,6 +392,8 @@ class SessionCoordinator {
     _openUrl = null;
     _lastReady = false;
     _restoringReady = false;
+    _lastOut = false;
+    _joinBackAt = null;
     _seenMediaId = -1;
     _wasPlayAllowed = false;
     _everConnected = false;
@@ -443,12 +457,12 @@ class SessionCoordinator {
   void _subscribe() {
     _stateSub ??= sync.states.listen(_onState);
     _feedSub ??= sync.feeds.listen(_onFeed);
-    _kickSub ??= sync.kicked.listen(_onKicked);
+    _nudgeSub ??= sync.nudges.listen(_onNudge);
     _errSub ??= sync.errors.listen((msg) {
       health.value = HealthStatus(HealthSeverity.warn, msg);
     });
     _statusSub ??= sync.status.listen((s) {
-      if (s == SyncStatus.closed && !_manualClose && kickReason.peek() == null) {
+      if (s == SyncStatus.closed && !_manualClose) {
         health.value = const HealthStatus(
             HealthSeverity.warn, 'connection lost — retrying…');
         _soundLost();
@@ -613,6 +627,12 @@ class SessionCoordinator {
 
   Future<void> _applyState(StateBroadcast r) async {
     _trackSelfReady(r);
+    if (_lastOut) {
+      // A newer media than the one this member serves: that relay ended.
+      if (_relaySourceMediaId != -1 && _relaySourceMediaId != r.mediaId) _stopRelaySource();
+      await _unloadForOut();
+      return;
+    }
     _seekGate.observe(r, sync.memberId);
     final newEvent = r.eventId != _lastEventId;
     _lastEventId = r.eventId;
@@ -740,6 +760,7 @@ class SessionCoordinator {
     } else {
       _lastReady = self.ready;
     }
+    _lastOut = self.out;
     final last = _seenMediaId;
     _seenMediaId = r.mediaId;
     // A ready restored by a reconnect may not have echoed yet: unready
@@ -753,6 +774,27 @@ class SessionCoordinator {
       _restoringReady = false;
       sync.sendReady(false, source: 'auto');
     }
+  }
+
+  /// Sitting out: nothing open, nothing pulled. A relay this member
+  /// serves goes on (it does not use the player). The next state after
+  /// [joinBack] opens the media as new.
+  Future<void> _unloadForOut() async {
+    _wasPlayAllowed = false;
+    _awaitLiveFor = -1;
+    starving.value = null;
+    if (_mediaId == -1 && _openUrl == null) return;
+    _mediaId = -1;
+    _openUrl = null;
+    _openHeaders = null;
+    _seekGate.reset();
+    _clearPendingSeek();
+    diff.reset();
+    _leaveJellyfinItem();
+    if (!_playerReady) return;
+    try {
+      await playback.stop();
+    } catch (_) {}
   }
 
   void _updateStarving(StateBroadcast r, double bufferedAhead) {
@@ -773,14 +815,15 @@ class SessionCoordinator {
     }
     final self = selfMember.peek();
     if (self != null && self.ready) {
-      final waiters = r.members
+      final present = r.members.where((m) => !m.out).toList();
+      final waiters = present
           .where((m) => m.id != self.id && !m.stale && !(m.inSet && m.ready))
           .map((m) => m.name)
           .toList();
       if (waiters.isNotEmpty) {
-        final readyCount = r.members.where((m) => m.ready).length;
+        final readyCount = present.where((m) => m.ready).length;
         starving.value =
-            'waiting for ${waiters.join(', ')} ($readyCount/${r.members.length} ready)';
+            'waiting for ${waiters.join(', ')} ($readyCount/${present.length} ready)';
         return;
       }
     }
@@ -809,9 +852,15 @@ class SessionCoordinator {
         ToastItem(id: _toastId, text: text, at: DateTime.now().toUtc(), actor: f.actor)
       ];
     }
+    final selfName = selfMember.peek()?.name;
+    // Sat out by someone else: say who (the feed names members by name).
+    if (f.action == 'out' && f.target != null && f.target == selfName && f.actor != selfName) {
+      _pushToast('${f.actor} sat you out', actor: f.actor);
+      unawaited(sfx.play(const SfxCue(SfxKind.kick)));
+    }
     final kind = sfxForFeedAction(f.action);
     // Your own message needs no sound.
-    final own = f.action == 'chat' && f.actor == selfMember.peek()?.name;
+    final own = f.action == 'chat' && f.actor == selfName;
     if (kind != null && !own) {
       var readyIndex = 0;
       if (f.action == 'ready') {
@@ -827,8 +876,6 @@ class SessionCoordinator {
         return '${f.actor} joined';
       case 'leave':
         return '${f.actor} left';
-      case 'kick':
-        return '${f.actor} kicked ${f.target ?? ''}';
       case 'swap':
         return '${f.actor} changed media';
       default:
@@ -836,26 +883,13 @@ class SessionCoordinator {
     }
   }
 
-  Future<void> _onKicked(String reason) async {
-    kickReason.value = reason;
-    _manualClose = true;
-    _epoch++;
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
-    reconnecting.value = false;
-    _ticker?.cancel();
-    _ticker = null;
-    // Stop, not pause: a paused player keeps filling its cache from the
-    // host's media URL.
-    _openUrl = null;
-    await _stopJellyfin();
-    try {
-      await playback.stop();
-    } catch (_) {}
-    await sync.disconnect();
-    health.value = HealthStatus(
-        HealthSeverity.error,
-        reason.isEmpty ? 'kicked from server' : 'kicked: $reason');
+  /// Someone poked this member: sound (even when its switch is off; the
+  /// volume still applies), a toast, and the window asks for attention.
+  void _onNudge(NudgeNotice n) {
+    final name = n.name.isEmpty ? 'Someone' : n.name;
+    _pushToast('$name nudged you', actor: n.name.isEmpty ? null : n.name);
+    unawaited(sfx.play(const SfxCue(SfxKind.nudge)));
+    unawaited(requestAttention());
   }
 
   void _startTicker() {
@@ -871,20 +905,22 @@ class SessionCoordinator {
     if (sync.token.isNotEmpty) sync.sendPing();
     if (sync.token.isNotEmpty && r != null && _playerReady) {
       // Duration only once the open media is the server's current one.
-      final known = !_opening && _openUrl != null && _mediaId == r.mediaId;
+      // Sitting out: still a report (it keeps this member fresh), empty.
+      final known = !_lastOut && !_opening && _openUrl != null && _mediaId == r.mediaId;
       sync.sendReport(
-        position: playback.positionSecs,
-        buffered: playback.bufferedSecsAhead,
+        position: _lastOut ? 0 : playback.positionSecs,
+        buffered: _lastOut ? 0 : playback.bufferedSecsAhead,
         eventId: r.eventId,
         duration: known ? playback.durationSecs : 0,
         mediaId: known ? r.mediaId : 0,
         jf: _jfAccessFor(r),
       );
-      _checkSeekLanded(r);
-      unawaited(_tickJellyfin(r));
+      if (!_lastOut) {
+        _checkSeekLanded(r);
+        unawaited(_tickJellyfin(r));
+      }
     }
     if (!_manualClose &&
-        kickReason.peek() == null &&
         _lastStateAt != null &&
         now.difference(_lastStateAt!).inSeconds >= 5) {
       if (serverState.peek() != null) {
@@ -905,6 +941,8 @@ class SessionCoordinator {
     // No warning when there is nothing to lose (unready), and none while
     // PLAYING: the ready flag gates nothing then, and watching counts as
     // activity so a pause after a long watch starts a fresh idle clock.
+    if (r != null) _readyAfterJoinBack(r, now);
+    final sitOutWhenIdle = AppSettings.instance.idleSitsOut.peek();
     final event = _idle.tick(now,
         playing: serverState.peek()?.transport == 'playing',
         selfReady: selfMember.peek()?.ready ?? false);
@@ -915,15 +953,43 @@ class SessionCoordinator {
           ...toasts.peek(),
           ToastItem(
               id: _toastId,
-              text: 'idle — auto-unready in 2 min unless you press Space',
+              text: sitOutWhenIdle
+                  ? 'idle — sitting out in 2 min unless you press Space'
+                  : 'idle — auto-unready in 2 min unless you press Space',
               at: now)
         ];
         unawaited(sfx.play(const SfxCue(SfxKind.warn)));
       case IdleEvent.unready:
         _lastReady = false;
-        sync.sendReady(false, source: 'auto');
+        if (sitOutWhenIdle) {
+          sitOut();
+        } else {
+          sync.sendReady(false, source: 'auto');
+        }
       case IdleEvent.none:
         break;
+    }
+  }
+
+  /// After [joinBack] while playing: ready once the player holds what the
+  /// gate needs, or after [_joinBackWait] (then the gate waits for it).
+  void _readyAfterJoinBack(StateBroadcast r, DateTime now) {
+    final at = _joinBackAt;
+    if (at == null) return;
+    final self = selfMember.peek();
+    if (self == null || self.out) {
+      if (now.difference(at) > _joinBackWait) _joinBackAt = null;
+      return;
+    }
+    final loaded = _playerReady && !_opening && _openUrl != null && _mediaId == r.mediaId;
+    if (self.ready ||
+        (loaded && playback.bufferedSecsAhead >= r.bufferNeed) ||
+        now.difference(at) > _joinBackWait) {
+      _joinBackAt = null;
+      if (!self.ready) {
+        _lastReady = true;
+        sync.sendReady(true, source: 'manual');
+      }
     }
   }
 
@@ -993,6 +1059,10 @@ class SessionCoordinator {
 
   void toggleReady() {
     final self = selfMember.peek();
+    if (self?.out ?? false) {
+      joinBack();
+      return;
+    }
     // Ready but out of the set (dropped out while stale) gates like
     // unready, so Space puts self back in instead of unreadying.
     final next = !((self?.ready ?? false) && (self?.inSet ?? false));
@@ -1080,12 +1150,43 @@ class SessionCoordinator {
     sync.sendProfile(name: name, avatar: avatar);
   }
 
-  void kick(String memberId, {String reason = ''}) {
+  /// Sits [memberId] out (anyone, the host included), self when null.
+  void sitOut([String? memberId]) {
+    final target = memberId ?? sync.memberId;
+    if (target.isEmpty) return;
     markInput();
-    sync.sendKick(memberId, reason: reason);
+    if (target == sync.memberId) _joinBackAt = null;
+    sync.sendOut(target, true);
+  }
+
+  /// Back from sitting out: the media opens at the server position and
+  /// this member readies. Held: at once (the gate waits for the buffer);
+  /// playing: once buffered, so the others do not pause for the load.
+  void joinBack() {
+    final self = selfMember.peek();
+    if (self == null || !self.out) return;
+    markInput();
+    sync.sendOut(self.id, false);
+    if (serverState.peek()?.transport == 'playing') {
+      _joinBackAt = DateTime.now().toUtc();
+    } else {
+      _joinBackAt = null;
+      _lastReady = true;
+      sync.sendReady(true, source: 'manual');
+    }
+  }
+
+  /// Pokes [memberId]: only they hear it (sitting out or not).
+  void nudgeMember(String memberId) {
+    if (memberId.isEmpty || memberId == sync.memberId) return;
+    markInput();
+    sync.sendNudge(memberId);
   }
 
   void _swap(HelloMedia media) {
+    // Putting something up means watching it: back first.
+    final self = selfMember.peek();
+    if (self != null && self.out) sync.sendOut(self.id, false);
     _pendingArt = (media: media, after: serverState.peek()?.mediaId ?? 0);
     sync.sendSwap(media);
   }
@@ -1266,11 +1367,11 @@ class SessionCoordinator {
   /// results), shown like the session's own.
   void showToast(String text) => _pushToast(text);
 
-  void _pushToast(String text) {
+  void _pushToast(String text, {String? actor}) {
     _toastId++;
     toasts.value = [
       ...toasts.peek(),
-      ToastItem(id: _toastId, text: text, at: DateTime.now().toUtc())
+      ToastItem(id: _toastId, text: text, at: DateTime.now().toUtc(), actor: actor)
     ];
   }
 
@@ -1304,7 +1405,7 @@ class SessionCoordinator {
     if (reporter != null && snap != null) unawaited(reporter.stop(snap));
   }
 
-  /// Leave / kick / window close: Stopped, bounded so leaving never hangs.
+  /// Leave / window close: Stopped, bounded so leaving never hangs.
   Future<void> _stopJellyfin() async {
     final reporter = _reporter;
     final snap = _snapNow();
@@ -1592,7 +1693,7 @@ class SessionCoordinator {
   }
 
   void _scheduleReconnect({bool manual = false}) {
-    if (_manualClose || kickReason.peek() != null || _params == null) return;
+    if (_manualClose || _params == null) return;
     if (!manual && !_everConnected) return;
     if (reconnecting.peek()) return;
     reconnecting.value = true;
@@ -1607,14 +1708,15 @@ class SessionCoordinator {
   /// would kill the newer connection and leave a ghost member).
   Future<void> _reconnect(int epoch) async {
     _reconnectTimer = null;
-    bool stale() => epoch != _epoch || kickReason.peek() != null;
+    bool stale() => epoch != _epoch;
     final params = _params;
     if (stale() || params == null) return;
     if (_manualClose) {
       reconnecting.value = false;
       return;
     }
-    var wantReady = _lastReady;
+    final wasOut = _lastOut;
+    var wantReady = _lastReady && !wasOut;
     final seenBefore = _seenMediaId;
     try {
       health.value = const HealthStatus(
@@ -1655,6 +1757,10 @@ class SessionCoordinator {
         wantReady = false;
         _lastReady = false;
       }
+      // A new member (the server dropped the old one) sits out again; a
+      // resumed one still does.
+      final selfNow = sync.lastState?.members.where((m) => m.id == sync.memberId).firstOrNull;
+      if (wasOut && !(selfNow?.out ?? false)) sync.sendOut(sync.memberId, true);
       if (wantReady) {
         _lastReady = true;
         _restoringReady = true;
@@ -1700,7 +1806,7 @@ class SessionCoordinator {
   }
 
   void retry() {
-    if (kickReason.peek() != null || _params == null) return;
+    if (_params == null) return;
     _invalidateAttempts();
     _manualClose = false;
     reconnecting.value = false;
@@ -1761,7 +1867,7 @@ class SessionCoordinator {
     }
     await _stateSub?.cancel();
     await _feedSub?.cancel();
-    await _kickSub?.cancel();
+    await _nudgeSub?.cancel();
     await _errSub?.cancel();
     await _statusSub?.cancel();
     _aniList?.close();

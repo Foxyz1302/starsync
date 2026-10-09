@@ -53,8 +53,6 @@ void mountJellyfinRelayRoute(
     switch (session.gate(token)) {
       case MediaGate.ok:
         break;
-      case MediaGate.forbidden:
-        return _plain(403);
       default:
         return _plain(401);
     }

@@ -288,31 +288,46 @@ class WelcomeMessage {
   }
 }
 
-class KickedMessage {
-  final String reason;
-  const KickedMessage({this.reason = ''});
+/// Sits [target] (a member id) out, or with [out] false brings oneself
+/// back. Out: connected, but not in the ready gate and not playing.
+class OutIntent {
+  final String target;
+  final bool out;
+  const OutIntent({required this.target, required this.out});
 
-  Map<String, Object?> toJson() => {'t': 'kicked', 'reason': reason};
+  Map<String, Object?> toJson() => {'t': 'out', 'target': target, 'out': out};
 
-  factory KickedMessage.fromJson(Map<String, Object?> json) {
-    if (json['t'] != 'kicked') throw const ProtocolException('not a kicked message');
-    return KickedMessage(reason: (json['reason'] as String?) ?? '');
+  factory OutIntent.fromJson(Map<String, Object?> json) {
+    if (json['t'] != 'out') throw const ProtocolException('not an out intent');
+    return OutIntent(target: (json['target'] as String?) ?? '', out: (json['out'] as bool?) ?? true);
   }
 }
 
-class KickRequest {
+/// Client to server: poke [target] (a member id). The server passes it on
+/// to that member only, as a [NudgeNotice].
+class NudgeIntent {
   final String target;
-  final String reason;
-  const KickRequest({required this.target, this.reason = ''});
+  const NudgeIntent({required this.target});
 
-  Map<String, Object?> toJson() => {'t': 'kick', 'target': target, 'reason': reason};
+  Map<String, Object?> toJson() => {'t': 'nudge', 'target': target};
 
-  factory KickRequest.fromJson(Map<String, Object?> json) {
-    if (json['t'] != 'kick') throw const ProtocolException('not a kick request');
-    return KickRequest(
-      target: (json['target'] as String?) ?? '',
-      reason: (json['reason'] as String?) ?? '',
-    );
+  factory NudgeIntent.fromJson(Map<String, Object?> json) {
+    if (json['t'] != 'nudge') throw const ProtocolException('not a nudge intent');
+    return NudgeIntent(target: (json['target'] as String?) ?? '');
+  }
+}
+
+/// Server to the nudged member: who poked it ([from] member id, [name]).
+class NudgeNotice {
+  final String from;
+  final String name;
+  const NudgeNotice({required this.from, required this.name});
+
+  Map<String, Object?> toJson() => {'t': 'nudge', 'from': from, 'name': name};
+
+  factory NudgeNotice.fromJson(Map<String, Object?> json) {
+    if (json['t'] != 'nudge') throw const ProtocolException('not a nudge notice');
+    return NudgeNotice(from: (json['from'] as String?) ?? '', name: (json['name'] as String?) ?? '');
   }
 }
 
@@ -536,6 +551,8 @@ class MemberView {
   final Map<String, bool> jf;
   /// The hosting app's own member (sent the server's host key).
   final bool host;
+  /// Sitting out: connected, outside the ready gate, not playing.
+  final bool out;
   const MemberView({
     required this.id,
     required this.name,
@@ -546,6 +563,7 @@ class MemberView {
     required this.stale,
     this.jf = const {},
     this.host = false,
+    this.out = false,
   });
 
   Map<String, Object?> toJson() => {
@@ -558,6 +576,7 @@ class MemberView {
         'stale': stale,
         if (jf.isNotEmpty) 'jf': jf,
         if (host) 'host': true,
+        if (out) 'out': true,
       };
 
   factory MemberView.fromJson(Map<String, Object?> json) => MemberView(
@@ -570,6 +589,7 @@ class MemberView {
         stale: (json['stale'] as bool?) ?? false,
         jf: jfAccessFromJson(json['jf']) ?? const {},
         host: json['host'] == true,
+        out: json['out'] == true,
       );
 }
 

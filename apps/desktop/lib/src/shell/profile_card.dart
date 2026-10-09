@@ -81,7 +81,8 @@ class _ProfileCardState extends State<ProfileCard> {
           final hosting = online && coord.hostFile != null;
           final color = _p.color.value;
           final png = _p.picture.value;
-          final me = selfAvatarInfo(ready: self?.ready ?? false, host: hosting);
+          final out = self?.out ?? false;
+          final me = selfAvatarInfo(ready: self?.ready ?? false, host: hosting, out: out);
           return Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -166,7 +167,8 @@ class _ProfileCardState extends State<ProfileCard> {
                               Pill(online ? 'in a server' : 'offline',
                                   online ? Colors.greenAccent : Colors.grey),
                               if (online)
-                                Pill((self?.ready ?? false) ? 'ready' : 'not ready', Colors.lightBlueAccent),
+                                Pill(out ? 'sitting out' : (self?.ready ?? false) ? 'ready' : 'not ready',
+                                    Colors.lightBlueAccent),
                             ],
                           ),
                         ],
@@ -237,6 +239,16 @@ class _ProfileCardState extends State<ProfileCard> {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 child: Column(children: [
+                  if (self != null)
+                    _link(
+                      out ? Icons.login_rounded : Icons.event_seat_outlined,
+                      out ? 'Join back' : 'Sit out',
+                      trailing: Text(out ? 'Space' : 'stay in the server', style: small),
+                      onTap: () {
+                        out ? coord.joinBack() : coord.sitOut();
+                        Navigator.of(context).maybePop();
+                      },
+                    ),
                   _link(
                     Icons.extension_outlined,
                     'Jellyfin & integrations',

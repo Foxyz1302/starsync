@@ -34,11 +34,13 @@ ShellToast shellToastFor(ToastItem t, AvatarInfo Function(String name) avatar) {
       ? Icons.login
       : rest.startsWith('left')
           ? Icons.logout
-          : rest.startsWith('kicked')
-              ? Icons.gavel
-              : rest.startsWith('changed')
-                  ? Icons.swap_horiz
-                  : Icons.info_outline;
+          : rest.startsWith('sat you out')
+              ? Icons.bedtime
+              : rest.startsWith('nudged')
+                  ? Icons.notifications_active_outlined
+                  : rest.startsWith('changed')
+                      ? Icons.swap_horiz
+                      : Icons.info_outline;
   return ShellToast(id: t.id, who: avatar(n), text: rest, icon: icon);
 }
 

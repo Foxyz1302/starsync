@@ -48,17 +48,17 @@ profile: name, picture with a crop editor, colour, and links to the
 settings), the Library / Schedule / Settings tabs, and the party. Offline
 the party side has Join and Host; in a server it shows everyone's avatar
 with a ring for their state (green ready, amber buffering, grey not ready,
-dimmed reconnecting; a crown on whoever hosts, a tower on whoever
-passes the video on). Click the avatars for the member list (force ready,
-kick, "Copy invite address"; when you host it lists this computer's
+dimmed reconnecting, dimmed with a moon sitting out; a crown on whoever
+hosts, a tower on whoever passes the video on). Click the avatars for the
+member list (force ready, Nudge, Sit out, "Copy invite address"; when you host it lists this computer's
 network addresses with the port, and friends outside your network need
 that port forwarded or a server they can all reach, like a VPS). Beside them the server and "ready n/m", the chat button with unread
 count, and Leave. Empty strip space drags the window.
 
 The player fills the window under the strip. Pick a tab and it shrinks to
 a mini player in a corner: drag it anywhere and it snaps to the nearest
-corner; double-click or ⤢ makes it big again, × stops watching (you stay in
-the server, muted) and the strip's screen button brings it back. F or
+corner; double-click or ⤢ makes it big again, × sits you out (below) and
+× again closes it; the strip's screen button brings it back. F or
 double-click on the picture goes fullscreen (the strip hides, the party
 shows in a corner while paused, the window buttons sit in the player's top
 bar while its controls are up), Esc leaves it. The controls show the
@@ -76,11 +76,23 @@ hidden, as a small chip top right.
 Your name and picture change for everyone in the server right away; the
 colour is yours only.
 
+**Sitting out.** Step away without leaving: Sit out (your profile, your
+row in the member list, or × on the mini player) unloads the video on your
+end, and nobody waits for you any more; you stay in chat. Anyone can sit
+anyone out, the host too ("Alice sat you out" tells you who). The player
+then shows the cover, title and where the others are; Join back (or Space)
+loads the video there and readies you. Settings → Party & network → "When idle,
+sit out instead of just unready" does it after 10 idle minutes.
+
+**Nudge.** Nudge in the member list pokes someone, sitting out or not:
+only they hear it (a sound, a pop-up, and the taskbar entry asks for
+attention when the window is in the background).
+
 ## Host from the app
 
 Host in the strip: set a port and an optional password (blank = anyone can
 join), then Host. The app starts a server inside itself and joins it; you
-are the host and nobody can kick you. Nothing is up yet: pick what to
+are the host (the crown). Nothing is up yet: pick what to
 watch in the Library tab (below) and put it up. Leaving or
 closing the app stops the server. Friends need to reach your machine: open
 the TCP port on your router (or use a LAN or VPN address). Friends open
@@ -142,7 +154,7 @@ then everyone (you included) uses Join.
 | `--config` | none | YAML or JSON file with the same settings (`port`, `secret`, `name`, `mediaPath`, `advertiseHost`, `ytDlp`, `ytDlpDir`); replaces the flags |
 
 It prints `READY port=... name=...` once listening and stops cleanly on
-Ctrl+C or SIGTERM. A dedicated server has no host: anyone can kick anyone.
+Ctrl+C or SIGTERM. A dedicated server has no host.
 To run it as a service, unpack the tarball to `/opt/watch-together` and use
 [deploy/watch-together.service](deploy/watch-together.service) (copy it to
 `/etc/systemd/system/`, edit the flags, `systemctl enable --now watch-together`).

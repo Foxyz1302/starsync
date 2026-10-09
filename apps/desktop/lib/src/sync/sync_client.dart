@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:sync_relay_core/core.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-enum SyncStatus { idle, connecting, open, kicked, closed, error }
+enum SyncStatus { idle, connecting, open, closed, error }
 
 class SyncClient {
   /// Local clock; injectable so tests can run a client whose clock is off.
@@ -23,13 +23,14 @@ class SyncClient {
   StreamSubscription? _sub;
   final StreamController<StateBroadcast> _states = StreamController.broadcast();
   final StreamController<FeedMessage> _feeds = StreamController.broadcast();
-  final StreamController<String> _kicked = StreamController.broadcast();
+  final StreamController<NudgeNotice> _nudges = StreamController.broadcast();
   final StreamController<String> _errors = StreamController.broadcast();
   final StreamController<SyncStatus> _status = StreamController.broadcast();
 
   Stream<StateBroadcast> get states => _states.stream;
   Stream<FeedMessage> get feeds => _feeds.stream;
-  Stream<String> get kicked => _kicked.stream;
+  /// Someone poked this member (`nudge`).
+  Stream<NudgeNotice> get nudges => _nudges.stream;
   Stream<String> get errors => _errors.stream;
   Stream<SyncStatus> get status => _status.stream;
 
@@ -153,14 +154,10 @@ class SyncClient {
           // one toast, one sfx.
           if (f.action != 'chat') _feeds.add(f);
         } catch (_) {}
-      case 'kicked':
+      case 'nudge':
         try {
-          final msg = KickedMessage.fromJson(decoded);
-          _kicked.add(msg.reason);
-          _status.add(SyncStatus.kicked);
-        } catch (_) {
-          _kicked.add('');
-        }
+          _nudges.add(NudgeNotice.fromJson(decoded));
+        } catch (_) {}
       case 'pong':
         try {
           final pong = PongMessage.fromJson(decoded);
@@ -255,8 +252,14 @@ class SyncClient {
     _send(ArtMessage(mediaId: mediaId, poster: poster, banner: banner).toJson());
   }
 
-  void sendKick(String target, {String reason = ''}) {
-    _send(KickRequest(target: target, reason: reason).toJson());
+  /// Sits the member [target] out, or with [out] false brings this
+  /// member back (only oneself can come back).
+  void sendOut(String target, bool out) {
+    _send(OutIntent(target: target, out: out).toJson());
+  }
+
+  void sendNudge(String target) {
+    _send(NudgeIntent(target: target).toJson());
   }
 
   Future<void> disconnect() async {
@@ -283,7 +286,7 @@ class SyncClient {
     await disconnect();
     await _states.close();
     await _feeds.close();
-    await _kicked.close();
+    await _nudges.close();
     await _errors.close();
     await _status.close();
   }

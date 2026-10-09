@@ -36,6 +36,55 @@ void main() {
     });
   });
 
+  group('sitting out', () {
+    test('an out member never blocks, is never ready, its buffer is ignored', () {
+      join('a', 'alice');
+      final bob = join('b', 'bob');
+      engine.applyReady('a', true);
+      buffer('a', 4.0);
+      expect(engine.transport, Transport.held, reason: 'bob is in the set');
+      engine.applyOut('a', bob, true);
+      final b = engine.members['b']!;
+      expect([b.out, b.inSet, b.ready], [true, false, false]);
+      expect(engine.transport, Transport.playing);
+      final feed = engine.feed.drain().lastWhere((f) => f.action == 'out');
+      expect([feed.actor, feed.target], ['alice', 'bob']);
+      expect(engine.broadcast().members.last.toJson()['out'], isTrue);
+      expect(engine.broadcast().members.first.toJson().containsKey('out'), isFalse);
+      // Ready, force, swap and reports leave it out.
+      engine.applyReady('b', true);
+      engine.applyForce('a', 'all', true);
+      buffer('b', 9);
+      engine.applySwap('a', const HelloMedia(name: 'n', size: 1, duration: 0, url: 'u'));
+      expect([b.ready, b.inSet, b.buffered], [false, false, 0]);
+      expect(engine.members['a']!.inSet, isTrue);
+    });
+
+    test('only oneself comes back: in the set unready, ready follows', () {
+      final alice = join('a', 'alice');
+      final bob = join('b', 'bob');
+      engine.applyOut('b', bob, true);
+      expect(engine.feed.drain().last.target, isNull, reason: 'sat out by itself');
+      engine.applyReady('a', true);
+      buffer('a', 4.0);
+      expect(engine.transport, Transport.playing);
+      engine.applyOut('a', bob, false);
+      expect(engine.members['b']!.out, isTrue, reason: 'others cannot bring bob back');
+      engine.applyOut('b', bob, false);
+      final b = engine.members['b']!;
+      expect([b.out, b.inSet, b.ready], [false, false, false], reason: 'playing: in from its ready');
+      expect(engine.transport, Transport.playing);
+      engine.applyReady('b', true);
+      expect(engine.transport, Transport.held, reason: 'now the gate waits for bob');
+      buffer('b', 4.0);
+      expect(engine.transport, Transport.playing);
+      // The host can be sat out like anyone.
+      engine.members['a']!.host = true;
+      engine.applyOut('b', alice, true);
+      expect(engine.members['a']!.out, isTrue);
+    });
+  });
+
   group('membership + gate', () {
     test('join while held lands in the set, playback stays held', () {
       join('a', 'alice');

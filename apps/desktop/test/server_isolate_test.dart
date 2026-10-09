@@ -110,7 +110,7 @@ void main() {
     }
   });
 
-  test('host path: isolate server, host unkickable, crash leaves the session',
+  test('host path: isolate server, host sat out and nudging, crash leaves the session',
       timeout: const Timeout(Duration(minutes: 2)), () async {
     MediaKit.ensureInitialized();
     Hive.init(
@@ -131,16 +131,16 @@ void main() {
       final hostId = ((state['members'] as List)
           .cast<Map>()
           .firstWhere((m) => m['name'] == 'host'))['id'];
-      friend.ws.add(jsonEncode(KickRequest(target: '$hostId').toJson()));
-      final err = await friend.next('err');
-      expect(err['message'], "can't kick the host");
+      // Anyone may sit the host out; its player unloads, the server serves on.
+      friend.ws.add(jsonEncode(OutIntent(target: '$hostId', out: true).toJson()));
+      await _poll(() => session.coordinator.selfOut.peek(), 'host sat out');
 
-      // The host can kick the friend (plain loopback peers are not hosts).
+      // The host nudges the friend: only the friend hears it.
       final friendId = ((state['members'] as List)
           .cast<Map>()
           .firstWhere((m) => m['name'] == 'friend'))['id'];
-      session.coordinator.kick('$friendId');
-      await friend.next('kicked');
+      session.coordinator.nudgeMember('$friendId');
+      expect((await friend.next('nudge'))['name'], 'host');
 
       session.hostedServer!.isolate.kill(priority: Isolate.immediate);
       await _poll(() => session.route.peek() == AppRoute.home, 'leave after crash');

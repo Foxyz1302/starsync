@@ -21,22 +21,6 @@ void main() {
       expect(s.gate(t), MediaGate.ok);
     });
 
-    test('kick unknown throws, kick known forbids + drops', () async {
-      final s = Session(id: 'default', secret: 'shh');
-      expect(() => s.kick('nope'), throwsA(isA<AuthException>()));
-      final t = s.issueToken('mallory', '');
-      var dropped = false;
-      String? gotReason;
-      s.tokens[t]!.onKick = (reason) async {
-        dropped = true;
-        gotReason = reason;
-      };
-      await s.kick(t, reason: 'idle');
-      expect(s.gate(t), MediaGate.forbidden);
-      expect(dropped, isTrue);
-      expect(gotReason, 'idle');
-    });
-
     test('oversize avatar rejected', () {
       final s = Session(id: 'default', secret: 'shh');
       final big = 'x' * (RelayConstants.maxAvatarBytes + 1);
@@ -120,18 +104,6 @@ void main() {
 
     test('welcome rejects wrong type', () {
       expect(() => WelcomeMessage.fromJson({'t': 'hello'}), throwsA(isA<ProtocolException>()));
-    });
-
-    test('kicked + kick request round-trip', () {
-      const k = KickedMessage(reason: 'idle');
-      final back = KickedMessage.fromJson(Map<String, Object?>.from(k.toJson()));
-      expect(back.reason, 'idle');
-      const r = KickRequest(target: 'abc', reason: 'afk?');
-      final backR = KickRequest.fromJson(Map<String, Object?>.from(r.toJson()));
-      expect(backR.target, 'abc');
-      expect(backR.reason, 'afk?');
-      expect(() => KickedMessage.fromJson({'t': 'err'}), throwsA(isA<ProtocolException>()));
-      expect(() => KickRequest.fromJson({'t': 'err'}), throwsA(isA<ProtocolException>()));
     });
 
     test('lastSeen touch + stale helper', () {

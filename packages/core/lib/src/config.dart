@@ -101,7 +101,7 @@ class AppConfig {
   /// client dialled.
   final String advertiseHost;
   /// Secret the hosting app's own client sends in hello to be marked host
-  /// (unkickable). Empty means no member is the host (dedicated server).
+  /// (`members[].host`). Empty means no member is the host (dedicated server).
   final String hostKey;
   /// Optional login for relaying Jellyfin media to guests; null = no relay.
   final JellyfinCredential? jellyfin;

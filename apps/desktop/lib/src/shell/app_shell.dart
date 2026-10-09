@@ -112,9 +112,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   /// The next media to come up opens full (just joined, or put up here).
   bool _autoFull = false;
   int _lastMediaId = -1;
-  double? _mutedVolume;
   bool _dialogOpen = false;
-  String? _lastKickShown;
   final _stops = <void Function()>[];
   // Rebuild the shell on these flips, not on every state broadcast.
   final _online = computed(() => SessionState.instance.route.value == AppRoute.session);
@@ -140,7 +138,6 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     // Reads linked servers and checks their tokens in the background.
     _jellyfin.ensureLoaded();
     if (widget.autoUpdateCheck) _autoCheck();
-    _flow.onKicked = _showKicked;
     HardwareKeyboard.instance.addHandler(_onKey);
     final session = SessionState.instance;
     final coord = session.coordinator;
@@ -181,17 +178,17 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
             if (!_chatOpen) setState(() => _unread += chats);
           }));
     }));
-    // Kicked: back offline, and say so.
+    // Back from sitting out with the player closed: show it (the media
+    // plays again).
+    var wasOut = false;
     _stops.add(effect(() {
-      final kick = coord.kickReason.value;
-      if (kick == null) {
-        _lastKickShown = null;
-        return;
+      final out = coord.selfOut.value;
+      if (wasOut && !out && session.route.peek() == AppRoute.session) {
+        _later(() {
+          if (_mode == PlayerMode.none) _show(PlayerMode.mini);
+        });
       }
-      untracked(() {
-        if (session.route.value == AppRoute.session) session.route.value = AppRoute.home;
-      });
-      if (kick.isNotEmpty) _later(() => _showKicked(kick));
+      wasOut = out;
     }));
     // The hosted server died mid-session (SessionState leaves): say so.
     _stops.add(effect(() {
@@ -242,7 +239,6 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   }
 
   void _wentOffline() {
-    _mutedVolume = null;
     if (_fullscreen) _toggleFullscreen();
     setState(() {
       _chatOpen = false;
@@ -258,7 +254,6 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   Future<void> _show(PlayerMode m) async {
     if (m == _mode) return;
     final seq = ++_modeSeq;
-    if (m != PlayerMode.none) _unmute();
     setState(() {
       _from = _shown;
       _mode = m;
@@ -282,27 +277,15 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     _show(PlayerMode.mini);
   }
 
-  /// Mini's ×: stop watching but stay in the server (muted until shown).
+  /// The player's ×: sit out (stay in the server, nothing loaded; the
+  /// player shows the join-back card). Once out, × closes the player.
   void _closePlayer() {
-    final playback = SessionState.instance.coordinator.playback;
-    if (playback.alive.peek()) {
-      try {
-        _mutedVolume = playback.player.state.volume;
-        playback.player.setVolume(0);
-      } catch (_) {}
+    final coord = SessionState.instance.coordinator;
+    if (coord.selfOut.peek()) {
+      _show(PlayerMode.none);
+    } else {
+      coord.sitOut();
     }
-    _show(PlayerMode.none);
-  }
-
-  void _unmute() {
-    final v = _mutedVolume;
-    if (v == null) return;
-    _mutedVolume = null;
-    final playback = SessionState.instance.coordinator.playback;
-    if (!playback.alive.peek()) return;
-    try {
-      playback.player.setVolume(v);
-    } catch (_) {}
   }
 
   Future<void> _setWindowFullscreen(bool on) async {
@@ -518,12 +501,6 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       ),
     );
     if (ok == true) await SessionState.instance.leave();
-  }
-
-  Future<void> _showKicked(String reason) async {
-    if (reason == _lastKickShown) return;
-    _lastKickShown = reason;
-    await _alert('You were removed', reason.isEmpty ? 'The host removed you from the server.' : reason);
   }
 
   Future<void> _alert(String title, String text) async {

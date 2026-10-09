@@ -43,7 +43,8 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
  "duration":1440.5,"mediaId":2,"jf":{"<serverId>":true}}
 {"t":"ping","c":1767225600000}
 {"t":"chat","text":"..."}
-{"t":"kick","target":"<memberId>","reason":""}
+{"t":"out","target":"<memberId>","out":true}
+{"t":"nudge","target":"<memberId>"}
 {"t":"profile","name":"...","avatar":"<base64>"}
 {"t":"art","mediaId":2,"poster":"<base64>","banner":"<base64>"}
 ```
@@ -54,11 +55,11 @@ Field notes:
 - `hello.hostKey` (optional, omitted when empty): the hosting app
   generates a random key per hosting, gives it to its server and sends it
   from its own client. The member whose key equals the server's is the host
-  and cannot be kicked. A server without a key (the dedicated server) has no
+  (`members[].host`). A server without a key (the dedicated server) has no
   host. Where the connection comes from does not matter.
 - `hello.resume` (optional, omitted when empty): the token from this
   client's previous `welcome`, sent on reconnect. If the server still has
-  that member and it is not kicked, the connection takes it over: `welcome`
+  that member, the connection takes it over: `welcome`
   returns the same `token` and `memberId`, the member keeps its flags, and
   there is no `join`/`leave` feed. Otherwise it is ignored and a new member
   joins.
@@ -81,6 +82,19 @@ Field notes:
   `rejected: avatar too large` (the socket stays open, nothing changes).
 - `art`: pictures of the current media (see "Media art").
 - `chat.text` is cut to 500 characters.
+- `out`: `out:true` sits the member `target` out (anyone, the host
+  included); `out:false` brings the sender back and only works with its own
+  member id as `target`. An out member is never in the set and never
+  ready: `ready` from it and `force` on it are ignored, a swap leaves it
+  out, the `buffered` of its reports counts as 0 (it keeps sending
+  `report`: that keeps it fresh). Coming back puts it in the set like a
+  join (unless `playing`), unready; it sends `ready` itself. Unknown
+  targets and no-op changes are ignored. Feed: `out` (`target` = the name
+  of who was sat out, absent when the actor sat itself out) and `back`.
+- `nudge`: the server sends `{"t":"nudge","from":<memberId>,"name":<name>}`
+  to `target` only (no feed). At most 3 per second and 20 per minute per
+  sender; the rest, nudges to oneself and to unknown targets are dropped
+  silently.
 - `swap.media.url` is the link; `name`, `size`, `duration` are informational.
   `swap.media.jellyfin` makes it Jellyfin media (see below); then `url` is
   dropped. `swap.media.relay` makes it relayed media (see "Relay").
@@ -99,12 +113,12 @@ Field notes:
  "serverTime":"<ISO-8601 UTC>","mediaId":1,
  "media":{name,size,duration,url?,jellyfin?,relay?,swapBy?,art?}|absent,
  "members":[{"id","name","avatarHash"?,"ready","inSet","buffered","stale","jf"?,
-   "host"?}],
+   "host"?,"out"?}],
  "seekBy":"m1","seekSeq":3,"relay":true}
 {"t":"pong","c":1767225600000,"s":1767225600012}
 {"t":"feed","actor":"","action":"","target":"","reason":"","at":"<ISO-8601>"}
 {"t":"chat","text":"...","from":"<name>"}
-{"t":"kicked","reason":""}
+{"t":"nudge","from":"m2","name":"Alice"}
 {"t":"err","message":""}
 ```
 
@@ -130,12 +144,13 @@ Field notes:
   `report.jf`, omitted when it never sent one. `members[].avatarHash`
   (omitted when the member has no picture) names the picture's bytes (see
   "Avatars"). `members[].host` (omitted when false): the member sent the
-  server's `hostKey` (see `hello.hostKey`).
+  server's `hostKey` (see `hello.hostKey`). `members[].out` (omitted when
+  false): the member sits out (see `out`).
 - `pong.c` echoes the ping's `c`; `pong.s` is the server's clock in epoch ms
   (the clock `serverTime` uses). With `t3` the local receive time, the offset
   is `s - (c + t3) / 2`, accurate to half the round trip.
 - `feed.action` values: `ready`, `unready`, `force-ready`, `force-unready`,
-  `force-play`, `force-hold`, `kick`, `join`, `leave`, `stale`, `swap`,
+  `force-play`, `force-hold`, `out`, `back`, `join`, `leave`, `stale`, `swap`,
   `seek`, `pause`, `resume`, `finished`, `chat`, `rename`, `avatar`. `target`
   and `reason` are optional; `reason` carries `auto`/`manual` for ready and
   `silent too long` or `no signal` for leave/stale. `rename`: `actor` is the
@@ -154,7 +169,7 @@ Field notes:
 - `GET /a/<sid>/<token>/<hash>`: the bytes with their image content type,
   `cache-control: private, max-age=31536000, immutable` (a hash names fixed
   bytes; clients fetch each hash once, from the host they dialled).
-  Errors: 401 bad token, 403 kicked, 404 no current member has that
+  Errors: 401 bad token, 404 no current member has that
   picture, 410 unknown session. Pictures go with their member (leave,
   change, removal).
 
@@ -204,7 +219,7 @@ state   media.art = {"poster":"<hash>","banner":"<hash>"}
   file) with its own credential and streams it through. `Range` is forwarded
   as sent; status, `Content-Range`, `Content-Length`, `Content-Type` and
   `Accept-Ranges` come back as Jellyfin sent them. Errors: 401 bad token,
-  403 kicked or not the current item, 404 no relay for the current media,
+  403 not the current item, 404 no relay for the current media,
   410 unknown session, 502 Jellyfin unreachable or rejecting the server's
   credential. Bytes count toward `bytesServed`.
 - Pasted Jellyfin links sent as plain `url` stay plain links.
@@ -261,7 +276,7 @@ to the entry.
 - `GET /r/<sid>/<token>/<mediaId>/<name>`: the media (one file), Range
   table as for `/m`. `GET /r/<sid>/<token>/<mediaId>/<i>/<name>`: track
   `i` (from 0) of a media with `tracks` (track 0 of a one-file media
-  too). Errors: 401 bad token, 403 kicked, 404 not the current relayed
+  too). Errors: 401 bad token, 404 not the current relayed
   media (a player still on an older `mediaId` gets 404, never the new
   bytes) or no such track (the one-file URL of a media with `tracks`), 410
   unknown session, 503 + `retry-after` the source never connected or the

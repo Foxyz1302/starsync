@@ -38,7 +38,7 @@ size (`ServerIsolate.setFile`): the host's in-session File swap then sends a
   uncaught async error is logged and the server keeps going. If the isolate
   dies anyway, the session shows "server crashed: ..." and leaves; the
   shell says so in a dialog (during setup the host attempt fails with it).
-  Stop (leave, close, cancel during setup, a failed own join, being kicked)
+  Stop (leave, close, cancel during setup, a failed own join)
   sends `stop`, waits up to 3 s for exit, then kills the isolate.
 - **Dedicated server**: `bin/server.dart` compiled with `dart compile exe`
   and shipped next to the app as `watch-together-server`. It parses flags
@@ -55,11 +55,12 @@ warning is logged). Otherwise one shared secret, compared at hello.
 
 Host: when hosting, the app generates a random `hostKey` per hosting, puts
 it in the server config and sends it in its own `hello`. The member whose
-key matches is the host and cannot be kicked. The address a connection
-comes from plays no part (so a reverse proxy or tunnel on the same machine
-does not make everyone the host). The dedicated server has no key, so it
-has no host. Kick = revoke token, send `kicked`, close; the person may
-rejoin at once with a new token.
+key matches is the host (`members[].host`: the crown, art rights). The
+address a connection comes from plays no part (so a reverse proxy or tunnel
+on the same machine does not make everyone the host). The dedicated server
+has no key, so it has no host. Nobody removes anyone: members sit each
+other out ("Sitting out" below), the host included, since the hosted
+server and its `/m/` file serving do not need the host's player.
 
 ## Sync model
 
@@ -94,8 +95,22 @@ Loosely modeled on Syncplay, with a different readiness design.
   setting "Unready when the video changes", `AppSettings.unreadyOnSwap`,
   default off, sends `ready=false` itself on a new `mediaId`; not for the
   first state of a session, and a reconnect does not restore a ready that
-  a swap meanwhile would have dropped). Stale, leave and kick remove from
-  the set.
+  a swap meanwhile would have dropped). Stale, leave and sitting out
+  remove from the set.
+- **Sitting out** (`EngineMember.out`, `state.members[].out`): a member
+  stays connected (chat, feed, party, nudges) but is never in the set and
+  never ready: no `ready` or `force` reaches it, a swap leaves it out, its
+  reports keep it fresh but their `buffered` counts as 0. Anyone can sit
+  anyone out (`out` with `out:true`, the host included); only the member
+  itself comes back (`out:false`): it is then in the set like a fresh join
+  (unless PLAYING) and still unready. The app: an out member's player has
+  nothing open (no stream or relay pulls; a relay it serves goes on) and
+  shows the join-back card (cover, title, episode, the server position and
+  playing/paused). "Join back" or Space sends `out:false` and then
+  `ready`: at once while HELD (the gate waits for its buffer), while
+  PLAYING once the player has buffered `need` (at most 15 s), so the others
+  do not pause for the load. Putting something up while out comes back
+  first. A reconnect that lands as a new member sits out again.
 - **Pause**: while PLAYING, any in-set member who becomes not ready, under
   `need` buffered or stale flips the server to HELD (feed action `pause` by
   `server`). Recovery resumes by itself when the gate passes.
@@ -137,16 +152,26 @@ Loosely modeled on Syncplay, with a different readiness design.
   `hello.resume`. If the server still has that member (an unclean drop it has
   not noticed), the new socket takes it over: same token, member id, ready
   flag and media URL (the player keeps streaming), no join/leave feed, and the
-  dead socket is closed without removing the member. An unknown or kicked
-  token joins as a new member.
+  dead socket is closed without removing the member. An unknown token joins
+  as a new member.
 - **Client policies**: no state broadcast for 5 s means connection lost, clear
   the server state and reconnect every 1.5 s until cancelled (an epoch counter makes
-  a cancelled attempt stale) or kicked. After a reconnect the ready flag is
+  a cancelled attempt stale). After a reconnect the ready flag is
   restored from the server's state. Cancel during setup aborts the join.
   Closing the window leaves gracefully (2 s timeout).
 - **Idle** (`IdleTracker`): measured from the later of the last input and the
   moment playback stopped. While HELD and self ready: warning at 8 min,
   auto-unready at 10 min, and never less than 2 min after the warning.
+  With "When idle, sit out instead of just unready"
+  (`AppSettings.idleSitsOut`, default off) the 10 min step sits out.
+- **Nudge**: `nudge` names a member; the server passes it to that member
+  only (no feed), at most 3 per second and 20 per minute per sender
+  (`nudgesPerSec`, `nudgesPerMin`; the rest is dropped silently). The
+  nudged app plays the nudge sound whatever its per-sound switch (the
+  volume still applies), toasts "Alice nudged you" and asks the desktop
+  for attention when its window is not focused: the runners' `starsync/window`
+  channel (`attention`), the urgency hint on Linux (GTK, cleared on focus)
+  and `FlashWindowEx` until foreground on Windows.
 - **Deviations from Syncplay**: clock never follows the slowest watcher; no
   pause-on-leave; anyone can force ready/unready (all or one); presence gate;
   the clock is server time (clients correct for their offset to it).
@@ -192,7 +217,7 @@ Range table (`resolveMediaRequest`, tested byte-exact):
 | `bytes=-n` | 206 last n bytes |
 | unsatisfiable | 416, `Content-Range: bytes */size` |
 | host has no file | 503 + `Retry-After: 2` |
-| bad / unknown token, kicked, unknown session | 401, 403, 410 |
+| bad / unknown token, unknown session | 401, 410 |
 
 Always `Accept-Ranges: bytes`; `Content-Type` from the extension
 (`contentTypeForFile`). Relic hands the Range over as a typed `RangeHeader`;
@@ -365,7 +390,7 @@ errors leave it out).
 
 - Available (`state.relay`) only while the current media is a ref whose
   `serverId` equals the credential's. Only that item is relayed, only to a
-  valid, unkicked viewer token: no open proxy.
+  valid viewer token: no open proxy.
 - Each request opens `/Videos/{id}/stream?static=true&mediaSourceId=` with
   `Authorization: MediaBrowser` built from exactly the configured fields
   (Jellyfin rewrites a token's device fields from the header), forwards
@@ -573,7 +598,7 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
 - **Progress** (`JellyfinProgressReporter`, `OwnPlay` only): Playing once the
   file is open and mpv has picked its tracks; Progress every 10 s and at
   once on pause, resume, a seek (position more than 3 s from where playback
-  should be) or a track change; Stopped on swap, leave, kick, window close
+  should be) or a track change; Stopped on swap, leave, sitting out, window close
   (bounded to 1.5 s inside the graceful leave) and at `finished` (position =
   duration, so Jellyfin marks it played); seeking back from the end sends
   Playing again. Reports carry `PositionTicks`, `IsPaused` and mpv's
@@ -631,7 +656,8 @@ always scrolls the page). Space never presses a focused button
   ready; spreads on hover; 5 shown, 3 under 1100 px), the server name and
   "ready n/m" (hidden under 1100 px), chat with an unread badge, and Leave
   (asks first). The stack opens the members card (status, host / relay
-  pills, "via host", force ready, kick for all but the host, "Copy invite
+  pills, "via host", "sitting out"; per member force ready, Nudge and Sit
+  out (anyone, the host too), your own row Sit out / Join back; "Copy invite
   address": the dialled address when joined; hosting, `inviteAddresses`
   of `NetworkInterface.list` (IPv4, no loopback or link-local, private
   ranges first) with the Host port, and a note that friends outside the
@@ -640,7 +666,7 @@ always scrolls the page). Space never presses a focused button
 - **Avatars** (`avatar.dart`): `StatusAvatar` draws a ring outside the
   picture with a gap in the background colour (both scale with the size):
   green ready, amber buffering (with a spinner), grey not ready, dimmed
-  stale; a crown for the host (`members[].host` in the state; your own
+  stale, dimmed with a moon ("away") sitting out (last in the stack); a crown for the host (`members[].host` in the state; your own
   app also knows before the first state) and a tower for the member
   passing the video on. `memberAvatarImage` is the one picture lookup: yours from the
   profile, anyone else's from `coordinator.avatars` by `avatarHash`.
@@ -712,8 +738,9 @@ always scrolls the page). Space never presses a focused button
   Link (online the relay mode is picked there). Images are ignored.
   Nothing happens while a dialog or popover is over the shell.
 - **Sounds** (`sfx/`): the coordinator plays an `SfxCue` for ready,
-  unready, force-ready, join, leave, kick, swap and others' chat (feed
-  events), the idle warning, and connection lost / back (once per drop).
+  unready, force-ready, join, leave, swap and others' chat (feed
+  events), being sat out by someone (the `kick` sound), a nudge (always,
+  whatever its switch), the idle warning, and connection lost / back (once per drop).
   Nothing for what the video already says (play, pause, seeks, the end).
   The sounds are synthesized, not sampled: `synth.dart` renders voices
   (plucked strings with bends, glass and star bells, a singing bowl,
@@ -735,8 +762,10 @@ always scrolls the page). Space never presses a focused button
   snaps to the nearest corner with the shared curve). A mode change fades
   the layer out, moves it while invisible and fades it in (with the tabs
   when the full player comes or goes), so the video is never mounted twice
-  nor remounted. A tab sends the full player to mini; × on the mini closes
-  it (muted, still in the server) and the strip brings it back. Fullscreen
+  nor remounted. A tab sends the full player to mini; × on the mini sits
+  out (the player unloads and shows the join-back card, `SitOutCard`, over
+  the still mounted `Video`); × on that card closes the player, the strip
+  brings it back, and joining back with it closed shows the mini. Fullscreen
   is `windowManager.setFullScreen` with the strip hidden (party avatars in
   a corner while paused); F, Esc and double-click on the picture toggle it.
   The player keys (Settings → Keyboard shortcuts) work while the player is
@@ -902,7 +931,7 @@ fullscreen has no drag area and shows the buttons in the player's top bar.
 
 Every failure must show in the UI with a cause and a next step; nothing
 stalls silently. The app has a `HealthStatus` signal (severity + message)
-for connecting, reconnecting, wrong password, version mismatch, kicked,
+for connecting, reconnecting, wrong password, version mismatch,
 host offline, and starvation ("waiting for X - N.N s buffered").
 Errors are logged with a stack trace at the boundary, then turned into a
 displayable state. The server's `GET /health` returns JSON (`ok`, `name`,
@@ -950,7 +979,8 @@ this repo, written by `tool/release.sh`.
 - No transcoding: bandwidth is plentiful and the Jellyfin box should not be loaded.
 - No roles, friends trust model: simplest thing that fits the use.
 - Blank password = open server: the owner chooses between open and private.
-- The host cannot be kicked: the server dies with the host anyway.
+- Sit out instead of kick: friends never need to throw someone out, only to
+  stop waiting for them; the person stays in chat and can be nudged back.
 - Server runs inside the app on an isolate, and ships as a separate compiled
   server: a Flutter binary cannot run headless, so a dedicated server needs
   its own build of `packages/server`. An isolate keeps the UI responsive and

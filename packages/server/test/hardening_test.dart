@@ -123,29 +123,56 @@ void main() {
     await a.ws.close();
   });
 
-  test('host (hostKey) cannot be kicked; loopback without it can', () async {
+  test('anyone sits anyone out (host too); nudges reach only the target, capped', () async {
     await server.stop();
     server = SyncServer(AppConfig(port: 0, secret: '', name: 't', hostKey: 'hk'));
     await server.start();
     final host =
         await _Peer.join('127.0.0.1', server.boundPort, 'host', hostKey: 'hk');
     final friend = await _Peer.join('127.0.0.1', server.boundPort, 'friend');
-    final guesser =
-        await _Peer.join('127.0.0.1', server.boundPort, 'guesser', hostKey: 'nope');
+    final third = await _Peer.join('127.0.0.1', server.boundPort, 'third');
     String idOf(String name) =>
         server.hub.engine.members.values.firstWhere((m) => m.name == name).id;
-    friend.send(jsonEncode(KickRequest(target: idOf('host')).toJson()));
-    final err = await friend.next('err');
-    expect(err['message'], "can't kick the host");
-    expect(host.closed, isFalse);
-    await expectLater(
-        server.hub.kickById(idOf('host'), 'x'), throwsA(isA<AuthException>()));
-    // Same machine, no key (or a wrong one): an ordinary member.
-    host.send(jsonEncode(KickRequest(target: idOf('guesser')).toJson()));
-    await guesser.next('kicked');
-    await server.hub.kickById(idOf('friend'), 'x');
-    await friend.next('kicked');
+    EngineMember of(String name) =>
+        server.hub.engine.members.values.firstWhere((m) => m.name == name);
+    friend.send(jsonEncode(OutIntent(target: idOf('host'), out: true).toJson()));
+    var feed = await friend.next('feed');
+    while (feed['action'] != 'out') {
+      feed = await friend.next('feed');
+    }
+    expect([feed['actor'], feed['target']], ['friend', 'host']);
+    expect(of('host').out, isTrue);
+    expect(of('host').inSet, isFalse);
+    // Only oneself comes back.
+    friend.send(jsonEncode(OutIntent(target: idOf('host'), out: false).toJson()));
+    host.send(jsonEncode(OutIntent(target: idOf('host'), out: false).toJson()));
+    await Future.delayed(const Duration(milliseconds: 200));
+    expect(of('host').out, isFalse);
+
+    // 5 at once: 3 pass (per second), only to the target.
+    for (var i = 0; i < 5; i++) {
+      friend.send(jsonEncode(NudgeIntent(target: idOf('host')).toJson()));
+    }
+    await Future.delayed(const Duration(milliseconds: 300));
+    final got = host.msgs.where((m) => m['t'] == 'nudge').toList();
+    expect(got, hasLength(3));
+    expect(got.first, {'t': 'nudge', 'from': idOf('friend'), 'name': 'friend'});
+    expect(third.msgs.where((m) => m['t'] == 'nudge'), isEmpty);
+    expect(friend.msgs.where((m) => m['t'] == 'nudge'), isEmpty);
     await host.ws.close();
+    await friend.ws.close();
+    await third.ws.close();
+  });
+
+  test('nudge cap: 20 per minute', () {
+    final v = ViewerToken(token: 't', name: 'n');
+    final t0 = DateTime.utc(2026);
+    var passed = 0;
+    for (var i = 0; i < 30; i++) {
+      if (v.takeNudge(t0.add(Duration(milliseconds: 500 * i)))) passed++;
+    }
+    expect(passed, 20);
+    expect(v.takeNudge(t0.add(const Duration(seconds: 61))), isTrue);
   });
 
   test('state marks the host member for everyone', () async {

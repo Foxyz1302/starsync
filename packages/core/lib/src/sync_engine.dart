@@ -54,6 +54,8 @@ class EngineMember {
   Map<String, bool> jf = const {};
   /// The hosting app's own member (set by the server from the host key).
   bool host = false;
+  /// Sitting out: never in the set, never ready, its buffer ignored.
+  bool out = false;
   DateTime lastSeen;
   EngineMember({
     required this.id,
@@ -94,6 +96,7 @@ class EngineMember {
         stale: stale,
         jf: jf,
         host: host,
+        out: out,
       );
 }
 
@@ -193,7 +196,8 @@ class SyncEngine {
   void _seen(EngineMember member) {
     final wasStale = isStale(member);
     member.lastSeen = now;
-    if (!member.inSet &&
+    if (!member.out &&
+        !member.inSet &&
         (member.ready || (wasStale && transport != Transport.playing))) {
       member.inSet = true;
     }
@@ -301,6 +305,8 @@ class SyncEngine {
     final member = members[token];
     if (member == null) return;
     _seen(member);
+    // Sitting out: back first ([applyOut]), then ready.
+    if (member.out) return;
     if (member.ready == ready && member.inSet) {
       evaluate();
       return;
@@ -320,12 +326,13 @@ class SyncEngine {
     final actorName = actor?.name ?? '?';
     if (target == 'all') {
       for (final member in members.values) {
+        if (member.out) continue;
         member.ready = ready;
         if (ready) member.inSet = true;
       }
     } else {
       final member = byId(target);
-      if (member == null) return;
+      if (member == null || member.out) return;
       member.ready = ready;
       if (ready) member.inSet = true;
       feed.add(FeedMessage(
@@ -340,6 +347,28 @@ class SyncEngine {
         actor: actorName,
         action: ready ? 'force-play' : 'force-hold',
         at: now));
+    evaluate();
+  }
+
+  /// Sits the member [targetId] out ([out] true; anyone may, the host
+  /// included), or brings [actorToken]'s own member back ([out] false;
+  /// only oneself). Out: not ready, not in the set, so it never blocks.
+  /// Back: in the set like a fresh join (unless playing), still unready:
+  /// its own `ready` follows once it has buffered.
+  void applyOut(String actorToken, String targetId, bool out) {
+    final actor = members[actorToken];
+    final member = byId(targetId);
+    if (actor == null || member == null) return;
+    _seen(actor);
+    final self = identical(actor, member);
+    if (!out && !self) return;
+    if (member.out == out) return;
+    member.out = out;
+    member.ready = false;
+    member.buffered = 0;
+    member.inSet = !out && transport != Transport.playing;
+    feed.add(FeedMessage(
+        actor: actor.name, action: out ? 'out' : 'back', target: self ? null : member.name, at: now));
     evaluate();
   }
 
@@ -379,7 +408,7 @@ class SyncEngine {
     // (a stale member rejoins the set with its next frame if still ready).
     final t = now;
     for (final member in members.values) {
-      member.inSet = !isStale(member, t);
+      member.inSet = !member.out && !isStale(member, t);
       member.buffered = 0;
     }
     feed.add(FeedMessage(actor: actor?.name ?? '?', action: 'swap', at: now));
@@ -393,7 +422,7 @@ class SyncEngine {
     if (!reportPosition.isFinite) return;
     _seen(member);
     if (jf != null) member.jf = Map.unmodifiable(jf);
-    member.buffered = !buffered.isFinite || buffered < 0 ? 0 : buffered;
+    member.buffered = member.out || !buffered.isFinite || buffered < 0 ? 0 : buffered;
     final m = media;
     // First report of the length wins; only for the media the client has open.
     if (m != null && m.duration <= 0 && mediaId == this.mediaId &&

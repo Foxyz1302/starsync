@@ -97,6 +97,19 @@ class SettingsTab extends StatelessWidget {
               ),
             ),
           ),
+          SettingsPanel(
+            title: 'When idle',
+            child: SignalBuilder(
+              builder: (context) => SwitchListTile(
+                key: const ValueKey('idle-sits-out'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('When idle, sit out instead of just unready'),
+                subtitle: const Text('After 10 min away while ready and held, your player unloads the video until you join back (Space)'),
+                value: AppSettings.instance.idleSitsOut.value,
+                onChanged: AppSettings.instance.setIdleSitsOut,
+              ),
+            ),
+          ),
         ];
       case SettingsSection.player:
         return [
@@ -510,8 +523,9 @@ class NotificationsInfo extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              line('Joins, leaves, kicks, video changes and chat',
+              line('Joins, leaves, video changes and chat',
                   'Pop up bottom left for 5 s, with the person\'s picture'),
+              line('Sat out or nudged by someone', 'Only on your end, with their picture'),
               line('Ready, seeks and pauses', 'Only in Chat & activity (Tab), never as a pop-up'),
               line('App notices', 'Shader changes, a frozen video reloaded, the idle warning'),
             ],
@@ -617,10 +631,15 @@ class SoundSettings extends StatelessWidget {
                         DropdownMenuItem<String?>(value: p.name, child: Text(name)),
                     ],
                   ),
-                  Switch(
-                    key: ValueKey('sound-on-${kind.name}'),
-                    value: !off.contains(kind.name),
-                    onChanged: volume == 0 ? null : (on) => s.setSoundOn(kind.name, on),
+                  // A nudge always plays (an explicit poke): no switch,
+                  // its place kept so the rows line up.
+                  Visibility.maintain(
+                    visible: kind != SfxKind.nudge,
+                    child: Switch(
+                      key: ValueKey('sound-on-${kind.name}'),
+                      value: !off.contains(kind.name),
+                      onChanged: volume == 0 || kind == SfxKind.nudge ? null : (on) => s.setSoundOn(kind.name, on),
+                    ),
                   ),
                 ],
               ),
