@@ -131,11 +131,11 @@ unexpectedly` line just before it is expected. Without the app:
 - Hot restart with any media_kit `Player` alive (session, thumbnails, sfx)
   used to SIGSEGV on mpv's `core` thread: each mpv handle's wakeup callback
   is a `NativeCallable` of the old isolate, freed by the restart, and media_kit
-  then sends the leftover handles `quit`, which fires it. The Linux runner
-  (`linux/runner/hot_restart_guard.cc`, debug builds only) clears those
-  callbacks on the engine's `on-pre-engine-restart` signal, reading the
-  handles from media_kit's debug-only `NativeReferenceHolder` buffer (address
-  in `$TMPDIR/com.alexmercerind.media_kit.NativeReferenceHolder.<pid>`). Old
+  then sends the leftover handles `quit`, which fires it. `fox_utils`' Linux
+  plugin (from 0.1.8, debug builds only) clears those callbacks on the
+  engine's `on-pre-engine-restart` signal, reading the handles from
+  media_kit's debug-only `NativeReferenceHolder` buffer (address in
+  `$TMPDIR/com.alexmercerind.media_kit.NativeReferenceHolder.<pid>`). Old
   players are leaked, not destroyed, until the process exits. Re-check this
   after a media_kit upgrade.
 - mpv reconnect flags: comma form works, colon form is rejected. Re-verify

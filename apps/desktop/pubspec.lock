@@ -228,11 +228,11 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: "v0.1.7"
-      resolved-ref: dc16bba05491f54daf528ed83484ea9b6eab8825
+      ref: "v0.1.8"
+      resolved-ref: d2435a06b26d4f94c3c3777e6ef006ac84f4eef4
       url: "https://git.example.org/Foxyz/fox_utils.git"
     source: git
-    version: "0.1.7"
+    version: "0.1.8"
   hive_ce:
     dependency: "direct main"
     description:
