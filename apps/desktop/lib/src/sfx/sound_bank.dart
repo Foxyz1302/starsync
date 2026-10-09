@@ -8,7 +8,7 @@ import 'synth.dart';
 // (D E G A B), so overlapping sounds agree; quiet and short.
 
 const _d4 = -7, _a4 = 0, _b4 = 2;
-const _d5 = 5, _e5 = 7, _g5 = 10, _a5 = 12, _b5 = 14;
+const _d5 = 5, _g5 = 10, _a5 = 12, _b5 = 14;
 const _d6 = 17, _e6 = 19, _g6 = 22, _a6 = 24, _b6 = 26;
 
 double _p(int s) => semi(s);
@@ -31,12 +31,10 @@ SoundSpec soundFor(SfxKind kind, {int readyIndex = 1}) => switch (kind) {
           Note(0, _p(_a5), 0.35, gain: 0.8, bright: 0.2),
           Note(0.09, _p(_g5), 0.45, bright: 0.15),
         ], cutoff: 3800, peakDb: -20, room: 0.1),
-      // A strum up the open strings, a chime on top.
+      // Just the bell: playback starting is the rest of the cue.
       SfxKind.forceReady => SoundSpec([
-          for (final (i, s) in [_d5, _e5, _g5, _a5, _b5, _d6].indexed)
-            Note(i * 0.032, _p(s), 1.2, gain: 0.55 + i * 0.05, bright: 0.55),
-          Note(0.22, _p(_d6) * 2, 1.4, voice: Voice.chime, gain: 0.18),
-        ], peakDb: -17),
+          Note(0, _p(_d6) * 2, 1.6, voice: Voice.chime),
+        ], cutoff: 7000, peakDb: -18, room: 0.18),
       // Wind through the furin: three uneven tinkles.
       SfxKind.join => SoundSpec([
           Note(0, _p(_a6), 1.3, voice: Voice.chime, gain: 0.8),

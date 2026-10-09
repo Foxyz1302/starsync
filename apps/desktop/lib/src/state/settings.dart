@@ -43,7 +43,7 @@ class AppSettings {
   /// are hidden (both designs). Applies live.
   final progressLine = signal(true);
   /// App sounds (`sfx/`): 0..1, 0 = silent.
-  final soundVolume = signal(0.5);
+  final soundVolume = signal(1.0);
   /// `SfxKind` names switched off one by one.
   final soundsOff = signal<Set<String>>(const {});
 

@@ -35,9 +35,6 @@ off by deleting it in the same commit as the code. Wire changes also edit
      show the open link with an open-in-browser button.
    - Time UI: remaining time, scrubber preview.
    - mpv / mpv.net shortcut parity.
-   - Sounds: replace `NoopSfxService` (cues already fire). Candidates:
-     Kenney Interface Sounds (CC0), ObsydianX Pack 1 (CC0), akx/Notifications
-     (CC0); playback via flutter_soloud. Keep seek/pause/resume near silent.
    - Chaos suite: host drop 5 s / 30 s, viewer stall, 20-seek storm, long
      outage with cache exhaustion (`tool/shaper.dart --kill-after`); assert no
      OOM, no stuck session, drift recovers.
