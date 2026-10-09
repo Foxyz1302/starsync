@@ -641,6 +641,13 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     );
   }
 
+  /// No Jellyfin account, no server joined or hosted yet, band not
+  /// dismissed: the welcome band explains the three ways in.
+  bool get _newcomer =>
+      !AppSettings.instance.welcomeDismissed.value &&
+      _jellyfin.isEmpty &&
+      SessionState.instance.recents.value.isEmpty;
+
   Widget _body(bool online, bool alone) {
     final coord = SessionState.instance.coordinator;
     final tabBody = switch (_tab) {
@@ -651,12 +658,14 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
           solo: alone,
           // Offline, a put-up starts a solo session, which hosts.
           isHost: !online || coord.hostFile != null,
-          banner: online
+          // Only for newcomers: the strip has Join and Host for everyone else.
+          banner: online || !_newcomer
               ? null
               : WelcomeBand(
                   onJoin: () => _connect(ConnectMode.join),
                   onHost: () => _connect(ConnectMode.host),
                   onSolo: _watchSolo,
+                  onDismiss: () => setState(AppSettings.instance.dismissWelcome),
                 ),
           jellyfinStart: _libraryStart,
           onPutUp: _putUp,

@@ -23,6 +23,7 @@ const _keyProgressLine = 'progressLine';
 const _keySoundVolume = 'soundVolume';
 const _keySoundsOff = 'soundsOff';
 const _keySoundPreset = 'soundPreset';
+const _keyWelcomeDismissed = 'welcomeDismissed';
 const _keySoundPresetFor = 'soundPresetFor';
 const _keyUnreadyOnSwap = 'unreadyOnSwap';
 const _keyIdleSitsOut = 'idleSitsOut';
@@ -58,6 +59,8 @@ class AppSettings {
   /// The sound set (`SoundPreset` name) every sound uses unless
   /// [soundPresetFor] picks another one for it.
   final soundPreset = signal('cosmic');
+  /// The offline welcome band's × was pressed: never show it again.
+  final welcomeDismissed = signal(false);
   /// `SfxKind` name -> `SoundPreset` name, per-sound overrides.
   final soundPresetFor = signal<Map<String, String>>(const {});
 
@@ -110,6 +113,8 @@ class AppSettings {
       if (vol is num) soundVolume.value = vol.toDouble().clamp(0, 1);
       final off = box.get(_keySoundsOff);
       if (off is List) soundsOff.value = Set.unmodifiable(off.whereType<String>());
+      final welcomeOff = box.get(_keyWelcomeDismissed);
+      if (welcomeOff is bool) welcomeDismissed.value = welcomeOff;
       final soundSet = box.get(_keySoundPreset);
       if (soundSet is String) soundPreset.value = soundSet;
       final per = box.get(_keySoundPresetFor);
@@ -184,6 +189,11 @@ class AppSettings {
   void setSoundOn(String kind, bool on) {
     soundsOff.value = Set.unmodifiable(on ? ({...soundsOff.value}..remove(kind)) : {...soundsOff.value, kind});
     _put(_keySoundsOff, soundsOff.value.toList());
+  }
+
+  void dismissWelcome() {
+    welcomeDismissed.value = true;
+    _put(_keyWelcomeDismissed, true);
   }
 
   void setSoundPreset(String preset) {

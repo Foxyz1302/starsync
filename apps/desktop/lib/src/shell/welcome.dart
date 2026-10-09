@@ -19,7 +19,8 @@ class WelcomeBand extends StatelessWidget {
   final VoidCallback onJoin;
   final VoidCallback onHost;
   final VoidCallback onSolo;
-  const WelcomeBand({super.key, required this.onJoin, required this.onHost, required this.onSolo});
+  final VoidCallback? onDismiss;
+  const WelcomeBand({super.key, required this.onJoin, required this.onHost, required this.onSolo, this.onDismiss});
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +41,19 @@ class WelcomeBand extends StatelessWidget {
             Text(appName, style: t.titleLarge?.copyWith(fontWeight: FontWeight.w700, height: 1.1)),
             const SizedBox(height: 2),
             Text(appTagline, style: TextStyle(color: scheme.onSurfaceVariant)),
+            if (onDismiss != null)
+              TextButton(
+                key: const ValueKey('welcome-dismiss'),
+                onPressed: onDismiss,
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 24),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  foregroundColor: scheme.onSurfaceVariant,
+                  textStyle: const TextStyle(fontSize: 12),
+                ),
+                child: const Text("Don't show again"),
+              ),
           ],
         ),
       ],
@@ -76,7 +90,7 @@ class WelcomeBand extends StatelessWidget {
             ],
           ),
         );
-    return Container(
+    final band = Container(
       key: const ValueKey('welcome-band'),
       margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
       padding: const EdgeInsets.all(14),
@@ -110,6 +124,7 @@ class WelcomeBand extends StatelessWidget {
         );
       }),
     );
+    return band;
   }
 }
 

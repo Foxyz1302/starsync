@@ -733,7 +733,9 @@ always scrolls the page). Space never presses a focused button
   bytes). Online, a name change (once typing settles) or picture change
   goes out through `Profile.push` (`coordinator.updateProfile`).
 - **Welcome** (`welcome.dart`): offline the Library opens with
-  `WelcomeBand` over the source switch (sizes away when online): the app
+  `WelcomeBand` over the source switch, only for newcomers (no Jellyfin
+  account, no recent server, not dismissed with "Don't show again";
+  sizes away when online): the app
   icon, Starsync and "Watch together, in sync", then three `WayCard`s,
   Join a friend first (filled), Host, Watch solo (opens Files, or
   Jellyfin when linked); beside the name from 940 px, under it below,
