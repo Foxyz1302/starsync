@@ -309,12 +309,14 @@ class _ServerLabel extends StatelessWidget {
   );
 }
 
-/// "Solo" alone, "Your server" when hosting, else the address joined.
+/// "Solo" alone, "Your server" when hosting, else the joined server's
+/// name (its `--name`), or its address while unknown.
 String serverName() {
   final session = SessionState.instance;
-  if (session.solo.peek()) return 'Solo';
+  if (session.solo.value) return 'Solo';
   if (session.coordinator.hostFile != null) return 'Your server';
-  return session.lastForm.host;
+  final label = session.serverLabel.value;
+  return label.isNotEmpty ? label : session.lastForm.host;
 }
 
 /// Solo: just you, on your own; a spinner while it becomes a server.

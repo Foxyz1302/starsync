@@ -8,6 +8,7 @@ import 'package:sync_relay_core/core.dart';
 
 import '../jellyfin/accounts.dart';
 import '../jellyfin/session_media.dart';
+import '../screens/home/health_probe.dart';
 import '../screens/home/picked_media.dart';
 import '../playback/yt_dlp_app.dart';
 import '../sfx/sfx.dart';
@@ -173,6 +174,9 @@ class SessionState {
   /// In a solo session: this app's own server on 127.0.0.1, only you in
   /// it. Hosting from it ([host]) keeps what plays and where.
   final solo = signal(false);
+  /// The joined server's own name (`/health`), '' until known or when it
+  /// only has the default name.
+  final serverLabel = signal('');
   /// A solo session is becoming a hosted one: the player has nothing open
   /// until the media is up again on the new server.
   final switching = signal(false);
@@ -418,6 +422,11 @@ class SessionState {
       await coordinator.connect(params);
       if (op != _op) throw const ConnectCancelled();
       route.value = AppRoute.session;
+      serverLabel.value = '';
+      unawaited(probeHealth(params.host, '${params.port}', defaultHealthGet).then((h) {
+        // 'server' is the dedicated server's default --name: not a name.
+        if (op == _op && h.online && h.name.isNotEmpty && h.name != 'server') serverLabel.value = h.name;
+      }).catchError((Object _) {}));
     } finally {
       await _saveFormQuietly();
     }
@@ -469,6 +478,7 @@ class SessionState {
     await coordinator.leave();
     await stopServer();
     solo.value = false;
+    serverLabel.value = '';
     status.value = const HealthStatus(HealthSeverity.info, 'idle');
     route.value = AppRoute.home;
   }
