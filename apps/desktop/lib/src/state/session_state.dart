@@ -260,12 +260,13 @@ class SessionState {
   /// pick, seeked to where it was; if hosting fails, solo comes back.
   Future<void> host(ConnectParams params, ConnectForm form) async {
     if (!solo.peek()) return _host(params, form: form);
-    final carry = _carry();
+    final carry = _invited = _carry();
     switching.value = true;
     try {
       await coordinator.leave();
       await stopServer();
       solo.value = false;
+      coordinator.solo = false;
       try {
         await _host(params, form: form);
       } catch (_) {
@@ -284,6 +285,27 @@ class SessionState {
       } catch (e) {
         coordinator.showToast("couldn't put it up again: $e");
       }
+    } finally {
+      switching.value = false;
+    }
+  }
+
+  /// What an Invite from solo carried over, for [cancelInvite].
+  ({PickedMedia pick, double position})? _invited;
+
+  /// Invite cancelled after the hosted server already came up: back to
+  /// solo with the same media, not out of the session.
+  Future<void> cancelInvite() async {
+    final carry = _invited;
+    switching.value = true;
+    try {
+      await coordinator.leave();
+      await stopServer();
+      await _host(_soloParams!, soloSession: true);
+      if (carry != null) await _resume(carry);
+    } catch (e) {
+      debugPrint('back to solo failed: $e');
+      await leave();
     } finally {
       switching.value = false;
     }
@@ -394,6 +416,7 @@ class SessionState {
         rethrow;
       }
       solo.value = soloSession;
+      coordinator.solo = soloSession;
       route.value = AppRoute.session;
     } finally {
       if (form != null) await _saveFormQuietly();
@@ -478,6 +501,7 @@ class SessionState {
     await coordinator.leave();
     await stopServer();
     solo.value = false;
+    coordinator.solo = false;
     serverLabel.value = '';
     status.value = const HealthStatus(HealthSeverity.info, 'idle');
     route.value = AppRoute.home;

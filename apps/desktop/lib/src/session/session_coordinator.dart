@@ -240,6 +240,9 @@ class SessionCoordinator {
   StreamSubscription? _statusSub;
 
   bool _manualClose = false;
+  /// A solo session (set by SessionState): no idle unready / sit out,
+  /// there is nobody to hold up.
+  bool solo = false;
   bool _playerReady = false;
   bool _wasPlayAllowed = false;
   // Last ready flag the server reported for self; restored after a
@@ -949,9 +952,11 @@ class SessionCoordinator {
     // activity so a pause after a long watch starts a fresh idle clock.
     if (r != null) _readyAfterJoinBack(r, now);
     final sitOutWhenIdle = AppSettings.instance.idleSitsOut.peek();
-    final event = _idle.tick(now,
-        playing: serverState.peek()?.transport == 'playing',
-        selfReady: selfMember.peek()?.ready ?? false);
+    final event = solo
+        ? IdleEvent.none
+        : _idle.tick(now,
+            playing: serverState.peek()?.transport == 'playing',
+            selfReady: selfMember.peek()?.ready ?? false);
     switch (event) {
       case IdleEvent.warn:
         _toastId++;

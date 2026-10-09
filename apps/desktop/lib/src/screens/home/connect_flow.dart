@@ -97,6 +97,7 @@ class ConnectFlow extends ChangeNotifier {
       _notify();
       return;
     }
+    final fromSolo = mode == ConnectMode.host && _session.solo.value;
     try {
       if (mode == ConnectMode.host) {
         await _session.host(params, form);
@@ -111,10 +112,14 @@ class ConnectFlow extends ChangeNotifier {
       return;
     }
     if (myAttempt != _attempt) {
-      // Cancelled after it got through: back out.
+      // Cancelled after it got through: back out (an Invite: back to solo).
       try {
-        await _session.leave();
-        await _session.stopServer();
+        if (fromSolo) {
+          await _session.cancelInvite();
+        } else {
+          await _session.leave();
+          await _session.stopServer();
+        }
       } catch (_) {}
       return;
     }

@@ -296,7 +296,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                 _status(),
                 _progressLine(),
                 _jellyfinOverlay(),
-                if (widget.fullscreen) ...[_pausedParty(), _unreadChip()],
+                if (widget.fullscreen) ...[if (!SessionState.instance.solo.value) _pausedParty(), _unreadChip()],
               ] else
                 _miniOverlay(),
               // Sitting out: nothing is loaded; the card covers the
