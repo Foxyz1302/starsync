@@ -1059,6 +1059,9 @@ class SessionCoordinator {
       final ArtBytes? bytes;
       if (ref != null && client != null) {
         bytes = await jellyfinArt(client, ref.itemId);
+      } else if (ref == null && (media.url ?? '').isNotEmpty) {
+        // A web link: its name is a URL tail ("1"), not a show; never guess.
+        bytes = null;
       } else {
         final name = ref == null ? media.name : jellyfinTitle(ref.title, ref.subtitle).$1;
         bytes = await aniListArt(_aniList ??= AniListClient(), name);

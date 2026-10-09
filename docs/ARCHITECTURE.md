@@ -662,8 +662,8 @@ always scrolls the page). Space never presses a focused button
   the controls: `playerStatusFor` (pure) picks the most pressing of
   removed, reconnecting (Cancel), a warn/error health message (Retry),
   connecting (only after 2 s), finished, someone loading (below
-  `StateBroadcast.bufferNeed`, the gate's own need: less near the end,
-  none at finished; their avatar with the progress round it), you not
+  `StateBroadcast.bufferNeed`, the gate's own need at the current
+  position: less near the end, none at finished; their avatar with the progress round it), you not
   ready (a click marks you ready) and who everyone waits for (avatars,
   "2/3 ready"); nothing otherwise, info never. 34 px avatars, a main line
   and a muted detail line. Frosted glass, colour only for problems; it fades through

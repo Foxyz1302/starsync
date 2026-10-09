@@ -559,12 +559,17 @@ class StateBroadcast {
   /// Buffer an in-set member needs before playback can go on, as the
   /// server's gate counts it: [RelayConstants.minBufferSecs], less near the
   /// end (mpv cannot buffer past it), none once finished.
-  double get bufferNeed {
+  double get bufferNeed => bufferNeedAt(DateTime.now().toUtc());
+
+  /// [bufferNeed] at [now]: while playing the position has moved on since
+  /// [serverTime] (the local clock is close enough for this).
+  double bufferNeedAt(DateTime now) {
     if (transport == 'finished') return 0;
     final d = (media?['duration'] as num?)?.toDouble() ?? 0;
     const full = RelayConstants.minBufferSecs;
     if (d <= 0) return full;
-    return (d - position - RelayConstants.endSlackSecs).clamp(0.0, full).toDouble();
+    final moved = transport == 'playing' ? now.difference(serverTime).inMilliseconds / 1000 : 0;
+    return (d - (position + moved) - RelayConstants.endSlackSecs).clamp(0.0, full).toDouble();
   }
 
   final int eventId;

@@ -51,7 +51,8 @@ Future<ArtBytes> jellyfinArt(JellyfinClient client, String itemId,
 Future<ArtBytes?> aniListArt(AniListClient aniList, String name,
     {Future<Uint8List?> Function(Uri url, Map<String, String> headers, int maxBytes) fetch = fetchImage}) async {
   final series = parseReleaseName(name).series.trim();
-  if (series.isEmpty) return null;
+  // "1", "2026-10-09": nothing a show could be called.
+  if (!RegExp(r'\p{L}', unicode: true).hasMatch(series)) return null;
   final match = await aniList.searchMedia(series);
   if (match == null) return null;
   Future<Uint8List?> get(String? url, int maxBytes) async {

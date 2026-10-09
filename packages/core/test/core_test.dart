@@ -193,4 +193,21 @@ void main() {
       expect((r.duration, r.mediaId), (0.0, 0));
     });
   });
+
+  test('bufferNeed counts the time played since the last event', () {
+    final t0 = DateTime.utc(2026, 1, 1);
+    final s = StateBroadcast(
+      eventId: 1,
+      transport: 'playing',
+      position: 0,
+      serverTime: t0,
+      mediaId: 1,
+      media: const {'name': 'clip', 'duration': 6.0},
+      members: const [],
+    );
+    expect(s.bufferNeedAt(t0), 4.0);
+    // 3 s in: 3 s left, minus the 2 s end slack.
+    expect(s.bufferNeedAt(t0.add(const Duration(seconds: 3))), closeTo(1.0, 1e-9));
+    expect(s.bufferNeedAt(t0.add(const Duration(seconds: 5))), 0);
+  });
 }

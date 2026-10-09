@@ -208,6 +208,8 @@ void main() {
     expect(art.banner, jpeg);
     expect(asked, unorderedEquals(['https://img/xl.jpg', 'https://img/banner.jpg', 'https://img/l.jpg']));
     expect(await aniListArt(c, 'Nothing Like It.mkv', fetch: (_, _, _) async => jpeg), isNull);
+    // A link tail like ".../video/1" names no show: no AniList search at all.
+    expect(await aniListArt(c, '1', fetch: (_, _, _) async => jpeg), isNull);
     c.close();
   });
 
