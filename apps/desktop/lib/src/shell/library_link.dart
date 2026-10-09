@@ -189,10 +189,14 @@ String linkRelayHelp(LinkRelay r) => switch (r) {
           'while it plays; the link is not shown to anyone.',
     };
 
-/// The Link source. [offlineHint] set: the button is off and says why.
+/// Under Play when nobody else watches.
+const soloPlayHint = 'Plays just for you. Invite friends any time; it keeps playing.';
+
+/// The Link source. [solo]: nobody else watches (offline or solo), so the
+/// button says Play and there are no relay modes (the link plays direct).
 class LibraryLinkSource extends StatefulWidget {
   final MediaPickerController controller;
-  final String? offlineHint;
+  final bool solo;
   /// Puts the link up; returns an error text, or null when sent.
   final Future<String?> Function(LinkMedia media) onPutUp;
   final RecentLinks recents;
@@ -202,7 +206,7 @@ class LibraryLinkSource extends StatefulWidget {
     required this.controller,
     required this.onPutUp,
     required this.recents,
-    this.offlineHint,
+    this.solo = false,
     this.probe = defaultLinkProber,
   });
 
@@ -261,14 +265,14 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
 
   Future<void> _go() async {
     final url = _c.link.text.trim();
-    if (url.isEmpty || _busy || widget.offlineHint != null) return;
+    if (url.isEmpty || _busy) return;
     setState(() {
       _busy = true;
       _error = null;
     });
     String? error;
     try {
-      error = await widget.onPutUp(LinkMedia(url, relay: _c.linkRelay));
+      error = await widget.onPutUp(LinkMedia(url, relay: widget.solo ? LinkRelay.direct : _c.linkRelay));
     } catch (e) {
       error = '$e';
     }
@@ -292,7 +296,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
-    final hint = widget.offlineHint;
+    final solo = widget.solo;
     final url = _c.link.text.trim();
     final preview = url.isEmpty ? null : _previews[url];
     final loading = url.isNotEmpty && !_previews.containsKey(url);
@@ -312,11 +316,11 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
     );
     final button = FilledButton.icon(
       key: const ValueKey('link-put-up'),
-      onPressed: url.isEmpty || _busy || hint != null ? null : _go,
+      onPressed: url.isEmpty || _busy ? null : _go,
       icon: _busy
           ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
           : const Icon(Icons.play_arrow),
-      label: Text(hint == null ? 'Put it up' : 'Play'),
+      label: Text(solo ? 'Play' : 'Put it up'),
       style: FilledButton.styleFrom(
         minimumSize: const Size(0, 56),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -361,10 +365,10 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
                       ])
                     : Row(children: [Expanded(child: field), const SizedBox(width: 12), button]),
               ),
-              if (hint != null || _error != null) ...[
+              if (solo || _error != null) ...[
                 const SizedBox(height: 8),
                 Text(
-                  _error ?? hint!,
+                  _error ?? soloPlayHint,
                   key: const ValueKey('link-hint'),
                   textAlign: TextAlign.center,
                   style: t.bodySmall?.copyWith(color: _error != null ? scheme.error : Colors.grey),
@@ -380,7 +384,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
                         child: _PreviewCard(preview: preview, loading: loading),
                       ),
               ),
-              if (hint == null) ...[
+              if (!solo) ...[
                 const SizedBox(height: 28),
                 Text('How the others get it', style: t.titleSmall),
                 const SizedBox(height: 10),

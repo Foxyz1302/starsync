@@ -21,8 +21,9 @@ import 'schedule_card.dart';
 enum ScheduleFilter { jellyfin, following, all }
 
 class SchedulePage extends StatefulWidget {
-  /// In a server: available episodes can be put up.
-  final bool online;
+  /// Nobody else watches (offline or solo): available episodes say Play
+  /// (offline that starts a solo session).
+  final bool solo;
 
   /// Puts a Jellyfin episode up in the server; returns an error to show.
   final Future<String?> Function(JellyfinMedia pick) onPutUp;
@@ -36,7 +37,7 @@ class SchedulePage extends StatefulWidget {
 
   const SchedulePage({
     super.key,
-    required this.online,
+    this.solo = false,
     required this.onPutUp,
     required this.onToast,
     this.repository,
@@ -215,9 +216,9 @@ class _SchedulePageState extends State<SchedulePage> {
 
   (CardAction, String?) _actionFor(ScheduleEntry e) {
     if (e.status == ScheduleStatus.available || e.status == ScheduleStatus.inLibrary) {
-      if (!widget.online) return (CardAction.playOffline, 'Join or host a server to put it up');
-      if (e.jellyfinSeriesId == null) return (CardAction.putUp, 'Not linked to a Jellyfin series yet');
-      return (CardAction.putUp, null);
+      final put = widget.solo ? CardAction.play : CardAction.putUp;
+      if (e.jellyfinSeriesId == null) return (put, 'Not linked to a Jellyfin series yet');
+      return (put, null);
     }
     final me = _me;
     final CardAction kind;
@@ -242,6 +243,7 @@ class _SchedulePageState extends State<SchedulePage> {
   Future<void> _onAction(ScheduleEntry e, CardAction action) async {
     switch (action) {
       case CardAction.putUp:
+      case CardAction.play:
         return _putUp(e);
       case CardAction.request:
       case CardAction.requestSeries:
@@ -530,7 +532,7 @@ class _SchedulePageState extends State<SchedulePage> {
 
   Widget _card(ScheduleEntry e, DateTime now) {
     final (action, hint) = _actionFor(e);
-    final busy = _busy.contains(action == CardAction.putUp ? 'play:${_key(e)}' : _key(e));
+    final busy = _busy.contains(action == CardAction.putUp || action == CardAction.play ? 'play:${_key(e)}' : _key(e));
     return AiringCard(
       entry: e,
       now: now,

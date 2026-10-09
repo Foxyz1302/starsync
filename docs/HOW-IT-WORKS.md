@@ -44,7 +44,13 @@ A five-minute tour. Details: [ARCHITECTURE.md](ARCHITECTURE.md), wire format:
 - **Dedicated server**: `watch-together-server`, a separate program in the
   release tarball, for an always-on box. See the README.
 
-Friends join either way with Join in the strip at the top of the window.
+Friends join either way with Join a friend in the strip at the top of the
+window; guests need no Jellyfin or account.
+
+- **Watch solo**: put something up without joining or hosting and the
+  app hosts a private server reachable only from this computer, so
+  watching alone works like a session (progress, next episode). Invite
+  friends turns it into a normal hosted server, video and position kept.
 
 ## One session, start to finish
 

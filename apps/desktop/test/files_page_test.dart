@@ -44,7 +44,7 @@ Future<void> frames(WidgetTester tester, [int n = 10]) async {
 Future<void> pumpPage(
   WidgetTester tester, {
   Size size = const Size(1280, 800),
-  bool online = true,
+  bool solo = false,
   bool relayed = false,
   Future<String?> Function(String path)? onPlay,
   ThumbnailLoader? thumbnails,
@@ -56,7 +56,7 @@ Future<void> pumpPage(
   await tester.pumpWidget(MaterialApp(
     home: Scaffold(
       body: FilesPage(
-        online: online,
+        solo: solo,
         relayed: relayed,
         onPlay: onPlay ?? (_) async => null,
         thumbnails: thumbnails ?? fakeThumb,
@@ -206,24 +206,6 @@ void main() {
     expect(find.text('4 episodes · 1 extra · Grp'), findsOneWidget);
   });
 
-  testWidgets('offline: browsing works, playing is disabled', (tester) async {
-    store.addFolder(anime);
-    final played = <String>[];
-    await pumpPage(tester, online: false, onPlay: (p) async {
-      played.add(p);
-      return null;
-    });
-    await openFolder(tester, 'anime');
-    await openSeries(tester);
-    expect(find.text('E01'), findsOneWidget);
-    await tester.tap(find.text('E01'));
-    await tester.tap(find.text('Some Movie (2019)'));
-    await frames(tester);
-    expect(played, isEmpty);
-    expect(store.recent.value, isEmpty);
-    expect(find.byTooltip(offlinePlayHint), findsWidgets);
-  });
-
   testWidgets('a play goes to onPlay and into Recent', (tester) async {
     store.addFolder(anime);
     final played = <String>[];
@@ -261,7 +243,6 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
         body: FilesPage(
-          online: true,
           relayed: false,
           onPlay: (_) async => null,
           nowPlayingPath: '$anime/[Grp] Show - 03.mkv',

@@ -277,6 +277,10 @@ class SessionCoordinator {
   int _relaySourceMediaId = -1;
   /// This member serves the current media's bytes through the server.
   final relaying = signal<bool>(false);
+  /// What this client put up last in this connection (a solo session
+  /// carries it over when it becomes a hosted server).
+  PickedMedia? get lastPick => _lastPick;
+  PickedMedia? _lastPick;
   // Server seek applied to the player (event id and when), checked once it
   // should have landed.
   int? _pendingSeekEvent;
@@ -402,6 +406,7 @@ class SessionCoordinator {
     _seekGate.reset();
     _clearPendingSeek();
     _lastEventId = -1;
+    _lastPick = null;
     _resetJellyfin();
     _jfToastShown = false;
     if (!_jellyfinListening) {
@@ -1235,6 +1240,7 @@ class SessionCoordinator {
   /// link, or relayed per [relay]. Returns an error text, or null when sent.
   Future<String?> swapLink(String url, {LinkRelay relay = LinkRelay.direct}) async {
     markInput();
+    _lastPick = LinkMedia(url, relay: relay);
     final media = await mediaForLink(jellyfin, url);
     if (media.jellyfin != null) {
       _pendingOrigin = _JellyfinOrigin(url);
@@ -1304,6 +1310,7 @@ class SessionCoordinator {
   /// relayed by this member for viewers without an account.
   void swapJellyfin(JellyfinMedia media) {
     markInput();
+    _lastPick = media;
     _pendingOrigin = const _JellyfinOrigin(null);
     _swap(mediaForPick(media).copyWith(relay: const MediaRelay()));
   }
@@ -1313,6 +1320,7 @@ class SessionCoordinator {
   /// when sent.
   Future<String?> swapFile(String path) async {
     markInput();
+    _lastPick = FileMedia(path);
     final host = hostFile;
     if (host != null) {
       final file = await host(path);

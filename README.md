@@ -41,12 +41,28 @@ release with a newer protocol is a required update: everyone on a server
 must run the same protocol version, and a mismatch is refused with a message
 telling you to update.
 
+## Getting started
+
+Three ways in, all at the top of the Library when you are not in a server.
+None of them needs Jellyfin or an account.
+
+- **Join a friend** (most people): your friend sends you an address and,
+  maybe, a password. See [Join](#join).
+- **Host**: you have the video and friends watch it with you. See
+  [Host from the app](#host-from-the-app).
+- **Watch solo**: just play something from the Library. It plays for you
+  alone, with everything a server has (Jellyfin progress, next episode,
+  skip buttons); nothing is reachable from outside this computer. Invite
+  friends in the strip turns it into a hosted server (the Host card's port
+  and password) and the video carries on from where it was; Stop ends it.
+
 ## The window
 
 One window. Along the top, the strip: your avatar (click it for your
 profile: name, picture with a crop editor, colour, and links to the
 settings), the Library / Schedule / Settings tabs, and the party. Offline
-the party side has Join and Host; in a server it shows everyone's avatar
+the party side has Join a friend and Host; watching solo it says Solo,
+with Invite friends and Stop; in a server it shows everyone's avatar
 with a ring for their state (green ready, amber buffering, grey not ready,
 dimmed reconnecting, dimmed with a moon sitting out; a crown on whoever
 hosts, a tower on whoever passes the video on). Click the avatars for the
@@ -108,7 +124,8 @@ a folder or a link anywhere on the window, or press Ctrl+V outside a
 text field, and a small card asks how to open it (put it up, add the
 folder to Files, or fill Link).
 
-- **Jellyfin**: your linked servers (see below). Library chips beside the
+- **Jellyfin**: your linked servers (see below); with none linked it
+  points to Files and Link and offers Jellyfin as optional. Library chips beside the
   switch, then one **Continue** row (what you were watching and what comes
   next, one card per series, the one you watched most recently first;
   series not touched for two months drop out) and **Latest in** each
@@ -129,8 +146,8 @@ folder to Files, or fill Link).
 - **Files**: video folders you add on this computer, grouped by series
   (click a series to list its episodes), or any file through Browse. The others stream it from you.
 
-Put it up and the player opens. Offline the library browses but nothing
-goes up until you join or host ("Join or host to watch together").
+Put it up and the player opens. Not in a server, the buttons say Play
+and it plays for you alone ([Watch solo](#getting-started)).
 
 ## Dedicated server
 

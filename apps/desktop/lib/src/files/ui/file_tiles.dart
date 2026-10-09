@@ -10,9 +10,6 @@ import 'thumb.dart';
 // The Files page's rows and cards: a series header, an episode row (also
 // used for Recent), a loose-video card, and the empty states.
 
-/// Shown on play controls while there is nobody to watch with.
-const offlinePlayHint = 'Join or host to watch';
-
 /// What a play control is doing right now.
 enum PlayState { idle, starting, playing }
 
@@ -27,10 +24,6 @@ String parentName(String path) => baseName(File(path).parent.path);
 
 /// Cleaned title of a loose video: `Title (2019)`.
 String cleanTitle(ParsedName p) => p.year == null ? p.series : '${p.series} (${p.year})';
-
-/// Disabled with [offlinePlayHint] when [onTap] is null because offline.
-Widget _offlineTip(bool offline, Widget child) =>
-    offline ? Tooltip(message: offlinePlayHint, child: child) : child;
 
 class SeriesHeader extends StatelessWidget {
   final SeriesGroup group;
@@ -110,9 +103,8 @@ class FileRow extends StatelessWidget {
   final String? size;
   final PlayState state;
   final ThumbCache thumbs;
-  /// Null disables the row ([offline] adds the reason as a tooltip).
+  /// Null disables the row.
   final VoidCallback? onTap;
-  final bool offline;
   final bool indent;
   final Widget? trailing;
   const FileRow({
@@ -124,7 +116,6 @@ class FileRow extends StatelessWidget {
     required this.state,
     required this.thumbs,
     required this.onTap,
-    required this.offline,
     this.indent = true,
     this.trailing,
   });
@@ -148,62 +139,59 @@ class FileRow extends StatelessWidget {
       builder: (context, t, _) {
         final duration = durationText(t);
         final meta = [?duration, ?size].join(' · ');
-        return _offlineTip(
-          offline,
-          Material(
-            color: playing ? scheme.primary.withValues(alpha: 0.08) : Colors.transparent,
+        return Material(
+          color: playing ? scheme.primary.withValues(alpha: 0.08) : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            onTap: onTap,
             borderRadius: BorderRadius.circular(10),
-            child: InkWell(
-              onTap: onTap,
-              borderRadius: BorderRadius.circular(10),
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(indent ? 20 : 4, 5, 8, 5),
-                child: Row(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: ThumbImage(t, width: 80, height: 45),
-                    ),
-                    const SizedBox(width: 10),
-                    SizedBox(width: 20, child: Center(child: icon)),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    color: playing ? scheme.primary : null,
-                                  ),
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(indent ? 20 : 4, 5, 8, 5),
+              child: Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: ThumbImage(t, width: 80, height: 45),
+                  ),
+                  const SizedBox(width: 10),
+                  SizedBox(width: 20, child: Center(child: icon)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: playing ? scheme.primary : null,
                                 ),
                               ),
-                              if (playing) ...[
-                                const SizedBox(width: 8),
-                                Pill('now playing', scheme.primary),
-                              ],
+                            ),
+                            if (playing) ...[
+                              const SizedBox(width: 8),
+                              Pill('now playing', scheme.primary),
                             ],
-                          ),
-                          Text(subtitle,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(color: muted, fontSize: 12)),
-                        ],
-                      ),
+                          ],
+                        ),
+                        Text(subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: muted, fontSize: 12)),
+                      ],
                     ),
-                    if (meta.isNotEmpty) ...[
-                      const SizedBox(width: 12),
-                      Text(meta, style: TextStyle(color: muted, fontSize: 12)),
-                    ],
-                    ?trailing,
+                  ),
+                  if (meta.isNotEmpty) ...[
+                    const SizedBox(width: 12),
+                    Text(meta, style: TextStyle(color: muted, fontSize: 12)),
                   ],
-                ),
+                  ?trailing,
+                ],
               ),
             ),
           ),
@@ -223,14 +211,12 @@ class VideoCard extends StatelessWidget {
   final PlayState state;
   final ThumbCache thumbs;
   final VoidCallback? onTap;
-  final bool offline;
   const VideoCard({
     super.key,
     required this.video,
     required this.state,
     required this.thumbs,
     required this.onTap,
-    required this.offline,
   });
 
   @override
@@ -242,65 +228,62 @@ class VideoCard extends StatelessWidget {
       path: video.path,
       builder: (context, t, _) {
         final duration = durationText(t);
-        return _offlineTip(
-          offline,
-          InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: playing ? scheme.primary : Colors.transparent,
-                        width: 2,
-                      ),
+        return InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: playing ? scheme.primary : Colors.transparent,
+                      width: 2,
                     ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          ThumbImage(t),
-                          if (duration != null)
-                            Positioned(right: 6, bottom: 6, child: _Badge(duration)),
-                          if (state != PlayState.idle)
-                            Container(
-                              color: Colors.black38,
-                              alignment: Alignment.center,
-                              child: state == PlayState.playing
-                                  ? const Icon(Icons.graphic_eq, color: Colors.white, size: 32)
-                                  : const SizedBox.square(
-                                      dimension: 28,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 3, color: Colors.white)),
-                            ),
-                        ],
-                      ),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        ThumbImage(t),
+                        if (duration != null)
+                          Positioned(right: 6, bottom: 6, child: _Badge(duration)),
+                        if (state != PlayState.idle)
+                          Container(
+                            color: Colors.black38,
+                            alignment: Alignment.center,
+                            child: state == PlayState.playing
+                                ? const Icon(Icons.graphic_eq, color: Colors.white, size: 32)
+                                : const SizedBox.square(
+                                    dimension: 28,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 3, color: Colors.white)),
+                          ),
+                      ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 6),
-                Flexible(
-                  child: Text(
-                    cleanTitle(video.parsed),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                      color: playing ? scheme.primary : null,
-                    ),
+              ),
+              const SizedBox(height: 6),
+              Flexible(
+                child: Text(
+                  cleanTitle(video.parsed),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: playing ? scheme.primary : null,
                   ),
                 ),
-                Text(formatSize(video.size),
-                    style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
-              ],
-            ),
+              ),
+              Text(formatSize(video.size),
+                  style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+            ],
           ),
         );
       },

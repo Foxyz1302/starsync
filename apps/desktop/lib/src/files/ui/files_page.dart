@@ -48,8 +48,8 @@ void resetFilesPageSession() {
 }
 
 class FilesPage extends StatefulWidget {
-  /// In a session: false disables playing (browsing still works).
-  final bool online;
+  /// Nobody else watches (offline or solo): no relay notice.
+  final bool solo;
   /// The file will stream from this computer through the server.
   final bool relayed;
   /// Plays [path] in the session; returns an error text, or null.
@@ -67,7 +67,7 @@ class FilesPage extends StatefulWidget {
 
   const FilesPage({
     super.key,
-    required this.online,
+    this.solo = false,
     required this.relayed,
     required this.onPlay,
     this.nowPlayingPath,
@@ -207,7 +207,7 @@ class _FilesPageState extends State<FilesPage> {
   }
 
   Future<void> _play(String path) async {
-    if (!widget.online || _starting != null) return;
+    if (_starting != null) return;
     setState(() {
       _starting = path;
       _error = null;
@@ -236,7 +236,7 @@ class _FilesPageState extends State<FilesPage> {
           ? PlayState.playing
           : PlayState.idle;
 
-  VoidCallback? _tapOf(String path) => widget.online ? () => _play(path) : null;
+  VoidCallback _tapOf(String path) => () => _play(path);
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -264,9 +264,7 @@ class _FilesPageState extends State<FilesPage> {
         },
       );
 
-  Widget _browseButton(Widget Function(VoidCallback? onPressed) build) => widget.online
-      ? build(_browse)
-      : Tooltip(message: offlinePlayHint, child: build(null));
+  Widget _browseButton(Widget Function(VoidCallback? onPressed) build) => build(_browse);
 
   Widget _sidebar(BuildContext context, List<String> folders, String? open) {
     final scheme = Theme.of(context).colorScheme;
@@ -345,7 +343,7 @@ class _FilesPageState extends State<FilesPage> {
     final top = <Widget>[
       _header(context, open),
       if (narrow) _chips(folders, open),
-      if (widget.online && widget.relayed) const _RelayNotice(),
+      if (!widget.solo && widget.relayed) const _RelayNotice(),
       AnimatedSize(
         duration: easeTime,
         curve: ease,
@@ -476,7 +474,6 @@ class _FilesPageState extends State<FilesPage> {
             state: _stateOf(path),
             thumbs: _thumbs,
             onTap: _tapOf(path),
-            offline: !widget.online,
             onRemove: () => _store.removeRecent(path),
           );
         },
@@ -594,7 +591,6 @@ class _FilesPageState extends State<FilesPage> {
             state: _stateOf(v.path),
             thumbs: _thumbs,
             onTap: _tapOf(v.path),
-            offline: !widget.online,
           );
         },
       ),
@@ -630,7 +626,6 @@ class _FilesPageState extends State<FilesPage> {
                 state: _stateOf(v.path),
                 thumbs: _thumbs,
                 onTap: _tapOf(v.path),
-                offline: !widget.online,
               );
             },
           );
@@ -647,7 +642,6 @@ class _RecentRow extends StatefulWidget {
   final PlayState state;
   final ThumbCache thumbs;
   final VoidCallback? onTap;
-  final bool offline;
   final VoidCallback onRemove;
   const _RecentRow({
     super.key,
@@ -655,7 +649,6 @@ class _RecentRow extends StatefulWidget {
     required this.state,
     required this.thumbs,
     required this.onTap,
-    required this.offline,
     required this.onRemove,
   });
 
@@ -688,7 +681,6 @@ class _RecentRowState extends State<_RecentRow> {
       state: widget.state,
       thumbs: widget.thumbs,
       onTap: missing ? null : widget.onTap,
-      offline: widget.offline && !missing,
       indent: false,
       trailing: IconButton(
         tooltip: 'Remove from recent',

@@ -78,7 +78,7 @@ class _ProfileCardState extends State<ProfileCard> {
           final coord = session.coordinator;
           final online = session.route.value == AppRoute.session;
           final self = online ? coord.selfMember.value : null;
-          final hosting = online && coord.hostFile != null;
+          final hosting = online && !session.solo.value && coord.hostFile != null;
           final color = _p.color.value;
           final png = _p.picture.value;
           final out = self?.out ?? false;

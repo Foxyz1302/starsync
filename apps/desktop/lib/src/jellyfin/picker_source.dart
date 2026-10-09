@@ -7,7 +7,7 @@ import 'browser.dart';
 import 'sign_in_panel.dart';
 
 /// The Library's Jellyfin source: the library browser once a server is
-/// linked, else an inline add-server panel.
+/// linked, else [empty] (default: an inline add-server panel).
 class JellyfinPickerSource extends StatefulWidget {
   final JellyfinAccounts accounts;
   final BrowseController? controller;
@@ -17,6 +17,8 @@ class JellyfinPickerSource extends StatefulWidget {
   final VoidCallback? onOpenIntegrations;
   final BrowseStart? start;
   final bool libraryStrip;
+  /// Shown while no server is linked.
+  final WidgetBuilder? empty;
   const JellyfinPickerSource({
     super.key,
     this.start,
@@ -27,6 +29,7 @@ class JellyfinPickerSource extends StatefulWidget {
     this.selected,
     this.onOpenIntegrations,
     this.libraryStrip = true,
+    this.empty,
   });
 
   @override
@@ -49,6 +52,7 @@ class _JellyfinPickerSourceState extends State<JellyfinPickerSource> {
         if (!a.loaded) {
           return const Center(child: CircularProgressIndicator(strokeWidth: 2));
         }
+        if (a.isEmpty && widget.empty != null) return widget.empty!(context);
         if (a.isEmpty) return _LinkFirst(accounts: a, onOpenIntegrations: widget.onOpenIntegrations);
         return JellyfinBrowser(
           key: const ValueKey('media-jellyfin'),

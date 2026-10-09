@@ -231,7 +231,7 @@ void main() {
     WidgetTester tester, {
     Size size = const Size(2560, 1080),
     ScheduleSnapshot Function()? snap,
-    bool online = true,
+    bool solo = false,
     JellyfinAccounts? accounts,
   }) async {
     toasts.clear();
@@ -245,7 +245,7 @@ void main() {
         theme: ThemeData.dark(),
         home: Scaffold(
           body: SchedulePage(
-            online: online,
+            solo: solo,
             repository: repo,
             accounts: accounts,
             onToast: toasts.add,
@@ -434,11 +434,11 @@ void main() {
     await done(tester);
   });
 
-  testWidgets('offline: Play is disabled', (tester) async {
-    await pumpPage(tester, online: false);
+  testWidgets('solo: the button says Play and works', (tester) async {
+    await pumpPage(tester, solo: true);
     expect(find.text('Put it up'), findsNothing);
     final b = widgetOf<ButtonStyleButton>(tester, action(111, 3));
-    expect(b.onPressed, isNull);
+    expect(b.onPressed, isNotNull);
     expect(find.text('Play'), findsOneWidget);
     await done(tester);
   });

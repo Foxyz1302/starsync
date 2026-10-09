@@ -8,6 +8,7 @@ import 'package:sync_relay_core/core.dart';
 import 'package:watch_together/src/screens/home/health_probe.dart';
 import 'package:watch_together/src/screens/home/media_picker.dart';
 import 'package:watch_together/src/shell/app_shell.dart';
+import 'package:watch_together/src/shell/library_link.dart' show soloPlayHint;
 import 'package:watch_together/src/state/session_state.dart';
 import 'package:watch_together/src/state/settings.dart';
 import 'package:watch_together/src/update/update_controller.dart';
@@ -230,24 +231,28 @@ void main() {
     expect(find.byKey(const ValueKey('join-row')), findsOneWidget);
   });
 
-  testWidgets('library: sources switch; offline nothing goes up; Integrations opens Settings', (tester) async {
+  testWidgets('library offline: welcome band, sources that need nothing, Jellyfin optional', (tester) async {
     await pumpShell(tester, const Size(1280, 900));
-    await tester.tap(find.text('Files'));
+    // The three ways in, Join first; none needs Jellyfin.
+    expect(find.byKey(const ValueKey('welcome-band')), findsOneWidget);
+    expect(find.text('Watch together, in sync'), findsOneWidget);
+    final join = tester.getTopLeft(find.byKey(const ValueKey('way-join')));
+    expect(join.dx, lessThan(tester.getTopLeft(find.byKey(const ValueKey('way-solo'))).dx));
+    // No linked server: Files and Link first, Jellyfin as an optional card.
+    expect(find.text('Pick something to watch'), findsOneWidget);
+    expect(find.text('Add a Jellyfin server'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('jellyfin-link')));
+    await tester.pumpAndSettle();
+    expect(find.text('Add a Jellyfin server'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('source-files')));
     await tester.pumpAndSettle();
     expect(find.byType(FilesPage), findsOneWidget);
     await tester.tap(find.text('Link'));
     await tester.pumpAndSettle();
     expect(find.text('Watch from a link'), findsOneWidget);
-    // Offline nothing goes up.
-    expect(find.text('Join or host to watch together'), findsOneWidget);
+    // Alone: Play, no relay modes.
+    expect(find.text(soloPlayHint), findsOneWidget);
     expect(find.text('How the others get it'), findsNothing);
-    await tester.tap(find.text('Jellyfin'));
-    await tester.pumpAndSettle();
-    // No linked server: sign-in right in the library.
-    expect(find.text('Add a Jellyfin server'), findsOneWidget);
-    await tester.tap(find.text('Open Integrations'));
-    await tester.pumpAndSettle();
-    expect(find.text('Add server'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

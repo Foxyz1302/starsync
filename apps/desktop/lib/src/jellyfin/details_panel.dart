@@ -32,16 +32,16 @@ typedef _Data = ({
 });
 
 /// The selected card's details, at the right of the library: banner,
-/// title, meta, "Put it up · S1E3" (a disabled Play with [offlineHint]
-/// offline), mark watched / unwatched, remove from Continue, overview and,
+/// title, meta, "Put it up · S1E3" ("Play · S1E3" when watching
+/// [solo]), mark watched / unwatched, remove from Continue, overview and,
 /// for a series or an episode, the episode list (click picks which
 /// episode goes up, double-click puts it up). Reloads when the
 /// [controller]'s data version moves.
 class JellyfinDetailsPanel extends StatefulWidget {
   final BrowseController controller;
   final JellyfinSelection selection;
-  /// Null when online; else why nothing can go up.
-  final String? offlineHint;
+  /// Nobody else watches (offline or solo): the button says Play.
+  final bool solo;
   /// Puts [item] (playable) up; returns an error text, or null when sent.
   final Future<String?> Function(JellyfinSelection item) onPutUp;
   final VoidCallback onClose;
@@ -51,7 +51,7 @@ class JellyfinDetailsPanel extends StatefulWidget {
     required this.selection,
     required this.onPutUp,
     required this.onClose,
-    this.offlineHint,
+    this.solo = false,
   });
 
   @override
@@ -104,7 +104,7 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
       _cached('episodes:$seriesId:$seasonId', (c) => c.episodes(seriesId, seasonId: seasonId));
 
   Future<void> _putUp(JellyfinItem target) async {
-    if (_busy || widget.offlineHint != null) return;
+    if (_busy) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -253,14 +253,8 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
       if (shown.communityRating != null) '★ ${shown.communityRating!.toStringAsFixed(1)}',
       if (!isSeries && shown.userData.played) 'Watched',
     ].join(' · ');
-    final hint = widget.offlineHint;
-    final label = playable == null
-        ? (hint == null ? 'Put it up' : 'Play')
-        : hint != null
-            ? 'Play'
-            : isSeries
-                ? 'Put it up · ${playable.episodeLabel ?? playable.name}'
-                : 'Put it up';
+    final verb = widget.solo ? 'Play' : 'Put it up';
+    final label = playable != null && isSeries ? '$verb · ${playable.episodeLabel ?? playable.name}' : verb;
     final inContinue = playable != null &&
         (playable.userData.isResumable || _c.continueKeys.contains(continueKey(playable)));
     final left = playable == null ? null : timeLeft(playable);
@@ -307,7 +301,7 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
                 children: [
                   FilledButton.icon(
                     key: const ValueKey('details-put-up'),
-                    onPressed: playable == null || hint != null || _busy ? null : () => _putUp(playable),
+                    onPressed: playable == null || _busy ? null : () => _putUp(playable),
                     icon: _busy
                         ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
                         : const Icon(Icons.play_arrow),
@@ -336,12 +330,12 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
                     ),
                 ],
               ),
-              if (hint != null || _error != null) ...[
+              if (_error != null) ...[
                 const SizedBox(height: 6),
                 Text(
-                  _error ?? hint!,
+                  _error!,
                   key: const ValueKey('details-hint'),
-                  style: t.bodySmall?.copyWith(color: _error != null ? scheme.error : Colors.grey),
+                  style: t.bodySmall?.copyWith(color: scheme.error),
                 ),
               ],
               if (isSeries && playable != null) ...[

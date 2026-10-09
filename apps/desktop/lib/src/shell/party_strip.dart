@@ -39,8 +39,9 @@ bool viaHostOf(MemberView m, JellyfinRef? ref) =>
     ref != null && m.jf[ref.serverId] == false;
 
 /// The 60 px strip over everything: your avatar (profile), the tabs, and
-/// the party: offline Join / Host, online the avatars (members card),
-/// server and readiness, chat and Leave. Empty space drags the window.
+/// the party: offline Join a friend / Host, solo a "Solo" chip, Invite
+/// friends and Stop, online the avatars (members card), server and
+/// readiness, chat and Leave. Empty space drags the window.
 class PartyStrip extends StatelessWidget {
   final ShellTab tab;
   final ValueChanged<ShellTab> onTab;
@@ -51,6 +52,8 @@ class PartyStrip extends StatelessWidget {
   final VoidCallback onHost;
   final VoidCallback onLeave;
   final VoidCallback onProfile;
+  /// Solo: host from here, keeping what plays.
+  final VoidCallback? onInvite;
 
   /// Online with something up but the player closed: brings it back.
   final VoidCallback? onShowPlayer;
@@ -69,6 +72,7 @@ class PartyStrip extends StatelessWidget {
     required this.onHost,
     required this.onLeave,
     required this.onProfile,
+    this.onInvite,
     this.onShowPlayer,
     this.updates,
     this.windowControls = true,
@@ -83,6 +87,7 @@ class PartyStrip extends StatelessWidget {
         final session = SessionState.instance;
         final coord = session.coordinator;
         final online = session.route.value == AppRoute.session;
+        final solo = online && (session.solo.value || session.switching.value);
         final self = online ? coord.selfMember.value : null;
         return Row(
           children: [
@@ -97,7 +102,7 @@ class PartyStrip extends StatelessWidget {
                 child: StatusAvatar(
                   info: selfAvatarInfo(
                     ready: self?.ready ?? false,
-                    host: online && coord.hostFile != null,
+                    host: online && !solo && coord.hostFile != null,
                   ),
                   size: stripAvatarSize,
                   ring: online,
@@ -130,14 +135,36 @@ class PartyStrip extends StatelessWidget {
             ),
             UpdateIndicator(controller: updates),
             const SizedBox(width: 8),
-            if (online) ...[
-              if (onShowPlayer != null)
-                IconButton(
-                  key: const ValueKey('show-player'),
-                  tooltip: 'Show the player',
-                  onPressed: onShowPlayer,
-                  icon: const Icon(Icons.smart_display_outlined, size: 20),
+            if (online && onShowPlayer != null)
+              IconButton(
+                key: const ValueKey('show-player'),
+                tooltip: 'Show the player',
+                onPressed: onShowPlayer,
+                icon: const Icon(Icons.smart_display_outlined, size: 20),
+              ),
+            if (solo) ...[
+              _SoloChip(compact: compact, busy: session.switching.value),
+              const SizedBox(width: 10),
+              if (compact)
+                FilledButton(
+                  key: const ValueKey('strip-invite'),
+                  onPressed: session.switching.value ? null : onInvite,
+                  child: const Text('Invite'),
+                )
+              else
+                FilledButton.icon(
+                  key: const ValueKey('strip-invite'),
+                  onPressed: session.switching.value ? null : onInvite,
+                  icon: const Icon(Icons.group_add_outlined, size: 18),
+                  label: const Text('Invite friends'),
                 ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                key: const ValueKey('strip-leave'),
+                onPressed: session.switching.value ? null : onLeave,
+                child: const Text('Stop'),
+              ),
+            ] else if (online) ...[
               PartyWatch(
                 builder: (context) => AvatarStack(
                   key: const ValueKey('party-avatars'),
@@ -177,23 +204,35 @@ class PartyStrip extends StatelessWidget {
                 child: const Text('Leave'),
               ),
             ] else ...[
-              if (!compact)
-                Text(
-                  'Offline',
-                  style: TextStyle(color: scheme.onSurfaceVariant),
+              if (!compact) ...[
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(color: scheme.outline, shape: BoxShape.circle),
                 ),
-              const SizedBox(width: 12),
-              FilledButton.tonal(
-                key: const ValueKey('strip-join'),
-                onPressed: onJoin,
-                child: const Text('Join'),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
-                key: const ValueKey('strip-host'),
-                onPressed: onHost,
-                child: const Text('Host'),
-              ),
+                const SizedBox(width: 6),
+                Text('Offline', style: TextStyle(color: scheme.onSurfaceVariant)),
+                const SizedBox(width: 12),
+              ],
+              if (compact) ...[
+                FilledButton(key: const ValueKey('strip-join'), onPressed: onJoin, child: const Text('Join')),
+                const SizedBox(width: 8),
+                FilledButton.tonal(key: const ValueKey('strip-host'), onPressed: onHost, child: const Text('Host')),
+              ] else ...[
+                FilledButton.icon(
+                  key: const ValueKey('strip-join'),
+                  onPressed: onJoin,
+                  icon: const Icon(Icons.login_rounded, size: 18),
+                  label: const Text('Join a friend'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.tonalIcon(
+                  key: const ValueKey('strip-host'),
+                  onPressed: onHost,
+                  icon: const Icon(Icons.podcasts_rounded, size: 18),
+                  label: const Text('Host'),
+                ),
+              ],
             ],
             const SizedBox(width: 8),
             if (windowControls) ...[
@@ -270,11 +309,52 @@ class _ServerLabel extends StatelessWidget {
   );
 }
 
-/// "Your server" when hosting, else the address joined.
+/// "Solo" alone, "Your server" when hosting, else the address joined.
 String serverName() {
   final session = SessionState.instance;
+  if (session.solo.peek()) return 'Solo';
   if (session.coordinator.hostFile != null) return 'Your server';
   return session.lastForm.host;
+}
+
+/// Solo: just you, on your own; a spinner while it becomes a server.
+class _SoloChip extends StatelessWidget {
+  final bool compact;
+  final bool busy;
+  const _SoloChip({required this.compact, required this.busy});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: busy
+          ? 'Starting your server…'
+          : 'Watching on your own. Nobody can join until you invite friends.',
+      child: Container(
+        key: const ValueKey('solo-chip'),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (busy)
+              const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2))
+            else
+              Icon(Icons.person_outline_rounded, size: 16, color: scheme.primary),
+            const SizedBox(width: 6),
+            Text(busy ? 'Inviting…' : 'Solo', style: const TextStyle(fontWeight: FontWeight.w600)),
+            if (!compact && !busy) ...[
+              const SizedBox(width: 6),
+              Text('only you', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// One strip tab: label and an underline that grows in when selected.

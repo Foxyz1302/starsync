@@ -16,6 +16,7 @@ import '../screens/home/media_picker.dart';
 import '../state/session_state.dart';
 import 'library_link.dart';
 import 'motion.dart';
+import 'welcome.dart';
 
 /// What putting up a Jellyfin pick sends: its ref (no URL, no token).
 /// Throws [FormatException] with a user-facing message when the server is
@@ -58,9 +59,6 @@ String? nowPlayingFile(Map<String, Object?>? media, String lastPath) {
   return name == media['name'] ? lastPath : null;
 }
 
-/// Offline, nothing goes up; this says why.
-const offlinePutUpHint = 'Join or host to watch together';
-
 /// Window width under which the details panel floats over the library.
 const detailsDockFrom = 1000.0;
 
@@ -68,12 +66,13 @@ const detailsDockFrom = 1000.0;
 /// through), the Jellyfin library chips beside it, and the source below.
 /// Jellyfin cards select on click and open their details in a panel at
 /// the right (docked from [detailsDockFrom], floating over the library
-/// below it); a double-click or the panel's button puts it up. Offline
-/// everything browses and the play buttons say [offlinePutUpHint].
+/// below it); a double-click or the panel's button puts it up. With
+/// nobody else watching ([solo]: offline or a solo session) the buttons
+/// say Play and putting something up starts (or uses) a solo session.
 class LibraryTab extends StatefulWidget {
   final MediaPickerController controller;
   final JellyfinAccounts accounts;
-  final bool online;
+  final bool solo;
   /// This app hosts the server: its files stream from here directly.
   final bool isHost;
   final BrowseStart? jellyfinStart;
@@ -85,15 +84,17 @@ class LibraryTab extends StatefulWidget {
   final RecentLinks? recentLinks;
   final LinkProber probe;
   /// The Files source (tests inject one); defaults to [FilesPage].
-  final Widget Function(BuildContext context, {required bool online, required bool relayed,
+  final Widget Function(BuildContext context, {required bool solo, required bool relayed,
       required Future<String?> Function(String path) onPlay, String? nowPlayingPath})? filesBuilder;
   /// Clock for the Jellyfin Continue row (tests pin it).
   final DateTime Function() now;
+  /// Over the source switch (the shell's welcome band while offline).
+  final Widget? banner;
   const LibraryTab({
     super.key,
     required this.controller,
     required this.accounts,
-    required this.online,
+    required this.solo,
     required this.isHost,
     required this.onPutUp,
     this.onPutUpDone,
@@ -103,6 +104,7 @@ class LibraryTab extends StatefulWidget {
     this.probe = defaultLinkProber,
     this.filesBuilder,
     this.now = DateTime.now,
+    this.banner,
   });
 
   @override
@@ -115,7 +117,6 @@ class _LibraryTabState extends State<LibraryTab> {
   JellyfinSelection? _shown;
 
   MediaPickerController get _c => widget.controller;
-  String? get _hint => widget.online ? null : offlinePutUpHint;
 
   @override
   void initState() {
@@ -163,7 +164,6 @@ class _LibraryTabState extends State<LibraryTab> {
 
   /// A Jellyfin card or episode: a series goes up as its next episode.
   Future<String?> _putUpJellyfin(JellyfinSelection sel) async {
-    if (!widget.online) return offlinePutUpHint;
     final account = widget.accounts.account(sel.serverId);
     final client = widget.accounts.clientFor(sel.serverId);
     if (account == null || client == null) return 'that Jellyfin server is not linked any more';
@@ -181,7 +181,6 @@ class _LibraryTabState extends State<LibraryTab> {
   /// Double-click on a card: put it up, errors as a snack bar.
   Future<void> _doublePutUp(JellyfinSelection sel) async {
     _c.select(sel);
-    if (!widget.online) return;
     final error = await _putUpJellyfin(sel);
     if (error != null && mounted) {
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(error)));
@@ -239,11 +238,16 @@ class _LibraryTabState extends State<LibraryTab> {
             onOpenIntegrations: widget.onOpenIntegrations,
             start: widget.jellyfinStart,
             libraryStrip: false,
+            empty: (context) => NoJellyfinPanel(
+              accounts: widget.accounts,
+              onFiles: () => _c.source = MediaKind.file,
+              onLink: () => _c.source = MediaKind.link,
+            ),
           ),
         ),
       MediaKind.link => LibraryLinkSource(
           controller: _c,
-          offlineHint: _hint,
+          solo: widget.solo,
           recents: widget.recentLinks ?? RecentLinks.instance,
           probe: widget.probe,
           onPutUp: _put,
@@ -253,6 +257,15 @@ class _LibraryTabState extends State<LibraryTab> {
 
     final main = Column(
       children: [
+        AnimatedSize(
+          duration: easeTime,
+          curve: ease,
+          alignment: Alignment.topCenter,
+          child: AnimatedSwitcher(
+            duration: easeTime,
+            child: widget.banner ?? const SizedBox(width: double.infinity),
+          ),
+        ),
         header,
         Expanded(child: fadeThrough(KeyedSubtree(key: ValueKey(source), child: content))),
       ],
@@ -267,7 +280,7 @@ class _LibraryTabState extends State<LibraryTab> {
             child: JellyfinDetailsPanel(
               controller: _browse,
               selection: shown,
-              offlineHint: _hint,
+              solo: widget.solo,
               onPutUp: _putUpJellyfin,
               onClose: () => _c.select(null),
             ),
@@ -328,14 +341,14 @@ class _LibraryTabState extends State<LibraryTab> {
     Future<String?> play(String path) => _put(FileMedia(path));
     return SignalBuilder(builder: (context) {
       final session = SessionState.instance;
-      final now = widget.online
+      final now = session.route.value == AppRoute.session
           ? nowPlayingFile(session.coordinator.serverState.value?.media, session.lastForm.mediaPath)
           : null;
       final b = widget.filesBuilder;
       if (b != null) {
-        return b(context, online: widget.online, relayed: relayed, onPlay: play, nowPlayingPath: now);
+        return b(context, solo: widget.solo, relayed: relayed, onPlay: play, nowPlayingPath: now);
       }
-      return FilesPage(online: widget.online, relayed: relayed, onPlay: play, nowPlayingPath: now);
+      return FilesPage(solo: widget.solo, relayed: relayed, onPlay: play, nowPlayingPath: now);
     });
   }
 }

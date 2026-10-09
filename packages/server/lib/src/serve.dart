@@ -18,7 +18,8 @@ import 'sync_server.dart';
 /// a file on this machine the hosted file (the hosting app's in-session file
 /// swap; a following `swap` with its name and size puts it up) and answers
 /// `{'ok':true,'name':n,'size':s}` or `{'ok':false}`. Without [events] a
-/// start failure throws.
+/// start failure throws. `'loopbackOnly': true` in [config] (next to the
+/// [AppConfig] keys) binds 127.0.0.1 only: the app's solo session.
 Future<void> serve(Map<String, Object?> config, {SendPort? events}) async {
   StreamSubscription<pkg_logging.LogRecord>? logs;
   if (events != null) {
@@ -32,7 +33,7 @@ Future<void> serve(Map<String, Object?> config, {SendPort? events}) async {
   }
   final SyncServer server;
   try {
-    server = SyncServer(AppConfig.fromMap(config));
+    server = SyncServer(AppConfig.fromMap(config), loopbackOnly: config['loopbackOnly'] == true);
     await server.start();
   } catch (e) {
     await logs?.cancel();

@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../files/scanner.dart' show FileKind, kindOf;
 import '../files/ui/file_tiles.dart' show baseName;
-import 'library_tab.dart' show offlinePutUpHint;
 
 // Something handed to the app, by a drop or by Ctrl+V outside a text
 // field: what it is ([classifyHandoff], pure) and the small card that asks
@@ -95,10 +94,8 @@ Handoff classifyHandoff({
 
 /// What the card's buttons ask the shell to do.
 enum HandoffAction {
-  /// Put the (first) video up for everyone.
+  /// Put the (first) video up (offline: watch it solo).
   putUp,
-  /// Offline: list the video in Files → Recent and open it there.
-  openInFiles,
   /// Add the video's folder (or the folder) to Files and open it.
   addFolder,
   /// Open Library → Link with the URL filled.
@@ -109,8 +106,9 @@ enum HandoffAction {
 /// pops the [HandoffAction] chosen.
 class HandoffCard extends StatelessWidget {
   final Handoff item;
-  final bool online;
-  const HandoffCard({super.key, required this.item, required this.online});
+  /// Nobody else watches (offline or solo): videos play, no relay talk.
+  final bool solo;
+  const HandoffCard({super.key, required this.item, required this.solo});
 
   @override
   Widget build(BuildContext context) {
@@ -128,10 +126,7 @@ class HandoffCard extends StatelessWidget {
           baseName(paths.first),
           paths.length > 1 ? 'and ${paths.length - 1} more · the first one goes up' : 'A video on this computer',
           [
-            if (online)
-              button(HandoffAction.putUp, Icons.play_arrow, 'Put it up', primary: true)
-            else
-              button(HandoffAction.openInFiles, Icons.history, 'Open in Files', primary: true),
+            button(HandoffAction.putUp, Icons.play_arrow, solo ? 'Play' : 'Put it up', primary: true),
             button(HandoffAction.addFolder, Icons.create_new_folder_outlined, 'Add its folder to Files'),
           ],
         ),
@@ -144,9 +139,9 @@ class HandoffCard extends StatelessWidget {
       HandoffLink(:final url) => (
           Icons.link,
           url,
-          online ? 'Pick how the others get it on the Link page' : offlinePutUpHint,
+          solo ? 'Opens it on the Link page' : 'Pick how the others get it on the Link page',
           [
-            button(HandoffAction.openLink, Icons.link, online ? 'Put it up as a link…' : 'Open in Link',
+            button(HandoffAction.openLink, Icons.link, solo ? 'Open in Link' : 'Put it up as a link…',
                 primary: true),
           ],
         ),

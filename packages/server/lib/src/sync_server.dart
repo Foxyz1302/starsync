@@ -48,8 +48,12 @@ class SyncServer {
   /// Upstream connections of the Jellyfin relay; created on first use.
   HttpClient? _relayClient;
 
+  /// Listen on 127.0.0.1 only (the app's solo session), not on every
+  /// IPv4 interface.
+  final bool loopbackOnly;
+
   /// [ytDlp] replaces the server's own (tests).
-  SyncServer(this.config, {YtDlp? ytDlp}) {
+  SyncServer(this.config, {YtDlp? ytDlp, this.loopbackOnly = false}) {
     hub = ServerHub(sessions, config.secret,
         hostKey: config.hostKey,
         jellyfin: config.jellyfin,
@@ -131,7 +135,7 @@ class SyncServer {
     await _resolveJellyfinServerId();
     _mountRoutes();
     _server = await _app.serve(
-      address: InternetAddress.anyIPv4,
+      address: loopbackOnly ? InternetAddress.loopbackIPv4 : InternetAddress.anyIPv4,
       port: config.port,
       // A killed isolate never closes its listening socket, so the port stays
       // bound in this process. Shared lets the next server in the same

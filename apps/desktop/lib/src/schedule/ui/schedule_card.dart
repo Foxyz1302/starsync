@@ -13,8 +13,8 @@ enum CardAction {
   none,
   putUp,
 
-  /// Available, but not in a server: shown disabled with a hint.
-  playOffline,
+  /// Available, nobody else watching (offline or solo): plays it here.
+  play,
   request,
   requestSeries,
   requested,
@@ -162,15 +162,10 @@ class AiringCard extends StatelessWidget {
     final spinner = const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2));
     Widget? b = switch (action) {
       CardAction.none => null,
-      CardAction.putUp => FilledButton.tonalIcon(
+      CardAction.putUp || CardAction.play => FilledButton.tonalIcon(
         onPressed: enabled ? onAction : null,
         icon: busy ? spinner : const Icon(Icons.play_arrow, size: 18),
-        label: const Text('Put it up'),
-      ),
-      CardAction.playOffline => FilledButton.tonalIcon(
-        onPressed: null,
-        icon: const Icon(Icons.play_arrow, size: 18),
-        label: const Text('Play'),
+        label: Text(action == CardAction.play ? 'Play' : 'Put it up'),
       ),
       CardAction.request || CardAction.requestSeries => OutlinedButton.icon(
         onPressed: enabled ? onAction : null,
@@ -216,7 +211,7 @@ class AiringCard extends StatelessWidget {
         ),
       ),
     );
-    final tap = action == CardAction.putUp && disabledHint == null && !busy ? onAction : null;
+    final tap = (action == CardAction.putUp || action == CardAction.play) && disabledHint == null && !busy ? onAction : null;
     if (compact) {
       final requestable = action == CardAction.request || action == CardAction.requestSeries;
       return Material(

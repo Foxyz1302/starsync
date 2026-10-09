@@ -128,6 +128,29 @@ void main() {
       expect(session.route.value, AppRoute.session);
     });
 
+    testWidgets('solo: just you, Invite friends opens the host card, Stop asks nothing', (tester) async {
+      await pumpShell(tester, const Size(1280, 800));
+      session.solo.value = true;
+      addTearDown(() => session.solo.value = false);
+      online([member('me', 'Me')], media: false);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('solo-chip')), findsOneWidget);
+      expect(find.byKey(const ValueKey('party-avatars')), findsNothing);
+      expect(find.byKey(const ValueKey('strip-chat')), findsNothing);
+      expect(find.byKey(const ValueKey('welcome-band')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('strip-invite')));
+      await tester.pumpAndSettle();
+      expect(find.text('Invite friends'), findsWidgets);
+      expect(find.text('Start hosting'), findsOneWidget);
+      await tester.tapAt(const Offset(5, 790));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('strip-leave')));
+      await tester.pumpAndSettle();
+      expect(find.text('Leave server?'), findsNothing);
+      expect(session.route.value, AppRoute.home);
+      expect(session.solo.value, isFalse);
+    });
+
     testWidgets('compact below 1100 px: 3 avatars, no server text', (tester) async {
       await pumpShell(tester, const Size(1000, 800));
       online(party, media: false);

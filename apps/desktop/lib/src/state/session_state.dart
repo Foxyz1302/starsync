@@ -8,6 +8,7 @@ import 'package:sync_relay_core/core.dart';
 
 import '../jellyfin/accounts.dart';
 import '../jellyfin/session_media.dart';
+import '../screens/home/picked_media.dart';
 import '../playback/yt_dlp_app.dart';
 import '../sfx/sfx.dart';
 import '../sfx/sound_bank.dart';
@@ -169,6 +170,13 @@ class SessionState {
   /// Set when the hosted server died mid-session; Home shows it on the
   /// Host card and clears it.
   final serverCrash = signal<String?>(null);
+  /// In a solo session: this app's own server on 127.0.0.1, only you in
+  /// it. Hosting from it ([host]) keeps what plays and where.
+  final solo = signal(false);
+  /// A solo session is becoming a hosted one: the player has nothing open
+  /// until the media is up again on the new server.
+  final switching = signal(false);
+  ConnectParams? _soloParams;
 
   /// The app's yt-dlp folder for the hosted server; '' (the server's own
   /// default) when the app-support folder is not available.
@@ -243,9 +251,80 @@ class SessionState {
     await _saveFormQuietly();
   }
 
+  /// Hosts a server friends can join. From a solo session it keeps the
+  /// media and position: the solo server goes, the new one gets the same
+  /// pick, seeked to where it was; if hosting fails, solo comes back.
   Future<void> host(ConnectParams params, ConnectForm form) async {
+    if (!solo.peek()) return _host(params, form: form);
+    final carry = _carry();
+    switching.value = true;
+    try {
+      await coordinator.leave();
+      await stopServer();
+      solo.value = false;
+      try {
+        await _host(params, form: form);
+      } catch (_) {
+        // Not hosted (failed or cancelled): back to solo, same media.
+        try {
+          await _host(_soloParams ?? params, soloSession: true);
+          if (carry != null) await _resume(carry);
+        } catch (e) {
+          debugPrint('back to solo failed: $e');
+          await leave();
+        }
+        rethrow;
+      }
+      try {
+        if (carry != null) await _resume(carry);
+      } catch (e) {
+        coordinator.showToast("couldn't put it up again: $e");
+      }
+    } finally {
+      switching.value = false;
+    }
+  }
+
+  /// Watch alone: the same hosted path, on 127.0.0.1 and a free port, no
+  /// password, nothing put up yet. Nobody else can reach it.
+  Future<void> startSolo(ConnectParams params) async {
+    if (route.peek() == AppRoute.session) return;
+    _soloParams = params;
+    await _host(params, soloSession: true);
+  }
+
+  ({PickedMedia pick, double position})? _carry() {
+    final pick = coordinator.lastPick;
+    if (pick == null || coordinator.serverState.peek()?.media == null) return null;
+    final pos = coordinator.playback.positionSecs;
+    return (pick: pick, position: pos.isFinite && pos > 0 ? pos : 0.0);
+  }
+
+  /// Puts [carry] up on the server just joined and seeks to its position
+  /// once the swap shows in a state.
+  Future<void> _resume(({PickedMedia pick, double position}) carry) async {
+    final before = coordinator.serverState.peek()?.mediaId ?? 0;
+    final error = await coordinator.swapPicked(carry.pick);
+    if (error != null) throw StateError(error);
+    if (carry.position < 1) return;
+    final landed = Completer<void>();
+    final stop = effect(() {
+      final r = coordinator.serverState.value;
+      if (r != null && r.media != null && r.mediaId > before && !landed.isCompleted) landed.complete();
+    });
+    try {
+      await landed.future.timeout(const Duration(seconds: 20));
+      coordinator.sync.sendSeek(carry.position);
+    } on TimeoutException {
+      debugPrint('resume: the media did not come up; not seeking');
+    } finally {
+      stop();
+    }
+  }
+
+  Future<void> _host(ConnectParams params, {ConnectForm? form, bool soloSession = false}) async {
     final op = ++_op;
-    _rememberForm(form);
+    if (form != null) _rememberForm(form);
     try {
       status.value =
           const HealthStatus(HealthSeverity.info, 'starting server…');
@@ -265,14 +344,15 @@ class SessionState {
       try {
         server = await ServerIsolate.start(
           AppConfig(
-            port: params.port,
-            secret: params.secret,
+            port: soloSession ? 0 : params.port,
+            secret: soloSession ? '' : params.secret,
             name: 'server',
             mediaPath: params.mediaPath,
             hostKey: hostKey,
             jellyfin: relay,
             ytDlpDir: await _sharedYtDlpDir(),
           ),
+          loopbackOnly: soloSession,
           onLog: (line) => debugPrint('[server] $line'),
           onCrash: (cause) => _onServerCrash(server, cause),
         );
@@ -289,13 +369,13 @@ class SessionState {
       _server = server;
       coordinator.hostFile = (path) async =>
           identical(_server, server) ? server.setFile(path) : null;
-      status.value =
-          HealthStatus(HealthSeverity.ok, 'hosting on port ${server.port}');
+      status.value = HealthStatus(
+          HealthSeverity.ok, soloSession ? 'watching solo' : 'hosting on port ${server.port}');
       try {
         await coordinator.connect(ConnectParams(
           host: '127.0.0.1',
           port: server.port,
-          secret: params.secret,
+          secret: soloSession ? '' : params.secret,
           name: params.name,
           avatar: params.avatar,
           hostKey: hostKey,
@@ -309,9 +389,10 @@ class SessionState {
         if (crash != null && e is! ConnectCancelled) throw ServerCrashed(crash);
         rethrow;
       }
+      solo.value = soloSession;
       route.value = AppRoute.session;
     } finally {
-      await _saveFormQuietly();
+      if (form != null) await _saveFormQuietly();
     }
   }
 
@@ -349,7 +430,9 @@ class SessionState {
     try {
       await coordinator.cancelConnect();
     } catch (_) {}
-    await stopServer();
+    // Solo becoming hosted: [host] stops what it started and goes back
+    // to solo itself.
+    if (!switching.peek()) await stopServer();
   }
 
   /// Saved whatever the outcome: a failed join is exactly when the user
@@ -385,6 +468,7 @@ class SessionState {
   Future<void> leave() async {
     await coordinator.leave();
     await stopServer();
+    solo.value = false;
     status.value = const HealthStatus(HealthSeverity.info, 'idle');
     route.value = AppRoute.home;
   }

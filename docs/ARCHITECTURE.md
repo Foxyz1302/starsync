@@ -40,6 +40,23 @@ size (`ServerIsolate.setFile`): the host's in-session File swap then sends a
   shell says so in a dialog (during setup the host attempt fails with it).
   Stop (leave, close, cancel during setup, a failed own join)
   sends `stop`, waits up to 3 s for exit, then kills the isolate.
+- **Solo session** (watching alone): the same hosting path, so nothing
+  about solo is a second code path or on the wire. Putting something up
+  while offline (`AppShellState._putUp`) calls `SessionState.startSolo`:
+  a `ServerIsolate` with `loopbackOnly` (an extra `'loopbackOnly': true`
+  key next to the `AppConfig` map; `SyncServer` binds 127.0.0.1 instead
+  of every IPv4 interface), port 0 (a free one), no password, a host key;
+  the app joins it and `SessionState.solo` is set. Everything a session
+  has works (Jellyfin progress, next episode, skip pills, the player); a
+  link goes up direct (no relay mode). Invite friends opens the Host card,
+  whose submit (`SessionState.host` while solo) remembers the
+  coordinator's `lastPick` (the last `swapLink` / `swapJellyfin` /
+  `swapFile` of this connection) and position, leaves and stops the solo
+  server, hosts on the card's port and password, swaps the same pick and
+  seeks once a state shows it (`switching` is set meanwhile; the shell
+  closes the player and reopens it as it was). If hosting fails or is
+  cancelled, solo starts again with the same media. Stop leaves without
+  asking.
 - **Dedicated server**: `bin/server.dart` compiled with `dart compile exe`
   and shipped next to the app as `watch-together-server`. It parses flags
   (`--port`, `--secret`, `--name`, `--media`, `--advertise-host`,
@@ -673,8 +690,11 @@ always scrolls the page). Space never presses a focused button
 
 - **Party strip** (`party_strip.dart`, 60 px): your avatar (profile card; 42 px like the party's),
   the Library / Schedule / Settings tabs with a growing underline (an
-  `HScroll` when narrow), the update indicator, then offline Join and Host
-  (connect cards), online the party: `AvatarStack` (host first, then
+  `HScroll` when narrow), the update indicator, then offline a grey dot,
+  "Offline", Join a friend and Host (connect cards; icon-less "Join" and
+  "Host" under 1100 px), solo a "Solo · only you" chip, Invite friends
+  (the Host card, titled "Invite friends", "Start hosting") and Stop (no
+  dialog; no avatars or chat), online the party: `AvatarStack` (host first, then
   ready; spreads on hover; 5 shown, 3 under 1100 px), the server name and
   "ready n/m" (hidden under 1100 px), chat with an unread badge, and Leave
   (asks first). The stack opens the members card (status, host / relay
@@ -702,7 +722,8 @@ always scrolls the page). Space never presses a focused button
   to watch is picked in the library afterwards. Submit state (busy,
   cancel, per-card errors) is `ConnectFlow`, owned by the shell so an
   attempt and its error outlive the card; a card closes itself once
-  online.
+  in a server that is not solo. Join says that a friend gives the address
+  and that no account or Jellyfin is needed.
 - **Profile** (`profile_card.dart`, `screens/home/profile.dart`): a card
   tinted with your colour: picture (hover "Change" opens `CropPicker`:
   drag, wheel or slider zoom, previews at 88/42/24 px, exports a 256 px
@@ -711,6 +732,14 @@ always scrolls the page). Space never presses a focused button
   the `connect_form` box (an old picture path is shrunk once and kept as
   bytes). Online, a name change (once typing settles) or picture change
   goes out through `Profile.push` (`coordinator.updateProfile`).
+- **Welcome** (`welcome.dart`): offline the Library opens with
+  `WelcomeBand` over the source switch (sizes away when online): the app
+  icon, Starsync and "Watch together, in sync", then three `WayCard`s,
+  Join a friend first (filled), Host, Watch solo (opens Files, or
+  Jellyfin when linked); beside the name from 940 px, under it below,
+  stacked under 520 px. With no Jellyfin server linked the Jellyfin source
+  is `NoJellyfinPanel`: Files and Link cards ("No account needed") and an
+  optional Jellyfin card whose "Link a server" opens the sign-in in place.
 - **Tabs**: Library (`library_tab.dart`): a source switch (Jellyfin /
   Link / Files, fade through) with the Jellyfin library chips beside it.
   Its state (source, link field and relay mode, selected Jellyfin card,
@@ -730,8 +759,10 @@ always scrolls the page). Space never presses a focused button
   is `FilesPage` (`files/`): watched folders (`FolderStore`) scanned in
   an isolate, videos grouped by series; series start collapsed, a header
   click opens one and open ones stay open for the app session
-  (`showFilesFolder` opens a folder from outside). Offline everything browses; the buttons say "Join or host to
-  watch together". Schedule (`schedule/`) is a week of day columns built
+  (`showFilesFolder` opens a folder from outside). With nobody else
+  watching (`solo` on the Library, Files and Schedule: offline or solo)
+  the buttons say Play, Link has no relay modes and Files no relay notice;
+  offline a put-up starts a solo session. Schedule (`schedule/`) is a week of day columns built
   from AniList's airing schedule (`anilist.dart`: pages cached 10 min in
   memory and 1 h on disk, stale data shown on 429 or failure) matched
   against AnimeFlow (`animeflow.dart`, app API with the Jellyfin token;
@@ -755,9 +786,9 @@ always scrolls the page). Space never presses a focused button
   into videos (the Files extensions, `kindOf`), a folder, an http(s) link,
   an image or nothing; videos win over folders, folders over images.
   `HandoffCard` opens as a popover at the pointer: a video goes up through
-  the shell's put-up (offline: into Files → Recent) or adds its folder to
-  Files; a folder is added to Files and opened; a link fills Library →
-  Link (online the relay mode is picked there). Images are ignored.
+  the shell's put-up (Play when alone; offline that starts solo) or adds
+  its folder to Files; a folder is added to Files and opened; a link fills
+  Library → Link (with others the relay mode is picked there). Images are ignored.
   Nothing happens while a dialog or popover is over the shell.
 - **Sounds** (`sfx/`): the coordinator plays an `SfxCue` for ready,
   unready, force-ready, join, leave, swap and others' chat (feed

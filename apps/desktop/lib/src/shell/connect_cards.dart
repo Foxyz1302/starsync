@@ -41,8 +41,9 @@ class HostFields {
   }
 }
 
-/// The strip's Join / Host buttons: a card over the window. It closes
-/// itself once the attempt got in; a failed one shows its error inside.
+/// The strip's Join / Host buttons (and solo's Invite friends, the Host
+/// card): a card over the window. It closes itself once the attempt got
+/// in; a failed one shows its error inside.
 Future<void> showConnectCard(
   BuildContext context, {
   required ConnectMode mode,
@@ -77,7 +78,9 @@ class _CloseWhenOnlineState extends State<_CloseWhenOnline> {
   void initState() {
     super.initState();
     _stop = effect(() {
-      if (SessionState.instance.route.value != AppRoute.session) return;
+      final s = SessionState.instance;
+      // Solo is in a session too: wait until it is a hosted server.
+      if (s.route.value != AppRoute.session || s.solo.value || s.switching.value) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) Navigator.of(context).maybePop();
       });
@@ -153,7 +156,7 @@ class JoinCard extends StatelessWidget {
       builder: (context, _) {
         final busy = flow.busy == ConnectMode.join;
         return _Card(
-          title: 'Join a server',
+          title: 'Join a friend',
           children: [
             SignalBuilder(builder: (context) {
               final list = [
@@ -221,6 +224,13 @@ class JoinCard extends StatelessWidget {
             const SizedBox(height: 16),
             ConnectButton(flow: flow, mode: ConnectMode.join, label: 'Join', onSubmit: _join, expand: true),
             ConnectFeedback(flow: flow, mode: ConnectMode.join),
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                'Your friend gives you the address and password. No account or Jellyfin needed.',
+                style: TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+            ),
           ],
         );
       },
@@ -243,10 +253,13 @@ class HostCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // From a solo session this is "Invite friends": same server settings,
+    // and what plays carries over.
+    final solo = SessionState.instance.solo.peek();
     return ListenableBuilder(
       listenable: flow,
       builder: (context, _) => _Card(
-        title: 'Host a server',
+        title: solo ? 'Invite friends' : 'Host a server',
         children: [
           AbsorbPointer(
             absorbing: flow.busy == ConnectMode.host,
@@ -281,13 +294,16 @@ class HostCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          ConnectButton(flow: flow, mode: ConnectMode.host, label: 'Host', onSubmit: _host, expand: true),
+          ConnectButton(
+              flow: flow, mode: ConnectMode.host, label: solo ? 'Start hosting' : 'Host', onSubmit: _host, expand: true),
           ConnectFeedback(flow: flow, mode: ConnectMode.host),
-          const Padding(
-            padding: EdgeInsets.only(top: 8),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
             child: Text(
-              'You pick what to watch afterwards, in the library.',
-              style: TextStyle(color: Colors.grey, fontSize: 12),
+              solo
+                  ? 'Your video keeps playing from where it is; friends join with your address.'
+                  : 'You pick what to watch afterwards, in the library.',
+              style: const TextStyle(color: Colors.grey, fontSize: 12),
             ),
           ),
         ],

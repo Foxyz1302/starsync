@@ -13,6 +13,7 @@ import '../jellyfin/accounts.dart';
 import '../jellyfin/browse_scope.dart' show BrowseStart;
 import '../jellyfin/session_media.dart';
 import '../screens/home/connect_flow.dart';
+import '../session/session_coordinator.dart' show ConnectParams;
 import '../screens/home/health_probe.dart';
 import '../screens/home/media_picker.dart';
 import '../screens/home/profile.dart';
@@ -31,6 +32,7 @@ import '../schedule/ui/schedule_page.dart';
 import 'session_player.dart';
 import 'settings_tab.dart';
 import 'toasts.dart';
+import 'welcome.dart';
 
 /// The one window: the party strip over a body that fades through between
 /// the tabs and the full player, the floating mini player, the chat panel
@@ -116,6 +118,11 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   final _stops = <void Function()>[];
   // Rebuild the shell on these flips, not on every state broadcast.
   final _online = computed(() => SessionState.instance.route.value == AppRoute.session);
+  /// Nobody else watches: offline, solo, or solo becoming a server.
+  final _alone = computed(() {
+    final s = SessionState.instance;
+    return s.route.value != AppRoute.session || s.solo.value || s.switching.value;
+  });
   final _hasMedia = computed(() =>
       SessionState.instance.route.value == AppRoute.session &&
       SessionState.instance.coordinator.serverState.value?.media != null);
@@ -190,6 +197,17 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       }
       wasOut = out;
     }));
+    // Solo becoming a hosted server: the player closes while the media
+    // moves over and comes back the way it was once it is up again.
+    _stops.add(effect(() {
+      if (!session.switching.value) return;
+      _later(() {
+        _lastMediaId = -1;
+        _autoFull = _mode == PlayerMode.full;
+        if (_fullscreen) _toggleFullscreen();
+        _show(PlayerMode.none);
+      });
+    }));
     // The hosted server died mid-session (SessionState leaves): say so.
     _stops.add(effect(() {
       final crash = session.serverCrash.value;
@@ -209,6 +227,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     HardwareKeyboard.instance.removeHandler(_onKey);
     _fade.dispose();
     _online.dispose();
+    _alone.dispose();
     _hasMedia.dispose();
     _flow.dispose();
     _join.dispose();
@@ -343,7 +362,8 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     _selectTab(ShellTab.library);
   }
 
-  /// Library → "Put it up for everyone"; the player opens full.
+  /// Library → "Put it up for everyone"; the player opens full. Offline
+  /// it starts a solo session first (just you, on this computer).
   Future<String?> _putUp(PickedMedia media) async {
     final session = SessionState.instance;
     if (media is JellyfinMedia) {
@@ -354,6 +374,12 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       }
       unawaited(_jellyfin.rememberPick(media));
     }
+    if (!_online.peek()) {
+      final error = await _startSolo();
+      if (error != null || !mounted) return error;
+    }
+    // Alone, a link plays direct: there is nobody to pass it on to.
+    if (media is LinkMedia && session.solo.peek()) media = LinkMedia(media.url);
     final error = await session.coordinator.swapPicked(media);
     if (error != null || !mounted) return error;
     final f = session.lastForm;
@@ -365,6 +391,29 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     _show(PlayerMode.full);
     return null;
   }
+
+  /// Starts a solo session; returns an error text, or null.
+  Future<String?> _startSolo() async {
+    final profile = Profile.instance;
+    try {
+      await profile.ensureLoaded();
+      final name = profile.name.peek().trim();
+      await SessionState.instance.startSolo(ConnectParams(
+        host: '127.0.0.1',
+        port: 0,
+        secret: '',
+        name: name.isEmpty ? 'Me' : name,
+        avatar: profile.avatarBase64(),
+      ));
+      return null;
+    } catch (e) {
+      return "couldn't start playing: $e";
+    }
+  }
+
+  /// Library's "Watch solo": somewhere to pick from (Jellyfin when linked,
+  /// else Files).
+  void _watchSolo() => _openLibrary(_jellyfin.isEmpty ? MediaKind.file : MediaKind.jellyfin);
 
   // --------------------------------------------------------------- handoff
 
@@ -406,11 +455,10 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     final align = at == null || size.isEmpty
         ? Alignment.center
         : Alignment((at.dx / size.width * 2 - 1).clamp(-1, 1), (at.dy / size.height * 2 - 1).clamp(-1, 1));
-    final online = _online.peek();
     _handoffOpen = true;
     final HandoffAction? action;
     try {
-      action = await showPopover<HandoffAction>(context, at: align, child: HandoffCard(item: item, online: online));
+      action = await showPopover<HandoffAction>(context, at: align, child: HandoffCard(item: item, solo: _alone.peek()));
     } finally {
       _handoffOpen = false;
     }
@@ -424,10 +472,6 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
           await FolderStore.instance.ensureLoaded();
           FolderStore.instance.addRecent(paths.first);
         }
-      case (HandoffVideos(:final paths), HandoffAction.openInFiles):
-        await FolderStore.instance.ensureLoaded();
-        FolderStore.instance.addRecent(paths.first);
-        _openFiles(null);
       case (HandoffVideos(:final paths), HandoffAction.addFolder):
         await _addFolder(File(paths.first).parent.path);
       case (HandoffFolder(:final path), _):
@@ -484,7 +528,13 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
 
   // --------------------------------------------------------------- dialogs
 
+  /// Leave asks first; a solo session just stops.
   Future<void> _confirmLeave() async {
+    final session = SessionState.instance;
+    if (session.solo.peek()) {
+      await session.leave();
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -542,6 +592,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
         backgroundColor: _fullscreen ? Colors.black : scheme.surface,
         body: SignalBuilder(builder: (context) {
           final online = _online.value;
+          final alone = _alone.value;
           final hasMedia = _hasMedia.value;
           return Column(
             children: [
@@ -556,6 +607,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
                   onJoin: () => _connect(ConnectMode.join),
                   onHost: () => _connect(ConnectMode.host),
                   onLeave: _confirmLeave,
+                  onInvite: () => _connect(ConnectMode.host),
                   onProfile: () => showProfileCard(context, onOpenSettings: _openSettings, updates: widget.updates),
                   onShowPlayer: hasMedia && _mode == PlayerMode.none ? () => _show(PlayerMode.mini) : null,
                   updates: widget.updates,
@@ -565,7 +617,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
                 key: const ValueKey('body'),
                 child: Row(
                   children: [
-                    Expanded(child: _body(online)),
+                    Expanded(child: _body(online, alone)),
                     AnimatedSize(
                       duration: easeTime,
                       curve: ease,
@@ -589,21 +641,29 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     );
   }
 
-  Widget _body(bool online) {
+  Widget _body(bool online, bool alone) {
     final coord = SessionState.instance.coordinator;
     final tabBody = switch (_tab) {
       ShellTab.library => LibraryTab(
           key: ValueKey('library-$_libraryGen'),
           controller: _picker,
           accounts: _jellyfin,
-          online: online,
-          isHost: coord.hostFile != null,
+          solo: alone,
+          // Offline, a put-up starts a solo session, which hosts.
+          isHost: !online || coord.hostFile != null,
+          banner: online
+              ? null
+              : WelcomeBand(
+                  onJoin: () => _connect(ConnectMode.join),
+                  onHost: () => _connect(ConnectMode.host),
+                  onSolo: _watchSolo,
+                ),
           jellyfinStart: _libraryStart,
           onPutUp: _putUp,
           onOpenIntegrations: () => _openSettings(SettingsSection.integrations),
         ),
       ShellTab.schedule => SchedulePage(
-          online: online,
+          solo: alone,
           onPutUp: _putUp,
           onToast: coord.showToast,
         ),

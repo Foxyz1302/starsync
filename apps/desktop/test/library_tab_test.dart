@@ -48,16 +48,16 @@ FakeJellyfin libraryFake() {
 }
 
 class FilesStub extends StatelessWidget {
-  final bool online, relayed;
+  final bool solo, relayed;
   final Future<String?> Function(String path) onPlay;
-  const FilesStub({super.key, required this.online, required this.relayed, required this.onPlay});
+  const FilesStub({super.key, required this.solo, required this.relayed, required this.onPlay});
 
   @override
   Widget build(BuildContext context) => Column(children: [
-        Text('files online=$online relayed=$relayed'),
+        Text('files solo=$solo relayed=$relayed'),
         TextButton(
           key: const ValueKey('stub-play'),
-          onPressed: online ? () => onPlay('/v/a.mkv') : null,
+          onPressed: () => onPlay('/v/a.mkv'),
           child: const Text('play'),
         ),
       ]);
@@ -75,7 +75,7 @@ class Harness {
 Future<Harness> pumpLibrary(
   WidgetTester tester,
   Size size, {
-  bool online = true,
+  bool solo = false,
   bool isHost = false,
   MediaKind source = MediaKind.jellyfin,
   Harness? reuse,
@@ -103,7 +103,7 @@ Future<Harness> pumpLibrary(
         key: UniqueKey(),
         controller: h.controller,
         accounts: h.accounts,
-        online: online,
+        solo: solo,
         isHost: isHost,
         jellyfinStart: start,
         recentLinks: h.recents,
@@ -111,8 +111,8 @@ Future<Harness> pumpLibrary(
         probe: (url) async => url.endsWith('.mkv')
             ? LinkProbe.file(Uri.parse(url), 1)
             : LinkProbe.page(Uri.parse(url), info: const YtDlpInfo(title: 'A video', uploader: 'Chan')),
-        filesBuilder: (context, {required online, required relayed, required onPlay, nowPlayingPath}) =>
-            FilesStub(online: online, relayed: relayed, onPlay: onPlay),
+        filesBuilder: (context, {required solo, required relayed, required onPlay, nowPlayingPath}) =>
+            FilesStub(solo: solo, relayed: relayed, onPlay: onPlay),
         onPutUp: (m) async {
           h.put.add(m);
           return null;
@@ -152,7 +152,7 @@ void main() {
 
     await tester.tap(find.text('Files'));
     await settle(tester, 10);
-    expect(find.text('files online=true relayed=true'), findsOneWidget);
+    expect(find.text('files solo=false relayed=true'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('stub-play')));
     await settle(tester);
     expect(h.put, [const FileMedia('/v/a.mkv')]);
@@ -247,32 +247,26 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('offline: everything browses, nothing goes up', (tester) async {
-    final h = await pumpLibrary(tester, const Size(1600, 1000), online: false);
+  testWidgets('solo: buttons say Play and put up; a link goes direct, no relay modes', (tester) async {
+    final h = await pumpLibrary(tester, const Size(1600, 1000), solo: true);
     await tester.tap(arifuretaCard());
     await settle(tester, 10);
     final go = find.byKey(const ValueKey('details-put-up'));
-    expect(tester.widget<ButtonStyleButton>(go).onPressed, isNull);
-    expect(find.descendant(of: go, matching: find.text('Play')), findsOneWidget);
-    expect(find.text(offlinePutUpHint), findsOneWidget);
-    await doubleTap(tester, arifuretaCard());
-    expect(h.put, isEmpty);
+    expect(find.descendant(of: go, matching: find.textContaining('Play')), findsOneWidget);
+    await tester.tap(go);
+    await settle(tester, 10);
+    expect(h.put.single, isA<JellyfinMedia>());
 
     await tester.tap(find.text('Link'));
     await settle(tester, 10);
+    h.controller.linkRelay = LinkRelay.me;
     await tester.enterText(find.byKey(const ValueKey('link-field')), 'https://cdn.example/a.mkv');
     await settle(tester, 10);
-    final linkGo = find.byKey(const ValueKey('link-put-up'));
-    expect(tester.widget<ButtonStyleButton>(linkGo).onPressed, isNull);
-    expect(find.descendant(of: find.byKey(const ValueKey('media-link')), matching: find.text(offlinePutUpHint)),
-        findsOneWidget);
     expect(find.text('How the others get it'), findsNothing);
-    expect(find.text('a.mkv'), findsOneWidget, reason: 'the preview still works');
-
-    await tester.tap(find.text('Files'));
+    expect(find.text(soloPlayHint), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('link-put-up')));
     await settle(tester, 10);
-    expect(find.text('files online=false relayed=true'), findsOneWidget);
-    expect(h.put, isEmpty);
+    expect(h.put.last, const LinkMedia('https://cdn.example/a.mkv'));
     expect(tester.takeException(), isNull);
   });
 
@@ -307,7 +301,7 @@ void main() {
 
   testWidgets('hosting: files stream from here; now-playing file passes through', (tester) async {
     await pumpLibrary(tester, const Size(1400, 900), source: MediaKind.file, isHost: true);
-    expect(find.text('files online=true relayed=false'), findsOneWidget);
+    expect(find.text('files solo=false relayed=false'), findsOneWidget);
   });
 
   testWidgets('the last pick comes back selected; "Change video" opens on its series', (tester) async {
@@ -325,7 +319,7 @@ void main() {
     expect(c.selected!.itemId, bsEpisode);
     expect(c.source, MediaKind.jellyfin);
     final h = Harness(c, accounts, FakeJellyfin());
-    await pumpLibrary(tester, const Size(1600, 1000), reuse: h, online: false);
+    await pumpLibrary(tester, const Size(1600, 1000), reuse: h, solo: true);
     expect(find.byKey(const ValueKey('jf-details')), findsOneWidget);
     expect(find.text('Black Summoner'), findsWidgets);
 

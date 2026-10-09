@@ -8,6 +8,7 @@ import 'package:hive_ce/hive.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:watch_together/src/jellyfin/accounts.dart';
+import 'package:watch_together/src/screens/home/picked_media.dart';
 import 'package:watch_together/src/session/session_coordinator.dart';
 import 'package:watch_together/src/state/server_isolate.dart';
 import 'package:watch_together/src/state/session_state.dart';
@@ -215,6 +216,47 @@ void main() {
       await session.coordinator.leave(silent: true);
       await session.stopServer();
       await accounts.signOut(sid);
+      if (file.existsSync()) file.deleteSync();
+    }
+  });
+
+  test('solo: loopback-only server; inviting friends hosts the same media',
+      timeout: const Timeout(Duration(minutes: 2)), () async {
+    MediaKit.ensureInitialized();
+    final tmp = Platform.environment['WT_TEST_TMP'] ?? Directory.systemTemp.path;
+    Hive.init('$tmp/hive_isolate_solo_test');
+    final session = SessionState.instance;
+    final port = await _freePort();
+    _Raw? friend;
+    final file = File('$tmp/solo carry.mkv')..writeAsBytesSync(List.filled(4096, 7));
+    session.route.value = AppRoute.home; // the tests above leave it set
+    try {
+      await session.startSolo(const ConnectParams(host: '127.0.0.1', port: 0, secret: '', name: 'me'));
+      expect(session.route.peek(), AppRoute.session);
+      expect(session.solo.peek(), isTrue);
+      await session.coordinator.playback.player.setVolume(0);
+      final soloPort = session.hostedServer!.port;
+      // Reachable on loopback only: a LAN address of this machine is refused.
+      final lan = [
+        for (final i in await NetworkInterface.list(type: InternetAddressType.IPv4))
+          for (final a in i.addresses)
+            if (!a.isLoopback) a,
+      ];
+      if (lan.isNotEmpty) {
+        await expectLater(Socket.connect(lan.first, soloPort, timeout: const Duration(seconds: 3)),
+            throwsA(isA<SocketException>()));
+      }
+      expect(await session.coordinator.swapPicked(FileMedia(file.path)), isNull);
+      await _poll(() => session.coordinator.serverState.peek()?.media?['name'] == 'solo carry.mkv', 'solo media');
+
+      await session.host(ConnectParams(host: '', port: port, secret: 'pw', name: 'me'), ConnectForm());
+      expect(session.solo.peek(), isFalse);
+      expect(session.route.peek(), AppRoute.session);
+      friend = await _Raw.join(port, 'friend', secret: 'pw');
+      await friend.next('state', where: (m) => (m['media'] as Map?)?['name'] == 'solo carry.mkv');
+    } finally {
+      await friend?.ws.close();
+      await session.leave();
       if (file.existsSync()) file.deleteSync();
     }
   });
