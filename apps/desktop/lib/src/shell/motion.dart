@@ -90,17 +90,17 @@ Future<T?> showPopover<T>(
       },
     );
 
-/// Horizontal lists for mouse users: drag with the mouse, and the plain
-/// (vertical) wheel moves them sideways. At either end the wheel is left
-/// to the page, so a row never traps vertical scrolling.
+/// Horizontal lists for mouse users: drag with the mouse or Shift+wheel;
+/// the plain wheel stays vertical (the page scrolls under the cursor, not
+/// the row).
 class HScroll extends StatefulWidget {
   final ScrollController? controller;
   final Widget Function(ScrollController controller) builder;
-  /// Map the plain (vertical) wheel to sideways scrolling. Off where the
-  /// children scroll vertically themselves (the schedule's day columns):
-  /// there only mouse drag and Shift+wheel move sideways.
+  /// Also map the plain (vertical) wheel to sideways scrolling (at either
+  /// end the wheel goes to the page). Off by default: one wheel doing two
+  /// things was confusing.
   final bool wheel;
-  const HScroll({super.key, this.controller, required this.builder, this.wheel = true});
+  const HScroll({super.key, this.controller, required this.builder, this.wheel = false});
 
   @override
   State<HScroll> createState() => _HScrollState();

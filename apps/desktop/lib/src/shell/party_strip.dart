@@ -92,6 +92,7 @@ class PartyStrip extends StatelessWidget {
               message: 'Your profile',
               child: InkWell(
                 key: const ValueKey('strip-profile'),
+                canRequestFocus: false,
                 customBorder: const CircleBorder(),
                 onTap: onProfile,
                 child: StatusAvatar(

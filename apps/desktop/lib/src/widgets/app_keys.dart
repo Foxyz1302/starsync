@@ -4,13 +4,15 @@ import 'package:flutter/services.dart';
 import '../state/session_state.dart';
 import 'text_focus.dart';
 
-/// Tab and Shift+Tab never move focus (the app's [Shortcuts] override):
-/// a button that got focus that way would be pressed by Space, the ready
-/// key.
+/// Tab and Shift+Tab never move focus, and Space never presses the
+/// focused button (the app's [Shortcuts] override): Space is the ready key,
+/// and a button keeps focus after a click. Text fields still type spaces
+/// (their own shortcuts come first).
 Map<ShortcutActivator, Intent> get appShortcuts => {
       ...WidgetsApp.defaultShortcuts,
       const SingleActivator(LogicalKeyboardKey.tab): const DoNothingIntent(),
       const SingleActivator(LogicalKeyboardKey.tab, shift: true): const DoNothingIntent(),
+      const SingleActivator(LogicalKeyboardKey.space): const DoNothingIntent(),
     };
 
 /// The window's two app-wide keys, ahead of whatever has focus: while in a

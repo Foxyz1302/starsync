@@ -669,7 +669,11 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
             ),
           ),
           if (online && _shown != PlayerMode.none) _playerLayer(area),
-          Positioned(left: 16, bottom: _fullscreen ? 90 : 16, child: const PartyToasts()),
+          Positioned(left: 16, bottom: _fullscreen ? 90 : 16, child: PartyToasts(
+            onOpenChat: () {
+              if (!_chatOpen) _toggleChat();
+            },
+          )),
         ],
       );
     });

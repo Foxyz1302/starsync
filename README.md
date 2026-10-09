@@ -64,7 +64,7 @@ when you're ready", "Waiting for Bob and Mika · 2/3 ready", "Bob is
 loading…") or what went wrong, with Retry or Cancel when it helps. Chat and activity open in a panel on the right (chat button or
 Tab), ready to type; it shows messages, and its "Activity" toggle adds
 joins, ready, seeks and the like between them. Joins, leaves, chat and
-other news also pop up bottom left with the person's avatar. Unread chat
+other news also pop up bottom left with the person's avatar; click a message to open the chat. Unread chat
 shows as a count on the chat buttons and, in fullscreen with the controls
 hidden, as a small chip top right.
 

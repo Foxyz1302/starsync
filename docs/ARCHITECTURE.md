@@ -525,8 +525,9 @@ One window, `AppShell` (`lib/src/shell/`), whatever the connection state
 through for views that replace each other (the old one gone after 35%, the
 new one fading and scaling in from 0.985), `showPopover` (cards that fade
 and scale in from where they open; they scroll when the window is short)
-and `HScroll` (horizontal rows: mouse drag, the vertical wheel scrolls them
-sideways until an end, then the page).
+and `HScroll` (horizontal rows: mouse drag or Shift+wheel; the plain wheel
+always scrolls the page). Space never presses a focused button
+(`appShortcuts`): it is the ready key.
 
 - **Party strip** (`party_strip.dart`, 60 px): your avatar (profile card; 42 px like the party's),
   the Library / Schedule / Settings tabs with a growing underline (an
@@ -687,7 +688,8 @@ sideways until an end, then the page).
   **Toasts** (`toasts.dart`): the coordinator's toasts bottom left, with
   the avatar of their `ToastItem.actor` (feed and chat toasts; the app's
   own have none); each
-  slides in, stays 5 s, then slides out and collapses its gap.
+  slides in, stays 5 s, then slides out and collapses its gap. A click on
+  a chat toast opens the chat; the others let clicks through.
 
 Settings persist in two Hive boxes: `connect_form` (last form, recent
 servers and links, the profile picture and colour; saved even when a join

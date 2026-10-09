@@ -43,10 +43,13 @@ ShellToast shellToastFor(ToastItem t, AvatarInfo Function(String name) avatar) {
 }
 
 /// The coordinator's toasts as cards with avatars, bottom-left: each
-/// slides in, stays [life], then slides out and collapses its gap.
+/// slides in, stays [life], then slides out and collapses its gap. A click
+/// on a chat toast opens the chat ([onOpenChat]); the rest let clicks
+/// through.
 class PartyToasts extends StatefulWidget {
   final Duration life;
-  const PartyToasts({super.key, this.life = const Duration(seconds: 5)});
+  final VoidCallback? onOpenChat;
+  const PartyToasts({super.key, this.life = const Duration(seconds: 5), this.onOpenChat});
 
   @override
   State<PartyToasts> createState() => _PartyToastsState();
@@ -101,13 +104,37 @@ class _PartyToastsState extends State<PartyToasts> {
     super.dispose();
   }
 
+  void _open(ShellToast t) {
+    widget.onOpenChat?.call();
+    setState(() => t.leaving = true);
+  }
+
   @override
-  Widget build(BuildContext context) => IgnorePointer(child: ToastColumn(toasts: _shown.reversed.take(6).toList().reversed.toList()));
+  Widget build(BuildContext context) => ToastColumn(
+        toasts: _shown.reversed.take(6).toList().reversed.toList(),
+        onTap: widget.onOpenChat == null ? null : _open,
+      );
 }
 
 class ToastColumn extends StatelessWidget {
   final List<ShellToast> toasts;
-  const ToastColumn({super.key, required this.toasts});
+  /// Clicks on chat toasts; null (or any other toast): clicks pass through.
+  final ValueChanged<ShellToast>? onTap;
+  const ToastColumn({super.key, required this.toasts, this.onTap});
+
+  Widget _card(ShellToast t) {
+    final card = ToastCard(toast: t);
+    final tap = onTap;
+    if (!t.chat || tap == null || t.leaving) return IgnorePointer(child: card);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        key: ValueKey('toast-open-chat-${t.id}'),
+        onTap: () => tap(t),
+        child: card,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -139,7 +166,7 @@ class ToastColumn extends StatelessWidget {
                   duration: easeTime,
                   curve: ease,
                   opacity: t.leaving ? 0 : 1,
-                  child: Padding(padding: const EdgeInsets.only(top: 8), child: ToastCard(toast: t)),
+                  child: Padding(padding: const EdgeInsets.only(top: 8), child: _card(t)),
                 ),
               ),
             ),
