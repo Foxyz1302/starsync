@@ -512,8 +512,9 @@ all three link modes. Nothing is bundled or installed by hand.
   - the best single file (`pickSingleFile`: video and audio not `none`, a
     video container, tallest up to 1080p, else the shortest above), unless
   - a video-only + audio-only pair is taller (`pickSplit`): video tallest
-    up to 1080p (else the shortest above), avc1 before vp9 before av01
-    (hardware decoding), then bitrate; audio the original language, not a
+    up to 1080p (else the shortest above), HEVC before AV1 before VP9
+    before h264 (the most compact first: relayed bytes cost every viewer
+    and the server buffer, and mpv decodes them all), then bitrate; audio the original language, not a
     `-drc` variant unless alone, m4a/aac before opus, then bitrate.
     YouTube has only these (299 + 140 for a 1080p60 video).
   - Neither (only HLS/DASH playlists) or a live stream: nothing to relay.

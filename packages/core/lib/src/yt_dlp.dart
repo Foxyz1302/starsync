@@ -161,18 +161,23 @@ YtDlpFormat? pickSingleFile(List<Object?> formats, {int maxHeight = 1080}) {
   return YtDlpFormat._of(ok.first);
 }
 
+// Relayed bytes cost every viewer bandwidth and the server buffer, and mpv
+// decodes all of these: the most compact codec first. HEVC (hardware
+// decoding nearly everywhere), then AV1 (smallest; software is fine to
+// 1080p), then VP9, then h264.
 int _videoCodecRank(Map f) {
   final c = '${f['vcodec']}'.toLowerCase();
-  if (c.startsWith('avc') || c.startsWith('h264')) return 0;
-  if (c.startsWith('vp9') || c.startsWith('vp09')) return 1;
-  if (c.startsWith('av01')) return 2;
-  return 3;
+  if (c.startsWith('hvc') || c.startsWith('hev') || c.startsWith('h265')) return 0;
+  if (c.startsWith('av01')) return 1;
+  if (c.startsWith('vp9') || c.startsWith('vp09')) return 2;
+  if (c.startsWith('avc') || c.startsWith('h264')) return 3;
+  return 4;
 }
 
 /// The best video-only + audio-only pair of plain http(s) files (YouTube's
 /// DASH formats), or null. Video: the tallest up to [maxHeight] (else the
-/// shortest above), avc1 before vp9 before av01 (hardware decoding), then
-/// bitrate. Audio: the original language, not a `-drc` variant, m4a/aac
+/// shortest above), HEVC before AV1 before VP9 before h264 (smallest
+/// first, see [_videoCodecRank]), then bitrate. Audio: the original language, not a `-drc` variant, m4a/aac
 /// before others (opus), then bitrate.
 (YtDlpFormat, YtDlpFormat)? pickSplit(List<Object?> formats, {int maxHeight = 1080}) {
   final video = [

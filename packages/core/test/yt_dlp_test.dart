@@ -90,10 +90,10 @@ void main() {
       _f('96', 'm3u8_native', 'avc1', 'mp4a', 1080),
     ];
 
-    test('YouTube: avc1 video up to 1080p (highest bitrate) + m4a audio, with the chunk size', () {
+    test('YouTube: the most compact codec up to 1080p (VP9 over h264 here) + m4a audio, with the chunk size', () {
       final t = pickTracks(youtube);
-      expect([for (final x in t) (x.kind, x.format.id)], [('video', '299'), ('audio', '140')]);
-      expect(t.first.format.chunkSize, 10485760);
+      expect([for (final x in t) (x.kind, x.format.id)], [('video', '248'), ('audio', '140')]);
+      expect(YtDlpInfo.parse({'title': 'x', 'formats': youtube}).formats['299']?.chunkSize, 10485760);
       expect(YtDlpInfo.parse({'title': 'x', 'formats': youtube}).formats['137']?.height, 1080);
     });
 
@@ -200,4 +200,15 @@ void main() {
     await media.close();
     expect(n, size);
   }, timeout: const Timeout(Duration(minutes: 3)), skip: Platform.environment['YTDLP_LIVE'] == '1' ? false : 'YTDLP_LIVE not set');
+
+  test('codec order: HEVC, then AV1, then VP9, then h264 at the same height', () {
+    final audio = _f('140', 'https', 'none', 'mp4a.40.2', null);
+    String pick(List<String> codecs) => pickSplit([
+          for (final (i, c) in codecs.indexed) _f('v$i', 'https', c, 'none', 1080),
+          audio,
+        ])!.$1.id;
+    expect(pick(['avc1.640033', 'vp09.00.40.08', 'av01.0.08M.08', 'hvc1.1.6.L12']), 'v3');
+    expect(pick(['avc1.640033', 'vp09.00.40.08', 'av01.0.08M.08']), 'v2');
+    expect(pick(['avc1.640033', 'vp09.00.40.08']), 'v1');
+  });
 }
