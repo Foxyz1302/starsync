@@ -60,3 +60,8 @@ jobs:
           dart pub get
           if ($LASTEXITCODE) { exit 1 }
           dart test test/updater_test.dart
+      # The release build, without publishing: a broken Windows build shows
+      # here, not only on a tag.
+      - name: Windows build
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tool/package_windows.ps1

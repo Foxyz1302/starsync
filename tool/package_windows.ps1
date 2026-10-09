@@ -27,7 +27,14 @@ function Invoke-Checked([string]$What, [scriptblock]$Cmd) {
 if (-not $SkipBuild) {
   Push-Location $App
   try {
-    Invoke-Checked 'flutter build windows' { flutter build windows --release "--dart-define=APP_VERSION=$Version" }
+    flutter build windows --release "--dart-define=APP_VERSION=$Version"
+    if ($LASTEXITCODE -ne 0) {
+      # Flutter hides MSBuild's messages: rebuild verbosely and show only
+      # the compiler/linker errors, so CI logs say what broke.
+      $log = flutter build windows --release -v "--dart-define=APP_VERSION=$Version" 2>&1
+      $log | Select-String -Pattern 'error C\d+|error LNK\d+|fatal error|: error ' | ForEach-Object { $_.Line } | Select-Object -First 40
+      throw 'flutter build windows failed'
+    }
   } finally { Pop-Location }
 }
 
