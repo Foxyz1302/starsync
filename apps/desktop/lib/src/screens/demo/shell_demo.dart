@@ -13,12 +13,17 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../jellyfin/accounts.dart';
+import '../../sfx/sfx.dart';
+import '../../sfx/sound_bank.dart';
+import '../../sfx/synth.dart';
+import '../../sfx/synth_sfx.dart';
 import '../../widgets/window_buttons.dart';
 
 part 'demo_files.dart';
 part 'demo_player.dart';
 part 'demo_schedule.dart';
 part 'demo_settings.dart';
+part 'demo_sounds.dart';
 
 // DEBUG ONLY: a placeholder mock of the single-window layout (party strip,
 // library with Jellyfin / Link / Files, click-to-select details, floating

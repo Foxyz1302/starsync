@@ -173,18 +173,8 @@ class _SettingsTabState extends State<_SettingsTab> {
               'Seeks and skips',
               'Always in the activity log',
             ),
-            _switch(
-              'unfocused',
-              'Desktop notification when the app is in the background',
-            ),
           ]),
-          _card('Sounds', [
-            _switch(
-              'sounds',
-              'Play sounds',
-              'Soft cues for ready, join and chat; seeks stay silent',
-            ),
-          ]),
+          const _SoundBoard(),
         ];
       case 4:
         return [

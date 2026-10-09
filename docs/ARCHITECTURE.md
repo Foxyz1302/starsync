@@ -590,6 +590,13 @@ sideways until an end, then the page).
   Jellyfin & integrations (linked servers, AnimeFlow's `/me` via
   `AnimeFlowClient.fromAccounts`, auto-advance), notifications & sounds
   (what pops up; no switches), updates, shortcuts, about.
+- **Sounds** (`sfx/`): the coordinator plays an `SfxCue` per feed event
+  through `SfxService` (the app still uses `NoopSfxService`). The set is
+  synthesized, not sampled: `synth.dart` renders notes (sine/bell/pluck
+  voices, soft attacks, low-pass, short room tail) to quiet WAVs,
+  `sound_bank.dart` defines every sound in D major pentatonic, and
+  `SynthSfx` plays them on a small pool of audio-only mpv players. The
+  debug layout demo's Notifications & sounds page plays each one.
 - **Player** (`session_player.dart`): `SessionPlayer` holds the one
   `Video` of the current player (a new `GlobalKey` per player generation).
   The shell keeps it in one layer of the body at one place in the element
