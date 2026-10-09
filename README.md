@@ -171,7 +171,8 @@ Anywhere in a server (unless you are typing): Space = ready / unready,
 Tab = chat & activity (Tab never moves between buttons). Keys while the
 player fills the window: Left/Right = seek 10 s, Up/Down = volume, Shift+Right = skip 1:30,
 PgUp/PgDn = previous / next chapter (as in mpv), F = fullscreen, Esc =
-close the chat or fullscreen, else ask to leave, Ctrl+R = reload video,
+close the chat, then fullscreen, then shrink the player to mini; from the
+mini it asks to leave, Ctrl+R = reload video,
 `<` / `>` or Shift+P / Shift+N = previous / next Jellyfin episode,
 Ctrl+1..6 = Anime4K mode A, B, C, A+A, B+B, C+A, Ctrl+0 = shaders off.
 Every seek, skip and chapter jump moves everyone.

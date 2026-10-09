@@ -306,6 +306,17 @@ void main() {
     await stepThrough();
     expect(shell().fullscreen, isFalse);
     expect(find.byType(PartyStrip), findsOneWidget);
+    // Esc again: big → mini, not leave; from mini it asks to leave.
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await stepThrough();
+    expect(shell().mode, PlayerMode.mini);
+    expect(find.text('Leave server?'), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.text('Leave server?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
     // Never rebuilt from scratch on the way.
     expect(FakeVideo.created, 1);
     // Offline: no player at all.

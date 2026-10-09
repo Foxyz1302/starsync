@@ -164,8 +164,15 @@ class _SessionPlayerState extends State<SessionPlayer> {
   /// dialog, a card, a text field) is in front of it. Space and Tab are
   /// app-wide ([AppKeys]).
   bool _globalKey(KeyEvent event) {
-    if (event is! KeyDownEvent || !mounted || !_full) return false;
+    if (event is! KeyDownEvent || !mounted) return false;
     if (SessionState.instance.route.peek() != AppRoute.session) return false;
+    // Mini: Esc is the last step out, asking to leave the server.
+    if (!_full) {
+      if (event.logicalKey != LogicalKeyboardKey.escape) return false;
+      if (ModalRoute.of(context)?.isCurrent == false || textInputFocused()) return false;
+      widget.onLeave();
+      return true;
+    }
     final route = ModalRoute.of(context);
     if (route != null && !route.isCurrent) {
       // A menu of ours is open: Esc closes it.
@@ -240,7 +247,8 @@ class _SessionPlayerState extends State<SessionPlayer> {
       } else if (widget.fullscreen) {
         widget.onToggleFullscreen();
       } else {
-        widget.onLeave();
+        // One step at a time: big player → mini, then (from mini) leave.
+        widget.onCollapse();
       }
       return true;
     }
