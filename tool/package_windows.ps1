@@ -25,6 +25,18 @@ function Invoke-Checked([string]$What, [scriptblock]$Cmd) {
 }
 
 if (-not $SkipBuild) {
+  # The host runner keeps the pub cache between jobs; its clone of a git
+  # dependency (fox_utils) went stale ("some refs were not updated") and
+  # resolved the wrong revision. Git deps are tiny: always fetch them fresh.
+  $PubCache = if ($env:PUB_CACHE) { $env:PUB_CACHE } else { Join-Path $env:LOCALAPPDATA 'Pub\Cache' }
+  foreach ($d in @((Join-Path $PubCache 'git'), (Join-Path $PubCache 'git\cache'))) {
+    Get-ChildItem -Path $d -Directory -Filter 'fox_utils*' -ErrorAction SilentlyContinue |
+      Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  Push-Location $App
+  try {
+    Invoke-Checked 'flutter pub get' { flutter pub get }
+  } finally { Pop-Location }
   Push-Location $App
   try {
     flutter build windows --release "--dart-define=APP_VERSION=$Version"
