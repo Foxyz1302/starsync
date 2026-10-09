@@ -108,7 +108,10 @@ attaches to spawned isolates too (it shows as `server`). Its log lines are
 printed with a `[server]` prefix. Hot reload reloads the server isolate's
 code too, but its state (members, clock, sockets) survives until hosting
 restarts; changes to startup code (`SyncServer.start`, routes) need a new
-Host. Without the app: `dart run packages/server/bin/server.dart`.
+Host. Hot restart kills the server isolate (flutter_tools kills every
+non-UI isolate first), so a `[server] server crashed: the server stopped
+unexpectedly` line just before it is expected. Without the app:
+`dart run packages/server/bin/server.dart`.
 
 ## Gotchas
 
@@ -125,6 +128,16 @@ Host. Without the app: `dart run packages/server/bin/server.dart`.
 - media_kit has no public `Player.setProperty`; the code reaches mpv through a
   dynamic call on `player.platform`. Cache size goes through
   `PlayerConfiguration(bufferSize:)`.
+- Hot restart with any media_kit `Player` alive (session, thumbnails, sfx)
+  used to SIGSEGV on mpv's `core` thread: each mpv handle's wakeup callback
+  is a `NativeCallable` of the old isolate, freed by the restart, and media_kit
+  then sends the leftover handles `quit`, which fires it. The Linux runner
+  (`linux/runner/hot_restart_guard.cc`, debug builds only) clears those
+  callbacks on the engine's `on-pre-engine-restart` signal, reading the
+  handles from media_kit's debug-only `NativeReferenceHolder` buffer (address
+  in `$TMPDIR/com.alexmercerind.media_kit.NativeReferenceHolder.<pid>`). Old
+  players are leaked, not destroyed, until the process exits. Re-check this
+  after a media_kit upgrade.
 - mpv reconnect flags: comma form works, colon form is rejected. Re-verify
   through `setProperty` if touched.
 - Overlays that are hidden but mounted keep focus (Space falls into a hidden
