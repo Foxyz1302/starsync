@@ -36,7 +36,10 @@ if (-not $SkipBuild) {
       $ErrorActionPreference = 'Continue'
       $log = cmd /c "flutter build windows --release -v --dart-define=APP_VERSION=$Version 2>&1"
       $ErrorActionPreference = 'Stop'
-      $log | Select-String -Pattern 'error C\d+|error LNK\d+|fatal error|: error |error MSB' | ForEach-Object { $_.Line } | Select-Object -Unique -First 40
+      Write-Host '--- error lines ---'
+      $log | Select-String -Pattern 'error' | ForEach-Object { $_.Line } | Select-Object -Unique -First 60
+      Write-Host '--- last lines ---'
+      $log | Select-Object -Last 80
       throw 'flutter build windows failed'
     }
   } finally { Pop-Location }
