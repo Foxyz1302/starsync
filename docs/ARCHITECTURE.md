@@ -256,8 +256,16 @@ mpv settings (`PlaybackController`): `Player` with `bufferSize` 256 MiB
 read-ahead: rides out short drops, intro skips are instant),
 `demuxer-max-bytes=268435456` (150 s up to ~14 Mbit/s; a 1.4 GB / 24 min
 file is ~8), `demuxer-max-back-bytes=67108864`,
-`stream-lavf-o=reconnect_streamed=1,reconnect_on_http_error=1,reconnect_delay_max=4`
-(comma form; this mpv build rejects colon-joined). The cache is in RAM:
+`stream-lavf-o=reconnect_streamed=1,reconnect_on_http_error=5xx,reconnect_delay_max=4,reconnect_max_retries=3`
+(comma form; this mpv build rejects colon-joined): a dropped connection
+or a 5xx is retried, at most 3 times per read and 4 s apart at most; a
+4xx (a CDN refusing a request) fails at once instead of being retried
+(older ffmpeg ignores `reconnect_max_retries`). A load that fails (mpv's
+fatal "No video or audio streams selected", or an EDL track that cannot
+be opened) before a duration is known is reported once per open
+(`onLoadError`) and shows as "can't play this: ..." with ffmpeg's HTTP
+status when this player gets ffmpeg's log (ffmpeg logs through one mpv
+instance per process, the first one alive). The cache is in RAM:
 media_kit sets `cache-on-disk` without a `cache-dir`, and mpv falls back. mpv
 ignores invalid values silently, so every pin is read back and a mismatch is
 logged and kept in `pinMismatches`. Measured against the `/m` endpoint
@@ -288,12 +296,18 @@ turns shaders off (saved) with a toast.
 Render mode: media_kit's Linux/Windows video output creates mpv's render
 context (OpenGL, else its software renderer) when the `VideoController` is
 created, and nothing in its API says which. The player therefore requests
-mpv logs at `v`: OpenGL init logs `GL_VERSION` under `libmpv_render`
+mpv logs at `v` while the controller is created: OpenGL init logs
+`GL_VERSION` under `libmpv_render`
 (`RenderMode.gpu`; "suspected software renderer" means llvmpipe,
 `softwareGl`); none within 1.5 s of the controller being ready means the
 software path (`software`, where shaders do nothing; the shader toast, the
-menu and Settings say so). After startup the `v` level adds no steady
-traffic (measured: 0 messages over 5 s of playback). The hardware path is
+menu and Settings say so). Otherwise the session player logs at `warn`
+(`PlaybackController.logLevel`, switched with `mpv_request_log_messages`
+on media_kit's handle): media_kit drains mpv's log on the UI thread, one
+message at a time, so a chatty level, or ffmpeg logging every retry of a
+refused request, could starve the UI. Shader and yt-dlp hook errors are
+`error` lines and still arrive. The thumbnail and sound players keep
+media_kit's default (`error`) and nothing listens to their log. The hardware path is
 fragile: media_kit borrows whatever EGL context GDK left current on the main
 thread (upstream media-kit#1404), so an X11 session or a Flutter/GDK change
 can silently fall back to software.
@@ -641,7 +655,14 @@ all three link modes. Nothing is bundled or installed by hand.
   external link every app points mpv's hook at its managed copy
   (`script-opts=ytdl_hook-ytdl_path=...`, `ytdl-format=bv*[height<=1080]+ba/b`,
   once per player), waiting for the download unless the URL names a media
-  file. A hook error shows as "can't open this link: ...".
+  file. A hook error shows as "can't open this link: ...". The hook (mpv
+  0.41) gives mpv the first requested format's `http_headers` (User-Agent
+  as `user-agent`; Referer, Cookie, X-Forwarded-For as file-local
+  `http-header-fields`, which win over the empty list media_kit sets on
+  load) and its `cookies` (`stream-lavf-o`), for every track of its EDL:
+  Bilibili's CDN answers 403 without the Referer. The app never opens a
+  resolved format URL in mpv itself (the putter of "Through me" plays the
+  page through the hook too); relays read them with yt-dlp's headers.
 - **Through me**: the putter's probe must give tracks, and a pieces
   track's playlist must be readable, else the swap is refused ("Live
   streams can't be passed on", DRM, or nothing a relay can read) with a

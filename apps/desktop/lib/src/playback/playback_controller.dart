@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:ffi' show Int8;
 import 'dart:io';
 
+import 'package:ffi/ffi.dart' show StringUtf8Pointer, malloc;
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
@@ -63,6 +65,22 @@ class PlaybackController {
 
   /// mpv's yt-dlp hook could not open the current link (its error text).
   void Function(String error)? onYtdlError;
+
+  /// The current media failed to load (the HTTP error when there was one,
+  /// e.g. a CDN's 403), at most once per [openUrl].
+  void Function(String error)? onLoadError;
+
+  // Per opened media: the last HTTP error ffmpeg logged, and whether a
+  // load error was reported.
+  String? _httpError;
+  bool _loadErrorSent = false;
+
+  /// mpv's log level for this app. media_kit drains mpv's log on the UI
+  /// thread one line at a time, so a chatty level (ffmpeg retrying a
+  /// refused request logs every attempt) can starve the UI: warnings and
+  /// errors only, except while the video output starts ([video]), when
+  /// the render-mode probe needs mpv's verbose GL init lines.
+  static const logLevel = 'warn';
 
   /// Points mpv's yt-dlp hook at [path] (the app's managed copy) for web
   /// page links, at most 1080p, once per player; its cookies
@@ -162,6 +180,7 @@ class PlaybackController {
     final existing = _video;
     if (existing != null) return existing;
     final hwdec = _hwdecOverride;
+    _requestLog(player, 'v'); // back to [logLevel] by _detectRenderMode
     // media_kit's video output sets hwdec itself on attach ('auto' unless
     // configured), which used to override SYNC_RELAY_HWDEC.
     final video = _video = VideoController(
@@ -187,8 +206,7 @@ class PlaybackController {
       bufferSize: maxBytes,
       libass: true,
       vo: Platform.environment['SYNC_RELAY_VO'],
-      // Verbose: the render-mode probe needs mpv's GL init lines.
-      logLevel: MPVLogLevel.v,
+      logLevel: MPVLogLevel.warn, // see [logLevel]
     ))
       ..onUserSeek = (d) => onUserSeek?.call(d);
     _shaders = '';
@@ -243,8 +261,29 @@ class PlaybackController {
     if (hwdec != null) {
       await _pin('hwdec', hwdec);
     }
-    await _pin('stream-lavf-o',
-        'reconnect_streamed=1,reconnect_on_http_error=1,reconnect_delay_max=4');
+    await _pin('stream-lavf-o', streamLavfOptions);
+  }
+
+  /// ffmpeg's HTTP options (mpv `stream-lavf-o`, comma form): reconnect
+  /// after a dropped connection, also on a streamed (growing) relay
+  /// response, and a server error (5xx) while connecting; a refused request
+  /// (4xx) fails at once. At most 3 tries per read, 4 s apart at most.
+  static const streamLavfOptions = 'reconnect_streamed=1,reconnect_on_http_error=5xx,'
+      'reconnect_delay_max=4,reconnect_max_retries=3';
+
+  // mpv_request_log_messages on [p]'s handle (media_kit has no API for it).
+  static void _requestLog(Player p, String level) {
+    try {
+      final dynamic platform = p.platform;
+      final name = level.toNativeUtf8();
+      try {
+        platform.mpv.mpv_request_log_messages(platform.ctx, name.cast<Int8>());
+      } finally {
+        malloc.free(name);
+      }
+    } catch (e) {
+      debugPrint('mpv log level $level not set: $e');
+    }
   }
 
   /// Puts the saved shader choice (Settings, Ctrl+0..6, shader button) on
@@ -331,7 +370,27 @@ class PlaybackController {
   void _onLog(PlayerLog log) {
     if (log.prefix == 'ytdl_hook' && (log.level == 'error' || log.level == 'fatal')) {
       final text = log.text.trim().replaceFirst(RegExp(r'^ERROR:\s*'), '');
-      if (text.isNotEmpty) onYtdlError?.call(text);
+      if (text.isNotEmpty) {
+        _loadErrorSent = true;
+        onYtdlError?.call(text);
+      }
+      return;
+    }
+    // ffmpeg logs through one mpv instance per process (the first one
+    // alive), so the HTTP status is a bonus, not a given.
+    if (log.prefix == 'ffmpeg') {
+      final http = RegExp(r'HTTP error \d{3}.*').firstMatch(log.text);
+      if (http != null) _httpError = http[0]!.trim();
+      return;
+    }
+    // Nothing playable opened (a track of mpv's yt-dlp EDL refused, ...).
+    if (!_loadErrorSent &&
+        duration.peek() == Duration.zero &&
+        ((log.prefix == 'cplayer' && log.level == 'fatal') ||
+            (log.prefix == 'demux' && log.level == 'error'))) {
+      _loadErrorSent = true;
+      final http = _httpError;
+      onLoadError?.call(http == null ? 'the video stream could not be opened' : 'the video server answered $http');
       return;
     }
     if (log.prefix != 'libmpv_render') return;
@@ -364,10 +423,12 @@ class PlaybackController {
   Future<void> _detectRenderMode(Player p, VideoController video) async {
     try {
       await video.platform.future;
+      await Future.delayed(const Duration(milliseconds: 1500));
     } catch (_) {
       return;
+    } finally {
+      if (identical(p, _player)) _requestLog(p, logLevel);
     }
-    await Future.delayed(const Duration(milliseconds: 1500));
     if (!identical(p, _player) || renderMode.peek() != RenderMode.unknown) {
       return;
     }
@@ -451,6 +512,8 @@ class PlaybackController {
     if (!_ready) return;
     try {
       _chapterJson = '';
+      _httpError = null;
+      _loadErrorSent = false;
       chapters.value = const [];
       tracks.value = const [];
       buffered.value = Duration.zero;

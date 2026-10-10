@@ -333,6 +333,7 @@ class SessionCoordinator {
     try {
       playback.onFrozen = () => unawaited(reloadVideo(auto: true));
       playback.onYtdlError = (e) => health.value = HealthStatus(HealthSeverity.error, "can't open this link: $e");
+      playback.onLoadError = (e) => health.value = HealthStatus(HealthSeverity.error, "can't play this: $e");
       playback.onUserSeek = (d) => _userSeek(d.inMicroseconds / 1e6);
       await playback.init();
       _playerReady = true;
