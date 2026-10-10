@@ -140,17 +140,24 @@ List<ScheduleEntry> matchSchedule(
     final id = s.anilistId;
     if (id != null) refs[id] ??= _SeriesRef(s.seriesId, s.jellyfinSeriesId, s.followed);
   }
+  // AnimeFlow's AniList episode number wins outright: TVDB numbering runs
+  // on across split entries (JoJo S6E4 is "2nd & 3rd STAGE" ep 3), so a TVDB
+  // or absolute number, or an air day, is only a guess for AniList entries
+  // AnimeFlow gives no AniList numbers for.
+  final byAni = <String, AnimeFlowScheduleItem>{};
   final byEp = <String, AnimeFlowScheduleItem>{};
   final byAbs = <String, AnimeFlowScheduleItem>{};
   final byDay = <String, AnimeFlowScheduleItem>{};
+  final numbered = <int>{};
   for (final it in schedule) {
     final e = it.episode, id = e.anilistId;
     if (id == null) continue;
     final ref = refs[id] ??= _SeriesRef(it.seriesId, it.jellyfinSeriesId, it.followed);
     if (it.followed) ref.followed = true;
-    // AnimeFlow's AniList episode number first: TVDB numbering can run on
-    // across split cours.
-    if (e.anilistEpisode != null) byEp.putIfAbsent('$id#${e.anilistEpisode}', () => it);
+    if (e.anilistEpisode != null) {
+      numbered.add(id);
+      byAni.putIfAbsent('$id#${e.anilistEpisode}', () => it);
+    }
     byEp.putIfAbsent('$id#${e.episode}', () => it);
     if (e.absolute != null) byAbs.putIfAbsent('$id#${e.absolute}', () => it);
     if (e.airDate != null) byDay.putIfAbsent('$id@${_day(e.airDate!)}', () => it);
@@ -160,7 +167,9 @@ List<ScheduleEntry> matchSchedule(
       () {
         final id = a.anilistId;
         final ref = refs[id];
-        final it = byEp['$id#${a.episode}'] ?? byAbs['$id#${a.episode}'] ?? byDay['$id@${_day(a.airingAt)}'];
+        final it = numbered.contains(id)
+            ? byAni['$id#${a.episode}']
+            : byEp['$id#${a.episode}'] ?? byAbs['$id#${a.episode}'] ?? byDay['$id@${_day(a.airingAt)}'];
         if (it != null) {
           final e = it.episode;
           return ScheduleEntry(

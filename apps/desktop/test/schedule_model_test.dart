@@ -129,6 +129,21 @@ void main() {
       expect(out.single.season, 2);
     });
 
+    test('a TVDB number never claims another AniList episode (JoJo S6E4 = 2nd STAGE ep 3)', () {
+      AnimeFlowScheduleItem row(int tvdbEp, int aniEp, EpisodeStatus st) => AnimeFlowScheduleItem(
+            episode: AnimeFlowEpisode(season: 6, episode: tvdbEp, anilistId: 210482, anilistEpisode: aniEp, status: st),
+            seriesId: 40,
+            title: 'JoJo',
+            jellyfinSeriesId: 'jfJ',
+          );
+      final out = matchSchedule(
+        [airing(210482, 3, DateTime(2026, 10, 9, 11)), airing(210482, 4, DateTime(2026, 10, 16, 11))],
+        schedule: [row(4, 3, EpisodeStatus.available), row(5, 4, EpisodeStatus.upcoming)],
+        now: now,
+      );
+      expect(out.map((e) => e.status), [ScheduleStatus.available, ScheduleStatus.upcoming]);
+    });
+
     test('by AniList id + episode, per season ids', () {
       // One AnimeFlow series (7) spans two AniList entries: S1 = 100, S2 = 200.
       final out = matchSchedule(
