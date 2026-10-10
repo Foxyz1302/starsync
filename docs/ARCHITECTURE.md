@@ -819,7 +819,13 @@ always scrolls the page). Space never presses a focused button
   against AnimeFlow (`animeflow.dart`, app API with the Jellyfin token;
   `/library` marks shows on Jellyfin it doesn't track, through every AniList
   entry of a season (`anilist_map`: a season AniList splits has several)) into a status per
-  episode (`schedule_model.dart`); requests and the owner's inbox are in
+  episode (`schedule_model.dart`). An aired episode of such a show reads
+  "on Jellyfin" only when Jellyfin has it: the season plus AniList
+  episode + the run's offset, checked against the series' episodes seen
+  by the linked account (`jellyfinEpisodeNumbers`, one request per series
+  memoised 3 min; `confirmOnJellyfin` is the pure step); absent reads
+  "aired · not on Jellyfin yet", unknown (no linked account, lookup
+  failed) "aired", neither with Put it up. Requests and the owner's inbox are in
   `requests_sheet.dart`. It refreshes every minute; mouse drag and
   Shift+wheel scroll the board sideways, the plain wheel scrolls a column.
   Settings (`settings_tab.dart`) has a left nav with icons

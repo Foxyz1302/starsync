@@ -8,6 +8,7 @@ import 'package:watch_together/src/jellyfin/accounts.dart';
 import 'package:watch_together/src/schedule/anilist.dart';
 import 'package:watch_together/src/schedule/animeflow.dart';
 import 'package:watch_together/src/schedule/schedule_model.dart';
+import 'package:watch_together/src/schedule/ui/schedule_actions.dart';
 import 'package:watch_together/src/schedule/ui/schedule_page.dart';
 import 'package:watch_together/src/screens/home/picked_media.dart';
 
@@ -431,6 +432,51 @@ void main() {
     expect(putUp.single.itemId, 'ep3');
     expect(putUp.single.serverId, 'srv');
     expect(toasts, isEmpty);
+    await done(tester);
+  });
+
+  testWidgets('untracked on Jellyfin: episode lookup, aired-not-there has no Play', (tester) async {
+    final jf = FakeJf();
+    final accounts = JellyfinAccounts(
+      store: MemoryJellyfinStore({
+        'accounts': jsonEncode([
+          {
+            'serverId': 'srv',
+            'serverName': 'Home',
+            'urls': ['http://jf.test'],
+            'userId': 'uid',
+            'userName': 'me',
+            'token': 'tok',
+          },
+        ]),
+      }),
+      httpFactory: () => jf,
+      deviceName: 'Test',
+    );
+    final eps = await tester.runAsync(() => jellyfinEpisodeNumbers(accounts, flow, 'jf7'));
+    expect(eps, {(1, 2), (1, 3)});
+    await tester.runAsync(() => jellyfinEpisodeNumbers(accounts, flow, 'jf7'));
+    expect(jf.seen.where((u) => u.path.endsWith('/Episodes')), hasLength(1), reason: 'memoised');
+    final none = JellyfinAccounts(store: MemoryJellyfinStore(), deviceName: 'Test');
+    expect(await tester.runAsync(() => jellyfinEpisodeNumbers(none, flow, 'jf7')), isNull);
+
+    await pumpPage(
+      tester,
+      snap: () => snapshot(
+        list: [
+          ScheduleEntry(
+            airing: airing(777, 'Clover', 2, day(0, 9)),
+            status: ScheduleStatus.notOnJellyfin,
+            season: 1,
+            jellyfinEpisode: 2,
+            jellyfinSeriesId: 'jfC',
+          ),
+        ],
+      ),
+    );
+    expect(card(777, 2), findsOneWidget);
+    expect(find.text('aired · not on Jellyfin yet'), findsOneWidget);
+    expect(action(777, 2), findsNothing);
     await done(tester);
   });
 

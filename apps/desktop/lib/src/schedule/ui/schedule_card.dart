@@ -49,6 +49,8 @@ String countdownText(DateTime at, DateTime now) {
   ScheduleStatus.unmonitored => ('not monitored', Colors.grey, Icons.visibility_off_outlined),
   ScheduleStatus.notTracked => ('not in AnimeFlow', Colors.grey, Icons.public),
   ScheduleStatus.inLibrary => ('on Jellyfin', Colors.greenAccent, Icons.video_library_outlined),
+  ScheduleStatus.notOnJellyfin => ('aired · not on Jellyfin yet', Colors.grey, Icons.hourglass_empty),
+  ScheduleStatus.aired => ('aired', Colors.grey, Icons.done),
 };
 
 class DayColumn extends StatelessWidget {

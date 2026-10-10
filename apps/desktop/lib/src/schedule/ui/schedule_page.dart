@@ -97,16 +97,20 @@ class _SchedulePageState extends State<SchedulePage> {
   void initState() {
     super.initState();
     _ownsRepo = widget.repository == null;
-    _repo =
-        widget.repository ??
-        ScheduleRepository(
-          aniList: AniListClient(),
-          animeFlow: AnimeFlowClient.fromAccounts(JellyfinAccounts.instance),
-        );
+    _repo = widget.repository ?? _ownRepo();
     _load();
     _timer = Timer.periodic(SchedulePage.refreshEvery, (_) {
       if (mounted && !_refreshing && TickerMode.valuesOf(context).enabled) _load();
     });
+  }
+
+  ScheduleRepository _ownRepo() {
+    final flow = AnimeFlowClient.fromAccounts(_accounts);
+    return ScheduleRepository(
+      aniList: AniListClient(),
+      animeFlow: flow,
+      jellyfinEpisodes: (id) => jellyfinEpisodeNumbers(_accounts, flow, id),
+    );
   }
 
   @override

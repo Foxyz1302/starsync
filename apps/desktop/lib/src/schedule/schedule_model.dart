@@ -17,9 +17,16 @@ enum ScheduleStatus {
   unmonitored,
   /// AnimeFlow does not track this series (or is unreachable).
   notTracked,
-  /// Not tracked by AnimeFlow, but the series is on Jellyfin (`/library`):
-  /// the episode may be there; Put it up finds out.
-  inLibrary;
+  /// Not tracked by AnimeFlow, the series is on Jellyfin (`/library`) and
+  /// so is the episode ([confirmOnJellyfin]; [matchSchedule] alone sets
+  /// it from the series).
+  inLibrary,
+  /// Not tracked, the series is on Jellyfin, the episode aired but is not
+  /// there yet.
+  notOnJellyfin,
+  /// Not tracked, the series is on Jellyfin, the episode aired; whether
+  /// it is there is unknown (no linked account, lookup failed).
+  aired;
 
   static ScheduleStatus of(EpisodeStatus s) => switch (s) {
         EpisodeStatus.available => available,
@@ -44,8 +51,12 @@ class ScheduleEntry {
   final bool followed;
   /// AnimeFlow's series id (follow, requests).
   final int? seriesId;
-  /// The AnimeFlow season of the matched episode (requests).
+  /// The AnimeFlow season of the matched episode (requests); untracked
+  /// on Jellyfin: the TVDB season of the AniList entry.
   final int? season;
+  /// Untracked on Jellyfin: the TVDB episode number in [season] (AniList
+  /// episode + the `anilist_map` run's offset).
+  final int? jellyfinEpisode;
   /// Play target once available.
   final String? jellyfinSeriesId;
   /// The series is on Jellyfin (tracked or not).
@@ -60,8 +71,22 @@ class ScheduleEntry {
     this.followed = false,
     this.seriesId,
     this.season,
+    this.jellyfinEpisode,
     this.jellyfinSeriesId,
   });
+
+  ScheduleEntry withStatus(ScheduleStatus s) => ScheduleEntry(
+        airing: airing,
+        status: s,
+        progress: progress,
+        reason: reason,
+        tracked: tracked,
+        followed: followed,
+        seriesId: seriesId,
+        season: season,
+        jellyfinEpisode: jellyfinEpisode,
+        jellyfinSeriesId: jellyfinSeriesId,
+      );
 
   @override
   String toString() => 'ScheduleEntry(${airing.anilistId}#${airing.episode} $status)';
@@ -98,15 +123,16 @@ List<ScheduleEntry> matchSchedule(
   DateTime? now,
 }) {
   final at = now ?? DateTime.now();
-  // AniList id -> (Jellyfin series, its TVDB season) from /library.
-  final lib = <int, (String, int)>{};
+  // AniList id -> (Jellyfin series, its TVDB season, TVDB - AniList
+  // episode offset) from /library.
+  final lib = <int, (String, int, int)>{};
   for (final item in library) {
     if (item.jellyfinSeriesId.isEmpty) continue;
     for (final r in item.anilistMap) {
-      lib[r.anilistId] ??= (item.jellyfinSeriesId, r.season);
+      lib[r.anilistId] ??= (item.jellyfinSeriesId, r.season, r.offset);
     }
     for (final e in item.anilistIds.entries) {
-      lib[e.value] ??= (item.jellyfinSeriesId, e.key);
+      lib[e.value] ??= (item.jellyfinSeriesId, e.key, 0);
     }
   }
   final refs = <int, _SeriesRef>{};
@@ -156,6 +182,7 @@ List<ScheduleEntry> matchSchedule(
             airing: a,
             status: a.airingAt.isAfter(at) ? ScheduleStatus.upcoming : ScheduleStatus.inLibrary,
             season: onJf.$2,
+            jellyfinEpisode: a.episode + onJf.$3,
             jellyfinSeriesId: onJf.$1,
           );
         }
@@ -170,6 +197,27 @@ List<ScheduleEntry> matchSchedule(
       }(),
   ];
 }
+
+/// Checks [matchSchedule]'s [ScheduleStatus.inLibrary] entries (series
+/// on Jellyfin) against the episodes Jellyfin has: [episodes] maps a
+/// Jellyfin series id to its (season, episode) numbers. Found stays
+/// inLibrary, absent becomes [ScheduleStatus.notOnJellyfin], a series
+/// missing from [episodes] (not looked up) [ScheduleStatus.aired].
+List<ScheduleEntry> confirmOnJellyfin(List<ScheduleEntry> entries, Map<String, Set<(int, int)>> episodes) => [
+      for (final e in entries)
+        if (e.status != ScheduleStatus.inLibrary)
+          e
+        else
+          switch (episodes[e.jellyfinSeriesId]) {
+            null => e.withStatus(ScheduleStatus.aired),
+            final have when have.contains((e.season, e.jellyfinEpisode)) => e,
+            _ => e.withStatus(ScheduleStatus.notOnJellyfin),
+          },
+    ];
+
+/// The (season, episode) numbers Jellyfin has of a series; null when it
+/// cannot tell (no linked account for that server).
+typedef JellyfinEpisodeLookup = Future<Set<(int, int)>?> Function(String jellyfinSeriesId);
 
 /// One loaded window. Errors are display text; [entries] is empty only
 /// when AniList failed with nothing cached.
@@ -206,12 +254,15 @@ class ScheduleSnapshot {
 
 /// Loads AniList and AnimeFlow for a window and merges them.
 class ScheduleRepository {
-  ScheduleRepository({required this.aniList, this.animeFlow, DateTime Function()? now})
+  ScheduleRepository({required this.aniList, this.animeFlow, this.jellyfinEpisodes, DateTime Function()? now})
       : _now = now ?? DateTime.now;
 
   final AniListClient aniList;
   /// Null = not configured (AniList only).
   final AnimeFlowClient? animeFlow;
+  /// Confirms "on Jellyfin" per episode ([confirmOnJellyfin]); null =
+  /// never confirmed (aired entries read [ScheduleStatus.aired]).
+  final JellyfinEpisodeLookup? jellyfinEpisodes;
   final DateTime Function() _now;
 
   /// Last week's Monday 00:00 local .. 4 weeks later.
@@ -236,7 +287,8 @@ class ScheduleRepository {
     final flow = await flowF;
     final airings = [...ani.airings]..sort((a, b) => a.airingAt.compareTo(b.airingAt));
     final entries = flow.error == null
-        ? matchSchedule(airings, schedule: flow.schedule, series: flow.series, library: flow.library, now: now)
+        ? await _confirm(
+            matchSchedule(airings, schedule: flow.schedule, series: flow.series, library: flow.library, now: now))
         : [for (final a in airings) untrackedEntry(a, now)];
     return ScheduleSnapshot(
       from: start,
@@ -247,6 +299,26 @@ class ScheduleRepository {
       animeFlowException: flow.error is AnimeFlowException ? flow.error as AnimeFlowException : null,
       me: flow.me,
     );
+  }
+
+  /// Looks up the episodes of every series an inLibrary entry is on, in
+  /// parallel; a failed or impossible lookup leaves that series out.
+  Future<List<ScheduleEntry>> _confirm(List<ScheduleEntry> entries) async {
+    final lookup = jellyfinEpisodes;
+    final ids = {
+      for (final e in entries)
+        if (e.status == ScheduleStatus.inLibrary && e.jellyfinSeriesId != null) e.jellyfinSeriesId!,
+    };
+    final found = <String, Set<(int, int)>>{};
+    if (lookup != null) {
+      await Future.wait([
+        for (final id in ids)
+          lookup(id).then((eps) {
+            if (eps != null) found[id] = eps;
+          }, onError: (_) {}),
+      ]);
+    }
+    return confirmOnJellyfin(entries, found);
   }
 
   Future<({AnimeFlowMe? me, List<AnimeFlowScheduleItem> schedule, List<AnimeFlowSeries> series, List<AnimeFlowLibraryItem> library, Object? error})>

@@ -78,7 +78,7 @@ Future<({int season, int episode})> flowNumbering(AnimeFlowClient? client, Sched
     }
   }
   if (ep != null) return (season: ep.season, episode: ep.episode);
-  return (season: e.season ?? 1, episode: e.airing.episode);
+  return (season: e.season ?? 1, episode: e.jellyfinEpisode ?? e.airing.episode);
 }
 
 /// The AniDB id of an untracked AniList entry, from AnimeFlow's search:
@@ -110,6 +110,25 @@ JellyfinAccount? jellyfinAccountFor(JellyfinAccounts accounts, AnimeFlowClient? 
     if (a != null) return a;
   }
   return accounts.defaultAccount;
+}
+
+/// The (season, episode) numbers of the episodes Jellyfin has of
+/// [jellyfinSeriesId], seen by the account AnimeFlow's ids belong to
+/// ([jellyfinAccountFor]); null without a linked account. One request per
+/// series, memoised a few minutes ([JellyfinAccounts.cached]).
+Future<Set<(int, int)>?> jellyfinEpisodeNumbers(
+  JellyfinAccounts accounts,
+  AnimeFlowClient? flow,
+  String jellyfinSeriesId,
+) async {
+  await accounts.ensureLoaded(validate: false);
+  final account = jellyfinAccountFor(accounts, flow);
+  final client = account == null ? null : accounts.clientFor(account.serverId);
+  if (account == null || client == null) return null;
+  return accounts.cached(account.serverId, 'schedule-episodes:$jellyfinSeriesId', () async => {
+    for (final x in await client.episodes(jellyfinSeriesId))
+      if (x.parentIndexNumber != null && x.indexNumber != null) (x.parentIndexNumber!, x.indexNumber!),
+  });
 }
 
 /// The Jellyfin episode of an available [e] as a media pick. Throws
