@@ -33,8 +33,8 @@ off by deleting it in the same commit as the code. Wire changes also edit
      should open the video track's URL alone, not the EDL.
 
 4. **AniList account**: sign in (OAuth via a localhost callback), "My list"
-   filter on the Schedule; today's "Following" (AnimeFlow's monitored
-   shows) becomes "On the server".
+   filter on the Schedule from the user's AniList lists. This is the
+   Schedule's personal tracking; AnimeFlow has no per-user follow.
 
 5. **Ops**: check shaders on Windows; the relay e2e "source drops
    uncleanly and resumes" fails about half the time under the full suite.

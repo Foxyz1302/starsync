@@ -127,7 +127,6 @@ class AiringCard extends StatelessWidget {
   final ScheduleEntry entry;
   final DateTime now;
   final bool compact;
-  final bool followed;
   final CardAction action;
 
   /// Why [action] is disabled (no request scope, not on Jellyfin, ...);
@@ -138,20 +137,15 @@ class AiringCard extends StatelessWidget {
   final bool busy;
   final VoidCallback onAction;
 
-  /// Null hides the bookmark (untracked series).
-  final VoidCallback? onFollow;
-
   const AiringCard({
     super.key,
     required this.entry,
     required this.now,
     required this.compact,
-    required this.followed,
     required this.action,
     required this.onAction,
     this.disabledHint,
     this.busy = false,
-    this.onFollow,
   });
 
   String get _id => '${entry.airing.anilistId}-${entry.airing.episode}';
@@ -179,22 +173,6 @@ class AiringCard extends StatelessWidget {
     if (b == null) return null;
     b = KeyedSubtree(key: ValueKey('action-$_id'), child: b);
     return disabledHint == null ? b : Tooltip(message: disabledHint!, child: b);
-  }
-
-  Widget? _follow(BuildContext context, double size) {
-    final f = onFollow;
-    if (f == null) return null;
-    return IconButton(
-      key: ValueKey('follow-$_id'),
-      onPressed: f,
-      tooltip: followed ? 'Stop following' : 'Follow',
-      visualDensity: VisualDensity.compact,
-      padding: EdgeInsets.zero,
-      constraints: BoxConstraints.tightFor(width: size + 10, height: size + 10),
-      iconSize: size,
-      color: followed ? Theme.of(context).colorScheme.primary : null,
-      icon: Icon(followed ? Icons.bookmark : Icons.bookmark_outline),
-    );
   }
 
   @override
@@ -246,7 +224,6 @@ class AiringCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (followed && onFollow == null) Icon(Icons.bookmark, size: 14, color: scheme.primary),
                 if (requestable)
                   Tooltip(
                     message: disabledHint ?? (action == CardAction.request ? 'Request' : 'Request series'),
@@ -270,7 +247,6 @@ class AiringCard extends StatelessWidget {
       );
     }
     final button = _button(context);
-    final follow = _follow(context, 16);
     // The cover poster leads: it is what people recognise at a glance.
     return Material(
       key: ValueKey('card-$_id'),
@@ -340,25 +316,11 @@ class AiringCard extends StatelessWidget {
                             style: const TextStyle(fontWeight: FontWeight.w600, height: 1.25),
                           ),
                           const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  'Episode ${a.episode}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
-                                ),
-                              ),
-                              const SizedBox(width: 2),
-                              if (follow != null)
-                                follow
-                              else if (followed)
-                                Padding(
-                                  padding: const EdgeInsets.only(left: 4),
-                                  child: Icon(Icons.bookmark, size: 14, color: scheme.primary),
-                                ),
-                            ],
+                          Text(
+                            'Episode ${a.episode}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
                           ),
                           const Spacer(),
                           Row(

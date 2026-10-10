@@ -29,7 +29,6 @@ final seriesJson = {
   'jellyfin_series_id': 'jf7',
   'state': 'released',
   'monitored': true,
-  'followed': true,
   'episodes_total': 24,
   'episodes_available': 20,
   'next_air_date': null,
@@ -110,7 +109,7 @@ void main() {
           'to': req.uri.queryParameters['to'],
           'items': [
             {...episodeJson, 'series_id': 7, 'title': 'Show', 'anidb_id': 70, 'tvdb_id': 700,
-              'jellyfin_series_id': 'jf7', 'followed': true},
+              'jellyfin_series_id': 'jf7'},
           ],
         }, etag: 'W/"s1"');
       },
@@ -126,7 +125,6 @@ void main() {
     expect(it.anidbId, 70);
     expect(it.tvdbId, 700);
     expect(it.jellyfinSeriesId, 'jf7');
-    expect(it.followed, isTrue);
     final e = it.episode;
     expect((e.season, e.episode, e.absolute, e.title, e.anilistId), (2, 3, 15, 'Three', 222));
     expect(e.airDate, DateTime.utc(2026, 10, 8, 19, 36, 32));
@@ -146,7 +144,7 @@ void main() {
     expect(server.seen, isEmpty);
   });
 
-  test('/series, /series/{id} with episodes, follow/unfollow', () async {
+  test('/series, /series/{id} with episodes', () async {
     await serve({
       'GET /series': (req, res) async => json(res, {'items': [seriesJson]}, etag: 'W/"a"'),
       'GET /series/7': (req, res) async => json(res, {
@@ -156,24 +154,18 @@ void main() {
               {'season': 1, 'episode': 1, 'status': 'failed', 'reason': 'No release'},
             ],
           }),
-      'PUT /series/7/follow': (req, res) async => res.statusCode = 204,
-      'DELETE /series/7/follow': (req, res) async => res.statusCode = 204,
     });
     final c = client();
     final s = (await c.series()).single;
     expect(s.seriesId, 7);
     expect(s.anilistId, 111);
     expect(s.state, SeriesState.released);
-    expect(s.monitored && s.followed, isTrue);
+    expect(s.monitored, isTrue);
     expect((s.episodesTotal, s.episodesAvailable, s.nextAirDate), (24, 20, null));
     final d = await c.seriesDetail(7);
     expect(d.episodes.map((e) => e.season), [0, 1]);
     expect(d.episodes.last.status, EpisodeStatus.failed);
     expect(d.episodes.last.reason, 'No release');
-    await c.setFollowed(7, true);
-    await c.setFollowed(7, false);
-    expect(server.seen.skip(2).map((r) => '${r.method} ${r.uri.path}'),
-        ['PUT /api/app/v1/series/7/follow', 'DELETE /api/app/v1/series/7/follow']);
   });
 
   test('/search and the three request bodies', () async {

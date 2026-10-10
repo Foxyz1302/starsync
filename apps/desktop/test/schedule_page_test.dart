@@ -88,7 +88,6 @@ List<ScheduleEntry> entries() => [
     airing: airing(111, 'Avail Show', 3, day(0, 9)),
     status: ScheduleStatus.available,
     tracked: true,
-    followed: true,
     seriesId: 7,
     season: 1,
     jellyfinSeriesId: 'jf7',
@@ -201,8 +200,6 @@ void main() {
           });
         case ('GET', '/search'):
           json(res, {'items': searchHits});
-        case ('PUT' || 'DELETE', '/series/7/follow'):
-          res.statusCode = 204;
         case ('POST', '/requests/1/approve' || '/requests/2/reject'):
           json(res, {});
         default:
@@ -298,13 +295,9 @@ void main() {
     await done(tester);
   });
 
-  testWidgets('filters: following, all airing, niche too, compact', (tester) async {
+  testWidgets('filters: all airing, niche too, compact', (tester) async {
     await pumpPage(tester);
-    await tester.tap(find.text('Following'));
-    await tester.pump();
-    expect(card(111, 3), findsOneWidget);
-    expect(card(222, 5), findsNothing);
-
+    expect(find.text('Following'), findsNothing);
     await tester.tap(find.text('All airing'));
     await tester.pump();
     expect(card(444, 1), findsOneWidget);
@@ -395,15 +388,6 @@ void main() {
     expect(b.onPressed, isNull);
     expect(find.byWidgetPredicate((w) => w is Tooltip && (w.message ?? '').contains('owner')), findsWidgets);
     expect(find.text('My requests'), findsOneWidget);
-    await done(tester);
-  });
-
-  testWidgets('follow toggles through AnimeFlow', (tester) async {
-    final repo = await pumpPage(tester);
-    await tester.tap(find.byKey(const ValueKey('follow-111-3')));
-    await io(tester);
-    expect(server.seen.where((r) => r.method == 'DELETE' && r.uri.path.endsWith('/series/7/follow')), hasLength(1));
-    expect(repo.forced.length, greaterThanOrEqualTo(2)); // reloaded
     await done(tester);
   });
 

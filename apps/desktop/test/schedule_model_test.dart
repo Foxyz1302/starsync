@@ -20,7 +20,7 @@ Airing airing(int id, int ep, DateTime local) => Airing(
     );
 
 AnimeFlowScheduleItem item(int? anilistId, int ep, EpisodeStatus status,
-        {int season = 1, int? absolute, DateTime? air, int seriesId = 7, bool followed = false,
+        {int season = 1, int? absolute, DateTime? air, int seriesId = 7,
         double? progress, String? reason}) =>
     AnimeFlowScheduleItem(
       episode: AnimeFlowEpisode(
@@ -36,7 +36,6 @@ AnimeFlowScheduleItem item(int? anilistId, int ep, EpisodeStatus status,
       seriesId: seriesId,
       title: 'Show',
       jellyfinSeriesId: 'jf$seriesId',
-      followed: followed,
     );
 
 void main() {
@@ -150,7 +149,7 @@ void main() {
         [airing(100, 3, DateTime(2026, 10, 1, 20)), airing(200, 3, DateTime(2026, 10, 9, 20))],
         schedule: [
           item(100, 3, EpisodeStatus.available, season: 1),
-          item(200, 3, EpisodeStatus.downloading, season: 2, progress: 0.4, followed: true),
+          item(200, 3, EpisodeStatus.downloading, season: 2, progress: 0.4),
         ],
         series: [const AnimeFlowSeries(seriesId: 7, title: 'Show', anilistId: 100, jellyfinSeriesId: 'jf7')],
         now: now,
@@ -158,7 +157,6 @@ void main() {
       expect(out.map((e) => e.status), [ScheduleStatus.available, ScheduleStatus.downloading]);
       expect(out.map((e) => e.season), [1, 2]);
       expect(out[1].progress, 0.4);
-      expect(out[1].followed, isTrue);
       expect(out.every((e) => e.tracked && e.seriesId == 7 && e.jellyfinSeriesId == 'jf7'), isTrue);
     });
 
@@ -205,11 +203,11 @@ void main() {
       final out = matchSchedule(
         [airing(500, 2, DateTime(2026, 10, 7, 20)), airing(500, 3, DateTime(2026, 10, 14, 20))],
         schedule: const [],
-        series: [const AnimeFlowSeries(seriesId: 9, title: 'S', anilistId: 500, followed: true)],
+        series: [const AnimeFlowSeries(seriesId: 9, title: 'S', anilistId: 500)],
         now: now,
       );
       expect(out.map((e) => e.status), [ScheduleStatus.missing, ScheduleStatus.upcoming]);
-      expect(out.every((e) => e.followed && e.seriesId == 9), isTrue);
+      expect(out.every((e) => e.seriesId == 9), isTrue);
     });
 
     test('progress only while downloading, reason only when failed', () {
@@ -271,7 +269,7 @@ void main() {
             return json(res, {
               'items': [
                 {'season': 1, 'episode': 3, 'anilist_id': 100, 'status': 'available', 'series_id': 7,
-                  'title': 'Show', 'followed': false},
+                  'title': 'Show'},
               ],
             });
           case '/flow/series':

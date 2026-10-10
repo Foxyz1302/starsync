@@ -18,7 +18,7 @@ import 'schedule_card.dart';
 // one thing to do about it (put it up, request it). Refreshes every
 // minute while visible; ETags keep that cheap.
 
-enum ScheduleFilter { jellyfin, following, all }
+enum ScheduleFilter { jellyfin, all }
 
 class SchedulePage extends StatefulWidget {
   /// Nobody else watches (offline or solo): available episodes say Play
@@ -75,8 +75,6 @@ class _SchedulePageState extends State<SchedulePage> {
   /// The sheet stays built while it slides out.
   bool _sheetBuilt = false;
 
-  /// Follow toggles not yet confirmed by a reload (series id -> followed).
-  final _followOverride = <int, bool>{};
 
   /// Requested in this run: "anilistId#episode" or "series:anilistId".
   final _requested = <String>{};
@@ -190,11 +188,8 @@ class _SchedulePageState extends State<SchedulePage> {
     animate ? _scroll.animateTo(x, duration: easeTime, curve: ease) : _scroll.jumpTo(x);
   }
 
-  bool _followed(ScheduleEntry e) => (e.seriesId == null ? null : _followOverride[e.seriesId]) ?? e.followed;
-
   bool _shows(ScheduleEntry e) => switch (_filter) {
     ScheduleFilter.jellyfin => e.tracked || e.onJellyfin,
-    ScheduleFilter.following => _followed(e),
     ScheduleFilter.all => _niche || e.tracked || e.airing.popularity >= SchedulePage.nicheBelow,
   };
 
@@ -341,21 +336,6 @@ class _SchedulePageState extends State<SchedulePage> {
     },
   );
 
-  Future<void> _toggleFollow(ScheduleEntry e) async {
-    final c = _flow, id = e.seriesId;
-    if (c == null || id == null) return;
-    final next = !_followed(e);
-    setState(() => _followOverride[id] = next);
-    try {
-      await c.setFollowed(id, next);
-      await _load();
-    } catch (err) {
-      _toast(friendlyError(err));
-    } finally {
-      if (mounted) setState(() => _followOverride.remove(id));
-    }
-  }
-
   Future<void> _decide(AnimeFlowRequest r, {required bool approve}) async {
     final c = _flow;
     if (c == null || _reqBusy.contains(r.id)) return;
@@ -392,11 +372,6 @@ class _SchedulePageState extends State<SchedulePage> {
                 value: ScheduleFilter.jellyfin,
                 icon: Icon(Icons.video_library_outlined),
                 label: Text('On Jellyfin'),
-              ),
-              ButtonSegment(
-                value: ScheduleFilter.following,
-                icon: Icon(Icons.bookmark_outline),
-                label: Text('Following'),
               ),
               ButtonSegment(value: ScheduleFilter.all, icon: Icon(Icons.public), label: Text('All airing')),
             ],
@@ -541,12 +516,10 @@ class _SchedulePageState extends State<SchedulePage> {
       entry: e,
       now: now,
       compact: _compact,
-      followed: _followed(e),
       action: action,
       disabledHint: hint,
       busy: busy,
       onAction: () => _onAction(e, action),
-      onFollow: e.tracked && e.seriesId != null && _flow != null ? () => _toggleFollow(e) : null,
     );
   }
 

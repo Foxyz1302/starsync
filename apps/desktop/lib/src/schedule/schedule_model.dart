@@ -48,8 +48,7 @@ class ScheduleEntry {
   final String? reason;
   /// AnimeFlow tracks the series.
   final bool tracked;
-  final bool followed;
-  /// AnimeFlow's series id (follow, requests).
+  /// AnimeFlow's series id (requests).
   final int? seriesId;
   /// The AnimeFlow season of the matched episode (requests); untracked
   /// on Jellyfin: the TVDB season of the AniList entry.
@@ -68,7 +67,6 @@ class ScheduleEntry {
     this.progress,
     this.reason,
     this.tracked = false,
-    this.followed = false,
     this.seriesId,
     this.season,
     this.jellyfinEpisode,
@@ -81,7 +79,6 @@ class ScheduleEntry {
         progress: progress,
         reason: reason,
         tracked: tracked,
-        followed: followed,
         seriesId: seriesId,
         season: season,
         jellyfinEpisode: jellyfinEpisode,
@@ -106,8 +103,7 @@ String _day(DateTime d) {
 class _SeriesRef {
   final int seriesId;
   final String? jellyfinSeriesId;
-  bool followed;
-  _SeriesRef(this.seriesId, this.jellyfinSeriesId, this.followed);
+  _SeriesRef(this.seriesId, this.jellyfinSeriesId);
 }
 
 /// Merges AniList [airings] with AnimeFlow's [schedule] rows and tracked
@@ -138,7 +134,7 @@ List<ScheduleEntry> matchSchedule(
   final refs = <int, _SeriesRef>{};
   for (final s in series) {
     final id = s.anilistId;
-    if (id != null) refs[id] ??= _SeriesRef(s.seriesId, s.jellyfinSeriesId, s.followed);
+    if (id != null) refs[id] ??= _SeriesRef(s.seriesId, s.jellyfinSeriesId);
   }
   // AnimeFlow's AniList episode number wins outright: TVDB numbering runs
   // on across split entries (JoJo S6E4 is "2nd & 3rd STAGE" ep 3), so a TVDB
@@ -152,8 +148,7 @@ List<ScheduleEntry> matchSchedule(
   for (final it in schedule) {
     final e = it.episode, id = e.anilistId;
     if (id == null) continue;
-    final ref = refs[id] ??= _SeriesRef(it.seriesId, it.jellyfinSeriesId, it.followed);
-    if (it.followed) ref.followed = true;
+    refs[id] ??= _SeriesRef(it.seriesId, it.jellyfinSeriesId);
     if (e.anilistEpisode != null) {
       numbered.add(id);
       byAni.putIfAbsent('$id#${e.anilistEpisode}', () => it);
@@ -178,7 +173,6 @@ List<ScheduleEntry> matchSchedule(
             progress: e.status == EpisodeStatus.downloading ? e.progress : null,
             reason: e.status == EpisodeStatus.failed ? e.reason : null,
             tracked: true,
-            followed: it.followed || (ref?.followed ?? false),
             seriesId: it.seriesId,
             season: e.season,
             jellyfinSeriesId: it.jellyfinSeriesId ?? ref?.jellyfinSeriesId ?? lib[id]?.$1,
@@ -199,7 +193,6 @@ List<ScheduleEntry> matchSchedule(
           airing: a,
           status: a.airingAt.isAfter(at) ? ScheduleStatus.upcoming : ScheduleStatus.missing,
           tracked: true,
-          followed: ref.followed,
           seriesId: ref.seriesId,
           jellyfinSeriesId: ref.jellyfinSeriesId ?? lib[id]?.$1,
         );

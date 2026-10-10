@@ -248,7 +248,6 @@ class AnimeFlowScheduleItem {
   final int? anidbId;
   final int? tvdbId;
   final String? jellyfinSeriesId;
-  final bool followed;
 
   const AnimeFlowScheduleItem({
     required this.episode,
@@ -257,7 +256,6 @@ class AnimeFlowScheduleItem {
     this.anidbId,
     this.tvdbId,
     this.jellyfinSeriesId,
-    this.followed = false,
   });
 
   static AnimeFlowScheduleItem fromJson(Map j) => AnimeFlowScheduleItem(
@@ -267,7 +265,6 @@ class AnimeFlowScheduleItem {
         anidbId: _int(j['anidb_id']),
         tvdbId: _int(j['tvdb_id']),
         jellyfinSeriesId: _str(j['jellyfin_series_id']),
-        followed: j['followed'] == true,
       );
 }
 
@@ -296,7 +293,6 @@ class AnimeFlowSeries {
   final String? jellyfinSeriesId;
   final SeriesState state;
   final bool monitored;
-  final bool followed;
   final int episodesTotal;
   final int episodesAvailable;
   final DateTime? nextAirDate;
@@ -312,7 +308,6 @@ class AnimeFlowSeries {
     this.jellyfinSeriesId,
     this.state = SeriesState.releasing,
     this.monitored = false,
-    this.followed = false,
     this.episodesTotal = 0,
     this.episodesAvailable = 0,
     this.nextAirDate,
@@ -328,7 +323,6 @@ class AnimeFlowSeries {
         jellyfinSeriesId: _str(j['jellyfin_series_id']),
         state: SeriesState.parse(j['state']),
         monitored: j['monitored'] == true,
-        followed: j['followed'] == true,
         episodesTotal: _int(j['episodes_total']) ?? 0,
         episodesAvailable: _int(j['episodes_available']) ?? 0,
         nextAirDate: _time(j['next_air_date']),
@@ -683,10 +677,6 @@ class AnimeFlowClient {
     final j = await _call('GET', '/series/$seriesId', etag: true);
     return AnimeFlowSeries.fromJson(j is Map ? j : const {});
   }
-
-  /// Follow (or unfollow) a series [view].
-  Future<void> setFollowed(int seriesId, bool followed) =>
-      _call(followed ? 'PUT' : 'DELETE', '/series/$seriesId/follow');
 
   /// Titles that can be requested [request].
   Future<List<AnimeFlowSearchHit>> search(String q) async => [
