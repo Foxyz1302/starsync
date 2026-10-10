@@ -3,7 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:sync_relay_core/core.dart' show LinkProbe, hasMediaExtension, notAVideoText;
+import 'package:sync_relay_core/core.dart' show LinkProbe, hasMediaExtension, parseJellyfinLink, playErrorText;
 
 import '../playback/yt_dlp_app.dart';
 import '../screens/home/media_picker.dart';
@@ -107,7 +107,10 @@ class LinkPreview {
   /// "youtube.com · Channel", or the host.
   final String subtitle;
   final String? thumbnail;
-  const LinkPreview({required this.title, required this.subtitle, this.thumbnail});
+  /// Why this computer cannot open it, in plain words ([LinkProbe.problem]);
+  /// null when it looks playable.
+  final String? problem;
+  const LinkPreview({required this.title, required this.subtitle, this.thumbnail, this.problem});
 }
 
 /// What a link is (see [AppYtDlp.probe]).
@@ -125,24 +128,30 @@ String clockText(double seconds) {
 }
 
 /// The preview of [url]: a web page shows yt-dlp's title, uploader,
-/// duration and thumbnail (or why it is not a video); a media file (by
-/// name or by probe) its file name and host. Null for text that is not an http(s) link.
+/// duration and thumbnail; a media file its file name and host; a link
+/// that does not open, why ([LinkPreview.problem]). Null for text that is
+/// not an http(s) link.
 Future<LinkPreview?> previewLink(String url, {LinkProber probe = defaultLinkProber}) async {
   final uri = Uri.tryParse(url.trim());
   if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https') || uri.host.isEmpty) return null;
   final host = _host(uri);
-  // A media file name needs no lookup.
-  if (hasMediaExtension(uri)) return LinkPreview(title: LinkMedia(url.trim()).label, subtitle: host);
+  // A Jellyfin item goes up as the item (see `mediaForLink`), not the page.
+  if (parseJellyfinLink(url.trim()) != null) return LinkPreview(title: host, subtitle: '$host · Jellyfin');
+  final file = hasMediaExtension(uri);
   final LinkProbe p;
   try {
     p = await probe(url.trim());
   } catch (e) {
-    return LinkPreview(title: LinkMedia(url.trim()).label, subtitle: '$host · $e');
+    final problem = playErrorText('$e');
+    return LinkPreview(title: LinkMedia(url.trim()).label, subtitle: '$host · $problem', problem: problem);
   }
   final info = p.info;
   if (!p.isPage) return LinkPreview(title: LinkMedia(url.trim()).label, subtitle: host);
-  if (info == null) {
-    return LinkPreview(title: p.title ?? host, subtitle: '$host · ${notAVideoText(p.ytDlpError)}');
+  final problem = p.problem;
+  if (info == null || problem != null) {
+    // A media file name that did not answer as one keeps its name.
+    final title = file ? LinkMedia(url.trim()).label : p.title ?? host;
+    return LinkPreview(title: title, subtitle: '$host · ${problem ?? 'Not a video'}', problem: problem);
   }
   return LinkPreview(
     title: p.title ?? host,
@@ -221,6 +230,8 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
   Timer? _debounce;
   bool _busy = false;
   String? _error;
+  /// [_error] is the probe's problem: "Put it up anyway" is offered.
+  bool _canForce = false;
 
   @override
   void initState() {
@@ -242,7 +253,12 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
     if (url == _previewUrl) return;
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 350), () => _preview(url));
-    if (mounted) setState(() => _error = null);
+    if (mounted) {
+      setState(() {
+        _error = null;
+        _canForce = false;
+      });
+    }
   }
 
   Future<void> _preview(String url) async {
@@ -263,19 +279,27 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
     } catch (_) {}
   }
 
-  Future<void> _go() async {
+  Future<void> _go({bool anyway = false}) async {
     final url = _c.link.text.trim();
     if (url.isEmpty || _busy) return;
     setState(() {
       _busy = true;
       _error = null;
+      _canForce = false;
     });
-    String? error;
-    try {
-      error = await widget.onPutUp(LinkMedia(url, relay: widget.solo ? LinkRelay.direct : _c.linkRelay));
-    } catch (e) {
-      error = '$e';
+    // What the probe found refuses it here, with "Put it up anyway": the
+    // server or a friend (with cookies) may still open it.
+    final problem = anyway ? null : (_previews[url] ?? await previewLink(url, probe: widget.probe))?.problem;
+    String? error = problem;
+    if (problem == null) {
+      try {
+        error = await widget.onPutUp(
+            LinkMedia(url, relay: widget.solo ? LinkRelay.direct : _c.linkRelay, anyway: anyway));
+      } catch (e) {
+        error = '$e';
+      }
     }
+    final canForce = problem != null;
     if (error == null) {
       final p = _previews[url] ?? await previewLink(url, probe: widget.probe);
       unawaited(widget.recents.add(RecentLink(
@@ -289,6 +313,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
     setState(() {
       _busy = false;
       _error = error;
+      _canForce = canForce;
     });
   }
 
@@ -373,6 +398,14 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
                   textAlign: TextAlign.center,
                   style: t.bodySmall?.copyWith(color: _error != null ? scheme.error : Colors.grey),
                 ),
+                if (_canForce)
+                  Center(
+                    child: TextButton(
+                      key: const ValueKey('link-put-up-anyway'),
+                      onPressed: _busy ? null : () => _go(anyway: true),
+                      child: Text(solo ? 'Play it anyway' : 'Put it up anyway'),
+                    ),
+                  ),
               ],
               AnimatedSize(
                 duration: easeTime,
@@ -475,9 +508,9 @@ class _PreviewCard extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         p?.subtitle ?? 'Paste an http(s) address',
-                        maxLines: 1,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.grey),
+                        style: TextStyle(color: p?.problem != null ? scheme.error : Colors.grey),
                       ),
                     ],
                   ),

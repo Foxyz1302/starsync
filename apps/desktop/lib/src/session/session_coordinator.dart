@@ -182,6 +182,10 @@ class SessionCoordinator {
   final toasts = signal<List<ToastItem>>([]);
   final reconnecting = signal(false);
   final starving = signal<String?>(null);
+  /// Why this player cannot open the current media, in plain words
+  /// ([playErrorText]); empty while it can. It rides in `report.error`, so
+  /// the server stops waiting for this member and the others see it.
+  final playerError = signal('');
 
   /// The current media's Jellyfin ref (null for links and files).
   final currentRef = signal<JellyfinRef?>(null);
@@ -318,6 +322,12 @@ class SessionCoordinator {
   int _advanceDoneFor = -1;
   String _blockedKey = '';
   bool _jellyfinListening = false;
+  // The mediaId [playerError] belongs to, and the player's duration when
+  // it came: a new duration means the media opened after all.
+  int _playerErrorFor = -1;
+  Duration _playerErrorDuration = Duration.zero;
+  // Members' last `error`, by id, so a new one toasts once.
+  Map<String, String> _memberErrors = const {};
 
   SessionCoordinator(
       {this.sfx = const NoopSfxService(), JellyfinAccounts? jellyfin, TrackPrefs? trackPrefs, AppYtDlp? ytDlp})
@@ -332,8 +342,8 @@ class SessionCoordinator {
     if (_playerReady) return;
     try {
       playback.onFrozen = () => unawaited(reloadVideo(auto: true));
-      playback.onYtdlError = (e) => health.value = HealthStatus(HealthSeverity.error, "can't open this link: $e");
-      playback.onLoadError = (e) => health.value = HealthStatus(HealthSeverity.error, "can't play this: $e");
+      playback.onYtdlError = _setPlayerError;
+      playback.onLoadError = _setPlayerError;
       playback.onUserSeek = (d) => _userSeek(d.inMicroseconds / 1e6);
       await playback.init();
       _playerReady = true;
@@ -343,6 +353,35 @@ class SessionCoordinator {
           HealthStatus(HealthSeverity.error, 'player failed to start: $e');
       rethrow;
     }
+  }
+
+  void _setPlayerError(String raw) {
+    debugPrint('player cannot open media $_mediaId: $raw');
+    _playerErrorFor = _mediaId;
+    _playerErrorDuration = playback.duration.peek();
+    playerError.value = playErrorText(raw);
+  }
+
+  /// Clears [playerError] once the media opened (a new duration) or the
+  /// server moved to another media.
+  void _checkPlayerError(int mediaId) {
+    if (playerError.peek().isEmpty) return;
+    final d = playback.duration.peek();
+    if (_playerErrorFor != mediaId || (d > Duration.zero && d != _playerErrorDuration)) {
+      playerError.value = '';
+    }
+  }
+
+  /// A member's new `error` toasts once (the pill is hidden while playing).
+  void _toastMemberErrors(StateBroadcast r) {
+    final now = {for (final m in r.members) if (m.error.isNotEmpty) m.id: m.error};
+    for (final m in r.members) {
+      final e = now[m.id];
+      if (e != null && m.id != sync.memberId && _memberErrors[m.id] != e) {
+        _pushToast("${m.name} can't play this: $e", actor: m.name);
+      }
+    }
+    _memberErrors = now;
   }
 
   bool _reloadingVideo = false;
@@ -398,6 +437,8 @@ class SessionCoordinator {
     diff.reset();
     _mediaId = -1;
     _openUrl = null;
+    playerError.value = '';
+    _memberErrors = const {};
     _lastReady = false;
     _restoringReady = false;
     _lastOut = false;
@@ -495,8 +536,7 @@ class SessionCoordinator {
       return true;
     } catch (e) {
       debugPrint('open media failed: $e');
-      health.value =
-          HealthStatus(HealthSeverity.error, 'cannot open media: $e');
+      _setPlayerError('$e');
       return false;
     } finally {
       _opening = false;
@@ -614,6 +654,8 @@ class SessionCoordinator {
   void _onState(StateBroadcast r) {
     _lastStateAt = DateTime.now().toUtc();
     serverState.value = r;
+    _toastMemberErrors(r);
+    _checkPlayerError(r.mediaId);
     _maybeSendArt(r);
     _queuedState = r;
     if (_applying) return;
@@ -917,6 +959,8 @@ class SessionCoordinator {
       // Duration only once the open media is the server's current one.
       // Sitting out: still a report (it keeps this member fresh), empty.
       final known = !_lastOut && !_opening && _openUrl != null && _mediaId == r.mediaId;
+      _checkPlayerError(r.mediaId);
+      final error = playerError.peek();
       sync.sendReport(
         position: _lastOut ? 0 : playback.positionSecs,
         buffered: _lastOut ? 0 : playback.bufferedSecsAhead,
@@ -924,6 +968,7 @@ class SessionCoordinator {
         duration: known ? playback.durationSecs : 0,
         mediaId: known ? r.mediaId : 0,
         jf: _jfAccessFor(r),
+        error: known && _playerErrorFor == r.mediaId ? error : '',
       );
       if (!_lastOut) {
         _checkSeekLanded(r);
@@ -1244,10 +1289,13 @@ class SessionCoordinator {
   /// A pasted link: a recognised Jellyfin item link goes up as a ref
   /// (see [mediaForLink]) that this member relays for viewers without an
   /// account (with the link's key, which stays here); anything else as the
-  /// link, or relayed per [relay]. Returns an error text, or null when sent.
-  Future<String?> swapLink(String url, {LinkRelay relay = LinkRelay.direct}) async {
+  /// link, or relayed per [relay]. A link this computer cannot open (its
+  /// probe's [LinkProbe.problem], or unreachable) is refused with the
+  /// reason in plain words unless [anyway]. Returns an error text, or null
+  /// when sent.
+  Future<String?> swapLink(String url, {LinkRelay relay = LinkRelay.direct, bool anyway = false}) async {
     markInput();
-    _lastPick = LinkMedia(url, relay: relay);
+    _lastPick = LinkMedia(url, relay: relay, anyway: anyway);
     final media = await mediaForLink(jellyfin, url);
     if (media.jellyfin != null) {
       _pendingOrigin = _JellyfinOrigin(url);
@@ -1261,6 +1309,8 @@ class SessionCoordinator {
     } catch (e) {
       probeError = '$e';
     }
+    final problem = probe == null ? playErrorText(probeError ?? '') : probe.problem;
+    if (problem != null && !anyway) return problem;
     // A page is named by its title, never its URL tail ("1", "watch").
     final uri = Uri.tryParse(url) ?? Uri();
     final name = probe?.title ?? (probe != null || hasMediaExtension(uri) || uri.host.isEmpty ? media.name : uri.host);
@@ -1271,9 +1321,9 @@ class SessionCoordinator {
     if (relay == LinkRelay.me) {
       // This computer reads it: a file, or a page's formats (one file,
       // separate video and audio tracks, or segmented playlists).
-      if (probe == null) return 'cannot pass this link on: $probeError';
-      final problem = probe.relayProblem;
-      if (problem != null) return problem;
+      if (probe == null) return problem;
+      final relayProblem = probe.relayProblem;
+      if (relayProblem != null) return relayProblem;
       final y = await ytDlp.ytDlp;
       final check = LinkRelayMedia(uri, ytDlp: y, probe: probe);
       var size = 0;
@@ -1352,8 +1402,8 @@ class SessionCoordinator {
   /// Any picker selection.
   Future<String?> swapPicked(PickedMedia media) async {
     switch (media) {
-      case LinkMedia(:final url, :final relay):
-        return swapLink(url, relay: relay);
+      case LinkMedia(:final url, :final relay, :final anyway):
+        return swapLink(url, relay: relay, anyway: anyway);
       case JellyfinMedia():
         swapJellyfin(media);
       case FileMedia(:final path):

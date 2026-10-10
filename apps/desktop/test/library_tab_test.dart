@@ -110,7 +110,9 @@ Future<Harness> pumpLibrary(
         now: () => fixtureNow,
         probe: (url) async => url.endsWith('.mkv')
             ? LinkProbe.file(Uri.parse(url), 1)
-            : LinkProbe.page(Uri.parse(url), info: const YtDlpInfo(title: 'A video', uploader: 'Chan')),
+            : url.contains('bilibili')
+                ? LinkProbe.page(Uri.parse(url), ytDlpError: 'HTTP Error 412: Precondition Failed')
+                : LinkProbe.page(Uri.parse(url), info: const YtDlpInfo(title: 'A video', uploader: 'Chan')),
         filesBuilder: (context, {required solo, required relayed, required onPlay, nowPlayingPath}) =>
             FilesStub(solo: solo, relayed: relayed, onPlay: onPlay),
         onPutUp: (m) async {
@@ -295,6 +297,18 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('recent-link-$url')));
     await settle(tester, 10);
     expect(h.controller.link.text, url);
+
+    // A link the probe cannot open: the reason, not put up; "anyway" is.
+    const bili = 'https://www.bilibili.com/video/BV1';
+    await tester.enterText(find.byKey(const ValueKey('link-field')), bili);
+    await settle(tester, 10);
+    await tester.tap(find.byKey(const ValueKey('link-put-up')));
+    await settle(tester, 10);
+    expect(find.text(needsCookiesText), findsOneWidget);
+    expect(h.put, hasLength(1));
+    await tester.tap(find.byKey(const ValueKey('link-put-up-anyway')));
+    await settle(tester, 10);
+    expect((h.put.last as LinkMedia).anyway, isTrue);
 
     expect(tester.takeException(), isNull);
   });

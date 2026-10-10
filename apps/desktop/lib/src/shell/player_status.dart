@@ -11,11 +11,12 @@ import 'avatar.dart';
 import 'motion.dart';
 
 /// What the player's status pill says, most pressing first.
-enum StatusKind { reconnecting, problem, connecting, finished, loading, you, waiting }
+enum StatusKind { reconnecting, problem, connecting, finished, loading, you, cannotPlay, waiting }
 
-/// The pill's button: stop reconnecting, retry, or mark yourself ready
-/// (the whole pill).
-enum StatusAction { cancel, retry, ready }
+/// The pill's button: stop reconnecting, retry (reconnect), reload the
+/// video (your player could not open it), or mark yourself ready (the
+/// whole pill).
+enum StatusAction { cancel, retry, reload, ready }
 
 /// One status line: [text], a muted [detail], a coloured [tone] for
 /// problems (warn, error), the members it is about ([who]; [self] for you)
@@ -55,17 +56,23 @@ String _sentence(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1
 
 /// The player's status from the session's signals; null when there is
 /// nothing to say (playing, connected, everyone ready). [slowConnect]:
-/// connecting has taken over 2 s.
+/// connecting has taken over 2 s. [playerError]: why your player cannot
+/// open the media (the coordinator's `playerError`).
 StatusView? playerStatusFor({
   required HealthStatus health,
   bool reconnecting = false,
   StateBroadcast? state,
   MemberView? self,
   bool slowConnect = false,
+  String playerError = '',
 }) {
   if (reconnecting) {
     return const StatusView(StatusKind.reconnecting, 'Reconnecting…',
         tone: HealthSeverity.warn, action: StatusAction.cancel);
+  }
+  if (playerError.isNotEmpty && state?.media != null && !(self?.out ?? false)) {
+    return StatusView(StatusKind.problem, "Can't play this: $playerError",
+        tone: HealthSeverity.error, action: StatusAction.reload, short: "Can't play this");
   }
   if (health.severity == HealthSeverity.warn || health.severity == HealthSeverity.error) {
     return StatusView(StatusKind.problem, _sentence(health.message),
@@ -81,6 +88,12 @@ StatusView? playerStatusFor({
   if (r.transport == 'finished') {
     return const StatusView(StatusKind.finished, 'Finished · seek back or pick the next video', short: 'Finished');
   }
+  // Members whose player cannot open it: the server does not wait for
+  // them; say why instead of "waiting for".
+  final failed = [
+    for (final m in r.members)
+      if (m.error.isNotEmpty && !m.out && (self == null || m.id != self.id)) m,
+  ];
   // As the server holds playback: someone in the ready set short of the
   // minimum buffer.
   final need = r.bufferNeed;
@@ -92,12 +105,22 @@ StatusView? playerStatusFor({
           who: [m], self: you, progress: p, detail: '${(p * 100).round()}%');
     }
   }
+  if (failed.isNotEmpty) {
+    final f = failed.first;
+    final who = nameList([for (final m in failed) m.name]);
+    final unready = self != null && !self.ready;
+    return StatusView(StatusKind.cannotPlay, "$who can't play this: ${f.error}",
+        who: failed,
+        short: "$who can't play this",
+        detail: unready ? "Press Space when you're ready" : null,
+        action: unready ? StatusAction.ready : null);
+  }
   if (self != null && !self.ready) {
     return StatusView(StatusKind.you, "Press Space when you're ready",
         who: [self], self: true, action: StatusAction.ready, detail: 'or click here', short: 'Press Space when ready');
   }
   // Members sitting out are never waited for nor counted.
-  final active = [for (final m in r.members) if (!m.stale && !m.out) m];
+  final active = [for (final m in r.members) if (!m.stale && !m.out && m.error.isEmpty) m];
   final others = [
     for (final m in active)
       if ((self == null || m.id != self.id) && !(m.inSet && m.ready)) m,
@@ -117,6 +140,7 @@ StatusView? playerStatusNow({bool slowConnect = false}) {
     state: c.serverState.value,
     self: c.selfMember.value,
     slowConnect: slowConnect,
+    playerError: c.playerError.value,
   );
 }
 
@@ -164,6 +188,8 @@ class _PlayerStatusState extends State<PlayerStatus> {
         coord.cancelReconnect();
       case StatusAction.retry:
         coord.retry();
+      case StatusAction.reload:
+        unawaited(coord.reloadVideo());
       case StatusAction.ready:
         coord.toggleReady();
     }
@@ -266,6 +292,7 @@ class _StatusLine extends StatelessWidget {
         return null;
       case StatusKind.loading:
       case StatusKind.you:
+      case StatusKind.cannotPlay:
       case StatusKind.waiting:
         final r = coord.serverState.value;
         final infos = [

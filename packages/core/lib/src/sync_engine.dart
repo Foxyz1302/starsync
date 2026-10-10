@@ -56,6 +56,9 @@ class EngineMember {
   bool host = false;
   /// Sitting out: never in the set, never ready, its buffer ignored.
   bool out = false;
+  /// Its player cannot open the current media (`report.error`): outside
+  /// the ready gate until a report clears it or the media changes.
+  String error = '';
   DateTime lastSeen;
   EngineMember({
     required this.id,
@@ -97,6 +100,7 @@ class EngineMember {
         jf: jf,
         host: host,
         out: out,
+        error: error,
       );
 }
 
@@ -197,6 +201,7 @@ class SyncEngine {
     final wasStale = isStale(member);
     member.lastSeen = now;
     if (!member.out &&
+        member.error.isEmpty &&
         !member.inSet &&
         (member.ready || (wasStale && transport != Transport.playing))) {
       member.inSet = true;
@@ -307,12 +312,12 @@ class SyncEngine {
     _seen(member);
     // Sitting out: back first ([applyOut]), then ready.
     if (member.out) return;
-    if (member.ready == ready && member.inSet) {
+    if (member.ready == ready && (member.inSet || member.error.isNotEmpty)) {
       evaluate();
       return;
     }
     member.ready = ready;
-    if (ready) member.inSet = true;
+    if (ready && member.error.isEmpty) member.inSet = true;
     feed.add(FeedMessage(
         actor: member.name,
         action: ready ? 'ready' : 'unready',
@@ -328,13 +333,13 @@ class SyncEngine {
       for (final member in members.values) {
         if (member.out) continue;
         member.ready = ready;
-        if (ready) member.inSet = true;
+        if (ready && member.error.isEmpty) member.inSet = true;
       }
     } else {
       final member = byId(target);
       if (member == null || member.out) return;
       member.ready = ready;
-      if (ready) member.inSet = true;
+      if (ready && member.error.isEmpty) member.inSet = true;
       feed.add(FeedMessage(
           actor: actorName,
           action: ready ? 'force-ready' : 'force-unready',
@@ -366,7 +371,7 @@ class SyncEngine {
     member.out = out;
     member.ready = false;
     member.buffered = 0;
-    member.inSet = !out && transport != Transport.playing;
+    member.inSet = !out && member.error.isEmpty && transport != Transport.playing;
     feed.add(FeedMessage(
         actor: actor.name, action: out ? 'out' : 'back', target: self ? null : member.name, at: now));
     evaluate();
@@ -408,6 +413,7 @@ class SyncEngine {
     // (a stale member rejoins the set with its next frame if still ready).
     final t = now;
     for (final member in members.values) {
+      member.error = '';
       member.inSet = !member.out && !isStale(member, t);
       member.buffered = 0;
     }
@@ -416,10 +422,11 @@ class SyncEngine {
   }
 
   void applyReport(String token, double reportPosition, double buffered, int reportEventId,
-      {double duration = 0, int mediaId = 0, Map<String, bool>? jf}) {
+      {double duration = 0, int mediaId = 0, Map<String, bool>? jf, String error = ''}) {
     final member = members[token];
     if (member == null) return;
     if (!reportPosition.isFinite) return;
+    _setError(member, mediaId == this.mediaId ? error : '');
     _seen(member);
     if (jf != null) member.jf = Map.unmodifiable(jf);
     member.buffered = member.out || !buffered.isFinite || buffered < 0 ? 0 : buffered;
@@ -430,6 +437,21 @@ class SyncEngine {
       media = m.copyWith(duration: duration);
     }
     if (reportEventId < eventId) return;
+    evaluate();
+  }
+
+  /// An error takes the member out of the set (the gate stops waiting for
+  /// it); clearing it puts it back like a join: in the set unless playing
+  /// (then from its next `ready`).
+  void _setError(EngineMember member, String error) {
+    if (member.error == error) return;
+    member.error = error;
+    if (error.isNotEmpty) {
+      member.inSet = false;
+    } else if (!member.out) {
+      member.inSet = transport != Transport.playing;
+    }
+    // Leaving the set may let the others start.
     evaluate();
   }
 

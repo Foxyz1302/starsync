@@ -40,7 +40,7 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
 {"t":"swap","media":{"name":"","size":0,"duration":0,"jellyfin":{<ref>}}}
 {"t":"swap","media":{"name":"","size":123,"duration":0,"url":"...","relay":{}}}
 {"t":"report","position":123.1,"buffered":6.2,"eventId":41,
- "duration":1440.5,"mediaId":2,"jf":{"<serverId>":true}}
+ "duration":1440.5,"mediaId":2,"jf":{"<serverId>":true},"error":"Not allowed (403)"}
 {"t":"ping","c":1767225600000}
 {"t":"chat","text":"..."}
 {"t":"out","target":"<memberId>","out":true}
@@ -72,6 +72,17 @@ Field notes:
   client plays the item with its own account, `false` = through the relay.
   Sticky: a report without `jf` keeps the last one. At most 8 entries, keys
   up to 64 characters; others are dropped.
+- `report.error` (optional, omitted when empty): short plain text saying
+  why this client's player cannot open the media `report.mediaId` (e.g.
+  `Not allowed (403)`). The client sends it in every report while that
+  lasts and drops it once the media opens (a reload included). The server
+  keeps it per member (one line, cut to 120 characters) only for the
+  current `mediaId`: a report without it, or for another `mediaId`,
+  clears it, and so does a swap. An errored member is out of the ready
+  gate: out of the set, a `ready` or `force` does not put it back; when
+  the error clears it is in the set again like a join (unless `playing`,
+  then from its `ready`). Optional on both sides: older servers ignore it,
+  older clients ignore `members[].error`.
 - `ping.c`: the client's clock in epoch ms; answered with `pong`.
 - `user.avatar`: base64 PNG, at most 256 KiB of characters (else
   `rejected: ...`). `name` is trimmed, empty becomes `?`, cut to 32
@@ -113,7 +124,7 @@ Field notes:
  "serverTime":"<ISO-8601 UTC>","mediaId":1,
  "media":{name,size,duration,url?,jellyfin?,relay?,swapBy?,art?}|absent,
  "members":[{"id","name","avatarHash"?,"ready","inSet","buffered","stale","jf"?,
-   "host"?,"out"?}],
+   "host"?,"out"?,"error"?}],
  "seekBy":"m1","seekSeq":3,"relay":true}
 {"t":"pong","c":1767225600000,"s":1767225600012}
 {"t":"feed","actor":"","action":"","target":"","reason":"","at":"<ISO-8601>"}
@@ -145,7 +156,9 @@ Field notes:
   (omitted when the member has no picture) names the picture's bytes (see
   "Avatars"). `members[].host` (omitted when false): the member sent the
   server's `hostKey` (see `hello.hostKey`). `members[].out` (omitted when
-  false): the member sits out (see `out`).
+  false): the member sits out (see `out`). `members[].error` (omitted when
+  empty): the member's player cannot open the current media (see
+  `report.error`).
 - `pong.c` echoes the ping's `c`; `pong.s` is the server's clock in epoch ms
   (the clock `serverTime` uses). With `t3` the local receive time, the offset
   is `s - (c + t3) / 2`, accurate to half the round trip.

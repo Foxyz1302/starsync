@@ -428,7 +428,7 @@ void mountSyncRoute(
               final report = ReportMessage.fromJson(decoded);
               hub.engine.applyReport(
                   token, report.position, report.buffered, report.eventId,
-                  duration: report.duration, mediaId: report.mediaId, jf: report.jf);
+                  duration: report.duration, mediaId: report.mediaId, jf: report.jf, error: report.error);
               hub.changed();
             case 'ping':
               final ping = PingMessage.fromJson(decoded);

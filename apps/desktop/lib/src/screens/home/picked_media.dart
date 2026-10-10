@@ -16,7 +16,10 @@ enum LinkRelay { direct, server, me }
 final class LinkMedia extends PickedMedia {
   final String url;
   final LinkRelay relay;
-  const LinkMedia(this.url, {this.relay = LinkRelay.direct});
+  /// Put it up even though this computer's probe found a problem
+  /// (`LinkProbe.problem`): the server or a friend may still open it.
+  final bool anyway;
+  const LinkMedia(this.url, {this.relay = LinkRelay.direct, this.anyway = false});
 
   @override
   String get label {

@@ -145,7 +145,10 @@ folder to Files, or fill Link).
   what it is (a page's title, uploader, length and thumbnail, else the
   file name); in a server, pick how the
   others get it (everyone fetches it, the server fetches it, or through
-  you). Your last 12 links are listed under it.
+  you). Your last 12 links are listed under it. A link that does not
+  open here (needs cookies, 403, 404, not a video) says why and goes up
+  only with "Put it up anyway"; in the player, whoever cannot play it is
+  named ("Bob can't play this: Not allowed (403)") and nobody waits for them.
 - **Files**: video folders you add on this computer, grouped by series
   (click a series to list its episodes), or any file through Browse. The others stream it from you.
 

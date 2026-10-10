@@ -113,8 +113,17 @@ Loosely modeled on Syncplay, with a different readiness design.
   setting "Unready when the video changes", `AppSettings.unreadyOnSwap`,
   default off, sends `ready=false` itself on a new `mediaId`; not for the
   first state of a session, and a reconnect does not restore a ready that
-  a swap meanwhile would have dropped). Stale, leave and sitting out
-  remove from the set.
+  a swap meanwhile would have dropped). Stale, leave, sitting out and a
+  player error remove from the set.
+- **Player error** (`EngineMember.error`, `report.error`,
+  `state.members[].error`): a member whose player cannot open the current
+  media says why in its reports; the server takes it out of the set at
+  once (like sitting out, but automatic: `ready`/`force` do not put it
+  back, its ready flag is kept), so the others start without it. A report
+  without it (the media opened, after a reload too) or a swap clears it:
+  back in the set like a join while not PLAYING; while PLAYING from its
+  next frame if it is ready (the others then hold for its buffer, as for a
+  stale member coming back), else from its `ready`.
 - **Sitting out** (`EngineMember.out`, `state.members[].out`): a member
   stays connected (chat, feed, party, nudges) but is never in the set and
   never ready: no `ready` or `force` reaches it, a swap leaves it out, its
@@ -263,9 +272,18 @@ or a 5xx is retried, at most 3 times per read and 4 s apart at most; a
 (older ffmpeg ignores `reconnect_max_retries`). A load that fails (mpv's
 fatal "No video or audio streams selected", or an EDL track that cannot
 be opened) before a duration is known is reported once per open
-(`onLoadError`) and shows as "can't play this: ..." with ffmpeg's HTTP
-status when this player gets ffmpeg's log (ffmpeg logs through one mpv
-instance per process, the first one alive). The cache is in RAM:
+(`onLoadError`), with ffmpeg's HTTP status when this player gets
+ffmpeg's log (ffmpeg logs through one mpv instance per process, the
+first one alive). That, a yt-dlp hook error and a failed `openUrl` become
+the coordinator's `playerError` in plain words (`playErrorText`, core
+`link_probe.dart`: 412/precondition/login/cookies/sign in → "This site
+needs cookies — Settings → Player → yt-dlp → Cookies", 403 → "Not allowed
+(403)", 404/410 → "Not found (404)", "Unsupported URL" → "Not a video
+page yt-dlp knows", network errors → "Couldn't reach the site", anything
+else as is). It rides in `report.error` (see "Player error" in the sync
+model) until the media opens (a new duration) or the server's `mediaId`
+moves on; the pill shows "Can't play this: ..." with Retry (Reload
+video). The cache is in RAM:
 media_kit sets `cache-on-disk` without a `cache-dir`, and mpv falls back. mpv
 ignores invalid values silently, so every pin is read back and a mismatch is
 logged and kept in `pinMismatches`. Measured against the `/m` endpoint
@@ -647,15 +665,23 @@ all three link modes. Nothing is bundled or installed by hand.
   video/audio type, or a generic one on a media file name, is a file
   (`looksLikeMediaFile`); anything else goes to yt-dlp, and when yt-dlp
   cannot read it the page's `og:title` / `<title>` is kept with yt-dlp's
-  reason ("Not a video (and yt-dlp couldn't read it: ...)"). The app
-  probes on paste (`AppYtDlp.probe`, remembered 10 minutes) for the Link
-  preview and the swap: a page is named by its title, never its URL tail,
-  and its thumbnail goes up as the banner (no poster).
+  reason and the GET's HTTP status. `LinkProbe.problem`: why it will not
+  play, in plain words (`playErrorText` of yt-dlp's reason, else of a 4xx
+  status), null for a file or a page yt-dlp read. The app probes on paste
+  (`AppYtDlp.probe`, remembered 10 minutes; media file names too, not a
+  Jellyfin item link) for the
+  Link preview and the swap: a page is named by its title, never its URL
+  tail, and its thumbnail goes up as the banner (no poster). A link with a
+  problem, or one the probe cannot reach ("Couldn't reach the site"), is
+  not put up in any mode: the Link page shows the reason (preview and
+  under the button) and offers "Put it up anyway" (`LinkMedia.anyway`),
+  for when the server or a friend with cookies may still open it;
+  `swapLink` refuses it the same way for any other caller.
 - **Everyone fetches it**: the swap sends the page URL. Before opening an
   external link every app points mpv's hook at its managed copy
   (`script-opts=ytdl_hook-ytdl_path=...`, `ytdl-format=bv*[height<=1080]+ba/b`,
   once per player), waiting for the download unless the URL names a media
-  file. A hook error shows as "can't open this link: ...". The hook (mpv
+  file. A hook error is a player error (see the mpv settings under "Media"). The hook (mpv
   0.41) gives mpv the first requested format's `http_headers` (User-Agent
   as `user-agent`; Referer, Cookie, X-Forwarded-For as file-local
   `http-header-fields`, which win over the empty list media_kit sets on
@@ -924,7 +950,13 @@ always scrolls the page). Space never presses a focused button
   `StateBroadcast.bufferNeed`, the gate's own need at the current
   position: less near the end, none at finished; their avatar with the progress round it), you not
   ready (a click marks you ready) and who everyone waits for (avatars,
-  "2/3 ready"); nothing otherwise, info never. 34 px avatars, a main line
+  "2/3 ready"); nothing otherwise, info never. Your own `playerError`
+  comes right after reconnecting ("Can't play this: ...", Retry reloads
+  the video); members with `members[].error` show as "Bob can't play
+  this: ..." (before your ready prompt, which then rides in the detail
+  line) and are never in "waiting for". A member's new error also toasts
+  once (the pill is hidden while playing); avatars carry a red error mark
+  and the members card says "can't play this: ...". 34 px avatars, a main line
   and a muted detail line. Frosted glass, colour only for problems; it fades through
   between kinds. The mini shows its short line in its hover bar. ⚙ in both
   control designs opens the player settings card (`controls/

@@ -75,6 +75,38 @@ String notAVideoText(String? ytDlpError) =>
 /// The text for a page with no video a relay can read.
 const noRelayFormatText = "This page has no video a relay can read. Choose 'Everyone fetches it' instead.";
 
+/// The plain-words texts of [playErrorText].
+const needsCookiesText = 'This site needs cookies — Settings → Player → yt-dlp → Cookies';
+const notAllowedText = 'Not allowed (403)';
+const notFoundText = 'Not found (404)';
+const unsupportedUrlText = 'Not a video page yt-dlp knows';
+const unreachableText = "Couldn't reach the site";
+const _plainTexts = {needsCookiesText, notAllowedText, notFoundText, unsupportedUrlText, unreachableText};
+
+final _cookiesHint = RegExp(r'\b412\b|precondition|log ?in\b|logged|cookies|sign ?in\b', caseSensitive: false);
+final _forbidden = RegExp(r'(^|[\s(:])403\b|forbidden', caseSensitive: false);
+final _notFound = RegExp(r'(^|[\s(:])404\b|\b410\b|not found', caseSensitive: false);
+final _unreachable = RegExp(
+    r'SocketException|HandshakeException|TimeoutException|timed out|failed host lookup|connection (refused|reset|closed)|'
+    r'network is unreachable|no route to host|name or service not known|getaddrinfo|unable to download webpage',
+    caseSensitive: false);
+
+/// Why a link or media cannot be played, in plain words, from the raw
+/// error of yt-dlp, ffmpeg/mpv or the link probe; anything it does not
+/// know comes back as is (one line, at most 100 characters).
+String playErrorText(String raw) {
+  final s = raw.trim();
+  // First: its message quotes the URL, which may say anything.
+  if (s.toLowerCase().contains('unsupported url')) return unsupportedUrlText;
+  if (_cookiesHint.hasMatch(s)) return needsCookiesText;
+  if (_forbidden.hasMatch(s)) return notAllowedText;
+  if (_notFound.hasMatch(s)) return notFoundText;
+  if (_unreachable.hasMatch(s)) return unreachableText;
+  final line = s.replaceAll(RegExp(r'\s+'), ' ');
+  if (line.isEmpty) return "Couldn't open it";
+  return line.length > 100 ? '${line.substring(0, 99)}…' : line;
+}
+
 class LinkProbeException implements Exception {
   final String message;
   const LinkProbeException(this.message);
@@ -94,14 +126,29 @@ class LinkProbe {
   final String? pageTitle;
   /// Why yt-dlp could not read the page.
   final String? ytDlpError;
+  /// The HTTP status of the probe's GET; 0 when unknown.
+  final int status;
   const LinkProbe.file(this.url, this.size)
       : isPage = false,
         info = null,
         pageTitle = null,
-        ytDlpError = null;
-  const LinkProbe.page(this.url, {this.info, this.pageTitle, this.ytDlpError})
+        ytDlpError = null,
+        status = 0;
+  const LinkProbe.page(this.url, {this.info, this.pageTitle, this.ytDlpError, this.status = 0})
       : isPage = true,
         size = -1;
+
+  /// Why nobody may be able to play this link ([playErrorText]), or null
+  /// when it looks playable: a page yt-dlp could not read, or a link
+  /// answering 4xx.
+  String? get problem {
+    if (!isPage || info != null) return null;
+    final err = ytDlpError == null ? null : playErrorText(ytDlpError!);
+    // A 4xx says more than yt-dlp's words it has no plain text for.
+    final known = err != null && _plainTexts.contains(err);
+    if (!known && status >= 400 && status < 500) return playErrorText('HTTP Error $status');
+    return err;
+  }
 
   /// The name to show: yt-dlp's title, the page's, else the host; null
   /// for a file (named by its file name).
@@ -134,12 +181,14 @@ Future<LinkProbe> probeLink(Uri url, {YtDlp? ytDlp, HttpClient? client}) async {
   try {
     String? body;
     Object? getError;
+    var status = 0;
     try {
       final req = await c.getUrl(url).timeout(const Duration(seconds: 15));
       req.headers
         ..set(HttpHeaders.rangeHeader, 'bytes=0-0')
         ..set(HttpHeaders.acceptEncodingHeader, 'identity');
       final res = await req.close().timeout(const Duration(seconds: 15));
+      status = res.statusCode;
       final type = res.headers.contentType?.mimeType ?? '';
       if (looksLikeMediaFile(status: res.statusCode, contentType: type, url: url)) {
         await res.drain<void>().catchError((_) {});
@@ -155,7 +204,7 @@ Future<LinkProbe> probeLink(Uri url, {YtDlp? ytDlp, HttpClient? client}) async {
     String? ytErr;
     if (ytDlp != null) {
       try {
-        return LinkProbe.page(url, info: await ytDlp.resolve(url.toString()));
+        return LinkProbe.page(url, info: await ytDlp.resolve(url.toString()), status: status);
       } catch (e) {
         ytErr = '$e';
       }
@@ -170,7 +219,7 @@ Future<LinkProbe> probeLink(Uri url, {YtDlp? ytDlp, HttpClient? client}) async {
         body = await _readText(await req.close().timeout(const Duration(seconds: 15)));
       } catch (_) {}
     }
-    return LinkProbe.page(url, pageTitle: body == null ? null : htmlTitle(body), ytDlpError: ytErr);
+    return LinkProbe.page(url, pageTitle: body == null ? null : htmlTitle(body), ytDlpError: ytErr, status: status);
   } finally {
     if (client == null) c.close(force: true);
   }

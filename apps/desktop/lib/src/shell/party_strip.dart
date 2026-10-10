@@ -103,6 +103,7 @@ class PartyStrip extends StatelessWidget {
                   info: selfAvatarInfo(
                     ready: self?.ready ?? false,
                     host: online && !solo && coord.hostFile != null,
+                    error: online ? coord.playerError.value : '',
                   ),
                   size: stripAvatarSize,
                   ring: online,
@@ -553,6 +554,8 @@ class _MemberTile extends StatelessWidget {
         ? 'reconnecting…'
         : m.out
         ? 'sitting out'
+        : m.error.isNotEmpty
+        ? "can't play this: ${m.error}"
         : info.buffering
         ? 'buffering ${m.buffered.toStringAsFixed(1)} s'
         : m.ready

@@ -202,8 +202,11 @@ void main() {
 
       final page = await previewLink('https://example.com/a',
           probe: (url) async => LinkProbe.page(Uri.parse(url), pageTitle: 'Example', ytDlpError: 'Unsupported URL'));
-      expect((page!.title, page.subtitle),
-          ('Example', "example.com · Not a video (and yt-dlp couldn't read it: Unsupported URL)"));
+      expect((page!.title, page.subtitle, page.problem),
+          ('Example', 'example.com · Not a video page yt-dlp knows', 'Not a video page yt-dlp knows'));
+      final refused = await previewLink('https://cdn.example/b.mp4',
+          probe: (url) async => LinkProbe.page(Uri.parse(url), ytDlpError: 'odd', status: 403));
+      expect((refused!.title, refused.problem), ('b.mp4', 'Not allowed (403)'));
       expect(await previewLink('not a link'), isNull);
     });
 

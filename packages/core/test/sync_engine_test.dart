@@ -85,6 +85,52 @@ void main() {
     });
   });
 
+  group('player errors', () {
+    void fail(String token, String error, {int? mediaId}) => engine.applyReport(
+        token, engine.positionAt(), 0, engine.eventId,
+        mediaId: mediaId ?? engine.mediaId, error: error);
+
+    test('an errored member leaves the gate; clearing puts it back', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applyReady('a', true);
+      engine.applyReady('b', true);
+      buffer('a', 4.0);
+      expect(engine.transport, Transport.held, reason: 'bob has no buffer');
+      fail('b', "Not allowed (403)");
+      final b = engine.members['b']!;
+      expect([b.error, b.inSet], ['Not allowed (403)', false]);
+      expect(engine.transport, Transport.playing, reason: 'alice plays alone');
+      final view = engine.broadcast().members;
+      expect(view.last.toJson()['error'], 'Not allowed (403)');
+      expect(view.first.toJson().containsKey('error'), isFalse);
+      engine.applyReady('b', true);
+      expect(b.inSet, isFalse, reason: 'ready does not bring it back while errored');
+      // A report of another media does not set it; a clean one clears it.
+      fail('b', 'x', mediaId: engine.mediaId - 1);
+      expect(b.error, isEmpty);
+      expect(b.inSet, isTrue, reason: 'ready and playing: back like a stale return');
+      expect(engine.transport, Transport.held, reason: 'bob is buffering');
+    });
+
+    test('a swap clears it; held, clearing puts it in the set', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      fail('b', 'Not found (404)');
+      engine.applySwap('a', const HelloMedia(name: 'n', size: 1, duration: 0, url: 'u'));
+      final b = engine.members['b']!;
+      expect([b.error, b.inSet], ['', true]);
+      fail('b', 'Not found (404)');
+      expect(b.inSet, isFalse);
+      buffer('b', 4.0);
+      expect([b.error, b.inSet], ['', true]);
+      expect(ReportMessage.fromJson({
+        't': 'report', 'position': 0, 'buffered': 0, 'eventId': 0,
+        'error': '  a\nb  ${'x' * 200}'}).error.length,
+          RelayConstants.maxMemberErrorLength);
+    });
+  });
+
   group('membership + gate', () {
     test('join while held lands in the set, playback stays held', () {
       join('a', 'alice');

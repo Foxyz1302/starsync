@@ -435,13 +435,17 @@ class ReportMessage {
   /// Jellyfin access by `ServerId`: true = plays with its own account,
   /// false = through the server's relay. Null leaves the last one in place.
   final Map<String, bool>? jf;
+  /// Why the player cannot open [mediaId] (short plain text); empty while
+  /// it can.
+  final String error;
   const ReportMessage(
       {required this.position,
       required this.buffered,
       required this.eventId,
       this.duration = 0,
       this.mediaId = 0,
-      this.jf});
+      this.jf,
+      this.error = ''});
 
   Map<String, Object?> toJson() => {
         't': 'report',
@@ -451,6 +455,7 @@ class ReportMessage {
         if (duration > 0) 'duration': duration,
         if (mediaId != 0) 'mediaId': mediaId,
         if (jf != null) 'jf': jf,
+        if (error.isNotEmpty) 'error': error,
       };
 
   factory ReportMessage.fromJson(Map<String, Object?> json) {
@@ -462,8 +467,18 @@ class ReportMessage {
       duration: finiteDouble(json['duration'], 'duration'),
       mediaId: finiteInt(json['mediaId'], 'mediaId'),
       jf: jfAccessFromJson(json['jf']),
+      error: memberErrorFromJson(json['error']),
     );
   }
+}
+
+/// Reads a `report.error` / `members[].error`: trimmed, single line, at
+/// most [RelayConstants.maxMemberErrorLength] characters; empty otherwise.
+String memberErrorFromJson(Object? value) {
+  if (value is! String) return '';
+  final line = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+  const max = RelayConstants.maxMemberErrorLength;
+  return line.length > max ? line.substring(0, max) : line;
 }
 
 /// Reads a `jf` map (`{serverId: bool}`), dropping non-bool entries and
@@ -582,6 +597,9 @@ class MemberView {
   final bool host;
   /// Sitting out: connected, outside the ready gate, not playing.
   final bool out;
+  /// Why its player cannot open the current media (`report.error`); empty
+  /// while it can. Errored: outside the ready gate.
+  final String error;
   const MemberView({
     required this.id,
     required this.name,
@@ -593,6 +611,7 @@ class MemberView {
     this.jf = const {},
     this.host = false,
     this.out = false,
+    this.error = '',
   });
 
   Map<String, Object?> toJson() => {
@@ -606,6 +625,7 @@ class MemberView {
         if (jf.isNotEmpty) 'jf': jf,
         if (host) 'host': true,
         if (out) 'out': true,
+        if (error.isNotEmpty) 'error': error,
       };
 
   factory MemberView.fromJson(Map<String, Object?> json) => MemberView(
@@ -619,6 +639,7 @@ class MemberView {
         jf: jfAccessFromJson(json['jf']) ?? const {},
         host: json['host'] == true,
         out: json['out'] == true,
+        error: memberErrorFromJson(json['error']),
       );
 }
 

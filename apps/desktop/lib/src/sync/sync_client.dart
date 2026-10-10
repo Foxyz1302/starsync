@@ -219,6 +219,7 @@ class SyncClient {
     double duration = 0,
     int mediaId = 0,
     Map<String, bool>? jf,
+    String error = '',
   }) {
     final safeBuffered = buffered.isNaN || buffered < 0 ? 0.0 : buffered;
     _send(
@@ -229,6 +230,7 @@ class SyncClient {
         duration: duration.isFinite && duration > 0 ? duration : 0,
         mediaId: mediaId,
         jf: jf,
+        error: error,
       ).toJson(),
     );
   }

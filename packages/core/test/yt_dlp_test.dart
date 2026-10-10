@@ -115,6 +115,24 @@ void main() {
     });
   });
 
+  test('play errors in plain words; a probe refuses unread pages and 4xx links', () {
+    expect(playErrorText('[BiliBili] BV1x: Unable to download webpage: HTTP Error 412: Precondition Failed'),
+        needsCookiesText);
+    expect(playErrorText('Sign in to confirm your age'), needsCookiesText);
+    expect(playErrorText('the video server answered HTTP error 403 Forbidden'), notAllowedText);
+    expect(playErrorText('HTTP Error 404: Not Found'), notFoundText);
+    expect(playErrorText('Unsupported URL: https://example.com/login/403'), unsupportedUrlText);
+    expect(playErrorText('cannot open the link: SocketException: Failed host lookup'), unreachableText);
+    expect(playErrorText('the video stream could not be opened'), 'the video stream could not be opened');
+    expect(playErrorText(notAllowedText), notAllowedText);
+    final u = Uri.parse('https://x/v.mp4');
+    expect(LinkProbe.page(u, ytDlpError: 'HTTP Error 412: Precondition Failed').problem, needsCookiesText);
+    expect(LinkProbe.page(u, ytDlpError: 'odd failure', status: 403).problem, notAllowedText);
+    expect(LinkProbe.page(u, ytDlpError: 'odd failure').problem, 'odd failure');
+    expect(LinkProbe.page(u, info: YtDlpInfo.parse({'title': 'x', 'formats': []}), status: 404).problem, isNull);
+    expect(LinkProbe.file(u, 10).problem, isNull);
+  });
+
   test('viewer URL: one track plain, several an mpv EDL with %length% framing', () {
     expect(relayViewerUrl('http://h:1/r/default/t/3', 'a/b c'), 'http://h:1/r/default/t/3/a_b%20c');
     const v = 'http://h:1/r/default/t/3/0/x', a = 'http://h:1/r/default/t/3/1/x';

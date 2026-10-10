@@ -112,6 +112,19 @@ void main() {
       expect(w.who.map((m) => m.name), ['Bob', 'Mika']);
     });
 
+    test("can't play: yours with Retry (reload); others' instead of waiting", () {
+      var v = playerStatusFor(health: ok, state: held([me]), self: me, playerError: 'Not allowed (403)')!;
+      expect((v.kind, v.text, v.action), (StatusKind.problem, "Can't play this: Not allowed (403)", StatusAction.reload));
+      final bob = MemberView(id: 'b', name: 'Bob', ready: false, inSet: false, buffered: 0, stale: false,
+          error: 'Not allowed (403)');
+      v = playerStatusFor(health: ok, state: held([me, bob, mv('m', 'Mika', ready: true)]), self: me)!;
+      expect((v.kind, v.text, v.action), (StatusKind.cannotPlay, "Bob can't play this: Not allowed (403)", null));
+      expect(v.who.single.id, 'b');
+      final notMe = mv('me', 'Me');
+      v = playerStatusFor(health: ok, state: held([notMe, bob]), self: notMe)!;
+      expect((v.kind, v.action), (StatusKind.cannotPlay, StatusAction.ready));
+    });
+
     test('names read as a sentence', () {
       expect(nameList(['Bob']), 'Bob');
       expect(nameList(['Bob', 'Mika']), 'Bob and Mika');

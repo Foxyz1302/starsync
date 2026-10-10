@@ -19,6 +19,9 @@ class AvatarInfo {
   final bool ready, buffering, relaying, stale, host, self;
   /// Sitting out: dimmed, with an "away" mark.
   final bool out;
+  /// Why their player cannot open the media (`members[].error`): an error
+  /// mark; empty when it can.
+  final String error;
   const AvatarInfo({
     this.id = '',
     required this.name,
@@ -31,6 +34,7 @@ class AvatarInfo {
     this.host = false,
     this.self = false,
     this.out = false,
+    this.error = '',
   });
 }
 
@@ -78,7 +82,7 @@ ImageProvider? memberAvatarImage(MemberView m, SessionCoordinator coord) {
 }
 
 /// Your own avatar from the profile (also offline).
-AvatarInfo selfAvatarInfo({bool ready = false, bool host = false, bool out = false}) {
+AvatarInfo selfAvatarInfo({bool ready = false, bool host = false, bool out = false, String error = ''}) {
   final p = Profile.instance;
   final png = p.picture.value;
   final name = p.name.value;
@@ -90,6 +94,7 @@ AvatarInfo selfAvatarInfo({bool ready = false, bool host = false, bool out = fal
     host: host,
     self: true,
     out: out,
+    error: error,
   );
 }
 
@@ -104,7 +109,7 @@ AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator 
     color: self ? Profile.instance.color.value : colorForName(m.name),
     image: memberAvatarImage(m, coord),
     ready: m.ready,
-    buffering: !m.stale && m.ready && playing && m.buffered < r!.bufferNeed,
+    buffering: !m.stale && m.ready && m.error.isEmpty && playing && m.buffered < r!.bufferNeed,
     relaying: relay != null && relay.source.isNotEmpty && relay.source == m.id,
     stale: m.stale,
     // The state marks the host (`members[].host`); your own app also
@@ -112,6 +117,7 @@ AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator 
     host: m.host || (self && coord.hostFile != null),
     self: self,
     out: m.out,
+    error: m.error,
   );
 }
 
@@ -138,7 +144,7 @@ class PartyWatch extends StatelessWidget {
 /// Circle avatar with a status ring outside it and a gap in the background
 /// colour, so overlapping neighbours never hide the status. Crown = host,
 /// tower = passing the video on, spinner = buffering, dimmed = stale,
-/// dimmed with a moon = sitting out.
+/// dimmed with a moon = sitting out, red "!" = cannot play the media.
 class StatusAvatar extends StatelessWidget {
   final AvatarInfo info;
   final double size;
@@ -222,6 +228,17 @@ class StatusAvatar extends StatelessWidget {
                 child: Icon(Icons.bedtime, size: (badge * 0.8).clamp(10.0, 24.0), color: Colors.blueGrey.shade200),
               ),
             ),
+          if (info.error.isNotEmpty)
+            Positioned(
+              key: const ValueKey('error-mark'),
+              right: -3,
+              top: -3,
+              child: Container(
+                padding: const EdgeInsets.all(1),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
+                child: Icon(Icons.error, size: (badge * 0.8).clamp(10.0, 24.0), color: Colors.redAccent.shade200),
+              ),
+            ),
           if (badges && info.relaying)
             Positioned(
               right: -3,
@@ -287,7 +304,9 @@ class _AvatarStackState extends State<AvatarStack> {
                   left: i * step,
                   top: 0,
                   child: Tooltip(
-                    message: visible[i].name,
+                    message: visible[i].error.isEmpty
+                        ? visible[i].name
+                        : "${visible[i].name} can't play this: ${visible[i].error}",
                     child: StatusAvatar(info: visible[i], size: size),
                   ),
                 ),
