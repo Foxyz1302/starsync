@@ -76,8 +76,6 @@ off by deleting it in the same commit as the code. Wire changes also edit
      not wanted yet.
    - HTTP: move the app's clients (Jellyfin, AniList, AnimeFlow, updater)
      to dio from `fox_utils` when touching them, for retries/interceptors.
-   - The `state` broadcast carries the full media URL, which can include an
-     `api_key` (recognised Jellyfin links become refs; other links do not).
    - TLS: document a reverse proxy in front of the server.
    - Playlist: `queue-add`, `queue-skip`, auto-advance like a swap.
    - Sidecar subtitles.
