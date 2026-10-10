@@ -1,6 +1,9 @@
 name: ci
 on:
+  # Branches only: a release tag points at a commit CI already checked on
+  # main, and release.yml builds it.
   push:
+    branches: ['**']
   pull_request:
 
 jobs:
