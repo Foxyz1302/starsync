@@ -638,7 +638,9 @@ all three link modes. Nothing is bundled or installed by hand.
   own drop target is off on Settings so only this box takes the file); its hosted server shares the folder,
   so it uses them too. mpv's hook gets the same as `ytdl-raw-options`
   (`cookies=%N%<path>` / `cookies-from-browser=%N%<spec>`, length-quoted),
-  re-set before each external link when it changed. The dedicated
+  re-set before each external link when it changed, after
+  `sub-langs=all,-danmaku` (Bilibili's danmaku XML is served raw-deflate:
+  ffmpeg warns on every read and the video waits on the track). The dedicated
   server: `--yt-dlp-cookies <file>` / `ytDlpCookies` converted into its
   folder at start; without it the copy and browser setting are removed.
   Values are never logged and never leave the machine.

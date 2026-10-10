@@ -7,6 +7,12 @@ import 'package:sync_relay_core/core.dart';
 /// mpv's `ytdl-format` for links every player opens itself.
 const ytdlFormat = 'bv*[height<=1080]+ba/b';
 
+/// yt-dlp's `--sub-langs` for mpv's hook (its default is `all`), without
+/// Bilibili's danmaku: an XML comment feed served raw-deflate, which
+/// ffmpeg fails to inflate on every read (a warning each time) while the
+/// video waits on it.
+const ytdlSubLangs = 'all,-danmaku';
+
 /// The app's yt-dlp (see [YtDlp]): in the app-support folder, shared with
 /// the hosted server. [probe] remembers what pasted links are for a while,
 /// so the Link preview and the swap ask once.
@@ -28,13 +34,15 @@ class AppYtDlp {
   /// update check afterwards).
   void warmUp() => unawaited(ytDlp.then((y) => y.ensure()).catchError((_) => null));
 
-  /// mpv's `ytdl-raw-options` for the cookies in the yt-dlp folder ('' for
-  /// none; see [YtDlpCookies]).
+  /// mpv's `ytdl-raw-options`: [ytdlSubLangs] and the cookies in the
+  /// yt-dlp folder (see [YtDlpCookies]).
   Future<String> mpvRawOptions() async {
+    const subs = 'sub-langs=%${ytdlSubLangs.length}%$ytdlSubLangs';
     try {
-      return (await ytDlp).cookies.mpvRawOptions();
+      final cookies = (await ytDlp).cookies.mpvRawOptions();
+      return cookies.isEmpty ? subs : '$subs,$cookies';
     } catch (_) {
-      return '';
+      return subs;
     }
   }
 
