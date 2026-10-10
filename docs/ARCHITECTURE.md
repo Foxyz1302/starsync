@@ -1144,7 +1144,11 @@ does the same from the app binary. In the app, `UpdateController`
 indicator, which opens the update card, and restarts the app ("Update and
 restart", closing Hive first).
 Settings has Check now and an auto-check toggle. The manifest is `updates/manifest.json` in
-this repo, written by `tool/release.sh`.
+this repo, written by `tool/release.sh`. Test builds (`X.Y.Z-dev.N`,
+`isDevBuild`) also read `devManifestUrl`, the `manifest.json` of the `dev`
+prerelease (`tool/dev_release.sh`), and take the newer of the two
+(`fetchLatestManifest`); the release X.Y.Z outranks its test builds, so
+testers land back on stable. `0.0.0-dev` (a dev run) checks nothing.
 
 ## Decisions
 

@@ -17,6 +17,7 @@ coverage/
 # Build artifacts that should never be committed
 *.tar.gz
 *.zip
+/dist/
 app.*.symbols
 app.*.map.json
 

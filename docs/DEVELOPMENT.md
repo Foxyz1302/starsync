@@ -94,6 +94,16 @@ User pushes tags; CI does the rest.
    release if the other job hasn't yet and uploads (or replaces) its asset.
    By hand: package, then the same `dart tool/release_publish.dart` line.
 
+Test builds (Linux, no tag, no CI): `tool/dev_release.sh [--no-publish]`
+(token: `RELEASE_TOKEN` or `~/.config/watch-together-release-token`, a
+Gitea access token with repository read/write) builds the working tree here as the next patch's
+`-dev.N` (N one past the published one) and replaces the assets of the
+`dev` prerelease with the tarball and its `manifest.json`. Dev builds
+update from it ([Updater](ARCHITECTURE.md#updater)). A stable install
+moves onto it once with the command the script prints (run with the app
+open: it finds the install from the running process and copies the new
+files over it).
+
 Tokens come from the environment (`RELEASE_TOKEN`, or Actions-provided
 `GITHUB_TOKEN`/`GITEA_TOKEN`). The manifest has no `sha256` by default; the
 updater skips the check when absent. Workflows live in `.gitea/workflows`

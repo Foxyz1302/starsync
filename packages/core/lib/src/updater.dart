@@ -28,6 +28,11 @@ final _log = createLogger('update');
 const updateManifestUrl =
     'https://git.example.org/Foxyz/sync_replay_project/raw/branch/main/updates/manifest.json';
 
+/// Test builds (`tool/dev_release.sh`): one Gitea prerelease, tag `dev`,
+/// whose assets each run replaces. Only dev builds read it.
+const devManifestUrl =
+    'https://git.example.org/Foxyz/sync_replay_project/releases/download/dev/manifest.json';
+
 const appVersion = String.fromEnvironment('APP_VERSION',
     defaultValue: '0.0.0-dev');
 
@@ -158,6 +163,34 @@ Future<UpdateManifest> fetchManifest(
     return UpdateManifest.fromJson(decoded);
   } finally {
     if (http == null) client.close();
+  }
+}
+
+/// A test build (`1.1.3-dev.4`); `0.0.0-dev` (a dev run) is not one.
+bool isDevBuild(String version) => version.contains('-dev.');
+
+/// The manifest to update from: the stable one, and for a [isDevBuild]
+/// also the dev one, whichever is newer (either alone if the other fails).
+/// A release outranks its own test builds, so testers return to stable.
+Future<UpdateManifest> fetchLatestManifest(
+    {HttpClient? http,
+    String currentVersion = appVersion,
+    String url = updateManifestUrl,
+    String devUrl = devManifestUrl}) async {
+  final stable = fetchManifest(http: http, url: url);
+  if (!isDevBuild(currentVersion)) return stable;
+  stable.ignore(); // awaited below; don't let an early failure go uncaught
+  final dev = await fetchManifest(http: http, url: devUrl)
+      .then<UpdateManifest?>((m) => m, onError: (Object e) {
+    _log.warning('dev manifest: $e');
+    return null;
+  });
+  if (dev == null) return stable;
+  try {
+    final s = await stable;
+    return isNewerVersion(s.version, dev.version) ? dev : s;
+  } catch (_) {
+    return dev;
   }
 }
 
@@ -538,7 +571,8 @@ Future<int> runUpgrade(
   stdout.writeln('$program $currentVersion (proto ${RelayConstants.protoVersion})');
   late final UpdateManifest manifest;
   try {
-    manifest = await fetchManifest(http: http, url: manifestUrl);
+    manifest = await fetchLatestManifest(
+        http: http, currentVersion: currentVersion, url: manifestUrl);
   } catch (e) {
     stdout.writeln('update check failed: $e');
     return 1;

@@ -6,24 +6,31 @@
 // asset URLs), so this never touches git history beyond reading notes.
 // Usage: dart tool/release_publish.dart vX.Y.Z <archive>
 //   (run after tool/package_linux.sh or tool/package_windows.ps1)
+//   dart tool/release_publish.dart dev <archive> <manifest.json>
+//   (tool/dev_release.sh): the `dev` prerelease, its assets all replaced.
 // Env: RELEASE_TOKEN (preferred) or the Actions-provided GITHUB_TOKEN /
 // GITEA_TOKEN. dart: imports only — runs without `pub get`.
 import 'dart:convert';
 import 'dart:io';
 
 Future<void> main(List<String> args) async {
-  if (args.length != 2) {
-    _die('usage: dart tool/release_publish.dart vX.Y.Z <archive>');
+  final dev = args.isNotEmpty && args[0] == 'dev';
+  if (args.length != (dev ? 3 : 2)) {
+    _die('usage: dart tool/release_publish.dart vX.Y.Z <archive>\n'
+        '       dart tool/release_publish.dart dev <archive> <manifest.json>');
   }
   final tag = args[0];
-  final archive = File(args[1]);
+  final files = [for (final a in args.skip(1)) File(a)];
+  for (final f in files) {
+    if (!f.existsSync()) _die('missing: ${f.path}');
+  }
+  final root = File.fromUri(Platform.script).parent.parent.path;
+  if (dev) return _publishDev(root, files);
+  final archive = files.single;
   final ver = tag.startsWith('v') ? tag.substring(1) : tag;
   if (!RegExp(r'^\d+\.\d+\.\d+$').hasMatch(ver)) {
     _die('tag must look like v0.2.0, got $tag');
   }
-  if (!archive.existsSync()) _die('archive missing: ${archive.path}');
-
-  final root = File.fromUri(Platform.script).parent.parent.path;
   final pubspec = File('$root/apps/desktop/pubspec.yaml').readAsStringSync();
   final pub = RegExp(r'^version: ([0-9.]+)', multiLine: true)
       .firstMatch(pubspec)
@@ -32,18 +39,8 @@ Future<void> main(List<String> args) async {
     _die('tag $tag != desktop pubspec $pub (run tool/release.sh first)');
   }
 
-  final env = Platform.environment;
-  final token = [env['RELEASE_TOKEN'], env['GITHUB_TOKEN'], env['GITEA_TOKEN']]
-      .firstWhere((t) => t != null && t.isNotEmpty,
-          orElse: () => _die('set RELEASE_TOKEN (or run in Actions)'))!;
-
-  final origin = _git(root, ['remote', 'get-url', 'origin']);
-  final server = RegExp(r'^(https?://[^/]+)/').firstMatch(origin)?.group(1) ??
-      env['GITHUB_SERVER_URL'] ??
-      _die('cannot derive server from origin $origin');
-  final repo =
-      RegExp(r'([^/:]+/[^/]+?)(\.git)?$').firstMatch(origin)!.group(1)!;
-  final api = '$server/api/v1/repos/$repo';
+  final token = _token();
+  final api = _apiBase(root);
 
   final prev = _git(root, ['describe', '--tags', '--abbrev=0', '$tag^'],
       allowFail: true);
@@ -62,7 +59,7 @@ Future<void> main(List<String> args) async {
     final c = _Api(http, token);
     var rel = await c.get('$api/releases/tags/$tag');
     if (rel == null) {
-      stdout.writeln('creating release $tag on $repo ...');
+      stdout.writeln('creating release $tag on $api ...');
       rel = await c.post('$api/releases', {
         'tag_name': tag,
         'name': tag,
@@ -90,6 +87,61 @@ Future<void> main(List<String> args) async {
         archive,
         name);
     stdout.writeln('published $name to $tag.');
+  } finally {
+    http.close();
+  }
+}
+
+String _token() {
+  final env = Platform.environment;
+  return [env['RELEASE_TOKEN'], env['GITHUB_TOKEN'], env['GITEA_TOKEN']]
+      .firstWhere((t) => t != null && t.isNotEmpty,
+          orElse: () => _die('set RELEASE_TOKEN (or run in Actions)'))!;
+}
+
+// The repo's API URL, from origin.
+String _apiBase(String root) {
+  final origin = _git(root, ['remote', 'get-url', 'origin']);
+  final server = RegExp(r'^(https?://[^/]+)/').firstMatch(origin)?.group(1) ??
+      Platform.environment['GITHUB_SERVER_URL'] ??
+      _die('cannot derive server from origin $origin');
+  final repo =
+      RegExp(r'([^/:]+/[^/]+?)(\.git)?$').firstMatch(origin)!.group(1)!;
+  return '$server/api/v1/repos/$repo';
+}
+
+// The `dev` prerelease (created at main's head on first use): every old
+// asset deleted, then [files] uploaded. Its manifest's URL is fixed, so
+// test builds find each new one.
+Future<void> _publishDev(String root, List<File> files) async {
+  final token = _token();
+  final api = _apiBase(root);
+  final http = HttpClient();
+  try {
+    final c = _Api(http, token);
+    final rel = await c.get('$api/releases/tags/dev') ??
+        await c.post('$api/releases', {
+          'tag_name': 'dev',
+          'target_commitish': 'main',
+          'name': 'Test build',
+          'body': 'Latest test build; dev builds update from here.',
+          'draft': false,
+          'prerelease': true,
+        }) ??
+        _die('could not create or find release dev');
+    final id = rel['id'];
+    for (final a in (rel['assets'] as List? ?? const [])) {
+      if (a is Map) await c.delete('$api/releases/$id/assets/${a['id']}');
+    }
+    for (final f in files) {
+      final name = f.uri.pathSegments.last;
+      stdout.writeln('uploading $name ...');
+      await c.upload(
+          '$api/releases/$id/assets?name=${Uri.encodeQueryComponent(name)}',
+          f,
+          name);
+    }
+    stdout.writeln('published to dev.');
   } finally {
     http.close();
   }

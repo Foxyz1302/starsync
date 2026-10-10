@@ -107,7 +107,8 @@ class UpdateController {
     final root = _root;
     if (root != null) await cleanupUpdateLeftovers(root);
     try {
-      final m = await fetchManifest(url: manifestUrl);
+      final m = await fetchLatestManifest(
+          currentVersion: currentVersion, url: manifestUrl);
       if (!isNewerVersion(currentVersion, m.version)) {
         _log.info('up to date ($currentVersion, latest ${m.version})');
         lastCheck.value = 'Up to date';

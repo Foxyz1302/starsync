@@ -208,6 +208,35 @@ void main() {
     }
   });
 
+  test('dev builds also read the dev manifest, the newer wins', () async {
+    final versions = {'/stable': '1.1.2', '/dev': '1.1.3-dev.2'};
+    final http = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    http.listen((req) async {
+      final v = versions[req.uri.path];
+      if (v == null) {
+        req.response.statusCode = 404;
+      } else {
+        req.response.write(jsonEncode(
+            {'version': v, 'protocol': 1, 'url': 'http://x/$v.tar.gz'}));
+      }
+      await req.response.close();
+    });
+    final base = 'http://127.0.0.1:${http.port}';
+    Future<String> latest(String current) async => (await fetchLatestManifest(
+            currentVersion: current, url: '$base/stable', devUrl: '$base/dev'))
+        .version;
+    try {
+      expect(await latest('1.1.2'), '1.1.2'); // stable builds never see dev
+      expect(await latest('1.1.3-dev.1'), '1.1.3-dev.2');
+      versions['/stable'] = '1.1.3'; // the release outranks its test builds
+      expect(await latest('1.1.3-dev.2'), '1.1.3');
+      versions.remove('/stable');
+      expect(await latest('1.1.3-dev.1'), '1.1.3-dev.2');
+    } finally {
+      await http.close(force: true);
+    }
+  });
+
   group('upgrade flow', () {
     late Directory work;
     late _Server server;

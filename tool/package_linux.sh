@@ -31,7 +31,8 @@ APP="$ROOT/apps/desktop"
 NAME="watch-together"
 ARCH="x64"
 
-VERSION="$(sed -n 's/^version: \([0-9.]*\).*/\1/p' "$APP/pubspec.yaml")"
+# VERSION in the environment overrides it (tool/dev_release.sh).
+VERSION="${VERSION:-$(sed -n 's/^version: \([0-9.]*\).*/\1/p' "$APP/pubspec.yaml")}"
 if [[ -z "$VERSION" ]]; then echo "error: version not found in $APP/pubspec.yaml" >&2; exit 1; fi
 
 if [[ "$SKIP_BUILD" != "1" ]]; then
