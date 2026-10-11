@@ -92,9 +92,10 @@ void main() {
     return m;
   }
 
-  Future<RelaySource> startSource(_Member m, {RelayMedia? from}) async {
+  Future<RelaySource> startSource(_Member m, {RelayMedia? from, String? queueId}) async {
     final src = RelaySource(
-        Uri.parse('ws://127.0.0.1:${server.boundPort}/r/default/${m.welcome.token}/source'),
+        Uri.parse('ws://127.0.0.1:${server.boundPort}/r/default/${m.welcome.token}/source'
+            '${queueId == null ? '' : '?q=$queueId'}'),
         from ?? RelayMedia.single(FileRelayBytes(file)),
         backoff: (_) => const Duration(milliseconds: 100));
     await src.start();
@@ -441,6 +442,158 @@ void main() {
       });
       await _until(() => alice.raw.any((f) => f.contains('relay fetch needs')), 'err');
       expect(server.hub.relay, isNull);
+    });
+  });
+
+  group('warm relay (Up next)', () {
+    late HttpServer origin;
+    var originBytes = 0;
+    setUp(() async {
+      originBytes = 0;
+      origin = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      origin.listen((req) async {
+        final r = resolveMediaRequest(rangeHeader: req.headers.value('range'), size: bytes.length, filename: 'x.mkv');
+        req.response.statusCode = r.status;
+        r.headers.forEach(req.response.headers.set);
+        if (r.status == 200 || r.status == 206) {
+          final end = r.end ?? bytes.length - 1;
+          originBytes += end - r.start + 1;
+          req.response.add(bytes.sublist(r.start, end + 1));
+        }
+        await req.response.close();
+      });
+    });
+    tearDown(() => origin.close(force: true));
+
+    List<Map> queueOf(_Member m) => [for (final q in (m.lastState?['queue'] as List?) ?? const []) q as Map];
+    Map? headRelay(_Member m) => (queueOf(m).firstOrNull?['media'] as Map?)?['relay'] as Map?;
+
+    Future<String> add(_Member m, Map<String, Object?> item, {bool next = false}) async {
+      final had = {for (final q in queueOf(m)) q['id']};
+      m.send({'t': 'queue', 'op': 'add', 'at': next ? 'next' : 'end', 'item': item});
+      await _until(() => queueOf(m).any((q) => !had.contains(q['id'])), 'queued');
+      return queueOf(m).firstWhere((q) => !had.contains(q['id']))['id'] as String;
+    }
+
+    Map<String, Object?> through(String key) => {
+          'media': {'name': 'ep 01.mkv', 'size': bytes.length, 'duration': 0},
+          'how': 'through',
+          'title': 'Ep 1',
+          'key': key,
+        };
+
+    String qUrl(_Member v, String queueId) =>
+        'http://127.0.0.1:${server.boundPort}/r/default/${v.welcome.token}/$queueId/${Uri.encodeComponent('ep 01.mkv')}';
+
+    test('a link the server fetches: preloaded from its queue id, promoted at the swap with its buffer', () async {
+      final alice = await join('alice');
+      final bob = await join('bob');
+      final id = await add(alice, {
+        'media': {'name': 'ep 01.mkv', 'size': 0, 'duration': 0, 'url': 'http://127.0.0.1:${origin.port}/x.mkv'},
+        'how': 'server',
+        'title': 'Ep 1',
+      });
+      await _until(() => headRelay(bob)?['live'] == true, 'warm relay live');
+      expect(headRelay(bob), {'fetch': true, 'live': true});
+      expect(jsonEncode(bob.lastState), isNot(contains('x.mkv')));
+      expect((await get(qUrl(bob, id))).$3, bytes);
+      // Small: the warm budget is far over this file, so all of it is in.
+      final fetched = originBytes;
+      alice.send({
+        't': 'swap',
+        'queueId': id,
+        'media': {'name': 'Ep 1', 'size': 0, 'duration': 0, 'relay': {'fetch': true}},
+      });
+      await _until(() => (bob.media?['relay'] as Map?)?['queueId'] == id, 'promoted');
+      expect(bob.media!['relay'], {'fetch': true, 'live': true, 'queueId': id});
+      expect(bob.media!['name'], 'ep 01.mkv', reason: 'the URL name the preload used');
+      expect(queueOf(bob), isEmpty);
+      expect(server.hub.warm, isNull);
+      // The same buffer: both URLs serve it, nothing is fetched again.
+      expect((await get(qUrl(bob, id))).$3, bytes);
+      expect((await get(viewerUrl(bob, mediaIdOf(bob)))).$3, bytes);
+      expect(originBytes, fetched);
+      final carol = await join('carol');
+      expect(carol.welcome.mediaUrl, qUrl(carol, id));
+    });
+
+    test('a link passed on: its adder feeds it before the swap, and the swap keeps that source', () async {
+      final alice = await join('alice');
+      final bob = await join('bob');
+      final id = await add(alice, through('k-abcdefgh'));
+      expect(headRelay(bob), {'source': alice.welcome.memberId});
+      final src = await startSource(alice, queueId: id);
+      await _until(() => headRelay(bob)?['live'] == true, 'warm relay live');
+      expect((await get(qUrl(bob, id), range: 'bytes=0-99')).$3, bytes.sublist(0, 100));
+      // Only its source may feed it.
+      final impostor = await startSource(bob, queueId: id);
+      await impostor.done.timeout(const Duration(seconds: 5));
+      alice.send({
+        't': 'swap',
+        'queueId': id,
+        'media': {'name': 'ep 01.mkv', 'size': bytes.length, 'duration': 0, 'relay': {}},
+      });
+      await _until(() => (bob.media?['relay'] as Map?)?['queueId'] == id, 'promoted');
+      expect(bob.media!['relay'], {'source': alice.welcome.memberId, 'live': true, 'queueId': id});
+      expect((await get(qUrl(bob, id))).$3, bytes);
+      expect(src.bytesSent, lessThan(bytes.length * 1.3));
+      // Still the source of the media it now relays.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(server.hub.relay!.live, isTrue);
+    });
+
+    test('dropped when the item stops being first: its URLs 404, its source stops', () async {
+      final alice = await join('alice');
+      final bob = await join('bob');
+      final id = await add(alice, through('k-abcdefgh'));
+      final src = await startSource(alice, queueId: id);
+      await _until(() => headRelay(bob)?['live'] == true, 'warm relay live');
+      await add(alice, through('k-ijklmnop'), next: true);
+      await src.done.timeout(const Duration(seconds: 5));
+      expect((await get(qUrl(bob, id))).$1, 404);
+      expect(server.hub.warm!.queueId, isNot(id));
+    });
+
+    test('not for an adder alone; dropped when its adder leaves', () async {
+      final alice = await join('alice');
+      await add(alice, through('k-abcdefgh'));
+      expect(headRelay(alice), isNull);
+      final bob = await join('bob');
+      await _until(() => headRelay(bob) != null, 'warm relay once someone could read it');
+      await alice.ws.close();
+      await _until(() => bob.lastState!['members'] is List && (bob.lastState!['members'] as List).length == 1, 'left');
+      expect(queueOf(bob), hasLength(1));
+      expect(headRelay(bob), isNull);
+      expect(server.hub.warm, isNull);
+    });
+
+    test('a Jellyfin item: fed by the first member with an account, for those without', () async {
+      final alice = await join('alice');
+      final bob = await join('bob');
+      void report(_Member m, bool access) => m.send({
+            't': 'report', 'position': 0, 'buffered': 0, 'eventId': 0, 'jf': {'srv1': access}, //
+          });
+      report(alice, true);
+      report(bob, false);
+      final id = await add(alice, {
+        'media': {
+          'name': 'Pilot',
+          'size': 0,
+          'duration': 0,
+          'jellyfin': {'serverId': 'srv1', 'itemId': '0123456789abcdef0123456789abcdef', 'title': 'Pilot'},
+        },
+        'how': 'jellyfin',
+        'title': 'Pilot',
+      });
+      await _until(() => headRelay(bob) != null, 'warm relay');
+      expect(headRelay(bob), isEmpty, reason: 'nobody feeds it yet');
+      final refused = await startSource(bob, queueId: id);
+      await refused.done.timeout(const Duration(seconds: 5));
+      await startSource(alice, queueId: id);
+      await _until(() => headRelay(bob)?['live'] == true, 'live');
+      expect(headRelay(bob)!['source'], alice.welcome.memberId);
+      report(bob, true);
+      await _until(() => headRelay(alice) == null, 'dropped once everyone has an account');
     });
   });
 

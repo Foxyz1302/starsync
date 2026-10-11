@@ -182,7 +182,10 @@ class RelayTrackSpec {
 /// them, the server fills them in for [fetch] once it has read the link.
 /// [rate] and [need] are the server's measures, 0 while unknown: bytes per
 /// second the source (or the server's own fetch) delivers while the
-/// buffer asks for bytes, and the media's average bitrate.
+/// buffer asks for bytes, and the media's average bitrate. [queueId]:
+/// the Up next item this relay was started for (its warm relay) before
+/// it went up; viewers open its `/r/.../<queueId>/...` URLs, so their
+/// preloads of it carry on.
 class MediaRelay {
   final String source;
   final bool fetch;
@@ -190,8 +193,15 @@ class MediaRelay {
   final List<RelayTrackSpec> tracks;
   final int rate;
   final int need;
+  final String queueId;
   const MediaRelay(
-      {this.source = '', this.fetch = false, this.live = false, this.tracks = const [], this.rate = 0, this.need = 0});
+      {this.source = '',
+      this.fetch = false,
+      this.live = false,
+      this.tracks = const [],
+      this.rate = 0,
+      this.need = 0,
+      this.queueId = ''});
 
   /// The source is measured slower than the media plays (both known):
   /// below 85 % of [need], so a rate close to it does not flicker.
@@ -210,7 +220,8 @@ class MediaRelay {
       live: live ?? this.live,
       tracks: tracks ?? this.tracks,
       rate: rate ?? this.rate,
-      need: need ?? this.need);
+      need: need ?? this.need,
+      queueId: queueId);
 
   Map<String, Object?> toJson() => {
         if (source.isNotEmpty) 'source': source,
@@ -219,6 +230,7 @@ class MediaRelay {
         if (validTracks(tracks)) 'tracks': [for (final t in tracks) t.toJson()],
         if (rate > 0) 'rate': rate,
         if (need > 0) 'need': need,
+        if (queueId.isNotEmpty) 'queueId': queueId,
       };
 
   /// Unknown kinds, a single byte track or too many make it one file.
@@ -232,7 +244,8 @@ class MediaRelay {
         live: json['live'] == true,
         tracks: ok ? List.unmodifiable(specs.cast<RelayTrackSpec>()) : const [],
         rate: _byteRate(json['rate']),
-        need: _byteRate(json['need']));
+        need: _byteRate(json['need']),
+        queueId: json['queueId'] is String ? json['queueId'] as String : '');
   }
 
   /// A bytes-per-second field: a finite non-negative number, else 0.

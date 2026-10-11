@@ -348,6 +348,9 @@ class RelaySource {
 
   var _tracks = const <RelayTrack>[];
 
+  /// The media's tracks once [start] has opened it (empty before).
+  List<RelayTrack> get tracks => _tracks;
+
   /// Opens the media (a page is resolved) and starts serving; throws
   /// when it cannot be read.
   Future<void> start() async {

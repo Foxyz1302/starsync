@@ -32,22 +32,39 @@ List<(int, int)> relayBudgets(List<int> sizes,
 /// video, 160 kbit/s for audio.
 double _piecesRate(String kind) => kind == 'audio' ? 20000 : 500000;
 
-/// One track as the source (or the fetcher) described it: a byte size,
-/// or a piece list.
-typedef _TrackInfo = ({int? size, RelayPieceList? pieces});
+/// One track as the source (or the fetcher) described it: its kind, a
+/// byte size or a piece list.
+typedef _TrackInfo = ({String kind, int? size, RelayPieceList? pieces});
 
-/// The relay of the current media: one buffer per track and where the
-/// bytes come from. One per relayed swap; [dispose] on the next swap or
-/// server stop (the buffers are memory only, so that is the whole cleanup).
+/// A relayed media on the server: one buffer per track and where the
+/// bytes come from. The relay of the current media (one per relayed swap;
+/// [dispose] on the next swap or server stop: the buffers are memory
+/// only, so that is the whole cleanup), or the warm relay of Up next's
+/// first item ([warm], keyed by [queueId]), which a swap of that item
+/// [promote]s to the current one, buffer and all.
 class ActiveRelay {
-  final int mediaId;
+  /// The media it relays; -1 while it is warm.
+  int mediaId;
   final String name;
   /// Token of the member whose machine serves the bytes; null when the
-  /// server fetches the link itself.
-  final String? sourceToken;
+  /// server fetches the link itself, or (a warm Jellyfin item) until a
+  /// member with an account dials in.
+  String? sourceToken;
+  /// That member's id (kept after it leaves); empty with [fetch].
+  String sourceId;
+  /// The server reads the link itself.
+  final bool fetch;
+  /// The Up next item it was started for (the warm relay); kept once
+  /// promoted, so the `/r/.../<queueId>/...` URLs keep working.
+  final String? queueId;
+  bool _warm;
   final void Function() onLiveChanged;
+  /// The server's own fetch could not read the link (with the reason).
+  void Function(String reason)? onFail;
+  bool failed = false;
   /// One per track, in track order ([RelayBuffer] for bytes, [PieceBuffer]
-  /// for pieces); empty until the server has read a fetched link.
+  /// for pieces); empty until the tracks are known (a fetched link read,
+  /// a warm source's first `info`).
   List<TrackBuffer> buffers = const [];
   /// `media.relay.tracks`: empty for one file.
   List<RelayTrackSpec> tracks = const [];
@@ -57,11 +74,17 @@ class ActiveRelay {
   var _local = const <LocalRelayFeed>[];
   RelicWebSocket? _channel;
   var _channelFeeds = const <ChannelRelayFeed>[];
+  List<_TrackInfo>? _infos;
   /// Shared by the tracks: time any of them waits on the source.
   final clock = FeedClock();
   final _rate = SourceRate();
 
-  ActiveRelay._(this.mediaId, this.name, this.sourceToken, this.onLiveChanged);
+  ActiveRelay._(this.mediaId, this.name, this.sourceToken, this.onLiveChanged,
+      {this.sourceId = '', this.fetch = false, this.queueId, bool warm = false})
+      : _warm = warm;
+
+  /// Up next's first item, before it goes up.
+  bool get warm => _warm;
 
   /// Takes the bytes the source sent so far, for [rate]; the server calls
   /// it once a second.
@@ -70,6 +93,9 @@ class ActiveRelay {
   /// Bytes per second the source delivers while the buffer asks for bytes
   /// (`media.relay.rate`); 0 until measured.
   int get rate => _rate.rate;
+
+  /// Bytes the buffers hold now.
+  int get cachedBytes => buffers.fold(0, (a, b) => a + b.cachedBytes);
 
   /// The media's average bytes per second for a [duration] in seconds
   /// (`media.relay.need`): byte tracks by size, pieces tracks from the
@@ -106,6 +132,12 @@ class ActiveRelay {
     if (!_known.isCompleted) _known.complete();
   }
 
+  /// The tracks a warm source described in its first `info`.
+  static List<RelayTrackSpec> _specsOf(List<_TrackInfo> infos) =>
+      infos.length == 1 && infos.single.pieces == null
+          ? const []
+          : [for (final t in infos) RelayTrackSpec(t.kind.isEmpty ? 'video' : t.kind, pieces: t.pieces != null)];
+
   /// The info of every track matches [tracks] (bytes for a byte track,
   /// pieces for a pieces one).
   bool _matches(List<_TrackInfo> infos) {
@@ -118,10 +150,8 @@ class ActiveRelay {
 
   /// Attaches every buffer to its feed.
   void _attachAll(List<RelayFeed> feeds, List<_TrackInfo> infos) {
-    _budget([
-      for (var i = 0; i < infos.length; i++)
-        infos[i].size ?? (_piecesRate(tracks[i].kind) * infos[i].pieces!.duration).round(),
-    ]);
+    _infos = infos;
+    _budget();
     for (var i = 0; i < buffers.length; i++) {
       final b = buffers[i];
       if (b is PieceBuffer) {
@@ -132,8 +162,18 @@ class ActiveRelay {
     }
   }
 
-  void _budget(List<int> sizes) {
-    final b = relayBudgets(sizes);
+  /// The tracks share the budget by size: a warm relay's small one
+  /// ([RelayConstants.relayWarmAheadBytes]), else the full one.
+  void _budget() {
+    final infos = _infos;
+    if (infos == null) return;
+    final sizes = [
+      for (var i = 0; i < infos.length; i++)
+        infos[i].size ?? (_piecesRate(infos[i].kind) * infos[i].pieces!.duration).round(),
+    ];
+    final b = _warm
+        ? relayBudgets(sizes, ahead: RelayConstants.relayWarmAheadBytes, back: RelayConstants.relayWarmBackBytes)
+        : relayBudgets(sizes);
     for (var i = 0; i < buffers.length; i++) {
       buffers[i]
         ..ahead = b[i].$1
@@ -144,22 +184,33 @@ class ActiveRelay {
   /// Bytes from member [sourceToken] over its relay channel, as the
   /// [tracks] its swap named (empty: one file).
   factory ActiveRelay.fromMember(int mediaId, String name, String sourceToken,
-          {List<RelayTrackSpec> tracks = const [], required void Function() onLiveChanged}) =>
-      ActiveRelay._(mediaId, name, sourceToken, onLiveChanged).._setTracks(tracks);
+          {List<RelayTrackSpec> tracks = const [], String sourceId = '', required void Function() onLiveChanged}) =>
+      ActiveRelay._(mediaId, name, sourceToken, onLiveChanged, sourceId: sourceId).._setTracks(tracks);
+
+  /// The warm relay of Up next's item [queueId] fed by member
+  /// [sourceToken] (null: the first qualified member to dial in); its
+  /// tracks are what the source's first `info` says.
+  factory ActiveRelay.warmFromMember(String queueId, String name, String? sourceToken,
+          {String sourceId = '', required void Function() onLiveChanged}) =>
+      ActiveRelay._(-1, name, sourceToken, onLiveChanged, sourceId: sourceId, queueId: queueId, warm: true);
 
   /// The server reads [url] itself: a media file as is, a web page
   /// through [ytDlp] (one file, video + audio tracks, or segmented
-  /// playlists). [onFail] gets the reason when it cannot.
-  static ActiveRelay fetch(int mediaId, String name, Uri url,
-      {YtDlp? ytDlp, required void Function() onLiveChanged, void Function(String reason)? onFail}) {
-    final r = ActiveRelay._(mediaId, name, null, onLiveChanged);
+  /// playlists). [onFail] gets the reason when it cannot. With [queueId]
+  /// it is that Up next item's warm relay.
+  static ActiveRelay fetchLink(int mediaId, String name, Uri url,
+      {YtDlp? ytDlp, String? queueId, required void Function() onLiveChanged, void Function(String reason)? onFail}) {
+    final r = ActiveRelay._(mediaId, name, null, onLiveChanged, fetch: true, queueId: queueId, warm: queueId != null)
+      ..onFail = onFail;
     final media = r._media = LinkRelayMedia(url, ytDlp: ytDlp);
     unawaited(() async {
       try {
         final tracks = await media.open();
         final infos = <_TrackInfo>[
           for (final t in tracks)
-            t.pieces != null ? (size: null, pieces: await t.pieces!.list()) : (size: await t.bytes!.size(), pieces: null),
+            t.pieces != null
+                ? (kind: t.kind, size: null, pieces: await t.pieces!.list())
+                : (kind: t.kind, size: await t.bytes!.size(), pieces: null),
         ];
         if (r._disposed) return;
         r._setTracks(relayTrackSpecs(tracks));
@@ -168,17 +219,34 @@ class ActiveRelay {
         onLiveChanged();
       } catch (e) {
         _log.warning('relay fetch: cannot read the link: $e');
-        if (!r._disposed) onFail?.call('$e');
+        if (!r._disposed) {
+          r.failed = true;
+          r.onFail?.call('$e');
+        }
       }
     }());
     return r;
+  }
+
+  /// A member relay whose source has not described its tracks yet takes
+  /// [tracks] from the swap that puts it up.
+  void ensureTracks(List<RelayTrackSpec> tracks) {
+    if (!fetch && !_known.isCompleted) _setTracks(tracks);
+  }
+
+  /// The warm relay becomes media [mediaId]'s: its buffer and feed carry
+  /// on, with the full budget.
+  void promote(int mediaId) {
+    this.mediaId = mediaId;
+    _warm = false;
+    _budget();
   }
 
   var _disposed = false;
   bool get live => buffers.isNotEmpty && buffers.every((b) => b.live);
 
   /// The tracks are known (a fetched link has been read).
-  bool get known => _known.isCompleted && !_disposed;
+  bool get known => _known.isCompleted && !_disposed && buffers.isNotEmpty;
 
   /// Waits until the tracks are known, up to [RelayConstants.relayWaitSecs].
   Future<bool> whenKnown() async {
@@ -214,6 +282,13 @@ class ActiveRelay {
     if (ch != null) unawaited(_closeNotSource(ch));
   }
 
+  /// The source dialled in with its tracks: a warm relay learns them
+  /// here; false when they are not this relay's.
+  bool _channelInfo(List<_TrackInfo> infos) {
+    if (!_known.isCompleted) _setTracks(_specsOf(infos));
+    return _matches(infos);
+  }
+
   void _attachChannel(RelicWebSocket ws, List<_TrackInfo> infos) {
     final old = _channel;
     if (old != null && !identical(old, ws)) unawaited(old.tryClose());
@@ -243,19 +318,21 @@ class ActiveRelay {
 /// malformed.
 List<_TrackInfo>? _infoTracks(Map j) {
   final size = j['size'], tracks = j['tracks'];
-  if (size is int) return size > 0 ? [(size: size, pieces: null)] : null;
+  if (size is int) return size > 0 ? [(kind: '', size: size, pieces: null)] : null;
   if (tracks is! List || tracks.isEmpty || tracks.length > MediaRelay.maxTracks) return null;
   final out = <_TrackInfo>[];
   for (final t in tracks) {
     if (t is! Map) return null;
+    final kind = t['kind'];
+    if (!MediaRelay.trackKinds.contains(kind)) return null;
     if (t['as'] == 'pieces') {
       final list = RelayPieceList.fromJson(t);
       if (list == null) return null;
-      out.add((size: null, pieces: list));
+      out.add((kind: kind as String, size: null, pieces: list));
     } else {
       final n = t['size'];
       if (n is! int || n <= 0) return null;
-      out.add((size: n, pieces: null));
+      out.add((kind: kind as String, size: n, pieces: null));
     }
   }
   return out;
@@ -270,32 +347,32 @@ Future<void> _closeNotSource(RelicWebSocket ws) async {
 }
 
 /// `GET /r/<sid>/<token>/source` (WebSocket): the source member's relay
-/// channel. `GET /r/<sid>/<token>/<mediaId>/<name>`: a viewer reads the
-/// relayed file, Range as for `/m`; `.../<mediaId>/<track>/<name>` one
-/// track of a media with tracks (a pieces track's media playlist), and
-/// `.../<mediaId>/<track>/p/<i>` piece `i` of a pieces track. [relay]
-/// gives the current relay.
+/// channel; `?q=<queueId>` for the warm relay of that Up next item.
+/// `GET /r/<sid>/<token>/<key>/<name>`: a viewer reads the relayed file,
+/// Range as for `/m`; `.../<key>/<track>/<name>` one track of a media
+/// with tracks (a pieces track's media playlist), and
+/// `.../<key>/<track>/p/<i>` piece `i` of a pieces track. `<key>` is the
+/// media id, or the queue id of a warm (or promoted) relay. [relayAt]
+/// finds the relay of a key, [sourceOf] the relay a token may feed.
 void mountRelayRoutes(
   RelicApp app,
-  SessionMap sessions,
-  ActiveRelay? Function() relay, {
+  SessionMap sessions, {
+  required ActiveRelay? Function(String key) relayAt,
+  required ActiveRelay? Function(String token, String? queueId) sourceOf,
   void Function(String token, MediaLog log)? onLog,
 }) {
   app.get('/r/:sid/:token/source', (final req) {
     final sid = req.pathParameters.raw[#sid] ?? '';
     final token = req.pathParameters.raw[#token] ?? '';
+    final queueId = req.url.queryParameters['q'];
     final session = sessions.get(sid);
-    final r = relay();
-    final ok = session != null &&
-        session.gate(token) == MediaGate.ok &&
-        r != null &&
-        r.sourceToken == token;
+    final found = session != null && session.gate(token) == MediaGate.ok ? sourceOf(token, queueId) : null;
     return WebSocketUpgrade((final ws) async {
-      if (!ok) {
+      final r = found;
+      if (r == null) {
         await _closeNotSource(ws);
         return;
       }
-      final r = relay()!;
       ws.pingInterval = Duration(seconds: RelayConstants.pingIntervalSecs);
       var attached = false;
       try {
@@ -313,7 +390,7 @@ void mountRelayRoutes(
               case 'info':
                 if (attached) continue;
                 final infos = _infoTracks(j);
-                if (infos == null || !r._matches(infos)) {
+                if (infos == null || !r._channelInfo(infos)) {
                   // Not the media this swap named: the source stops.
                   _log.warning('relay channel: info does not match the media (${r.name})');
                   await _closeNotSource(ws);
@@ -359,7 +436,7 @@ void mountRelayRoutes(
     final stopwatch = Stopwatch()..start();
     final sid = req.pathParameters.raw[#sid] ?? '';
     final token = req.pathParameters.raw[#token] ?? '';
-    final mediaId = int.tryParse(req.pathParameters.raw[#mediaId] ?? '');
+    final key = req.pathParameters.raw[#mediaId] ?? '';
     final track = tracked ? int.tryParse(req.pathParameters.raw[#seg] ?? '') ?? -1 : null;
     final session = sessions.get(sid);
     if (session == null) return _plain(410);
@@ -369,9 +446,9 @@ void mountRelayRoutes(
       default:
         return _plain(401);
     }
-    final r = relay();
     // A player still on an older media must not get the new one's bytes.
-    if (r == null || r.mediaId != mediaId) return _plain(404);
+    final r = relayAt(key);
+    if (r == null) return _plain(404);
     final notConnected = Response(503,
         body: Body.fromString('relay source not connected'),
         headers: Headers.build((h) => h['retry-after'] = ['2']));
@@ -421,7 +498,7 @@ void mountRelayRoutes(
         token,
         MediaLog(
           method: req.method.name,
-          path: '/r/$sid/$shortToken/$mediaId/${track == null ? '' : '$track/'}${r.name}',
+          path: '/r/$sid/$shortToken/$key/${track == null ? '' : '$track/'}${r.name}',
           rangeHeader: rangeHeader,
           status: res.status,
           bytesWritten: end - res.start + 1,

@@ -18,7 +18,9 @@ import 'package:watch_together/src/session/switch_trace.dart';
 // How long an Up next switch takes, end to end, over real mpv and a real
 // sync server: two Jellyfin account holders and a guest (through the
 // server's /j login) watch an episode, then ⏭ puts up the next episode,
-// then a direct link. The fake Jellyfin and the link's host answer with a
+// then a direct link, then a link passed on "through" alice, then one the
+// server fetches (both relayed: the guests preload them from the server's
+// warm relay of the item). The fake Jellyfin and the link's host answer with a
 // delay and a capped rate, like a server elsewhere. Prints each client's
 // phases (SwitchTrace) and the wall time from ⏭ to the server playing.
 //
@@ -206,7 +208,7 @@ void main() {
       final link = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       link.listen((req) => _serveFile(req, file));
       final linkUrl = 'http://127.0.0.1:${link.port}/clip.mkv';
-      final server = SyncServer(AppConfig(
+      final server = SyncServer(ytDlp: YtDlp('$_tmp/queue_switch_server_ytdlp', enabled: false), AppConfig(
         port: 0,
         secret: 'q',
         name: 'q',
@@ -219,7 +221,14 @@ void main() {
             deviceId: 'host-1',
             version: '9.9.9'),
       ));
-      await server.start();
+      // Relic logs errors writing a response (a relay response cut short
+      // when its relay is dropped at a swap or stop) as it does outside
+      // tests; anything else fails the test.
+      final serverErrors = <Object>[];
+      await runZonedGuarded(server.start, (e, _) {
+        if ('$e'.contains('Content size below specified contentLength') || '$e'.contains('did not arrive')) return;
+        serverErrors.add(e);
+      });
       final ytDlp = AppYtDlp(YtDlp('$_tmp/queue_switch_ytdlp', enabled: false));
       final accA = await _account(jelly.base, 'ATOKEN', 'ua', 'A-PC');
       final accC = await _account(jelly.base, 'CTOKEN', 'uc', 'C-PC');
@@ -297,8 +306,30 @@ void main() {
         }
         await switchOnce('direct link');
         expect(stateMediaUrl(a.serverState.peek()!), linkUrl);
+
+        // Relayed items: alice passes the link on, then the server fetches
+        // it. Each is fed into the server's warm relay while it waits, so
+        // bob and carol (and for the fetched one alice) preload from it,
+        // and the swap promotes that relay with its buffer.
+        for (final (what, mode) in [('link through alice', LinkRelay.me), ('server-fetched link', LinkRelay.server)]) {
+          expect(await a.queue.add(LinkMedia(linkUrl, relay: mode)), isNull);
+          await _poll(() => a.serverState.peek()?.queue.isNotEmpty ?? false, '$what queued');
+          final id = a.serverState.peek()!.queue.first.id;
+          await _poll(() => a.serverState.peek()?.queue.firstOrNull?.media.relay?.live ?? false, '$what warm relay live');
+          await switchOnce(what);
+          final relay = stateMediaRelay(a.serverState.peek()!);
+          expect(relay?.queueId, id, reason: 'the warm relay became the media\'s');
+          expect(relay?.fetch, mode == LinkRelay.server);
+          if (preload) {
+            for (final x in all.values) {
+              expect(x.switchTrace.of(x.serverState.peek()!.mediaId), contains(SwitchTrace.preloaded),
+                  reason: '$what preloaded');
+            }
+          }
+        }
         // ignore: avoid_print
         print(report.join('\n'));
+        expect(serverErrors, isEmpty);
 
         // Nothing queued: no preload. Queued and taken off again: dropped.
         if (preload) {

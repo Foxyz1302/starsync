@@ -680,13 +680,62 @@ class SessionCoordinator {
 
   /// This viewer's `/r/` URL; with tracks, a pieces track's playlist, or
   /// an mpv EDL of every track when there are several (a page's separate
-  /// video and audio).
-  String _relayMediaUrlFor(String name, int mediaId, [List<RelayTrackSpec> tracks = const []]) =>
-      relayViewerUrl('http://$_wsHost:$_wsPort/r/default/${sync.token}/$mediaId', name, tracks: tracks);
+  /// video and audio). A relay started in Up next ([queueId]) keeps its
+  /// queue id in the URL, so the preload of its warm relay matches.
+  String _relayMediaUrlFor(String name, int mediaId,
+          [List<RelayTrackSpec> tracks = const [], String queueId = '']) =>
+      relayViewerUrl('http://$_wsHost:$_wsPort/r/default/${sync.token}/${queueId.isEmpty ? mediaId : queueId}', name,
+          tracks: tracks);
+
+  /// This viewer's URL of the warm relay of Up next's first [item]
+  /// (`queue[0].media.relay`, see ARCHITECTURE "Getting ready"): the same
+  /// URL the media has once the item goes up, so the preload is promoted.
+  String warmRelayUrl(QueueItem item, MediaRelay relay) =>
+      _relayMediaUrlFor(item.media.name.isEmpty ? item.title : item.media.name, -1, relay.tracks, item.id);
+
+  // This member feeds the warm relay of Up next item `queueId` (its
+  // link, file or Jellyfin stream) before the item goes up; the swap
+  // that puts it up takes the source over.
+  ({String queueId, RelaySource src})? _warmSource;
+
+  /// Feeds the warm relay of Up next item [queueId] from here with
+  /// [media]; one already feeding it is kept. The server pulls only while
+  /// someone preloads it, and closes the channel once the item is no
+  /// longer first (the source then stops).
+  void feedWarm(String queueId, RelayMedia media) {
+    if (_warmSource?.queueId == queueId) {
+      unawaited(media.close());
+      return;
+    }
+    stopWarmSource();
+    final src = RelaySource(
+        Uri.parse('ws://$_wsHost:$_wsPort/r/default/${sync.token}/source?q=${Uri.encodeQueryComponent(queueId)}'),
+        media);
+    _warmSource = (queueId: queueId, src: src);
+    unawaited(() async {
+      try {
+        await src.start();
+      } catch (e) {
+        debugPrint('warm relay source of $queueId failed: $e');
+        if (identical(_warmSource?.src, src)) _warmSource = null;
+        return;
+      }
+      await src.done;
+      if (identical(_warmSource?.src, src)) _warmSource = null;
+    }());
+  }
+
+  void stopWarmSource() {
+    final w = _warmSource;
+    _warmSource = null;
+    if (w != null) unawaited(w.src.close());
+  }
 
   /// Serves [media] for media [mediaId] on this member's relay channel.
-  /// The server only pulls while someone watches through it.
-  void _startRelaySource(int mediaId, RelayMedia media, {bool announce = false}) {
+  /// The server only pulls while someone watches through it. When the
+  /// media came from Up next item [queueId] whose warm relay this member
+  /// feeds, that source carries on instead.
+  void _startRelaySource(int mediaId, RelayMedia media, {bool announce = false, String queueId = ''}) {
     // Back after a reconnect on the same media: it is still serving (and
     // redials by itself).
     if (_relaySource != null && _relaySourceMediaId == mediaId) {
@@ -694,6 +743,24 @@ class SessionCoordinator {
       return;
     }
     _stopRelaySource();
+    final warm = _warmSource;
+    if (queueId.isNotEmpty && warm != null && warm.queueId == queueId) {
+      _warmSource = null;
+      unawaited(media.close());
+      _relaySource = warm.src;
+      _relaySourceMediaId = mediaId;
+      relaying.value = true;
+      if (announce) {
+        _pushToast('Passing the video on through the server. Keep the app open while it plays.');
+      }
+      unawaited(warm.src.done.then((_) {
+        if (identical(_relaySource, warm.src)) {
+          _relaySource = null;
+          relaying.value = false;
+        }
+      }));
+      return;
+    }
     final src = RelaySource(
         Uri.parse('ws://$_wsHost:$_wsPort/r/default/${sync.token}/source'), media);
     _relaySource = src;
@@ -811,15 +878,17 @@ class SessionCoordinator {
         if (ref != null) {
           await _playJellyfin(ref, r,
               origin: origin is _JellyfinOrigin ? origin : null,
-              memberRelayUrl: relay != null && !mine ? _relayMediaUrlFor(name, r.mediaId) : null);
+              memberRelayUrl:
+                  relay != null && !mine ? _relayMediaUrlFor(name, r.mediaId, const [], relay.queueId) : null);
         } else if (origin is _FileOrigin) {
           await _openMedia(origin.path);
-          _startRelaySource(r.mediaId, RelayMedia.single(FileRelayBytes(File(origin.path))), announce: true);
+          _startRelaySource(r.mediaId, RelayMedia.single(FileRelayBytes(File(origin.path))),
+              announce: true, queueId: relay?.queueId ?? '');
         } else if (origin is _LinkOrigin) {
           await _openMedia(origin.url);
           _startRelaySource(
               r.mediaId, LinkRelayMedia(Uri.parse(origin.url), ytDlp: origin.ytDlp, probe: origin.probe),
-              announce: true);
+              announce: true, queueId: relay?.queueId ?? '');
         } else if (relay != null && !mine) {
           if (relay.fetch && !relay.live) {
             // The server is still getting it (yt-dlp takes seconds; mpv
@@ -828,7 +897,7 @@ class SessionCoordinator {
             _awaitLiveFor = r.mediaId;
             health.value = const HealthStatus(HealthSeverity.info, 'the server is getting the video…');
           } else {
-            await _openMedia(_relayMediaUrlFor(name, r.mediaId, relay.tracks));
+            await _openMedia(_relayMediaUrlFor(name, r.mediaId, relay.tracks, relay.queueId));
           }
         } else {
           var url = stateMediaUrl(r);
@@ -848,8 +917,9 @@ class SessionCoordinator {
       if (_mediaId == r.mediaId) settledMediaId.value = r.mediaId;
     } else if (_awaitLiveFor == r.mediaId && (stateMediaRelay(r)?.live ?? false)) {
       _awaitLiveFor = -1;
+      final relay = stateMediaRelay(r)!;
       await _openMedia(
-          _relayMediaUrlFor((r.media?['name'] as String?) ?? '', r.mediaId, stateMediaRelay(r)!.tracks));
+          _relayMediaUrlFor((r.media?['name'] as String?) ?? '', r.mediaId, relay.tracks, relay.queueId));
     }
     _jellyfinTransport(r);
     _relayStatus(r);
@@ -1469,11 +1539,14 @@ class SessionCoordinator {
       final relayProblem = probe.relayProblem;
       if (relayProblem != null) return relayProblem;
       final y = await ytDlp.ytDlp;
-      final check = LinkRelayMedia(uri, ytDlp: y, probe: probe);
+      // Up next's item this app already feeds (its warm relay): read.
+      final warm = _warmSource;
+      final fed = queueId != null && warm != null && warm.queueId == queueId && warm.src.tracks.isNotEmpty;
+      final check = fed ? null : LinkRelayMedia(uri, ytDlp: y, probe: probe);
       var size = 0;
       final List<RelayTrackSpec> specs;
       try {
-        final tracks = await check.open().timeout(const Duration(seconds: 15));
+        final tracks = fed ? warm.src.tracks : await check!.open().timeout(const Duration(seconds: 15));
         for (final t in tracks) {
           // A playlist is read (DRM and live refused) but has no size.
           final pieces = t.pieces;
@@ -1487,7 +1560,7 @@ class SessionCoordinator {
       } catch (e) {
         return 'cannot pass this link on: $e';
       } finally {
-        await check.close();
+        await check?.close();
       }
       _pendingOrigin = _LinkOrigin(url, probe, y);
       _swap(HelloMedia(
@@ -1717,7 +1790,8 @@ class SessionCoordinator {
     // its own sign-in, else the pasted link (played directly here too).
     if (origin != null) {
       if (plan is OwnPlay) {
-        _startRelaySource(r.mediaId, RelayMedia.single(HttpRelayBytes(Uri.parse(plan.url), headers: plan.headers)));
+        _startRelaySource(r.mediaId, RelayMedia.single(HttpRelayBytes(Uri.parse(plan.url), headers: plan.headers)),
+            queueId: stateMediaRelay(r)?.queueId ?? '');
       } else if (origin.link != null) {
         plan = RelayPlay(origin.link!);
         _startRelaySource(r.mediaId, RelayMedia.single(HttpRelayBytes(Uri.parse(origin.link!))));
@@ -2100,6 +2174,7 @@ class SessionCoordinator {
     reconnecting.value = false;
     await _stopJellyfin();
     _stopRelaySource();
+    stopWarmSource();
     _pendingOrigin = null;
     _pendingArt = null;
     _activeOrigin = null;

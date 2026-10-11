@@ -525,28 +525,35 @@ class QueueController {
     if (head != null) {
       final performer = queuePerformer(head, r.members).id == _me;
       final local = _local[head.key]?.pick;
+      // The server's warm relay of the item, once bytes can flow: what
+      // everyone without their own copy preloads.
+      final relay = head.media.relay;
+      final warmUrl = relay != null && relay.live ? coord.warmRelayUrl(head, relay) : null;
       switch (head.how) {
         case QueueHow.jellyfin:
           final ref = head.media.jellyfin;
           if (ref == null) return null;
           if (_ownAccount(ref.serverId)) return _WarmTarget(head.id, ref: ref);
-          // No account here: the server's login passes it on (`/j`).
-          final relay = r.relayNext ? coord.jellyfinRelayUrl(ref) : null;
-          return relay == null ? null : _WarmTarget(head.id, open: relay);
+          // No account here: the server's login passes it on (`/j`), else
+          // the warm relay a member with an account feeds.
+          final open = r.relayNext ? coord.jellyfinRelayUrl(ref) : warmUrl;
+          return open == null ? null : _WarmTarget(head.id, open: open);
         case QueueHow.direct:
           final url = head.media.url;
           if (url == null) return null;
           return _WarmTarget(head.id, probe: performer ? url : null, open: url);
         case QueueHow.through:
-          // Only its adder has the link; the others' relay starts with the swap.
-          if (!performer) return null;
+          // Only its adder has the link (and feeds the warm relay).
+          if (!performer) return warmUrl == null ? null : _WarmTarget(head.id, open: warmUrl);
           final url = local is LinkMedia ? local.url : null;
           return _WarmTarget(head.id, probe: url, open: url);
         case QueueHow.file:
-          if (!performer) return null;
+          if (!performer) return warmUrl == null ? null : _WarmTarget(head.id, open: warmUrl);
           // The host's own file plays from its `/m` URL once it is up.
           return _WarmTarget(head.id, open: local is FileMedia && coord.hostFile == null ? local.path : null);
         case QueueHow.server:
+          // The server fetches it into its warm relay; everyone preloads that.
+          if (warmUrl != null) return _WarmTarget(head.id, open: warmUrl);
           return performer ? _WarmTarget(head.id) : null;
       }
     }
@@ -564,6 +571,7 @@ class QueueController {
   /// playing has started. Done as soon as it is first, again before that
   /// runs out, dropped when it is no longer first.
   void _warm(StateBroadcast? r) {
+    _feedWarm(r);
     final t = _warmTarget(r);
     final key = t?.key ?? '';
     if (key != _warmKey) {
@@ -579,6 +587,59 @@ class QueueController {
       }
     }
     _syncPreload(r);
+  }
+
+  // The warm relay this app feeds (`<queue id>|<token>`), started once.
+  String _fedWarm = '';
+
+  /// Feeds the server's warm relay of Up next's first item from here when
+  /// it names this member as its source (a link passed on, a file), or a
+  /// Jellyfin item this app puts up with its own account when the server
+  /// asks for a source; see [SessionCoordinator.feedWarm]. The server
+  /// drops the relay (and with it the source) once the item is no longer
+  /// first.
+  void _feedWarm(StateBroadcast? r) {
+    final head = r?.queue.firstOrNull;
+    final relay = head?.media.relay;
+    if (r == null || head == null || relay == null || relay.fetch) return;
+    final key = '${head.id}|${coord.sync.token}';
+    if (key == _fedWarm) return;
+    switch (head.how) {
+      case QueueHow.through:
+      case QueueHow.file:
+        if (relay.source != _me) return;
+        final pick = _local[head.key]?.pick;
+        if (pick is FileMedia) {
+          _fedWarm = key;
+          coord.feedWarm(head.id, RelayMedia.single(FileRelayBytes(File(pick.path))));
+        } else if (pick is LinkMedia) {
+          _fedWarm = key;
+          unawaited(() async {
+            try {
+              // The probe [_resolveWarm] keeps: no second yt-dlp run.
+              final probe = await coord.ytDlp.probe(pick.url, keep: _warmKeep).timeout(const Duration(seconds: 60));
+              final y = await coord.ytDlp.ytDlp;
+              if (_fedWarm != key) return;
+              coord.feedWarm(head.id, LinkRelayMedia(Uri.parse(pick.url), ytDlp: y, probe: probe));
+            } catch (e) {
+              debugPrint('queue: feeding ${head.id}: $e');
+            }
+          }());
+        }
+      case QueueHow.jellyfin:
+        final ref = head.media.jellyfin;
+        if (ref == null || (relay.source.isNotEmpty && relay.source != _me)) return;
+        if (queuePerformer(head, r.members).id != _me) return;
+        // Resolved with this app's account by [_resolveWarm].
+        final w = coord.warmJellyfin;
+        if (w == null || !sameJellyfinItem(w.ref, ref)) return;
+        _fedWarm = key;
+        coord.feedWarm(
+            head.id, RelayMedia.single(HttpRelayBytes(Uri.parse(w.plan.url), headers: w.plan.headers)));
+      case QueueHow.direct:
+      case QueueHow.server:
+        return;
+    }
   }
 
   void _dropWarm(StateBroadcast? r) {
@@ -613,6 +674,7 @@ class QueueController {
           if (plan is OwnPlay) {
             coord.warmJellyfin = (ref: ref, plan: plan, until: DateTime.now().add(_warmKeep));
             open = (url: plan.url, headers: plan.headers);
+            _feedWarm(coord.serverState.peek());
           }
         } else if (url != null && ok) {
           open = (url: url, headers: null);

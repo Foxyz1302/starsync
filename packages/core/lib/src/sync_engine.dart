@@ -535,7 +535,9 @@ class SyncEngine {
 
   /// [relay]: whether the server can relay the current Jellyfin media; the
   /// engine does not know the server's credential.
-  StateBroadcast broadcast({bool relay = false, bool relayNext = false}) {
+  /// [warm]: the server's warm relay for Up next's first item, shown as
+  /// that item's `media.relay`.
+  StateBroadcast broadcast({bool relay = false, bool relayNext = false, ({String id, MediaRelay relay})? warm}) {
     final bySeek = _seekEventId == eventId;
     return StateBroadcast(
       eventId: eventId,
@@ -555,7 +557,10 @@ class SyncEngine {
       seekSeq: bySeek ? _seekSeq : null,
       relay: relay,
       relayNext: relayNext,
-      queue: queue.items,
+      queue: [
+        for (final q in queue.items)
+          warm != null && q.id == warm.id ? q.copyWith(media: q.media.copyWith(relay: warm.relay)) : q,
+      ],
       queuePlay: queue.play,
     );
   }

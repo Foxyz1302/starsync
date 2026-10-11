@@ -94,7 +94,7 @@ class SyncServer {
       );
     });
     mountSessionMediaRoute(_app, sessions);
-    mountRelayRoutes(_app, sessions, () => hub.relay);
+    mountRelayRoutes(_app, sessions, relayAt: hub.relayAt, sourceOf: hub.sourceOf);
     mountAvatarRoute(_app, hub);
     mountArtRoute(_app, hub);
     mountJellyfinRelayRoute(
@@ -108,8 +108,8 @@ class SyncServer {
       return 'http://${authority(dialledHost)}/m/$sid/$token/$name';
     }, relayUrlBuilder: (sid, token, itemId, dialledHost) =>
         'http://${authority(dialledHost)}/j/$sid/$token/${Uri.encodeComponent(itemId)}',
-        relayMediaUrlBuilder: (sid, token, mediaId, name, tracks, dialledHost) =>
-            relayViewerUrl('http://${authority(dialledHost)}/r/$sid/$token/$mediaId', name, tracks: tracks));
+        relayMediaUrlBuilder: (sid, token, key, name, tracks, dialledHost) =>
+            relayViewerUrl('http://${authority(dialledHost)}/r/$sid/$token/$key', name, tracks: tracks));
     _app.fallback = (final req) => Response.notFound(
           body: Body.fromString('not found'),
         );
@@ -181,7 +181,7 @@ class SyncServer {
     _heartbeat = null;
     _relayClient?.close(force: true);
     _relayClient = null;
-    hub.setRelay(null);
+    hub.dropRelays();
     await hub.closeAllSockets();
     await _app.close();
     _server = null;

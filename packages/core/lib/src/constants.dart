@@ -1,5 +1,5 @@
 abstract class RelayConstants {
-  static const int protoVersion = 13;
+  static const int protoVersion = 14;
 
   // Relay (`/r/...`): a member's bytes through the server's buffer.
   static const int relaySliceBytes = 1 << 20;
@@ -24,6 +24,12 @@ abstract class RelayConstants {
   /// A viewer request waits this long for its bytes (source away) before
   /// the server gives up on it.
   static const int relayWaitSecs = 60;
+  /// The warm relay (Up next's first relayed item, before it goes up)
+  /// keeps this much ahead of and behind its viewers' preloads, besides
+  /// the pins: about what a preload player reads ahead (48 MiB), never the
+  /// whole media.
+  static const int relayWarmAheadBytes = 32 << 20;
+  static const int relayWarmBackBytes = 8 << 20;
 
   static const int seekDebounceMs = 300;
   static const double driftSeekThresholdSecs = 5.0;

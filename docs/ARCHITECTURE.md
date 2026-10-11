@@ -595,6 +595,32 @@ How bytes move:
 - Cleanup: the buffer is memory only. Any swap disposes it (its URLs then
   404, the source is closed with 4001 and stops), and so does server
   stop. A crash frees it with the process.
+- Warm relay (`ServerHub.syncWarm`, run on every change; wire in
+  [PROTOCOL.md](PROTOCOL.md) "Relay"): a second, small `ActiveRelay` for
+  Up next's first item while it waits, keyed by its queue id, so viewers
+  preload it (see "Getting ready" under "Up next"). A server-fetched
+  link starts its fetch then; a link passed on or a file is fed by its
+  adder's app (a second channel, `/r/.../source?q=<queueId>`), only
+  while someone else is in the server and not for the host's own file;
+  a Jellyfin item someone present cannot play (and the server's login
+  does not cover) by the first member with an account that dials in.
+  Its budget is 32 MiB ahead and 8 MiB behind its viewers
+  (`relayWarmAheadBytes`, split by track size with the usual 8 MiB
+  floor) plus the pins: about what a preload player reads, so the
+  server holds at most that much on top of the current relay (there is
+  no global relay budget; each relay is bounded by its own). Like any
+  buffer it pulls nothing while nobody preloads. The swap that puts the
+  item up (`swap.queueId`, from its source, or anyone for a fetch, with
+  the same tracks) promotes it (`ServerHub.takeWarm`): the same buffer,
+  feed and source channel become the media's relay with the full
+  budget, `media.relay.queueId` names the item and the media keeps the
+  item's name, so its `/r/.../<queueId>/...` URLs (and the preloads of
+  them) stay valid. Any other swap of it, the item no longer first (a
+  removal, a reorder, Play now of another), its adder leaving, or server
+  stop drops it (its URLs 404, its source gets 4001); a restart starts
+  with none. A manual swap to something else keeps it (the item is
+  still first). A failed warm fetch is not promoted: the swap fetches
+  again and reports the reason.
 - Source away: viewers keep playing from the buffer; a request waits up
   to 60 s for missing bytes. The source reconnects with backoff (same
   token after a resume); a different size (or piece count and roles)
@@ -917,10 +943,17 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   "Jellyfin relay"). A link everyone opens is that link; the app that
   puts it up also probes it (`AppYtDlp.probe` with `keep`: kept 35
   minutes instead of 10, a refresh replaces it only once it is in; swaps
-  read it from there). A link passed on "through me" and a file only on
+  read it from there). A link passed on "through me" and a file on
   their adder's app (the link, the path; not the host's own file, which
-  plays from `/m`). A server-fetched link and others' relayed items have
-  nothing to get ready (the relay starts with the swap; see ROADMAP). It
+  plays from `/m`), which also feeds the server's warm relay of it
+  (`QueueController._feedWarm`, `SessionCoordinator.feedWarm`; a
+  Jellyfin item's from the member who puts it up, with its resolved
+  stream, when the server asks for one); everyone else, and everyone
+  for a server-fetched link, preloads that warm relay's URL
+  (`SessionCoordinator.warmRelayUrl`) once `queue[0].media.relay.live`
+  says bytes can flow (see "Relay"). At the swap the adder's app skips
+  re-reading the link's sizes (its warm source has them) and that
+  source carries on as the media's. It
   is resolved as soon as it is first there, again every 30 minutes, and
   dropped when it stops being first.
   **Preload**: once resolved, the stream is opened in a second, hidden
@@ -952,6 +985,9 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   account holders and a `/j` guest): ⏭ to the server playing 59 to
   86 ms for the next episode and 35 ms for a direct link, against about
   1.5 s cold; at 300 ms and 12 Mbit/s 52 and 103 ms against about 2.9 s.
+  Relayed, from the warm relay (same setup, loopback server): a link
+  passed on 21 to 22 ms, a server-fetched link 35 to 37 ms, against
+  about 1.6 s cold.
   `SwitchTrace` (env `SYNC_RELAY_TRACE_SWITCH=1` prints it) times each
   phase of a media change: state, resolved, open, player (a fresh
   player is up; see "Player lifecycle" under "Media"), opened or

@@ -1,4 +1,4 @@
-# Protocol (proto = 13)
+# Protocol (proto = 14)
 
 Wire format only. Behavior (gate, clock, timeouts) is in
 [ARCHITECTURE.md](ARCHITECTURE.md). Source of truth:
@@ -31,7 +31,7 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
 ## Client to server
 
 ```
-{"t":"hello","proto":13,"secret":"","user":{"name":"","avatar":""},
+{"t":"hello","proto":14,"secret":"","user":{"name":"","avatar":""},
  "media":{"name":"","size":0,"duration":0,"url":null},"hostKey":"...",
  "resume":"<token>"}
 {"t":"ready","ready":true,"source":"manual"}      source: manual | auto
@@ -275,6 +275,9 @@ swap  media.relay = {}               the swapper's machine serves the bytes
 state media.relay = {"source":"m2","live":true}   or {"fetch":true,"live":true}
       media.relay = {"fetch":true,"live":true,"tracks":[{"kind":"video"},{"kind":"audio"}]}
       media.relay = {"source":"m2","live":true,"rate":4100000,"need":2300000}
+      media.relay = {"source":"m2","live":true,"queueId":"q3"}   started in Up next (proto 14)
+      queue[0].media.relay = {"source":"m2","live":true,"tracks":[...]}   its warm relay
+      queue[0].media.relay = {"fetch":true,"live":true}
 ```
 
 Tracks: a relayed media is one file, or tracks that viewers play as one
@@ -313,37 +316,57 @@ anything else means one file.
   its segments in so far, after a minute of them). Both two significant
   digits, updated once a second. `rate` under `need` means the source
   cannot keep up; clients tell the source once per media.
+- Warm relay (proto 14): while Up next's first item is relayed (`how`
+  `server`, `through` or `file`, or `jellyfin` when someone present has
+  no access to that server and `state.relayNext` is false), the server
+  holds a small relay for it and shows it as that item's
+  `media.relay`: `source` (the adder; for `jellyfin` empty until the
+  first member with `jf` true for that server dials in), or `fetch`, and
+  `live` with `tracks` once bytes can flow. Its URLs use the item's
+  queue id where a media id would be. Not for the host's own file, nor
+  for an adder alone in the server. A swap with `queueId` of that item,
+  from its source (or, `fetch`, from anyone) with the same `tracks`,
+  makes it the media's relay: `media.relay.queueId` is the item's id,
+  `media.name` the item's `media.name`, the buffer and source carry on
+  and the queue-id URLs keep working. Any other swap of the item, or the
+  item no longer first, drops it (its URLs 404, its source is closed
+  with 4001).
 - `welcome.mediaUrl` for relayed media without `jellyfin`: this member's
   `/r/` URL; absent for the source itself (it plays its own copy) and for
   a fetched link the server has not read yet (clients open it on `live`).
   Clients build it after a swap like the `/m` one:
-  `http://<host>/r/default/<token>/<mediaId>/<name>` (name with `/` and
-  `\` made `_`, then URL-encoded; the server ignores it). With `tracks`,
-  each track's URL is `http://<host>/r/default/<token>/<mediaId>/<i>/<name>`
+  `http://<host>/r/default/<token>/<key>/<name>` (`<key>` the
+  `mediaId`, or `media.relay.queueId` when set; name with `/` and `\`
+  made `_`, then URL-encoded; the server ignores it). With `tracks`,
+  each track's URL is `http://<host>/r/default/<token>/<key>/<i>/<name>`
   (a pieces track: `<name>.m3u8`); one track is opened as is, several as
   an mpv EDL of them all, each framed by its byte length:
   `edl://!no_clip;%<len>%<track 0 url>;!new_stream;!no_clip;%<len>%<track 1 url>`.
-- `GET /r/<sid>/<token>/<mediaId>/<name>`: the media (one file), Range
-  table as for `/m`. `GET /r/<sid>/<token>/<mediaId>/<i>/<name>`: track
+- `GET /r/<sid>/<token>/<key>/<name>`: the media (one file), Range
+  table as for `/m`; `<key>` a `mediaId`, or a queue id (the warm relay,
+  or the media's relay started from it). `GET /r/<sid>/<token>/<key>/<i>/<name>`: track
   `i` (from 0) of a media with `tracks` (track 0 of a one-file media
   too); for a pieces track (any name), its media playlist
   (`application/vnd.apple.mpegurl`): `#EXT-X-PLAYLIST-TYPE:VOD`,
   `EXT-X-MEDIA-SEQUENCE`, `EXTINF` durations, `EXT-X-DISCONTINUITY`,
   `EXT-X-MAP` and `EXT-X-KEY:METHOD=AES-128` (with `IV` when given) as
   upstream, `EXT-X-ENDLIST`; every URI is `p/<j>`. `GET
-  /r/<sid>/<token>/<mediaId>/<i>/p/<j>`: piece `j` of pieces track `i`,
+  /r/<sid>/<token>/<key>/<i>/p/<j>`: piece `j` of pieces track `i`,
   whole, once it is in (a Range inside the piece answers 206). Errors: 401
-  bad token, 404 not the current relayed media (a player still on an
-  older `mediaId` gets 404, never the new bytes), no such track (the
+  bad token, 404 not the current relayed media nor the warm one (a player
+  still on an older `mediaId` gets 404, never the new bytes), no such track (the
   one-file URL of a media with `tracks`) or piece (or `p/` of a byte
   track), 410 unknown session, 503 + `retry-after` the source never
   connected or the server could not read the link (60 s), or a piece did
   not arrive within 60 s. A byte request whose bytes do not arrive within
   60 s ends early. Bytes count toward `bytesServed`.
 - `GET /r/<sid>/<token>/source` (WebSocket): the source's relay channel,
-  dialled by the source (works behind NAT). Only the current source's
-  token is accepted; anyone else, or the source after the next swap, is
-  closed with code 4001 (the source stops instead of reconnecting).
+  dialled by the source (works behind NAT); `?q=<queueId>` for the warm
+  relay of that item (or the media's relay started from it). Only that
+  relay's source token is accepted; anyone else, or the source once its
+  relay is dropped, is closed with code 4001 (the source stops instead
+  of reconnecting). A warm relay's tracks are those of its source's
+  first `info`.
   Frames:
 
 ```
@@ -442,4 +465,5 @@ state  "queue":[<item>,...], "queuePlay":"q3"
   leave out `url`: the server uses the one it kept. A swap without
   `queueId` leaves the queue as it is.
 - `state.queue` (omitted when empty) and `state.queuePlay` (omitted when
-  none) ride in every state, `welcome.state` included.
+  none) ride in every state, `welcome.state` included. The first item's
+  `media.relay` shows its warm relay (see "Relay").

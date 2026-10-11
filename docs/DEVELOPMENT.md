@@ -56,7 +56,8 @@ and `e2e_check` (simulated viewers against a live server).
   `seek_drag_e2e`, `end_of_file_e2e`, `readahead_e2e`, `jellyfin_e2e` (a
   local fake Jellyfin over HTTP; tests never talk to a real Jellyfin),
   `queue_switch_e2e` (times Up next switches against a delayed, rate-capped
-  fake Jellyfin and link host; `WT_SWITCH_PRELOAD=0` for the cold path,
+  fake Jellyfin and link host: an episode, a direct link, a link passed
+  on and a server-fetched one; `WT_SWITCH_PRELOAD=0` for the cold path,
   `WT_SWITCH_DELAY_MS` / `WT_SWITCH_RATE_KBS` for the link). The sync and
   end-of-file ones expect `~/Videos/chiyo.mp4`; others generate media with
   ffmpeg into `WT_TEST_TMP`. Headless mpv (no video output attached) won't
@@ -77,6 +78,11 @@ Traps:
   the `flutter_tester` by PID). `AppShell(videoBuilder:)` takes a stand-in,
   so shell tests run the real player layout without it; otherwise test pure
   logic (`StateDiff`, coordinator without widgets).
+- A `SyncServer` started inside a test: relic reports an error writing a
+  response (a relay response cut short when its relay is dropped at a
+  swap or stop) to the zone the server started in, which fails the
+  test; outside tests it is only logged. Start it in `runZonedGuarded`
+  and fail on anything else (`queue_switch_e2e`).
 - Never depend on a server-side WebSocket `onDone`; assert presence with
   deadline polling.
 - `sub.asFuture()` can resolve before `onDone`; poll with a deadline.

@@ -61,7 +61,8 @@ class ServerHub {
         : '$head: $why';
   }
 
-  StateBroadcast stateBroadcast() => engine.broadcast(relay: relayAvailable, relayNext: relayNextAvailable);
+  StateBroadcast stateBroadcast() =>
+      engine.broadcast(relay: relayAvailable, relayNext: relayNextAvailable, warm: _warmView());
 
   /// The relay of the current media (`/r/...`), if it is relayed.
   ActiveRelay? relay;
@@ -69,9 +70,159 @@ class ServerHub {
   /// Replaces the relay (null: the new media is not relayed). The old
   /// buffer is dropped with it.
   void setRelay(ActiveRelay? next) {
-    relay?.dispose();
+    if (!identical(relay, next)) relay?.dispose();
     relay = next;
   }
+
+  /// The warm relay: Up next's first item relayed before it goes up, so
+  /// every viewer preloads it (see ARCHITECTURE "Getting ready"); null
+  /// when that item is not relayed (or nobody would read it).
+  ActiveRelay? warm;
+
+  void _setWarm(ActiveRelay? next) {
+    if (!identical(warm, next)) warm?.dispose();
+    warm = next;
+  }
+
+  /// Drops both relays (server stop).
+  void dropRelays() {
+    setRelay(null);
+    _setWarm(null);
+  }
+
+  /// `queue[0].media.relay` while the warm relay exists.
+  ({String id, MediaRelay relay})? _warmView() {
+    final w = warm, id = w?.queueId;
+    if (w == null || id == null) return null;
+    return (
+      id: id,
+      relay: MediaRelay(
+          source: w.fetch ? '' : w.sourceId, fetch: w.fetch, live: w.live, tracks: w.live ? w.tracks : const []),
+    );
+  }
+
+  /// Keeps [warm] on Up next's first item when it is relayed: a link the
+  /// server fetches (its fetch starts now), a link passed on or a file
+  /// (its adder's app feeds it, while someone else is here to read it;
+  /// not the host's own file), a
+  /// Jellyfin item that someone here cannot play and the server's login
+  /// does not cover (the first member with an account feeds it). Called
+  /// on every change; anything else drops it.
+  void syncWarm() {
+    final first = engine.queue.items.firstOrNull;
+    final w = warm;
+    if (w != null && (first == null || w.queueId != first.id || !_keepWarm(w, first))) _setWarm(null);
+    if (warm == null && first != null) _setWarm(_newWarm(first));
+  }
+
+  bool _othersHere(String? memberId) => engine.members.values.any((m) => m.id != memberId);
+
+  /// A Jellyfin [ref] someone here cannot play while someone can, outside
+  /// the server's login.
+  bool _jellyfinNeedsWarm(JellyfinRef ref) =>
+      !_onLogin(ref) &&
+      engine.members.values.any((m) => !m.out && m.jf[ref.serverId] != true) &&
+      engine.members.values.any((m) => m.jf[ref.serverId] == true);
+
+  bool _keepWarm(ActiveRelay w, QueueItem first) {
+    switch (first.how) {
+      case QueueHow.server:
+        return w.fetch;
+      case QueueHow.through:
+      case QueueHow.file:
+        final adder = engine.byId(first.by);
+        return adder != null && adder.token == w.sourceToken && _othersHere(adder.id);
+      case QueueHow.jellyfin:
+        final ref = first.media.jellyfin;
+        final src = w.sourceToken;
+        return ref != null && _jellyfinNeedsWarm(ref) && (src == null || engine.members.containsKey(src));
+      case QueueHow.direct:
+        return false;
+    }
+  }
+
+  ActiveRelay? _newWarm(QueueItem first) {
+    final id = first.id;
+    final name = sanitizeMediaName(first.media.name.isEmpty ? first.title : first.media.name);
+    late final ActiveRelay r;
+    switch (first.how) {
+      case QueueHow.server:
+        final url = Uri.tryParse(engine.queue.privateUrlOf(id) ?? '');
+        if (url == null || session.secret.isEmpty) return null;
+        r = ActiveRelay.fetchLink(-1, name, url, ytDlp: ytDlp, queueId: id, onLiveChanged: () => relayLiveChanged(r));
+      case QueueHow.through:
+      case QueueHow.file:
+        final adder = engine.byId(first.by);
+        // The host's own file plays from its `/m` URL, never relayed.
+        if (adder == null || !_othersHere(adder.id) || (adder.host && first.how == QueueHow.file)) return null;
+        r = ActiveRelay.warmFromMember(id, name, adder.token,
+            sourceId: adder.id, onLiveChanged: () => relayLiveChanged(r));
+      case QueueHow.jellyfin:
+        final ref = first.media.jellyfin;
+        if (ref == null || !_jellyfinNeedsWarm(ref)) return null;
+        r = ActiveRelay.warmFromMember(id, name, null, onLiveChanged: () => relayLiveChanged(r));
+      case QueueHow.direct:
+        return null;
+    }
+    return r;
+  }
+
+  /// The relay `/r/.../<key>/...` reads: the current one by its media id,
+  /// or by the queue id it was started for, or the warm one.
+  ActiveRelay? relayAt(String key) {
+    final r = relay, w = warm;
+    final mediaId = int.tryParse(key);
+    if (mediaId != null) return r != null && r.mediaId == mediaId ? r : null;
+    if (key.isEmpty) return null;
+    if (w != null && w.queueId == key) return w;
+    if (r != null && r.queueId == key) return r;
+    return null;
+  }
+
+  /// The relay member [token] may feed on its channel: the current one
+  /// ([queueId] null), or the one of Up next item [queueId] (warm or
+  /// already promoted). A warm Jellyfin item takes the first member with
+  /// an account on that server that dials in.
+  ActiveRelay? sourceOf(String token, String? queueId) {
+    if (queueId == null || queueId.isEmpty) {
+      final r = relay;
+      return r != null && r.sourceToken == token ? r : null;
+    }
+    final r = relayAt(queueId);
+    if (r == null || r.fetch) return null;
+    if (r.sourceToken == null && identical(r, warm)) {
+      final ref = engine.queue.item(queueId)?.media.jellyfin;
+      final m = engine.members[token];
+      if (ref == null || m == null || m.jf[ref.serverId] != true) return null;
+      r
+        ..sourceToken = token
+        ..sourceId = m.id;
+      broadcastState();
+    }
+    return r.sourceToken == token ? r : null;
+  }
+
+  /// A swap of Up next item [queueId] by [token]: its warm relay, when it
+  /// can become the media's (the same kind of relay; a member's from its
+  /// own source with the same tracks), else null. Taken either way: the
+  /// item goes up now.
+  ActiveRelay? takeWarm(String? queueId, String token, {required bool fetch, List<RelayTrackSpec> tracks = const []}) {
+    final w = warm;
+    if (queueId == null || w == null || w.queueId != queueId) return null;
+    warm = null;
+    final ok = fetch
+        ? w.fetch && !w.failed
+        : !w.fetch && w.sourceToken == token && (!w.known || _sameTracks(w.tracks, tracks));
+    if (ok) {
+      w.ensureTracks(tracks);
+      return w;
+    }
+    w.dispose();
+    return null;
+  }
+
+  static bool _sameTracks(List<RelayTrackSpec> a, List<RelayTrackSpec> b) =>
+      a.length == b.length && [for (var i = 0; i < a.length; i++) a[i] == b[i]].every((x) => x);
 
   /// `media.relay` for a relayed swap by [token]: who serves the bytes
   /// and, from a member, its tracks (the server finds a fetched link's).
@@ -79,9 +230,18 @@ class ServerHub {
       ? const MediaRelay(fetch: true)
       : MediaRelay(source: engine.members[token]?.id ?? '', tracks: requested.tracks);
 
+  /// `media.relay` of a promoted warm relay [w] (Up next item [queueId]).
+  MediaRelay promotedRelay(ActiveRelay w, String queueId) => w.fetch
+      ? MediaRelay(fetch: true, live: w.live, tracks: w.live ? w.tracks : const [], queueId: queueId)
+      : MediaRelay(source: w.sourceId, live: w.live, tracks: w.tracks, queueId: queueId);
+
   /// The relay's channel came up or went down, or a fetched link was read:
-  /// `media.relay.live` and `tracks` follow.
+  /// `media.relay.live` and `tracks` follow (the warm one's in `queue`).
   void relayLiveChanged(ActiveRelay r) {
+    if (identical(warm, r)) {
+      broadcastState();
+      return;
+    }
     final m = engine.media;
     if (!identical(relay, r) || m?.relay == null) return;
     final was = m!.relay!;
@@ -192,6 +352,7 @@ class ServerHub {
   }
 
   void changed() {
+    syncWarm();
     broadcastState();
     broadcastFeed();
   }
@@ -301,7 +462,8 @@ void mountSyncRoute(
   String Function(String sid, String token, SessionMedia? media, String host)
       urlBuilder, {
   String Function(String sid, String token, String itemId, String host)? relayUrlBuilder,
-  String Function(String sid, String token, int mediaId, String name, List<RelayTrackSpec> tracks, String host)?
+  /// `key`: the media id, or the queue id of a relay started in Up next.
+  String Function(String sid, String token, String key, String name, List<RelayTrackSpec> tracks, String host)?
       relayMediaUrlBuilder,
 }) {
   app.get('/sync', (final req) {
@@ -374,15 +536,22 @@ void mountSyncRoute(
                 // Relayed for viewers without access: from the swapper's
                 // machine (its own sign-in never leaves it).
                 final relayReq = parsed.relay == null || parsed.relay!.fetch ? null : parsed.relay;
+                // Up next's warm relay of this item carries on as its relay.
+                final promoted = relayReq == null || ref == null ? null : hub.takeWarm(queueId, token, fetch: false);
                 final media = ref == null
                     ? null
                     : HelloMedia(
-                        name: sanitizeMediaName(parsed.name.isEmpty ? ref.title : parsed.name),
+                        name: promoted?.name ?? sanitizeMediaName(parsed.name.isEmpty ? ref.title : parsed.name),
                         size: parsed.size,
                         duration: parsed.duration,
                         jellyfin: ref,
-                        relay: relayReq == null ? null : hub.relayFor(token, const MediaRelay()));
+                        relay: relayReq == null
+                            ? null
+                            : promoted != null
+                                ? hub.promotedRelay(promoted, queueId!)
+                                : hub.relayFor(token, const MediaRelay()));
                 if (media == null || !hub.engine.applySwap(token, media, queueId: queueId)) {
+                  promoted?.dispose();
                   wsErr(ws, 'bad swap media');
                   return;
                 }
@@ -392,7 +561,11 @@ void mountSyncRoute(
                     duration: media.duration,
                     jellyfin: ref,
                     mediaId: hub.engine.mediaId);
-                hub.setRelay(relayReq == null ? null : _memberRelay(hub, token, media.name, const []));
+                hub.setRelay(relayReq == null
+                    ? null
+                    : promoted != null
+                        ? (promoted..promote(hub.engine.mediaId))
+                        : _memberRelay(hub, token, media.name, const []));
                 hub.changed();
                 return;
               }
@@ -415,27 +588,38 @@ void mountSyncRoute(
                   wsErr(ws, 'server fetch needs a server password');
                   return;
                 }
+                // Up next's warm relay of this item carries on as its relay
+                // (its buffer, its feed, its `/r/.../<queueId>/` URLs).
+                final promoted = hub.takeWarm(queueId, token, fetch: relayReq.fetch, tracks: relayReq.tracks);
+                final shown = promoted?.name ?? name;
                 final media = HelloMedia(
-                    name: name,
+                    name: shown,
                     size: parsed.size,
                     duration: parsed.duration,
-                    relay: hub.relayFor(token, relayReq));
+                    relay: promoted != null ? hub.promotedRelay(promoted, queueId!) : hub.relayFor(token, relayReq));
                 if (!hub.engine.applySwap(token, media, queueId: queueId)) {
+                  promoted?.dispose();
                   wsErr(ws, 'bad swap media');
                   return;
                 }
                 session.media = SessionMedia(
-                    name: name, size: parsed.size, duration: parsed.duration, mediaId: hub.engine.mediaId);
+                    name: shown, size: parsed.size, duration: parsed.duration, mediaId: hub.engine.mediaId);
+                void failed(String why) {
+                  wsErr(ws, hub.fetchFailText(why));
+                  hub.fetchFailed(shown);
+                }
                 late final ActiveRelay active;
-                active = relayReq.fetch
-                    ? ActiveRelay.fetch(hub.engine.mediaId, name, link!,
-                        ytDlp: hub.ytDlp,
-                        onLiveChanged: () => hub.relayLiveChanged(active),
-                        onFail: (why) {
-                          wsErr(ws, hub.fetchFailText(why));
-                          hub.fetchFailed(name);
-                        })
-                    : _memberRelay(hub, token, name, media.relay!.tracks);
+                if (promoted != null) {
+                  active = promoted..promote(hub.engine.mediaId);
+                  if (active.fetch) {
+                    active.onFail = failed;
+                  }
+                } else {
+                  active = relayReq.fetch
+                      ? ActiveRelay.fetchLink(hub.engine.mediaId, name, link!,
+                          ytDlp: hub.ytDlp, onLiveChanged: () => hub.relayLiveChanged(active), onFail: failed)
+                      : _memberRelay(hub, token, name, media.relay!.tracks);
+                }
                 hub.setRelay(active);
                 hub.changed();
                 return;
@@ -626,8 +810,8 @@ void mountSyncRoute(
                 relayed.mediaId == media.mediaId &&
                 relayMediaUrlBuilder != null
             ? (relayed.known
-                ? relayMediaUrlBuilder(
-                    'default', activeToken, relayed.mediaId, relayed.name, relayed.tracks, dialledHost)
+                ? relayMediaUrlBuilder('default', activeToken, relayed.queueId ?? '${relayed.mediaId}', media.name,
+                    relayed.tracks, dialledHost)
                 : null)
             : media?.file != null
                 ? urlBuilder('default', activeToken, media, dialledHost)
@@ -656,6 +840,6 @@ void mountSyncRoute(
 ActiveRelay _memberRelay(ServerHub hub, String token, String name, List<RelayTrackSpec> tracks) {
   late final ActiveRelay r;
   r = ActiveRelay.fromMember(hub.engine.mediaId, name, token,
-      tracks: tracks, onLiveChanged: () => hub.relayLiveChanged(r));
+      tracks: tracks, sourceId: hub.engine.members[token]?.id ?? '', onLiveChanged: () => hub.relayLiveChanged(r));
   return r;
 }
