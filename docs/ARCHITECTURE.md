@@ -923,7 +923,12 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
 ## Desktop UI
 
 One window, `AppShell` (`lib/src/shell/`), whatever the connection state
-(online = `SessionState.route` is `session`). Motion is shared
+(online = `SessionState.route` is `session`). The window comes back as it was
+(`platform/window_memory.dart`, settings key `windowBounds`, saved on
+resize/move/maximize and close): its normal size and maximized state
+everywhere, its position where an app may place itself (Windows, X11;
+not Wayland, where the compositor decides) and only if it still lands
+on a connected display, else centred. Fullscreen is not restored. Motion is shared
 (`motion.dart`): one curve (`fastEaseInToSlowEaseOut`, 320 ms), a fade
 through for views that replace each other (the old one gone after 35%, the
 new one fading and scaling in from 0.985), `showPopover` (cards that fade

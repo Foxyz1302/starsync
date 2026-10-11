@@ -10,6 +10,7 @@ import 'package:window_manager/window_manager.dart';
 import 'app.dart';
 import 'src/playback/yt_dlp_app.dart';
 import 'src/platform/desktop_entry.dart';
+import 'src/platform/window_memory.dart';
 import 'src/screens/home/ui.dart';
 import 'src/state/session_state.dart';
 import 'src/state/settings.dart';
@@ -40,23 +41,25 @@ Future<void> main(List<String> args) async {
         ),
       );
   WidgetsFlutterBinding.ensureInitialized();
+  await Hive.initFlutter();
+  await AppSettings.instance.ensureLoaded();
   await windowManager.ensureInitialized();
   await windowManager.setPreventClose(true);
-  windowManager.addListener(_CloseGuard());
-  const windowOptions = WindowOptions(
-    size: Size(1280, 720),
-    minimumSize: Size(160, 90),
-    center: true,
-    backgroundColor: Color(0xFF000000),
+  final memory = WindowMemory(Hive.isBoxOpen(settingsBoxName) ? Hive.box(settingsBoxName) : null);
+  windowManager.addListener(_CloseGuard(memory));
+  final windowOptions = WindowOptions(
+    size: memory.size,
+    minimumSize: const Size(160, 90),
+    center: !memory.hasPosition,
+    backgroundColor: const Color(0xFF000000),
     titleBarStyle: TitleBarStyle.hidden,
     title: appName,
   );
   windowManager.waitUntilReadyToShow(windowOptions, () async {
+    await memory.restore();
     await windowManager.show();
     await windowManager.focus();
   });
-  await Hive.initFlutter();
-  await AppSettings.instance.ensureLoaded();
   try {
     await SessionState.instance.loadForm();
   } catch (e, st) {
@@ -74,12 +77,15 @@ Future<void> main(List<String> args) async {
 /// hosted server shuts down), bounded so a hung socket can't keep the
 /// window open.
 class _CloseGuard with WindowListener {
+  final WindowMemory memory;
   bool _closing = false;
+  _CloseGuard(this.memory);
 
   @override
   Future<void> onWindowClose() async {
     if (_closing) return;
     _closing = true;
+    await memory.save();
     try {
       await SessionState.instance.leave().timeout(const Duration(seconds: 2));
     } catch (e) {
