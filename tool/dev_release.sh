@@ -63,7 +63,12 @@ EOF
 if [[ "$PUBLISH" != "1" ]]; then
   echo "built $TARBALL (not published)"; exit 0
 fi
-dart "$ROOT/tool/release_publish.dart" dev "$TARBALL" "$MANIFEST"
+# Gitea sometimes resets the upload; the previous build stays up meanwhile.
+for try in 1 2 3; do
+  dart "$ROOT/tool/release_publish.dart" dev "$TARBALL" "$MANIFEST" && break
+  [[ "$try" == 3 ]] && { echo "error: upload failed 3 times" >&2; exit 1; }
+  echo "upload failed, retrying ($try/3) ..."; sleep 3
+done
 
 cat <<EOF
 
