@@ -399,7 +399,11 @@ class _SessionPlayerState extends State<SessionPlayer> {
               child: Row(
                 children: [
                   const Expanded(child: NowPlayingTitle()),
-                  UpNextButton(queue: coord.queue, onPlayNextEpisode: coord.playNextEpisode, look: UpNextLook.standard),
+                  UpNextButton(
+                      queue: coord.queue,
+                      onPlayNextEpisode: coord.playNextEpisode,
+                      look: UpNextLook.standard,
+                      hold: _hold),
                   MaterialDesktopCustomButton(
                     icon: const Icon(Icons.video_library_outlined),
                     onPressed: widget.onChangeVideo,
@@ -571,7 +575,8 @@ class _SessionPlayerState extends State<SessionPlayer> {
       top: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          UpNextButton(queue: coord.queue, onPlayNextEpisode: coord.playNextEpisode, look: UpNextLook.uosc),
+          UpNextButton(
+              queue: coord.queue, onPlayNextEpisode: coord.playNextEpisode, look: UpNextLook.uosc, hold: _hold),
           UoscButton(
             key: const ValueKey('uosc-chat'),
             icon: widget.chatOpen ? Icons.chat_bubble_rounded : Icons.chat_bubble_outline_rounded,

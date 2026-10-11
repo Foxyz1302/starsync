@@ -170,8 +170,10 @@ checked first, like Put it up. The next item is kept ready on the app
 that will put it up, so skipping to it starts at once. Everyone shares one Up next and anyone can change it; what
 you added stays when you leave.
 
-In the player, **Up next · title** sits in the top bar next to the chat
-button: ⏭ plays it now, the title opens the queue: drag rows to reorder, hover a
+In the player, Up next sits in the top bar next to the chat button: the
+next item's picture and title (or the next episode's). Rest the mouse on
+it for a larger preview (who added it, its length, whether it is ready
+to start); ⏭ plays it now, a click opens the queue: drag rows to reorder, hover a
 row to play it now (▶) or remove it (×), paste a link in the field or
 drop a link or a video on it to add. When a video ends, a card shows
 what is up next with a 10 s countdown (Cancel stops it on your screen)

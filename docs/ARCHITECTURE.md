@@ -898,9 +898,18 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
 - **UI**: `UpNextButton` is one of the player's top-bar controls, before
   chat (see "Player overlay" under Desktop UI), in the look of the
   design's buttons (`UpNextLook`); it shows and hides with the controls,
-  which an open popover holds up: "Up next · title", a +n count, ⏭ plays
-  it now; without Up next the continuation ("Next · S1E8 …", ⏭ = next
-  episode); nothing when both are empty. Its title opens the queue as a
+  which an open popover holds up: the first item's picture (`QueueThumb`,
+  the rows' faint box and icon until it arrives), "UP NEXT" over its
+  title, a +n count, ⏭ plays it now; without Up next the continuation
+  (the episode's image, "NEXT · S1 E8" over its name, ⏭ = next episode);
+  nothing when both are empty. Resting on it 600 ms (popover closed)
+  shows `UpNextPreview` under it, right edges aligned, in `AppGlass`:
+  the picture large, title, second line, "length · added by (avatar)
+  name · how" (an episode: series, length, overview), how ready it is
+  here (the row's dot and words, else who puts it up) and the `>` key;
+  it stays while the mouse is on either, holds the controls up
+  (`ControlsHold`) while shown, and a click on it opens the queue. Its
+  title opens the queue as a
   `LeafPopover` (package `leaf_widgets`, an overlay rather than a route)
   hanging under it, right edges aligned: the app's glass (`AppGlass`),
   the menus' paddings and row hover, 64 px rows with an 80 px 16:9
@@ -1165,7 +1174,7 @@ from `AppMenuStyle.theme`; the uosc controls keep their own flat menus.
   tall like the status pill without avatars). The mouse on any
   floating element counts as the mouse on the controls: a
   `ControlsHold` (`controls/controls_probe.dart`) held by
-  `ControlsHoldRegion`s (and by the open Up next popover) keeps either
+  `ControlsHoldRegion`s (and by the open Up next popover or its preview) keeps either
   design's controls up (`UoscControls.holdBy`; `ControlsHoverProbe.hold`,
   which re-wakes media_kit's controls through their private hover
   handler, the same guarded dynamic call as `keepVideoControlsAwake`),
