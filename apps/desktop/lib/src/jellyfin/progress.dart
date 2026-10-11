@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:sync_relay_core/core.dart';
@@ -24,6 +25,14 @@ class PlayerSnapshot {
 /// go out one after another; a failure is logged and handed to [onError]
 /// (the session shows one quiet toast) and never touches playback. A 401
 /// calls [onUnauthorized] and ends reporting.
+///
+/// Watched or not is [WatchSession]'s rule, not Jellyfin's position
+/// percentages (see ARCHITECTURE.md "Jellyfin in a session"): an item
+/// played before ([playedBefore]) stays played (re-marked after Playing,
+/// Progress without a position, Stopped without one, then marked played
+/// again); otherwise Progress leaves the position out past
+/// [_noPositionFrom] of the runtime so Jellyfin cannot mark it played on
+/// its own, and Stopped carries what the rule says.
 class JellyfinProgressReporter {
   final JellyfinClient client;
   final String itemId;
@@ -34,20 +43,36 @@ class JellyfinProgressReporter {
   final void Function(Object error)? onError;
   final VoidCallback? onUnauthorized;
 
+  /// What this viewer watched of the item while it was open here.
+  final WatchSession watch;
+
   JellyfinProgressReporter({
     required this.client,
     required this.itemId,
     required this.source,
     required this.playSessionId,
+    bool playedBefore = false,
+    int resumeTicksBefore = 0,
     this.interval = const Duration(seconds: 10),
     this.onError,
     this.onUnauthorized,
     DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now;
+  })  : _clock = clock ?? DateTime.now,
+        _keepPlayed = playedBefore,
+        _runtime = (source.runTimeTicks ?? 0) / jellyfinTicksPerSecond,
+        watch = WatchSession(
+            playedBefore: playedBefore, resumeBefore: resumeTicksBefore / jellyfinTicksPerSecond);
+
+  /// Past this share of the runtime Progress carries no position: Jellyfin
+  /// marks an item played past its "max resume" share (90 % by default).
+  static const _noPositionFrom = 0.85;
 
   Future<void> _chain = Future.value();
   bool _playing = false;
   bool _dead = false;
+  bool _keepPlayed;
+  double _runtime;
+  double? _endingStart;
   PlayerSnapshot? _last;
   DateTime? _lastAt;
   DateTime? _lastSentAt;
@@ -55,13 +80,23 @@ class JellyfinProgressReporter {
   /// Between [start] and [stop].
   bool get active => _playing && !_dead;
 
+  /// The item counts as played here (before, or by the rule at a stop).
+  bool get keepsPlayed => _keepPlayed;
+
+  /// The player's duration (used when Jellyfin gave no runtime) and where
+  /// the ending starts (Outro segment / ED chapter), seconds.
+  void timeline({double duration = 0, double? endingStart}) {
+    if ((source.runTimeTicks ?? 0) <= 0 && duration > 0) _runtime = duration;
+    _endingStart = endingStart;
+  }
+
   /// The report body for [s]: ticks, pause, and mpv's aid/sid mapped to
   /// Jellyfin stream indices (-1 = subtitles off).
-  JellyfinPlaybackReport reportFor(PlayerSnapshot s) => JellyfinPlaybackReport(
+  JellyfinPlaybackReport reportFor(PlayerSnapshot s, {bool withPosition = true}) => JellyfinPlaybackReport(
         itemId: itemId,
         mediaSourceId: source.id,
         playSessionId: playSessionId,
-        positionTicks: (s.position * jellyfinTicksPerSecond).round(),
+        positionTicks: withPosition ? _ticks(s.position) : null,
         isPaused: s.paused,
         audioStreamIndex: s.aid == null
             ? null
@@ -71,13 +106,24 @@ class JellyfinProgressReporter {
             : source.jellyfinIndexForMpvTrack(JellyfinStreamType.subtitle, s.sid!),
       );
 
+  static int _ticks(double secs) => (secs * jellyfinTicksPerSecond).round();
+
+  /// Progress may carry the position: not for a played item, not without
+  /// a runtime and not near the end (either would let Jellyfin decide).
+  bool _progressPosition(double position) =>
+      !_keepPlayed && _runtime > 0 && position < _noPositionFrom * _runtime;
+
   /// Playing: once the media is open. Again after [stop] (played to the
-  /// end, then someone seeked back) starts reporting anew.
+  /// end, then someone seeked back) starts reporting anew. A played item
+  /// is marked played again right after (Jellyfin up to 10.11 clears it
+  /// on Playing).
   void start(PlayerSnapshot s) {
     if (_playing || _dead) return;
     _playing = true;
     _mark(s);
+    watch.sample(s.position, playing: !s.paused, at: _clock());
     _send('Playing', () => client.reportPlaybackStart(reportFor(s)));
+    if (_keepPlayed) _send('played', () => client.markPlayed(itemId));
   }
 
   /// Progress when due (see the class doc).
@@ -85,6 +131,7 @@ class JellyfinProgressReporter {
     if (!_playing || _dead) return;
     final last = _last, lastAt = _lastAt, sentAt = _lastSentAt;
     final now = _clock();
+    watch.sample(s.position, playing: !s.paused, at: now);
     var due = force || last == null || lastAt == null || sentAt == null;
     if (!due) {
       final elapsed = now.difference(lastAt).inMilliseconds / 1000;
@@ -99,15 +146,38 @@ class JellyfinProgressReporter {
     _lastAt = now;
     if (!due) return;
     _lastSentAt = now;
-    _send('Progress', () => client.reportPlaybackProgress(reportFor(s)));
+    final report = reportFor(s, withPosition: _progressPosition(s.position));
+    _send('Progress', () => client.reportPlaybackProgress(report));
   }
 
-  /// Stopped (swap, leave, kick, window close, played to the end).
+  /// Stopped (swap, leave, kick, window close, played to the end), as
+  /// [WatchSession.verdict] says: played (or kept played) -> no position,
+  /// then marked played; a peek -> the resume point from before; part way
+  /// -> the position, held under [_noPositionFrom] of the runtime.
   /// Completes when it and everything before it went out.
   Future<void> stop(PlayerSnapshot s) {
     if (!_playing || _dead) return _chain;
     _playing = false;
-    _send('Stopped', () => client.reportPlaybackStopped(reportFor(s)));
+    watch.sample(s.position, playing: !s.paused, at: _clock());
+    final v = _keepPlayed
+        ? const WatchVerdict(WatchOutcome.keepPlayed)
+        : watch.verdict(runtime: _runtime, endingStart: _endingStart);
+    debugPrint('jellyfin $itemId: $v (covered ${watch.covered.round()} s of ${_runtime.round()} s)');
+    final int? ticks;
+    switch (v.outcome) {
+      case WatchOutcome.played || WatchOutcome.keepPlayed:
+        _keepPlayed = true;
+        ticks = null;
+      case WatchOutcome.peek:
+        ticks = _ticks(watch.resumeBefore);
+      case WatchOutcome.partial:
+        final at = v.resumeAt ?? s.position;
+        ticks = _ticks(_runtime > 0 ? math.min(at, _noPositionFrom * _runtime) : at);
+    }
+    final report = JellyfinPlaybackReport(
+        itemId: itemId, mediaSourceId: source.id, playSessionId: playSessionId, positionTicks: ticks);
+    _send('Stopped', () => client.reportPlaybackStopped(report));
+    if (ticks == null) _send('played', () => client.markPlayed(itemId));
     return _chain;
   }
 

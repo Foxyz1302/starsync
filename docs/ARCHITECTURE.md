@@ -7,7 +7,7 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 
 | Path | What | Rule |
 |---|---|---|
-| `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client, updater | pure Dart, no Flutter |
+| `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client, updater, watched rule (`WatchSession`) | pure Dart, no Flutter |
 | `packages/server` | Relic HTTP + WebSocket server (`SyncServer`, `ServerHub`, `Session`, media endpoint, relay buffer, Jellyfin relay), the `serve()` entrypoint, `bin/server.dart` (dedicated server) | pure Dart, no Flutter |
 | `apps/desktop` | Flutter app: UI, `SyncClient`, `SessionCoordinator`, `PlaybackController` (media_kit/mpv), `ServerIsolate`, update UI (`UpdateController`) | ships with `watch-together-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
@@ -688,7 +688,8 @@ all three link modes. Nothing is bundled or installed by hand.
   reason and the GET's HTTP status. `LinkProbe.problem`: why it will not
   play, in plain words (`playErrorText` of yt-dlp's reason, else of a 4xx
   status), null for a file or a page yt-dlp read. The app probes on paste
-  (`AppYtDlp.probe`, remembered 10 minutes; media file names too, not a
+  (`AppYtDlp.probe`, remembered 10 minutes, longer for Up next's first
+  item (see "Up next"); media file names too, not a
   Jellyfin item link) for the
   Link preview and the swap: a page is named by its title, never its URL
   tail, and its thumbnail goes up as its art (see "Media art"). A link with a
@@ -754,13 +755,43 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   file is open and mpv has picked its tracks; Progress every 10 s and at
   once on pause, resume, a seek (position more than 3 s from where playback
   should be) or a track change; Stopped on swap, leave, sitting out, window close
-  (bounded to 1.5 s inside the graceful leave) and at `finished` (position =
-  duration, so Jellyfin marks it played); seeking back from the end sends
-  Playing again. Reports carry `PositionTicks`, `IsPaused` and mpv's
-  `aid`/`sid` as Jellyfin stream indices (`jellyfinIndexForMpvTrack`,
-  `SubtitleStreamIndex -1` = off). They go out in order on one chain;
-  failures are logged, one quiet toast per session, playback is never
-  touched; a 401 marks the account expired and ends reporting.
+  (bounded to 1.5 s inside the graceful leave) and at `finished`; seeking
+  back from the end sends Playing again. Reports carry `PositionTicks`
+  (see "Watched rule"), `IsPaused` and mpv's `aid`/`sid` as Jellyfin
+  stream indices (`jellyfinIndexForMpvTrack`, `SubtitleStreamIndex -1` =
+  off). They go out in order on one chain; failures are logged, one quiet
+  toast per session, playback is never touched; a 401 marks the account
+  expired and ends reporting.
+- **Watched rule** (`WatchSession` in `packages/core/lib/src/watch_session.dart`,
+  pure, meant for any tracker): each opening samples the position every
+  tick; only normal playback counts (forward, at most 2x speed + 1.5 s,
+  samples at most 10 s apart; seeks, skips and pauses add nothing). The
+  union of the watched stretches is the coverage (rewatching counts once),
+  alongside the plain watched time, first / last / furthest position and
+  start / end time. At a stop: played before this opening -> keep played;
+  coverage >= 80 % of the runtime, or the ending reached (furthest position
+  past the Outro / ED start, else the real end) with coverage >= 50 % ->
+  played; coverage under max(2 min, 5 %) (at most a quarter of a short
+  item) -> a peek; else part way, resuming at the last position. An
+  unknown runtime never makes it played. Jellyfin decides played from
+  positions alone (10.11): Playing sets a resumable item unplayed, a
+  Progress or Stopped position past "max resume" (90 %) marks it played,
+  one in between keeps a resume point. So `JellyfinProgressReporter`
+  (played before = `UserData.Played` read at open with
+  `/UserItems/{id}/UserData`):
+  - played (before, or by the rule at an earlier stop of this opening):
+    `UserPlayedItems` right after Playing, Progress without
+    `PositionTicks` (leaves the saved position and played state), Stopped
+    without `PositionTicks` (Jellyfin marks it played, position 0), then
+    `UserPlayedItems` again;
+  - peek: Stopped with the resume point from before the opening (0 when
+    none), so the item is as it was;
+  - part way: Stopped at the last position, held under 85 % of the
+    runtime so Jellyfin cannot mark it played;
+  - not played yet, any time: Progress leaves `PositionTicks` out from
+    85 % of the runtime on (and without a runtime), so only the rule
+    marks it played.
+  Members playing through the server report nothing.
 - **Episodes**: with `OwnPlay` on an episode, `adjacentEpisodes` (one
   `/Shows/{id}/Episodes` call; `episodeBefore` / `episodeAfter`) gives the
   previous and next episode. The controls show previous / next buttons
@@ -832,7 +863,7 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   puts the first item up does, with a swap naming it (`swap.queueId`), so
   the server takes it off in the same step and a second swap of it is
   ignored. Cancel is per screen like the next-episode countdown. "Play
-  now" anywhere (a row, the card, the chip's ▶, `>` / Shift+N) swaps
+  now" anywhere (a row, the card, the Up next button's ⏭, `>` / Shift+N) swaps
   directly from the app that can, else sends `play` and that app reacts
   to `state.queuePlay`. With nothing up at all, the first item goes up as
   soon as it is added. The swap goes through the usual paths
@@ -842,37 +873,52 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   with the reason. A swap without `queueId` (a manual one) leaves the
   queue alone. A member who puts its own link or file up while sitting
   out comes back first; any other queued swap leaves the swapper out.
-- **Getting ready** (`queueWarmDue`): in the last 90 s of the current
-  media, once it is buffered to its end, or at `finished`, the app that
-  will put the first item up resolves its link (`AppYtDlp.probe`, kept 10
-  minutes, which the swap then reads), so the swap does not wait for
-  yt-dlp. A Jellyfin item, a file or a server-fetched link has nothing to
-  get ready there. Only the first item, only that app, nothing on the
-  server. Its row shows a dot: hollow waiting, pulsing getting ready,
-  filled ready, red failed (tried again when it comes up).
+- **Getting ready** (`QueueController._warm`): the one item this app
+  puts up next is kept ready all the time, so a skip, Play now or the
+  end of the media starts it at once. That is the first Up next item on
+  the app that puts it up (`queuePerformer`), else, with Up next empty,
+  the first "Continues with" episode on an app that has it. It is
+  resolved as soon as it is first there (or this app becomes the one),
+  again every 30 minutes, and dropped when it stops being first: a link
+  is probed (`AppYtDlp.probe` with `keep`: the result stays 35 minutes
+  instead of 10 and a refresh replaces it only once it is in; swaps read
+  it from there); a Jellyfin item is resolved with this app's account
+  (`resolveJellyfinRef`: PlaybackInfo and the item) into
+  `SessionCoordinator.warmJellyfin`, which `_playJellyfin` takes instead
+  of resolving when the same ref goes up within those 35 minutes and the
+  account is unchanged. A file or a server-fetched link has nothing to
+  get ready. One item, one app, nothing on the server. Its row shows a
+  dot on its picture's corner (a tooltip says which): hollow waiting, pulsing getting ready, filled ready, red failed
+  (tried again every 2 minutes).
 - **Continues with**: not queued, computed here like the next episode:
   with an own-account Jellyfin episode playing, the next three episodes
   of the series (`/Shows/{id}/Episodes`, cached), greyed under Up next,
   "+" adds one. "Clear" hides them for the media playing and keeps its
   next-episode countdown from starting.
-- **UI**: `UpNextChip` top right under the top bar (under the party in
-  fullscreen), shown with the controls like the pills (`PillGate`) and
-  while its popover is open: "Up next · title", a +n count, ▶ plays it
-  now; without Up next the continuation ("Next · S1E8 …", ▶ = next
+- **UI**: `UpNextButton` is one of the player's top-bar controls, before
+  chat (see "Player overlay" under Desktop UI), in the look of the
+  design's buttons (`UpNextLook`); it shows and hides with the controls,
+  which an open popover holds up: "Up next · title", a +n count, ⏭ plays
+  it now; without Up next the continuation ("Next · S1E8 …", ⏭ = next
   episode); nothing when both are empty. Its title opens the queue as a
-  `LeafPopover` (package `leaf_widgets`, an overlay rather than a route):
-  frosted glass like the app menus; rows with a 16:9 picture, title, second
-  line, "length · added by (avatar) name · how", a drag handle
+  `LeafPopover` (package `leaf_widgets`, an overlay rather than a route)
+  hanging under it, right edges aligned: the app's glass (`AppGlass`),
+  the menus' paddings and row hover, 64 px rows with an 80 px 16:9
+  picture, title, second line, "length · added by (avatar) name · how", a drag handle
   (`ReorderableListView`, reordered here at once and sent as `move`), ▶
   and × floating in on hover; "Continues with"; a "Paste a link to add"
   field (focused on open, so the player's keys and Space rest while it
   is up; Esc closes) and a drop zone for links and video files. Being no
   route, it holds the shell's own drop and paste handling off while open
-  (`handoffHolds`). "Add to queue" elsewhere: the Link page's button
-  next to Put it up (in the chosen mode), a right-click menu on recent
-  links, Jellyfin cards, episodes and details-panel episodes, and Files
-  videos (Put it up / Add to queue / Play next), and a button in the
-  Jellyfin details panel (right-click: play next). None of it offline.
+  (`handoffHolds`). "Add to queue" elsewhere, on every source: the Link
+  page's button next to Put it up (in the chosen mode), a right-click
+  `showAppMenu` (Put it up / Add to queue / Play next) on recent links,
+  Jellyfin cards (home rows, libraries, search), series episodes and
+  details-panel episodes, Files videos and Schedule cards that can be
+  put up, a button in the Jellyfin details panel (right-click: play
+  next), and Add to queue / Play next on the drop and paste card (videos
+  in order, a link in the Link page's mode). All go through
+  `QueueController.add`. None of it offline.
 
 ## Desktop UI
 
@@ -988,7 +1034,10 @@ from `AppMenuStyle.theme`; the uosc controls keep their own flat menus.
   by the linked account (`jellyfinEpisodeNumbers`, one request per series
   memoised 3 min; `confirmOnJellyfin` is the pure step); absent reads
   "aired · not on Jellyfin yet", unknown (no linked account, lookup
-  failed) "aired", neither with Put it up. Requests and the owner's inbox are in
+  failed) "aired", neither with Put it up. Put it up resolves the Jellyfin
+  episode (`resolveJellyfinEpisode`: AnimeFlow's numbering, else the
+  season and offset, else the air day) and goes through the shell's
+  put-up; right-click queues it the same way. Requests and the owner's inbox are in
   `requests_sheet.dart`. It refreshes every minute; mouse drag and
   Shift+wheel scroll the board sideways, the plain wheel scrolls a column.
   Settings (`settings_tab.dart`) has a left nav with icons
@@ -1008,7 +1057,8 @@ from `AppMenuStyle.theme`; the uosc controls keep their own flat menus.
   `HandoffCard` opens as a popover at the pointer: a video goes up through
   the shell's put-up (Play when alone; offline that starts solo) or adds
   its folder to Files; a folder is added to Files and opened; a link fills
-  Library → Link (with others the relay mode is picked there). Images are ignored.
+  Library → Link (with others the relay mode is picked there). In a
+  server, videos and links also get Add to queue / Play next. Images are ignored.
   Nothing happens while a dialog or popover is over the shell.
 - **Sounds** (`sfx/`): the coordinator plays an `SfxCue` for ready,
   unready, force-ready, join, leave, swap and others' chat (feed
@@ -1059,8 +1109,8 @@ from `AppMenuStyle.theme`; the uosc controls keep their own flat menus.
   the banner (else a blur of the cover, else dark), darkened, with cover,
   big title and episode; it fades out on play and stays gone for that
   media; under 320 px tall (the mini) it drops the cover and shrinks the
-  title. One status pill (`player_status.dart`) sits bottom centre above
-  the controls: `playerStatusFor` (pure) picks the most pressing of
+  title. One status pill (`player_status.dart`) sits centred in the
+  action area (see "Player overlay"): `playerStatusFor` (pure) picks the most pressing of
   removed, reconnecting (Cancel), a warn/error health message (Retry),
   connecting (only after 2 s), finished, someone loading (below
   `StateBroadcast.bufferNeed`, the gate's own need at the current
@@ -1073,10 +1123,10 @@ from `AppMenuStyle.theme`; the uosc controls keep their own flat menus.
   line) and are never in "waiting for". A member's new error also toasts
   once (the pill is hidden while playing); avatars carry a red error mark
   and the members card says "can't play this: ...". 34 px avatars, a main line
-  and a muted detail line. Frosted glass, colour only for problems; it fades through
+  and a muted detail line. The pill glass, colour only for problems; it fades through
   between kinds. The mini shows its short line in its hover bar. ⚙ in both
   control designs opens the player settings card (`controls/
-  player_settings.dart`, `showPopover`): player design, progress line
+  player_settings.dart`, `showPopover`, on `AppGlass`): player design, progress line
   when hidden, upscaling shader, hardware decoding (set live on mpv's
   `hwdec`), subtitle and audio track. The rows (`playerSettingRows`) are
   the same widgets Settings → Player shows; all apply live. The progress
@@ -1086,6 +1136,35 @@ from `AppMenuStyle.theme`; the uosc controls keep their own flat menus.
   exit), as media_kit does not expose it. Fullscreen adds the
   `WindowButtons` to the top bar while the controls are up (restore
   leaves fullscreen).
+- **Player overlay** (full player, both designs; `session_player.dart`):
+  everything over the picture has a fixed place on one grid (16 px from
+  the sides, the bars' inset), so nothing floats on its own. The top
+  bar (part of the controls): now-playing title left; right the Up next
+  button (`UpNextButton`), chat, back-to-library or exit fullscreen,
+  then the window buttons in fullscreen, all in that design's button
+  look. Under it at the right, in fullscreen while paused, the party's
+  avatars; with the controls down and unread chat, the unread chip top
+  right. The action area: one band just above the bottom controls
+  (`_actionArea`; their height per design, 16 px gap), sliding down to
+  16 px from the bottom while they are hidden (`AnimatedPositioned`,
+  the shell's `ease` / `easeTime`); in it the status pill centred
+  (moved left only as far as it must to clear the right end, never
+  overlapping it) and at the right end the end card (`UpNextCard`, else
+  `EndOfEpisodeCard`, which stay up) or the action pills (Skip OP / ED /
+  1:30 over Next episode, `PillGate`). The Jellyfin blocked card sits in
+  the middle. Two surfaces: cards and popovers use `AppGlass`
+  (`widgets/app_menu.dart`, the menus' recipe: blur, dark tint, hairline
+  border, 12 px radius, shadow); pills use `PlayerGlass`
+  (`AppGlass.pill`: a stadium, lighter tint, no shadow): the status
+  pill, the unread chip and `FloatingPill` (the action pills, 44 px
+  tall like the status pill without avatars). The mouse on any
+  floating element counts as the mouse on the controls: a
+  `ControlsHold` (`controls/controls_probe.dart`) held by
+  `ControlsHoldRegion`s (and by the open Up next popover) keeps either
+  design's controls up (`UoscControls.holdBy`; `ControlsHoverProbe.hold`,
+  which re-wakes media_kit's controls through their private hover
+  handler, the same guarded dynamic call as `keepVideoControlsAwake`),
+  and lets them hide on their usual countdown once released.
 - **Chat** (`chat_panel.dart`): a 340 px panel sliding in at the right
   (strip button or Tab): chat with avatars; the "Activity" chip (off by
   default, `showActivity`, kept for the app's run only) adds the other
@@ -1164,7 +1243,7 @@ Session controls (the Standard player design): media_kit's
 `screens/session/player_controls.dart`); its own double-click and keys are
 off (its double-click pushes a fullscreen route with a second `Video`), the
 picture's double-click is a raw pointer observer (`DoubleClickListener`).
-The top bar holds the now-playing title, Change video, chat and back-to-library
+The top bar holds the now-playing title, Up next, Change video, chat and back-to-library
 (fullscreen: exit, then the window buttons); the bottom bar ends with the
 shader button, ⚙ and fullscreen. Its seek bar is off; ours
 (`ChapterSeekBar`: chapter diamonds, hover time with the chapter title)
@@ -1172,10 +1251,11 @@ sits in the bottom bar, which is taller by the bar's height (the top bar
 keeps its row at the top). A drag sends no hover events, so the bar keeps
 the controls up through a guarded dynamic `onHover()` on media_kit's
 private controls state (`keepVideoControlsAwake`). Pills (Skip OP / ED /
-1:30, Next episode) and cards live outside the auto-hiding controls. The
+1:30, Next episode) and cards live outside the auto-hiding controls, in
+the action area ("Player overlay"). The
 cards stay up; a pill (`PillGate`) shows only while the controls are up
 (`ControlsHoverProbe` for this design, `UoscControls.shown` for uosc) or
-the mouse is on it, and Skip OP / Skip 1:30 also for 5 s when an offer of
+the mouse is on it (which holds the controls up too), and Skip OP / Skip 1:30 also for 5 s when an offer of
 a new kind appears (Skip ED and Next episode never without the controls).
 Volume (`controls/volume.dart`, both
 designs): mpv's `volume-max` is pinned to `PlaybackController.maxVolume`
@@ -1200,8 +1280,8 @@ leave),
 subtitles and audio with track counts, a shader badge ("A HQ", opening the
 shared `showShaderMenu`), ready, mark everyone ready, reload; 1:30,
 chapters, previous / next episode, change video, volume, ⚙, fullscreen; the
-now-playing title top left (`UoscControls.topLeft`, with a top gradient), chat
-and back-to-library (fullscreen: exit) top right. Menus (`showUoscMenu`: a popup route above the button, the
+now-playing title top left (`UoscControls.topLeft`, with a top gradient), Up next, chat
+and back-to-library (fullscreen: exit) top right, centred on the title. Menus (`showUoscMenu`: a popup route above the button, the
 current row highlighted) list tracks and chapters with start times. All
 actions are the coordinator's (seeks through `player.seek`, the user path;
 `selectTrack`, `skipForward`, `seekTo`); keys and the floating pills are

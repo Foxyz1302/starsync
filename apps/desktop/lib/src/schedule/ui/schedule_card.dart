@@ -137,6 +137,9 @@ class AiringCard extends StatelessWidget {
   final bool busy;
   final VoidCallback onAction;
 
+  /// Right-click ([context]: the card): the page's menu; null: none.
+  final void Function(BuildContext context)? onMenu;
+
   const AiringCard({
     super.key,
     required this.entry,
@@ -146,6 +149,7 @@ class AiringCard extends StatelessWidget {
     required this.onAction,
     this.disabledHint,
     this.busy = false,
+    this.onMenu,
   });
 
   String get _id => '${entry.airing.anilistId}-${entry.airing.episode}';
@@ -192,6 +196,8 @@ class AiringCard extends StatelessWidget {
       ),
     );
     final tap = (action == CardAction.putUp || action == CardAction.play) && disabledHint == null && !busy ? onAction : null;
+    final onMenu = this.onMenu;
+    final menu = onMenu == null || busy ? null : () => onMenu(context);
     if (compact) {
       final requestable = action == CardAction.request || action == CardAction.requestSeries;
       return Material(
@@ -201,6 +207,7 @@ class AiringCard extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
           onTap: tap,
+          onSecondaryTap: menu,
           child: Padding(
             padding: const EdgeInsets.all(6),
             child: Row(
@@ -255,6 +262,7 @@ class AiringCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: tap,
+        onSecondaryTap: menu,
         child: Padding(
           padding: const EdgeInsets.all(8),
           child: Column(

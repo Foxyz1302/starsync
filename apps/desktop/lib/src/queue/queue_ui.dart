@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:fox_utils/fox_utils.dart' show DesktopDropX, DropTarget;
@@ -7,6 +6,9 @@ import 'package:leaf_widgets/leaf_widgets.dart' show LeafPopover, LeafPopoverCon
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
+import '../controls/uosc/buttons.dart' show UoscButton;
+import '../controls/uosc/controls.dart' show UoscControls;
+import '../controls/uosc/style.dart';
 import '../files/scanner.dart' show FileKind, kindOf;
 import '../jellyfin/images.dart';
 import '../jellyfin/session_media.dart' show EpisodeLink;
@@ -16,65 +18,41 @@ import '../shell/avatar.dart';
 import '../shell/handoff.dart' show handoffHolds;
 import '../shell/motion.dart';
 import '../state/session_state.dart';
-import '../widgets/app_menu.dart' show AppMenuStyle;
+import '../widgets/app_menu.dart' show AppGlass, AppMenuStyle;
 import 'queue_controller.dart';
 import 'queue_logic.dart';
 
-// Up next in the player: the chip top right (with the controls), the
-// popover it opens (the queue, the continuation, a field and a drop zone
-// to add), and the end-of-media card for the first item.
+// Up next in the player: its control in the top bar (with chat and
+// fullscreen), the popover it opens (the queue, the continuation, a field
+// and a drop zone to add), and the end-of-media card for the first item.
 
-/// Frosted dark glass like the app's menus.
-class _Glass extends StatelessWidget {
-  final Widget child;
-  final double radius;
-  final Color color;
-  const _Glass({super.key, required this.child, this.radius = AppMenuStyle.radius, this.color = AppMenuStyle.glass});
+// ---------------------------------------------------------------- button
 
-  @override
-  Widget build(BuildContext context) {
-    final r = BorderRadius.circular(radius);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: r,
-        boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 24, offset: Offset(0, 8))],
-      ),
-      child: ClipRRect(
-        borderRadius: r,
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-          child: Material(
-            color: color,
-            shape: RoundedRectangleBorder(
-                borderRadius: r, side: const BorderSide(color: AppMenuStyle.border, width: 0.5)),
-            child: child,
-          ),
-        ),
-      ),
-    );
-  }
-}
+/// Which controls design the Up next control sits in: it takes the look
+/// of that bar's buttons.
+enum UpNextLook { standard, uosc }
 
-// ------------------------------------------------------------------ chip
-
-/// "Up next · <title>" with ▶ (play it now), top right while the controls
-/// are up; the title opens the queue. Without Up next, the continuation
-/// ("Next · S1E8 …", ▶ plays it). Nothing when both are empty.
-class UpNextChip extends StatefulWidget {
+/// "Up next · <title>" and ▶ (play it now) in the player's top bar, one
+/// flat control among its buttons; the title opens the queue. Without Up
+/// next, the continuation ("Next · S1E8 …", ▶ plays it). Nothing when
+/// both are empty.
+class UpNextButton extends StatefulWidget {
   final QueueController queue;
   /// Plays the continuation's first episode (the next episode).
   final VoidCallback onPlayNextEpisode;
-  const UpNextChip({super.key, required this.queue, required this.onPlayNextEpisode});
+  final UpNextLook look;
+  const UpNextButton({super.key, required this.queue, required this.onPlayNextEpisode, required this.look});
 
   @override
-  State<UpNextChip> createState() => _UpNextChipState();
+  State<UpNextButton> createState() => _UpNextButtonState();
 }
 
-class _UpNextChipState extends State<UpNextChip> {
+class _UpNextButtonState extends State<UpNextButton> {
   final _popover = LeafPopoverController();
   bool _hoverTitle = false;
 
   QueueController get _q => widget.queue;
+  bool get _uosc => widget.look == UpNextLook.uosc;
 
   @override
   void dispose() {
@@ -102,8 +80,19 @@ class _UpNextChipState extends State<UpNextChip> {
     handoffHolds = math.max(0, handoffHolds - 1);
   }
 
+  Widget _tip(String message, Widget child) => _uosc
+      ? UoscTooltip(message: message, child: child)
+      : Tooltip(message: message, waitDuration: const Duration(milliseconds: 500), child: child);
+
   @override
   Widget build(BuildContext context) {
+    // The bar's own metrics: uosc's flat 40 px boxes, or media_kit's
+    // round 44 px icon buttons.
+    final height = _uosc ? UoscControls.buttonRowHeight : 44.0;
+    final radius = _uosc ? UoscStyle.radius : height / 2;
+    final hover = _uosc ? UoscStyle.hover : Colors.white10;
+    final fontSize = _uosc ? UoscStyle.fontSize : 14.0;
+    final dim = _uosc ? UoscStyle.dim : Colors.white70;
     return SignalBuilder(builder: (context) {
       final items = _q.items.value;
       final cont = _q.shownContinuation.value;
@@ -112,85 +101,89 @@ class _UpNextChipState extends State<UpNextChip> {
       final queued = items.isNotEmpty;
       final title = queued ? items.first.title : (cont.isNotEmpty ? cont.first.label : 'Nothing yet');
       final more = items.length - 1;
-      return _Glass(
-        radius: 999,
-        color: const Color(0xB3141418),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            LeafPopover(
-              controller: _popover,
-              popoverAnchor: Alignment.topRight,
-              childAnchor: Alignment.bottomRight,
-              spacing: 8,
-              onDismissed: _closed,
-              popoverBuilder: (context, c) => QueuePanel(queue: _q, onClose: c.hide),
-              child: MouseRegion(
-                cursor: SystemMouseCursors.click,
-                onEnter: (_) => setState(() => _hoverTitle = true),
-                onExit: (_) => setState(() => _hoverTitle = false),
-                child: GestureDetector(
-                  key: const ValueKey('up-next-chip'),
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _toggle,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    height: 36,
-                    padding: const EdgeInsets.only(left: 12, right: 10),
-                    color: _hoverTitle || open ? const Color(0x14FFFFFF) : Colors.transparent,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(queued ? Icons.queue_play_next_rounded : Icons.playlist_play_rounded,
-                            size: 17, color: Colors.white70),
-                        const SizedBox(width: 8),
-                        Text(queued ? 'Up next' : 'Next',
-                            style: const TextStyle(color: Colors.white60, fontSize: 12.5)),
-                        const Text('  ·  ', style: TextStyle(color: Colors.white38, fontSize: 12.5)),
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 240),
-                          child: Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                color: queued ? Colors.white : Colors.white70,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500),
-                          ),
-                        ),
-                        if (more > 0) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                            decoration: BoxDecoration(
-                                color: const Color(0x24FFFFFF), borderRadius: BorderRadius.circular(999)),
-                            child: Text('+$more', style: const TextStyle(color: Colors.white70, fontSize: 11)),
-                          ),
-                        ],
-                        const SizedBox(width: 4),
-                        AnimatedRotation(
-                          duration: easeTime,
-                          curve: ease,
-                          turns: open ? 0.5 : 0,
-                          child: const Icon(Icons.expand_more_rounded, size: 18, color: Colors.white54),
-                        ),
-                      ],
-                    ),
+      final label = MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hoverTitle = true),
+        onExit: (_) => setState(() => _hoverTitle = false),
+        child: GestureDetector(
+          key: const ValueKey('up-next-button'),
+          behavior: HitTestBehavior.opaque,
+          onTap: _toggle,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            height: height,
+            padding: const EdgeInsets.only(left: 10, right: 6),
+            decoration: BoxDecoration(
+              color: _hoverTitle || open ? hover : Colors.transparent,
+              borderRadius: BorderRadius.circular(radius),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(queued ? Icons.queue_play_next_rounded : Icons.playlist_play_rounded,
+                    size: _uosc ? 22 : 24, color: Colors.white),
+                const SizedBox(width: 8),
+                Text(queued ? 'Up next' : 'Next', style: TextStyle(color: dim, fontSize: fontSize)),
+                Text('  ·  ', style: TextStyle(color: dim, fontSize: fontSize)),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 240),
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: queued ? Colors.white : dim, fontSize: fontSize, fontWeight: FontWeight.w500),
                   ),
                 ),
-              ),
+                if (more > 0) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(color: UoscStyle.hover, borderRadius: BorderRadius.circular(999)),
+                    child: Text('+$more', style: TextStyle(color: dim, fontSize: 11)),
+                  ),
+                ],
+                const SizedBox(width: 2),
+                AnimatedRotation(
+                  duration: easeTime,
+                  curve: ease,
+                  turns: open ? 0.5 : 0,
+                  child: Icon(Icons.expand_more_rounded, size: 18, color: dim),
+                ),
+              ],
             ),
-            if (queued || cont.isNotEmpty) ...[
-              Container(width: 0.5, height: 20, color: Colors.white24),
-              _RoundIcon(
+          ),
+        ),
+      );
+      final playTip = queued ? 'Play ${items.first.title} now' : 'Play ${cont.isEmpty ? '' : cont.first.label} now';
+      final VoidCallback? play = queued ? _q.skip : (cont.isNotEmpty ? widget.onPlayNextEpisode : null);
+      final playButton = _uosc
+          ? UoscButton(key: const ValueKey('up-next-play'), icon: Icons.skip_next_rounded, tooltip: playTip, onPressed: play)
+          : _tip(
+              playTip,
+              IconButton(
                 key: const ValueKey('up-next-play'),
-                icon: Icons.play_arrow_rounded,
-                tooltip: queued ? 'Play ${items.first.title} now' : 'Play ${cont.first.label} now',
-                onPressed: queued ? _q.skip : widget.onPlayNextEpisode,
+                iconSize: 28,
+                color: Colors.white,
+                onPressed: play,
+                icon: const Icon(Icons.skip_next_rounded),
               ),
-            ],
-          ],
+            );
+      // The popover hangs under the whole control, right edges aligned.
+      return LeafPopover(
+        controller: _popover,
+        popoverAnchor: Alignment.topRight,
+        childAnchor: Alignment.bottomRight,
+        spacing: 8,
+        onDismissed: _closed,
+        popoverBuilder: (context, c) => QueuePanel(queue: _q, onClose: c.hide),
+        // A little apart from the bar's other buttons: its own group.
+        child: Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [label, if (play != null) playButton],
+          ),
         ),
       );
     });
@@ -378,7 +371,7 @@ class _QueuePanelState extends State<QueuePanel> {
           width: 424,
           child: ConstrainedBox(
             constraints: BoxConstraints(maxHeight: math.max(260, math.min(600, height - 140))),
-            child: _Glass(
+            child: AppGlass(
               child: AnimatedContainer(
                 duration: easeTime,
                 curve: ease,
@@ -403,13 +396,13 @@ class _QueuePanelState extends State<QueuePanel> {
                             ? _empty()
                             : ListView(
                                 shrinkWrap: true,
-                                padding: const EdgeInsets.fromLTRB(6, 0, 6, 6),
+                                padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
                                 children: [
                                   if (items.isEmpty)
                                     const Padding(
-                                      padding: EdgeInsets.fromLTRB(10, 2, 10, 8),
+                                      padding: EdgeInsets.fromLTRB(12, 2, 12, 8),
                                       child: Text('Nothing added yet. What plays next is below.',
-                                          style: TextStyle(color: Colors.white54, fontSize: 12.5)),
+                                          style: TextStyle(color: Colors.white54, fontSize: 12)),
                                     )
                                   else
                                     ReorderableListView.builder(
@@ -458,17 +451,18 @@ class _QueuePanelState extends State<QueuePanel> {
     );
   }
 
+  // Text lines up with the rows' (4 panel + 12 row padding).
   Widget _header(int count) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+        padding: const EdgeInsets.fromLTRB(16, 8, 6, 4),
         child: Row(
           children: [
-            const Text('Up next', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+            const Text('Up next', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
             if (count > 0) ...[
               const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-                decoration: BoxDecoration(color: const Color(0x24FFFFFF), borderRadius: BorderRadius.circular(999)),
-                child: Text('$count', style: const TextStyle(color: Colors.white70, fontSize: 11.5)),
+                decoration: BoxDecoration(color: AppMenuStyle.focus, borderRadius: BorderRadius.circular(999)),
+                child: Text('$count', style: const TextStyle(color: Colors.white70, fontSize: 11)),
               ),
             ],
             const Spacer(),
@@ -484,13 +478,13 @@ class _QueuePanelState extends State<QueuePanel> {
           children: [
             Icon(Icons.queue_play_next_rounded, size: 34, color: Colors.white30),
             SizedBox(height: 10),
-            Text('Nothing up next', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
+            Text('Nothing up next', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
             SizedBox(height: 4),
             Text(
               'Paste a link below, drop a video or a link here, or pick "Add to queue" in the library. '
               'It plays when this one ends.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white54, fontSize: 12.5, height: 1.35),
+              style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.35),
             ),
           ],
         ),
@@ -498,11 +492,11 @@ class _QueuePanelState extends State<QueuePanel> {
 
   List<Widget> _continuation(List<EpisodeLink> cont, bool alone) => [
         Padding(
-          padding: EdgeInsets.fromLTRB(10, alone ? 0 : 10, 2, 2),
+          padding: EdgeInsets.fromLTRB(12, alone ? 0 : 8, 2, 0),
           child: Row(
             children: [
               const Text('CONTINUES WITH',
-                  style: TextStyle(color: Colors.white38, fontSize: 10.5, letterSpacing: 0.8, fontWeight: FontWeight.w600)),
+                  style: TextStyle(color: Colors.white38, fontSize: 11, letterSpacing: 0.8, fontWeight: FontWeight.w600)),
               const Spacer(),
               TextButton(
                 key: const ValueKey('queue-clear-continuation'),
@@ -518,7 +512,7 @@ class _QueuePanelState extends State<QueuePanel> {
 
   Widget _footer() => Container(
         decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppMenuStyle.border, width: 0.5))),
-        padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+        padding: const EdgeInsets.all(8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
@@ -530,14 +524,16 @@ class _QueuePanelState extends State<QueuePanel> {
               // Read-only while adding, not disabled: focus stays here, so
               // Space and the arrows do not reach the player.
               readOnly: _busy,
-              style: const TextStyle(fontSize: 13.5),
+              style: const TextStyle(fontSize: 14),
               onSubmitted: (_) => _submit(),
+              // The app's field look (as `AppSelect`): a faint fill, a
+              // hairline, the accent while focused.
               decoration: InputDecoration(
                 isDense: true,
                 filled: true,
-                fillColor: const Color(0x14FFFFFF),
+                fillColor: const Color(0x0DFFFFFF),
                 hintText: _dragging ? 'Drop to add' : 'Paste a link to add',
-                hintStyle: const TextStyle(color: Colors.white38, fontSize: 13.5),
+                hintStyle: const TextStyle(color: Colors.white38, fontSize: 14),
                 prefixIcon: const Icon(Icons.add_link_rounded, size: 18, color: Colors.white54),
                 prefixIconConstraints: const BoxConstraints(minWidth: 38),
                 suffixIcon: _busy
@@ -547,7 +543,14 @@ class _QueuePanelState extends State<QueuePanel> {
                       )
                     : null,
                 contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppMenuStyle.rowRadius),
+                  borderSide: const BorderSide(color: AppMenuStyle.border, width: 0.5),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppMenuStyle.rowRadius),
+                  borderSide: BorderSide(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.6), width: 0.5),
+                ),
               ),
             ),
             AnimatedSize(
@@ -557,7 +560,7 @@ class _QueuePanelState extends State<QueuePanel> {
               child: _error == null
                   ? const SizedBox(width: double.infinity)
                   : Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+                      padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
                       child: Text(_error!, style: TextStyle(color: Colors.orange.shade300, fontSize: 12)),
                     ),
             ),
@@ -629,7 +632,7 @@ class _MetaLine extends StatelessWidget {
   /// Wraps onto a second line instead of cutting the end off.
   final bool wrap;
   const _MetaLine(
-      {required this.item, required this.members, required this.selfId, this.fontSize = 11.5, this.wrap = false});
+      {required this.item, required this.members, required this.selfId, this.fontSize = 12, this.wrap = false});
 
   @override
   Widget build(BuildContext context) {
@@ -637,7 +640,7 @@ class _MetaLine extends StatelessWidget {
     final dur = queueClock(item.duration);
     final mine = item.by == selfId && selfId.isNotEmpty;
     final name = mine ? 'you' : (item.byName.isEmpty ? '?' : item.byName);
-    const dot = Text('  ·  ', style: TextStyle(color: Colors.white24, fontSize: 11));
+    final dot = Text('  ·  ', style: TextStyle(color: Colors.white24, fontSize: fontSize));
     if (wrap) {
       final how = queueHowLabel(item, selfId: selfId);
       return Wrap(
@@ -681,6 +684,15 @@ class _MetaLine extends StatelessWidget {
   }
 }
 
+/// Every row of the popover (queued and continuation): one height, the
+/// drag handle's width before the picture (a spacer where there is none),
+/// one picture size and one type scale.
+const queueRowHeight = 64.0;
+const _lead = 22.0;
+const _thumb = 80.0;
+const _titleStyle = TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500);
+const _subStyle = TextStyle(color: Colors.white60, fontSize: 12);
+
 class _QueueRow extends StatefulWidget {
   final int index;
   final QueueItem item;
@@ -711,8 +723,8 @@ class _QueueRowState extends State<_QueueRow> {
     final item = widget.item;
     final row = AnimatedContainer(
         duration: const Duration(milliseconds: 120),
-        margin: const EdgeInsets.symmetric(vertical: 1),
-        padding: const EdgeInsets.fromLTRB(2, 6, 8, 6),
+        height: queueRowHeight,
+        padding: const EdgeInsets.only(right: 8),
         decoration: BoxDecoration(
           color: _hover ? AppMenuStyle.hover : Colors.transparent,
           borderRadius: BorderRadius.circular(AppMenuStyle.rowRadius),
@@ -724,8 +736,8 @@ class _QueueRowState extends State<_QueueRow> {
               child: MouseRegion(
                 cursor: SystemMouseCursors.grab,
                 child: SizedBox(
-                  width: 22,
-                  height: 40,
+                  width: _lead,
+                  height: queueRowHeight,
                   child: AnimatedOpacity(
                     duration: const Duration(milliseconds: 120),
                     opacity: _hover ? 0.8 : 0.25,
@@ -734,29 +746,22 @@ class _QueueRowState extends State<_QueueRow> {
                 ),
               ),
             ),
-            QueueThumb(queue: widget.queue, item: item),
-            const SizedBox(width: 10),
+            // Its readiness rides on the picture's corner.
+            Stack(
+              children: [
+                QueueThumb(queue: widget.queue, item: item, width: _thumb),
+                if (widget.warm != null) Positioned(top: 3, right: 3, child: _WarmDot(state: widget.warm!)),
+              ],
+            ),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(item.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.w500)),
-                      ),
-                      if (widget.warm != null) ...[const SizedBox(width: 6), _WarmDot(state: widget.warm!)],
-                    ],
-                  ),
+                  Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: _titleStyle),
                   if (item.sub.isNotEmpty)
-                    Text(item.sub,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white60, fontSize: 11.5)),
+                    Text(item.sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: _subStyle),
                   const SizedBox(height: 2),
                   _MetaLine(item: item, members: widget.members, selfId: widget.selfId),
                 ],
@@ -859,22 +864,30 @@ class _WarmDotState extends State<_WarmDot> with SingleTickerProviderStateMixin 
   Widget build(BuildContext context) {
     final green = Colors.greenAccent.shade400;
     final (color, filled, tip) = switch (widget.state) {
-      WarmState.idle => (Colors.white54, false, 'Gets ready near the end of this one'),
+      WarmState.idle => (Colors.white54, false, 'Waiting to get ready'),
       WarmState.warming => (green, true, 'Getting it ready…'),
       WarmState.ready => (green, true, 'Ready to start'),
-      WarmState.failed => (Colors.redAccent, true, "Couldn't get it ready; it is tried again when it comes up"),
+      WarmState.failed => (Colors.redAccent, true, "Couldn't get it ready; trying again shortly"),
     };
     return Tooltip(
       message: tip,
-      child: FadeTransition(
-        opacity: Tween(begin: 0.35, end: 1.0).animate(_pulse),
-        child: Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: filled ? color : Colors.transparent,
-            border: Border.all(color: color, width: 1.4),
+      // On a dark disc: it sits on the picture's corner.
+      child: Container(
+        key: const ValueKey('queue-warm-dot'),
+        width: 14,
+        height: 14,
+        alignment: Alignment.center,
+        decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xB3000000)),
+        child: FadeTransition(
+          opacity: Tween(begin: 0.35, end: 1.0).animate(_pulse),
+          child: Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: filled ? color : Colors.transparent,
+              border: Border.all(color: color, width: 1.4),
+            ),
           ),
         ),
       ),
@@ -907,7 +920,8 @@ class _ContinuationRowState extends State<_ContinuationRow> {
         duration: const Duration(milliseconds: 120),
         opacity: _hover ? 0.9 : 0.55,
         child: Container(
-          padding: const EdgeInsets.fromLTRB(24, 5, 6, 5),
+          height: queueRowHeight,
+          padding: const EdgeInsets.only(left: _lead, right: 8),
           decoration: BoxDecoration(
             color: _hover ? AppMenuStyle.hover : Colors.transparent,
             borderRadius: BorderRadius.circular(AppMenuStyle.rowRadius),
@@ -917,30 +931,27 @@ class _ContinuationRowState extends State<_ContinuationRow> {
               ClipRRect(
                 borderRadius: BorderRadius.circular(6),
                 child: SizedBox(
-                  width: 72,
-                  height: 40.5,
+                  width: _thumb,
+                  height: _thumb * 9 / 16,
                   child: client == null
                       ? const ColoredBox(color: Color(0x1FFFFFFF))
                       : JellyfinImage(client: client, image: image, icon: Icons.tv_rounded),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(e.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white, fontSize: 13)),
+                    Text(e.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: _titleStyle),
                     Text(
                       [if (runtime != null) queueClock(runtime.inSeconds.toDouble()), e.item.seriesName ?? '']
                           .where((s) => s.isNotEmpty)
                           .join('  ·  '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white54, fontSize: 11.5),
+                      style: _subStyle,
                     ),
                   ],
                 ),
@@ -976,7 +987,7 @@ class UpNextCard extends StatelessWidget {
     final r = queue.coord.serverState.value;
     final selfId = queue.coord.sync.memberId;
     final waiting = left == null ? _waitingFor(item, r) : null;
-    return _Glass(
+    return AppGlass(
       key: const ValueKey('up-next-card'),
       child: SizedBox(
         width: 400,

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart' show kPrimaryMouseButton;
@@ -105,6 +106,10 @@ class _SessionPlayerState extends State<SessionPlayer> {
   // does (shown on mount and on mouse movement, hidden 3 s later or on
   // exit), the uosc ones reporting it.
   final _controlsShown = ValueNotifier(true);
+  // The mouse on a floating element, or the Up next popover open, keeps
+  // the controls up.
+  final _hold = ControlsHold();
+  late final void Function() _stopPopoverWatch;
 
   SessionCoordinator get _coord => SessionState.instance.coordinator;
   bool get _full => widget.mode == PlayerMode.full;
@@ -124,6 +129,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
       _shaderNoticeSeen = n.id;
       _toast(n.text);
     });
+    _stopPopoverWatch = effect(() {
+      _hold.set(#upNextPopover, _coord.queue.popoverOpen.value);
+    });
   }
 
   @override
@@ -131,8 +139,10 @@ class _SessionPlayerState extends State<SessionPlayer> {
     HardwareKeyboard.instance.removeHandler(_globalKey);
     AppKeys.removeChatToggle(_toggleChat);
     _stopShaderWatch();
+    _stopPopoverWatch();
     _noFocus.dispose();
     _controlsShown.dispose();
+    _hold.dispose();
     super.dispose();
   }
 
@@ -291,10 +301,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
             children: [
               video,
               if (_full) ...[
-                _status(),
                 _progressLine(),
-                _jellyfinOverlay(),
-                _upNextChip(),
+                _blockedCard(),
+                _actionArea(),
                 if (widget.fullscreen) ...[if (!SessionState.instance.solo.value) _pausedParty(), _unreadChip()],
               ] else
                 _miniOverlay(),
@@ -390,6 +399,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
               child: Row(
                 children: [
                   const Expanded(child: NowPlayingTitle()),
+                  UpNextButton(queue: coord.queue, onPlayNextEpisode: coord.playNextEpisode, look: UpNextLook.standard),
                   MaterialDesktopCustomButton(
                     icon: const Icon(Icons.video_library_outlined),
                     onPressed: widget.onChangeVideo,
@@ -522,6 +532,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
       material: (_) => ControlsHoverProbe(
         shown: _controlsShown,
         hideAfter: _controlsHide,
+        hold: _hold,
         child: DoubleClickListener(
           onDoubleClick: widget.onToggleFullscreen,
           // Clicks on the bars are button clicks, not the video.
@@ -553,11 +564,14 @@ class _SessionPlayerState extends State<SessionPlayer> {
         });
     return UoscControls(
       shown: _controlsShown,
+      holdBy: _hold,
       onDoubleTap: widget.onToggleFullscreen,
       topLeft: const NowPlayingTitle(),
+      // Up next is one of the top bar's controls, before chat.
       top: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          UpNextButton(queue: coord.queue, onPlayNextEpisode: coord.playNextEpisode, look: UpNextLook.uosc),
           UoscButton(
             key: const ValueKey('uosc-chat'),
             icon: widget.chatOpen ? Icons.chat_bubble_rounded : Icons.chat_bubble_outline_rounded,
@@ -670,114 +684,129 @@ class _SessionPlayerState extends State<SessionPlayer> {
     );
   }
 
-  /// The one status pill, bottom centre above the controls.
-  Widget _status() =>
-      const Positioned(left: 16, right: 16, bottom: 124, child: Center(child: PlayerStatus()));
+  /// The side inset every floating element keeps (the bars' own), and
+  /// the gap between them and the controls.
+  static const _edge = 16.0;
 
-  /// Jellyfin: the blocked card, the end-of-episode card (countdown) and
-  /// the "Next episode" pill; for any media the skip pill (Skip OP / ED /
-  /// 1:30) above it. Outside the auto-hiding controls; the cards stay up,
-  /// the pills show only with the controls ([PillGate]).
-  Widget _jellyfinOverlay() {
-    final coord = _coord;
-    return Positioned.fill(
-      child: SignalBuilder(
-        builder: (context) {
-          final blocked = coord.jellyfinBlocked.value;
-          final next = coord.nextEpisode.value;
-          final countdown = coord.autoAdvance.value;
-          // Up next goes before the next episode.
-          final upNext = coord.queue.countdown.value;
-          final finished = coord.serverState.value?.transport == 'finished';
-          final pill = coord.nextPromptVisible.value;
-          final SkipOffer? skip = coord.skipOffer.value;
-          final showNext = next != null && pill;
-          return Stack(
-            children: [
-              if (blocked != null)
-                Center(
-                  child: JellyfinBlockedCard(
-                    blocked: blocked,
-                    onLinkAccount: widget.onOpenIntegrations,
-                    onRetry: coord.retryJellyfin,
-                  ),
-                ),
-              if (upNext != null && finished)
-                Positioned(
-                  right: 24,
-                  bottom: 138,
-                  child: UpNextCard(queue: coord.queue, countdown: upNext),
-                )
-              // "Clear" in Up next hides the next episode for this media.
-              else if (next != null &&
-                  (finished || countdown != null) &&
-                  coord.queue.shownContinuation.value.isNotEmpty)
-                Positioned(
-                  right: 24,
-                  bottom: 138,
-                  child: EndOfEpisodeCard(
-                    next: next,
-                    countdown: countdown,
-                    onPlayNow: coord.playNextEpisode,
-                    onCancel: coord.cancelAutoAdvance,
-                  ),
-                )
-              else if (showNext || skip != null)
-                Positioned(
-                  right: 24,
-                  bottom: 124,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    spacing: 10,
-                    children: [
-                      if (skip != null)
-                        PillGate(
-                          key: const ValueKey('skip-gate'),
-                          kind: skip.kind,
-                          // Skip ED: no announcing, only with the controls.
-                          announce: skip.kind != SkipKind.ending,
-                          controlsShown: _controlsShown,
-                          child: SkipPill(offer: skip, onPressed: () => coord.skip(skip)),
-                        ),
-                      if (showNext)
-                        PillGate(
-                          key: const ValueKey('next-gate'),
-                          kind: next,
-                          controlsShown: _controlsShown,
-                          child: NextEpisodePill(episode: next, onPressed: coord.playNextEpisode),
-                        ),
-                    ],
-                  ),
-                ),
-            ],
-          );
-        },
-      ),
-    );
-  }
+  /// The bottom controls' height in the design in use.
+  static double _bottomControlsHeight(bool uosc) => uosc
+      ? UoscControls.buttonRowHeight + UoscControls.rowBottomPadding + UoscTimeline.height
+      : _barHeight + ChapterSeekBar.height;
 
-  /// "Up next · <title>" top right, with the controls (and while its
-  /// popover is open); under the party in fullscreen.
-  Widget _upNextChip() {
-    final queue = _coord.queue;
-    return Positioned(
-      right: 16,
-      top: widget.fullscreen ? _barHeight + 60 : _topBarHeight + 8,
-      child: SignalBuilder(
-        builder: (context) => PillGate(
-          key: const ValueKey('up-next-gate'),
-          kind: 'up-next',
-          controlsShown: queue.popoverOpen.value ? const _AlwaysOn() : _controlsShown,
-          child: UpNextChip(queue: queue, onPlayNextEpisode: _coord.playNextEpisode),
+  /// The action area: one band above the bottom controls for everything
+  /// that floats there. The status pill (the ready prompt among it)
+  /// centred; at the right edge the end cards, else the action pills
+  /// (Skip OP / ED / 1:30 over Next episode). It rides on the controls:
+  /// just above them while they are up, down near the edge while they are
+  /// hidden. The mouse on any of it counts as the mouse on the controls
+  /// ([ControlsHold]).
+  Widget _actionArea() {
+    return SignalBuilder(builder: (context) {
+      final controls = _bottomControlsHeight(AppSettings.instance.mpvControls.value);
+      return ValueListenableBuilder<bool>(
+        valueListenable: _controlsShown,
+        builder: (context, shown, child) => AnimatedPositioned(
+          duration: easeTime,
+          curve: ease,
+          left: _edge,
+          right: _edge,
+          top: 0,
+          bottom: shown ? controls + _edge : _edge,
+          child: child!,
         ),
-      ),
+        child: CustomMultiChildLayout(
+          delegate: _ActionAreaLayout(gap: _edge),
+          children: [
+            LayoutId(id: _ActionSlot.status, child: ControlsHoldRegion(hold: _hold, child: const PlayerStatus())),
+            LayoutId(id: _ActionSlot.side, child: _actionSide()),
+          ],
+        ),
+      );
+    });
+  }
+
+  /// The action area's right end: the end-of-media card (Up next, else the
+  /// next episode; it stays up), else the pills, shown only with the
+  /// controls ([PillGate]).
+  Widget _actionSide() {
+    final coord = _coord;
+    return SignalBuilder(
+      builder: (context) {
+        final next = coord.nextEpisode.value;
+        final countdown = coord.autoAdvance.value;
+        // Up next goes before the next episode.
+        final upNext = coord.queue.countdown.value;
+        final finished = coord.serverState.value?.transport == 'finished';
+        final pill = coord.nextPromptVisible.value;
+        final SkipOffer? skip = coord.skipOffer.value;
+        final showNext = next != null && pill;
+        if (upNext != null && finished) {
+          return ControlsHoldRegion(hold: _hold, child: UpNextCard(queue: coord.queue, countdown: upNext));
+        }
+        // "Clear" in Up next hides the next episode for this media.
+        if (next != null && (finished || countdown != null) && coord.queue.shownContinuation.value.isNotEmpty) {
+          return ControlsHoldRegion(
+            hold: _hold,
+            child: EndOfEpisodeCard(
+              next: next,
+              countdown: countdown,
+              onPlayNow: coord.playNextEpisode,
+              onCancel: coord.cancelAutoAdvance,
+            ),
+          );
+        }
+        if (!showNext && skip == null) return const SizedBox.shrink();
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          spacing: 8,
+          children: [
+            if (skip != null)
+              PillGate(
+                key: const ValueKey('skip-gate'),
+                kind: skip.kind,
+                // Skip ED: no announcing, only with the controls.
+                announce: skip.kind != SkipKind.ending,
+                controlsShown: _controlsShown,
+                hold: _hold,
+                child: SkipPill(offer: skip, onPressed: () => coord.skip(skip)),
+              ),
+            if (showNext)
+              PillGate(
+                key: const ValueKey('next-gate'),
+                kind: next,
+                controlsShown: _controlsShown,
+                hold: _hold,
+                child: NextEpisodePill(episode: next, onPressed: coord.playNextEpisode),
+              ),
+          ],
+        );
+      },
     );
   }
+
+  /// Jellyfin refused this viewer: the card in the middle (it stays up).
+  Widget _blockedCard() => Positioned.fill(
+        child: SignalBuilder(builder: (context) {
+          final blocked = _coord.jellyfinBlocked.value;
+          if (blocked == null) return const SizedBox.shrink();
+          return Center(
+            child: ControlsHoldRegion(
+              hold: _hold,
+              child: JellyfinBlockedCard(
+                blocked: blocked,
+                onLinkAccount: widget.onOpenIntegrations,
+                onRetry: _coord.retryJellyfin,
+              ),
+            ),
+          );
+        }),
+      );
 
   /// Fullscreen hides the strip: while paused the party stays in a corner.
   Widget _pausedParty() => Positioned(
-        right: 16,
-        top: _barHeight + 8,
+        right: _edge,
+        top: _topBarHeight + 8,
         child: PartyWatch(builder: (context) {
           final r = _coord.serverState.value;
           final paused = r != null && r.transport != 'playing';
@@ -795,8 +824,8 @@ class _SessionPlayerState extends State<SessionPlayer> {
   /// glass chip says so top right (while it plays, only the controls' chat
   /// button shows the count: nothing sits on the picture).
   Widget _unreadChip() => Positioned(
-        right: 16,
-        top: 16,
+        right: _edge,
+        top: _edge,
         child: IgnorePointer(
           child: ValueListenableBuilder<bool>(
             valueListenable: _controlsShown,
@@ -945,32 +974,24 @@ class _SessionPlayerState extends State<SessionPlayer> {
   }
 }
 
-/// Always up (a pill whose popover is open).
-class _AlwaysOn implements ValueListenable<bool> {
-  const _AlwaysOn();
-  @override
-  bool get value => true;
-  @override
-  void addListener(VoidCallback listener) {}
-  @override
-  void removeListener(VoidCallback listener) {}
-}
-
 /// A floating pill's visibility: only while the controls are up (the
 /// mouse moved) or the mouse is on it. With [announce] it is also up for
 /// [firstShown] whenever [kind] changes (a new offer: Skip OP, Skip 1:30).
-/// Gone with the offer (the parent drops it).
+/// Gone with the offer (the parent drops it). The mouse on it holds
+/// [hold]: it counts as the mouse on the controls.
 class PillGate extends StatefulWidget {
   static const firstShown = Duration(seconds: 5);
   final Object kind;
   final bool announce;
   final ValueListenable<bool> controlsShown;
+  final ControlsHold? hold;
   final Widget child;
   const PillGate({
     super.key,
     required this.kind,
     this.announce = false,
     required this.controlsShown,
+    this.hold,
     required this.child,
   });
 
@@ -1014,8 +1035,8 @@ class _PillGateState extends State<PillGate> {
 
   @override
   Widget build(BuildContext context) {
-    // The pill covers the controls' hover area: on it, they may hide while
-    // it stays.
+    // The pill covers the controls' hover area: on it, [hold] keeps them
+    // up (and it stays while the mouse is on it).
     return ValueListenableBuilder<bool>(
       valueListenable: widget.controlsShown,
       builder: (context, shown, child) {
@@ -1029,9 +1050,32 @@ class _PillGateState extends State<PillGate> {
           ),
         );
       },
-      child: widget.child,
+      child: ControlsHoldRegion(hold: widget.hold, child: widget.child),
     );
   }
+}
+
+enum _ActionSlot { status, side }
+
+/// The action area's two slots, at its bottom: [_ActionSlot.side] at the
+/// right end, [_ActionSlot.status] centred, moved left only as far as it
+/// must to keep [gap] from the side (and never wider than what is left).
+class _ActionAreaLayout extends MultiChildLayoutDelegate {
+  final double gap;
+  _ActionAreaLayout({required this.gap});
+
+  @override
+  void performLayout(Size size) {
+    final side = layoutChild(_ActionSlot.side, BoxConstraints.loose(size));
+    positionChild(_ActionSlot.side, Offset(size.width - side.width, size.height - side.height));
+    final room = side.width > 0 ? size.width - side.width - gap : size.width;
+    final status = layoutChild(_ActionSlot.status, BoxConstraints.loose(Size(math.max(0, room), size.height)));
+    final x = math.min((size.width - status.width) / 2, room - status.width);
+    positionChild(_ActionSlot.status, Offset(math.max(0, x), size.height - status.height));
+  }
+
+  @override
+  bool shouldRelayout(_ActionAreaLayout old) => old.gap != gap;
 }
 
 const _shaderKeys = [

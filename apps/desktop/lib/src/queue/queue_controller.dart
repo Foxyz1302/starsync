@@ -22,7 +22,7 @@ import 'queue_logic.dart';
 // Up next on this client (see ARCHITECTURE.md "Up next"): the server's
 // queue as signals, adding to it (probed, with a picture), the end-of-media
 // countdown for its first item, putting an item up when this app is the
-// one that can, and getting that item ready shortly before.
+// one that can, and keeping that item ready.
 
 /// The end-of-media card for the first Up next item. [secondsLeft] null:
 /// no countdown here (auto-advance off, cancelled, or another app puts
@@ -62,7 +62,7 @@ class QueueController {
   /// The mediaId whose continuation was cleared here.
   final _hiddenFor = signal(-1);
 
-  /// The queue popover is open: the chip stays up.
+  /// The queue popover is open: the Up next button holds the controls up.
   final popoverOpen = signal(false);
 
   // What adder-only items stand for, by their key (a link passed on from
@@ -87,6 +87,12 @@ class QueueController {
       final next = coord.nextEpisode.value;
       final plan = coord.jellyfinPlan.value;
       unawaited(_loadContinuation(next, plan));
+    });
+    // The continuation and the state decide what to get ready.
+    effect(() {
+      shownContinuation.value;
+      final r = coord.serverState.value;
+      untracked(() => _warm(r));
     });
   }
 
@@ -474,44 +480,101 @@ class QueueController {
 
   // ------------------------------------------------------------ warming
 
-  /// Near the end of what plays (or once it is buffered to its end), the
-  /// app that will put the first item up resolves its link, so the swap
-  /// does not wait for yt-dlp. A Jellyfin item, a file or a link the
-  /// server fetches has nothing to get ready here.
-  void _warm(StateBroadcast r) {
+  /// How long a warm result is kept, when it is resolved again, and when a
+  /// failed one is tried again.
+  static const _warmKeep = Duration(minutes: 35);
+  static const _warmRefresh = Duration(minutes: 30);
+  static const _warmRetry = Duration(minutes: 2);
+
+  String _warmKey = '';
+  String? _warmUrl;
+  Timer? _warmTimer;
+  int _warmGen = 0;
+
+  /// What this app gets ready: Up next's first item when it is the one
+  /// that puts it up; with Up next empty, the first continuation episode
+  /// (only here when this app plays the series with its own account, and
+  /// its ▶ puts it up from here). Null: nothing.
+  ({String id, String? url, JellyfinRef? ref})? _warmTarget(StateBroadcast? r) {
+    if (r == null) return null;
     final head = r.queue.firstOrNull;
-    if (head == null || queuePerformer(head, r.members).id != _me) {
+    if (head != null) {
+      if (queuePerformer(head, r.members).id != _me) return null;
+      final local = _local[head.key]?.pick;
+      return switch (head.how) {
+        QueueHow.direct => (id: head.id, url: head.media.url, ref: null),
+        QueueHow.through => (id: head.id, url: local is LinkMedia ? local.url : null, ref: null),
+        QueueHow.jellyfin => (id: head.id, url: null, ref: head.media.jellyfin),
+        QueueHow.file || QueueHow.server => (id: head.id, url: null, ref: null),
+      };
+    }
+    final next = shownContinuation.peek().firstOrNull;
+    if (next == null) return null;
+    return (id: 'next:${next.item.id}', url: null, ref: mediaForPick(next.pick).jellyfin);
+  }
+
+  /// Keeps the one item this app puts up next ready, so a skip or the end
+  /// of what plays starts it at once: a link probed (`AppYtDlp.probe`,
+  /// kept while it stays first), a Jellyfin item resolved with this app's
+  /// account ([SessionCoordinator.warmJellyfin]). Done as soon as it is
+  /// first here, again before that runs out, dropped when it is no longer
+  /// first. A file or a link the server fetches has nothing to get ready.
+  void _warm(StateBroadcast? r) {
+    final t = _warmTarget(r);
+    final ref = t?.ref;
+    final key = t == null ? '' : '${t.id}|${t.url}|${ref?.serverId}/${ref?.itemId}/${ref?.mediaSourceId}';
+    if (key == _warmKey) return;
+    _dropWarm(r);
+    _warmKey = key;
+    if (t == null) {
       if (warm.peek() != null) warm.value = null;
       return;
     }
-    final w = warm.peek();
-    if (w == null || w.id != head.id) warm.value = (id: head.id, state: WarmState.idle);
-    if (warm.peek()!.state != WarmState.idle) return;
-    final duration = (r.media?['duration'] as num?)?.toDouble() ?? 0;
-    final position = coord.playback.positionSecs;
-    final due = r.media == null ||
-        queueWarmDue(
-            transport: r.transport,
-            position: position,
-            duration: duration,
-            bufferedTo: position + coord.playback.bufferedSecsAhead);
-    if (!due) return;
-    final local = _local[head.key]?.pick;
-    final url = switch (head.how) {
-      QueueHow.direct => head.media.url,
-      QueueHow.through => local is LinkMedia ? local.url : null,
-      _ => null,
-    };
-    if (url == null) {
-      warm.value = (id: head.id, state: WarmState.ready);
+    if (t.url == null && ref == null) {
+      warm.value = (id: t.id, state: WarmState.ready);
       return;
     }
-    warm.value = (id: head.id, state: WarmState.warming);
-    // The probe is kept a few minutes: the swap reads it from there.
-    unawaited(coord.ytDlp.probe(url).then((p) => p.problem == null, onError: (_) => false).then((ok) {
-      if (warm.peek()?.id != head.id) return;
-      warm.value = (id: head.id, state: ok ? WarmState.ready : WarmState.failed);
-    }));
+    warm.value = (id: t.id, state: WarmState.warming);
+    _resolveWarm(t, fresh: false);
+  }
+
+  void _dropWarm(StateBroadcast? r) {
+    _warmTimer?.cancel();
+    _warmTimer = null;
+    _warmGen++;
+    final url = _warmUrl;
+    _warmUrl = null;
+    if (url != null) coord.ytDlp.release(url);
+    // Kept while it is what just went up: that open takes it.
+    final w = coord.warmJellyfin;
+    if (w != null && !sameJellyfinItem(w.ref, refOfStateMedia(r?.media))) coord.warmJellyfin = null;
+  }
+
+  void _resolveWarm(({String id, String? url, JellyfinRef? ref}) t, {required bool fresh}) {
+    final gen = ++_warmGen;
+    unawaited(() async {
+      var ok = false;
+      try {
+        final url = t.url, ref = t.ref;
+        if (url != null) {
+          _warmUrl = url;
+          final p = await coord.ytDlp.probe(url, keep: _warmKeep, fresh: fresh).timeout(const Duration(seconds: 60));
+          ok = p.problem == null;
+        } else if (ref != null) {
+          final plan = await resolveJellyfinRef(coord.jellyfin, ref, relay: false, relayUrl: null);
+          if (gen != _warmGen) return;
+          if (plan is OwnPlay) {
+            coord.warmJellyfin = (ref: ref, plan: plan, until: DateTime.now().add(_warmKeep));
+            ok = true;
+          }
+        }
+      } catch (e) {
+        debugPrint('queue: getting ${t.id} ready: $e');
+      }
+      if (gen != _warmGen) return;
+      warm.value = (id: t.id, state: ok ? WarmState.ready : WarmState.failed);
+      _warmTimer = Timer(ok ? _warmRefresh : _warmRetry, () => _resolveWarm(t, fresh: true));
+    }());
   }
 
   // -------------------------------------------------------- continuation

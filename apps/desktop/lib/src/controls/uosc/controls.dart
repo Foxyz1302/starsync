@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../../state/settings.dart';
+import '../controls_probe.dart' show ControlsHold;
 
 // The mpv-style (uosc) controls frame: a full-width timeline at the
 // bottom with a row of flat buttons above it, the title top left and a
@@ -28,6 +29,8 @@ class UoscControls extends StatefulWidget {
   final Duration hideAfter;
   /// Follows whether the controls are up (for overlays outside them).
   final ValueNotifier<bool>? shown;
+  /// Keeps them up while held (the mouse on an overlay, an open popover).
+  final ControlsHold? holdBy;
   const UoscControls({
     super.key,
     required this.timeline,
@@ -38,9 +41,12 @@ class UoscControls extends StatefulWidget {
     this.onDoubleTap,
     this.hideAfter = const Duration(seconds: 3),
     this.shown,
+    this.holdBy,
   });
 
   static const buttonRowHeight = 40.0;
+  /// Under the button row, above the timeline.
+  static const rowBottomPadding = 4.0;
 
   /// The controls around [context], for widgets that need them kept up
   /// (a timeline drag, an open menu).
@@ -54,6 +60,7 @@ class UoscControls extends StatefulWidget {
 class UoscControlsState extends State<UoscControls> {
   bool _visible = true;
   int _holds = 0;
+  bool _heldBy = false;
   Timer? _timer;
 
   bool get visible => _visible;
@@ -61,6 +68,7 @@ class UoscControlsState extends State<UoscControls> {
   @override
   void initState() {
     super.initState();
+    widget.holdBy?.addListener(_holdByChanged);
     // Not during this build: an overlay listening to [shown] may be built.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) widget.shown?.value = true;
@@ -69,9 +77,27 @@ class UoscControlsState extends State<UoscControls> {
   }
 
   @override
+  void didUpdateWidget(UoscControls oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.holdBy != widget.holdBy) {
+      oldWidget.holdBy?.removeListener(_holdByChanged);
+      widget.holdBy?.addListener(_holdByChanged);
+      _holdByChanged();
+    }
+  }
+
+  @override
   void dispose() {
+    widget.holdBy?.removeListener(_holdByChanged);
     _timer?.cancel();
     super.dispose();
+  }
+
+  void _holdByChanged() {
+    final on = widget.holdBy?.held ?? false;
+    if (on == _heldBy || !mounted) return;
+    _heldBy = on;
+    hold(on);
   }
 
   /// Show the controls and restart the hide countdown.
@@ -185,8 +211,9 @@ class UoscControlsState extends State<UoscControls> {
                 child: AnimatedOpacity(
                   duration: fade,
                   opacity: visible ? 1 : 0,
+                  // The buttons centred on the title, like the standard
+                  // design's top bar.
                   child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
                         child: Padding(
@@ -196,7 +223,8 @@ class UoscControlsState extends State<UoscControls> {
                               : Align(alignment: AlignmentDirectional.centerStart, child: widget.topLeft),
                         ),
                       ),
-                      ?widget.top,
+                      if (widget.top != null)
+                        Padding(padding: const EdgeInsets.fromLTRB(0, 12, 6, 0), child: widget.top),
                     ],
                   ),
                 ),
@@ -217,7 +245,7 @@ class UoscControlsState extends State<UoscControls> {
                     duration: fade,
                     opacity: visible ? 1 : 0,
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(6, 0, 6, 4),
+                      padding: const EdgeInsets.fromLTRB(6, 0, 6, UoscControls.rowBottomPadding),
                       child: SizedBox(
                         height: UoscControls.buttonRowHeight,
                         child: Row(children: [...widget.left, const Spacer(), ...widget.right]),

@@ -204,6 +204,11 @@ class SessionCoordinator {
   /// Set when this viewer cannot play the Jellyfin media: no account and
   /// no relay. The session shows it with a way to link an account.
   final jellyfinBlocked = signal<BlockedPlay?>(null);
+  /// An item this app is about to put up, resolved ahead with its own
+  /// account (Up next's first item, the next episode; see
+  /// `QueueController`): opening it then skips PlaybackInfo. Used once,
+  /// until [until].
+  ({JellyfinRef ref, OwnPlay plan, DateTime until})? warmJellyfin;
   /// Neighbouring episodes this viewer can put up (own account only).
   final previousEpisode = signal<EpisodeLink?>(null);
   final nextEpisode = signal<EpisodeLink?>(null);
@@ -1620,8 +1625,9 @@ class SessionCoordinator {
     }
     JellyfinPlan plan;
     try {
-      plan = await resolveJellyfinRef(jellyfin, ref,
-          relay: r.relay, relayUrl: _relayUrlFor(ref), memberRelayUrl: memberRelayUrl);
+      plan = _takeWarmJellyfin(ref) ??
+          await resolveJellyfinRef(jellyfin, ref,
+              relay: r.relay, relayUrl: _relayUrlFor(ref), memberRelayUrl: memberRelayUrl);
     } finally {
       if (gen == _jfGen) _opening = false;
     }
@@ -1656,11 +1662,27 @@ class SessionCoordinator {
       case OwnPlay(:final url, :final headers):
         jellyfinBlocked.value = null;
         if (!await _openMedia(url, headers: headers) || gen != _jfGen) return;
+        // Played before and the resume point, fresh (a warmed plan's item
+        // is older): the watched rule never unmarks a played item.
+        final known = plan.item?.userData;
+        final userDataF = plan.client
+            .userData(ref.itemId)
+            .timeout(const Duration(seconds: 5))
+            .then<JellyfinUserData?>((d) => d, onError: (_) => known);
+        unawaited(_findEpisodes(plan, gen));
+        unawaited(_loadSegments(plan, ref, gen));
+        // Playing carries the tracks: wait (bounded) until the file is in.
+        await playback.waitForTracks();
+        if (gen != _jfGen) return;
+        final before = await userDataF;
+        if (gen != _jfGen) return;
         final reporter = JellyfinProgressReporter(
           client: plan.client,
           itemId: ref.itemId,
           source: plan.source,
           playSessionId: plan.info.playSessionId,
+          playedBefore: before?.played ?? false,
+          resumeTicksBefore: before?.playbackPositionTicks ?? 0,
           onUnauthorized: () => jellyfin.markExpired(ref.serverId),
           onError: (e) {
             if (_jfToastShown) return;
@@ -1668,11 +1690,6 @@ class SessionCoordinator {
             _pushToast('Jellyfin progress not saved: ${e is JellyfinException && e.isUnauthorized ? 'sign-in expired' : 'server unreachable'}');
           },
         );
-        unawaited(_findEpisodes(plan, gen));
-        unawaited(_loadSegments(plan, ref, gen));
-        // Playing carries the tracks: wait (bounded) until the file is in.
-        await playback.waitForTracks();
-        if (gen != _jfGen) return;
         final snap = await _snapshot();
         if (gen != _jfGen || snap == null) return;
         // Installed once started: the per-state restart (after the end)
@@ -1680,6 +1697,18 @@ class SessionCoordinator {
         _reporter = reporter..start(snap);
     }
     await _applyTrackChoice(plan, gen);
+  }
+
+  /// [warmJellyfin] when it is [ref], still fresh and its account
+  /// unchanged.
+  OwnPlay? _takeWarmJellyfin(JellyfinRef ref) {
+    final w = warmJellyfin;
+    if (w == null || !sameJellyfinItem(w.ref, ref)) return null;
+    warmJellyfin = null;
+    final fresh = DateTime.now().isBefore(w.until) &&
+        jellyfin.account(ref.serverId)?.token == w.plan.account.token &&
+        jellyfin.statusOf(ref.serverId) != JellyfinAccountStatus.expired;
+    return fresh ? w.plan : null;
   }
 
   Future<void> _findEpisodes(OwnPlay plan, int gen) async {
@@ -1734,7 +1763,10 @@ class SessionCoordinator {
     final snap = await _snapshot();
     if (snap == null) return;
     if (reporter != null && identical(reporter, _reporter) && r.transport != 'finished') {
-      reporter.update(snap);
+      final ending = playback.ending.peek()?.start;
+      reporter
+        ..timeline(duration: playback.durationSecs, endingStart: ending == null ? null : ending.inMilliseconds / 1000)
+        ..update(snap);
     }
     final next = nextEpisode.peek();
     final duration = playback.durationSecs;

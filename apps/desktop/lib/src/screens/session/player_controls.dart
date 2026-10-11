@@ -7,6 +7,7 @@ import 'package:sync_relay_core/core.dart' show JellyfinStreamType;
 
 import '../../jellyfin/track_prefs.dart' show MpvTrack;
 import '../../playback/media_marks.dart';
+import '../../widgets/app_menu.dart' show AppGlass;
 
 // Session control-bar pieces built on the playback signals (chapters,
 // tracks, skip offers): the seek bar with chapter marks, the chapter and
@@ -525,10 +526,13 @@ class SkipForwardButton extends StatelessWidget {
   }
 }
 
-/// Floating pill over the video (Next episode, Skip OP / ED / 1:30):
-/// faint at rest, lit on hover. Lives outside the auto-hiding controls
-/// (also in fullscreen); `PillGate` shows it with them.
+/// The player's action pill (Next episode, Skip OP / ED / 1:30): the
+/// status pill's glass ([AppGlass.pill]) at [height], faint at rest, lit
+/// on hover. Lives in the player's action area, outside the auto-hiding
+/// controls (also in fullscreen); `PillGate` shows it with them.
 class FloatingPill extends StatefulWidget {
+  /// Every action pill's height: the status pill's without avatars.
+  static const height = 44.0;
   final String label;
   final String tooltip;
   final IconData icon;
@@ -540,7 +544,7 @@ class FloatingPill extends StatefulWidget {
     required this.label,
     required this.tooltip,
     required this.onPressed,
-    this.icon = Icons.chevron_right,
+    this.icon = Icons.chevron_right_rounded,
     this.tapKey,
   });
 
@@ -553,38 +557,31 @@ class _FloatingPillState extends State<FloatingPill> {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    const fade = Duration(milliseconds: 150);
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: Tooltip(
         message: widget.tooltip,
-        child: AnimatedScale(
-          duration: const Duration(milliseconds: 150),
-          scale: _hover ? 1.06 : 1,
-          child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 150),
-            opacity: _hover ? 1 : 0.45,
-            child: GestureDetector(
-              key: widget.tapKey,
-              onTap: widget.onPressed,
+        child: AnimatedOpacity(
+          duration: fade,
+          opacity: _hover ? 1 : 0.45,
+          child: GestureDetector(
+            key: widget.tapKey,
+            onTap: widget.onPressed,
+            child: AppGlass.pill(
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.75),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: _hover ? primary : Colors.white24),
-                  boxShadow: _hover
-                      ? [BoxShadow(color: primary.withValues(alpha: 0.45), blurRadius: 16)]
-                      : const [],
-                ),
+                duration: fade,
+                height: FloatingPill.height,
+                padding: const EdgeInsets.only(left: 16, right: 12),
+                color: _hover ? Colors.white12 : Colors.transparent,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(widget.label, style: const TextStyle(color: Colors.white, fontSize: 13)),
-                    const SizedBox(width: 4),
+                    Text(widget.label,
+                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                    const SizedBox(width: 6),
                     Icon(widget.icon, color: Colors.white, size: 18),
                   ],
                 ),

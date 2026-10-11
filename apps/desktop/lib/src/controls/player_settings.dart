@@ -312,19 +312,18 @@ class PlayerSettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
+    // The app's glass, like the Up next popover and the menus.
+    return AppGlass(
       key: const ValueKey('player-settings-card'),
-      elevation: 12,
-      borderRadius: BorderRadius.circular(16),
       child: SizedBox(
         width: 420,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 14, 18, 10),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('Player', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+              const Text('Player', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
               const SizedBox(height: 4),
               ...playerSettingRows(renderMode: renderMode),
               if (tracks) ...[

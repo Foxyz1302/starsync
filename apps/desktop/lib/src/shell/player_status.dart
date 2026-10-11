@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:sync_relay_core/core.dart';
@@ -7,6 +6,7 @@ import 'package:sync_relay_core/core.dart';
 import '../session/health.dart';
 import '../session/session_coordinator.dart';
 import '../state/session_state.dart';
+import '../widgets/app_menu.dart' show AppGlass;
 import 'avatar.dart';
 import 'motion.dart';
 
@@ -241,32 +241,17 @@ class _PlayerStatusState extends State<PlayerStatus> {
   }
 }
 
-/// Frosted dark glass in a pill: the status pill, the unread chip.
+/// The player's pill surface (the status pill, the action pills, the
+/// unread chip): the app's glass as a stadium ([AppGlass.pill]).
 class PlayerGlass extends StatelessWidget {
   final Widget child;
   const PlayerGlass({super.key, required this.child});
 
   @override
-  Widget build(BuildContext context) {
-    final r = BorderRadius.circular(999);
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 560),
-      child: ClipRRect(
-        borderRadius: r,
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.55),
-              borderRadius: r,
-              border: Border.all(color: Colors.white12, width: 0.5),
-            ),
-            child: child,
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: AppGlass.pill(child: child),
+      );
 }
 
 class _StatusLine extends StatelessWidget {

@@ -105,6 +105,10 @@ enum HandoffAction {
   addFolder,
   /// Open Library → Link with the URL filled.
   openLink,
+  /// Add the videos (or the link, in the Link page's mode) to Up next.
+  queue,
+  /// The same, right after what plays.
+  playNext,
 }
 
 /// The card asking how to open a [Handoff] (videos, a folder or a link);
@@ -113,7 +117,9 @@ class HandoffCard extends StatelessWidget {
   final Handoff item;
   /// Nobody else watches (offline or solo): videos play, no relay talk.
   final bool solo;
-  const HandoffCard({super.key, required this.item, required this.solo});
+  /// In a server: videos and links can go to Up next.
+  final bool queue;
+  const HandoffCard({super.key, required this.item, required this.solo, this.queue = false});
 
   @override
   Widget build(BuildContext context) {
@@ -124,6 +130,13 @@ class HandoffCard extends StatelessWidget {
             key: ValueKey('handoff-${a.name}'), onPressed: () => pick(a), icon: Icon(icon, size: 18), label: Text(label))
         : OutlinedButton.icon(
             key: ValueKey('handoff-${a.name}'), onPressed: () => pick(a), icon: Icon(icon, size: 18), label: Text(label));
+    final many = switch (item) { HandoffVideos(:final paths) => paths.length > 1, _ => false };
+    final queueButtons = [
+      if (queue) ...[
+        button(HandoffAction.queue, Icons.playlist_add_rounded, many ? 'Add all to queue' : 'Add to queue'),
+        button(HandoffAction.playNext, Icons.queue_play_next_rounded, many ? 'Play all next' : 'Play next'),
+      ],
+    ];
 
     final (IconData icon, String title, String detail, List<Widget> buttons) = switch (item) {
       HandoffVideos(:final paths) => (
@@ -132,6 +145,7 @@ class HandoffCard extends StatelessWidget {
           paths.length > 1 ? 'and ${paths.length - 1} more · the first one goes up' : 'A video on this computer',
           [
             button(HandoffAction.putUp, Icons.play_arrow, solo ? 'Play' : 'Put it up', primary: true),
+            ...queueButtons,
             button(HandoffAction.addFolder, Icons.create_new_folder_outlined, 'Add its folder to Files'),
           ],
         ),
@@ -148,6 +162,7 @@ class HandoffCard extends StatelessWidget {
           [
             button(HandoffAction.openLink, Icons.link, solo ? 'Open in Link' : 'Put it up as a link…',
                 primary: true),
+            ...queueButtons,
           ],
         ),
       HandoffImage() || HandoffNothing() => (Icons.help_outline, '', '', const <Widget>[]),

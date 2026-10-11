@@ -6,6 +6,7 @@ import '../../jellyfin/accounts.dart';
 import '../../screens/home/picked_media.dart';
 import '../../shell/avatar.dart';
 import '../../shell/motion.dart';
+import '../../widgets/app_menu.dart';
 import '../anilist.dart';
 import '../animeflow.dart';
 import '../schedule_model.dart';
@@ -15,8 +16,9 @@ import 'schedule_card.dart';
 
 // The Schedule tab: one column per day from last week's Monday to four
 // weeks out (AniList), each airing with what AnimeFlow has of it, and the
-// one thing to do about it (put it up, request it). Refreshes every
-// minute while visible; ETags keep that cheap.
+// one thing to do about it (put it up, request it; right-click an
+// available one to queue it). Refreshes every minute while visible; ETags
+// keep that cheap.
 
 enum ScheduleFilter { jellyfin, all }
 
@@ -27,6 +29,9 @@ class SchedulePage extends StatefulWidget {
 
   /// Puts a Jellyfin episode up in the server; returns an error to show.
   final Future<String?> Function(JellyfinMedia pick) onPutUp;
+
+  /// Adds an episode to Up next; null: no server, the cards have no menu.
+  final AddToQueue? onAddToQueue;
   final void Function(String message) onToast;
 
   /// Null = the page makes (and closes) its own.
@@ -39,6 +44,7 @@ class SchedulePage extends StatefulWidget {
     super.key,
     this.solo = false,
     required this.onPutUp,
+    this.onAddToQueue,
     required this.onToast,
     this.repository,
     this.accounts,
@@ -259,6 +265,32 @@ class _SchedulePageState extends State<SchedulePage> {
     try {
       final pick = await resolveJellyfinEpisode(_accounts, _flow, e);
       final err = await widget.onPutUp(pick);
+      if (err != null) _toast(err);
+    } catch (err) {
+      _toast(friendlyError(err));
+    } finally {
+      if (mounted) setState(() => _busy.remove(key));
+    }
+  }
+
+  /// Right-click on an available episode ([context]: its card): Put it
+  /// up, Add to queue, Play next.
+  Future<void> _menu(BuildContext context, ScheduleEntry e) async {
+    final add = widget.onAddToQueue;
+    if (add == null) return;
+    final pick = await showAppMenu<int>(context, items: [
+      AppMenuItem(value: 0, label: widget.solo ? 'Play' : 'Put it up'),
+      const AppMenuItem(value: 1, label: 'Add to queue'),
+      const AppMenuItem(value: 2, label: 'Play next'),
+    ]);
+    if (pick == null || !mounted) return;
+    if (pick == 0) return _putUp(e);
+    final key = 'play:${_key(e)}';
+    if (_busy.contains(key)) return;
+    setState(() => _busy.add(key));
+    try {
+      final media = await resolveJellyfinEpisode(_accounts, _flow, e);
+      final err = await add(media, next: pick == 2);
       if (err != null) _toast(err);
     } catch (err) {
       _toast(friendlyError(err));
@@ -520,6 +552,9 @@ class _SchedulePageState extends State<SchedulePage> {
       disabledHint: hint,
       busy: busy,
       onAction: () => _onAction(e, action),
+      onMenu: widget.onAddToQueue != null && (action == CardAction.putUp || action == CardAction.play) && hint == null
+          ? (context) => _menu(context, e)
+          : null,
     );
   }
 

@@ -46,20 +46,44 @@ class AppYtDlp {
     }
   }
 
-  final _probes = <String, (DateTime, Future<LinkProbe>)>{};
+  final _probes = <String, ({DateTime at, DateTime until, Future<LinkProbe> f})>{};
   static const _probeTtl = Duration(minutes: 10);
 
-  Future<LinkProbe> probe(String url) {
+  /// What [url] is, from memory while it is kept (10 minutes from when it
+  /// was probed; [keep] keeps it longer, for Up next's first item, which
+  /// is probed again before that runs out). [fresh] probes again: the
+  /// remembered result stays until the new one is in, and stays when the
+  /// new one fails.
+  Future<LinkProbe> probe(String url, {Duration keep = _probeTtl, bool fresh = false}) {
     final now = DateTime.now();
-    _probes.removeWhere((_, v) => now.difference(v.$1) > _probeTtl);
+    _probes.removeWhere((_, v) => now.isAfter(v.until));
     final hit = _probes[url];
-    if (hit != null) return hit.$2;
+    if (hit != null && !fresh) {
+      final longer = hit.at.add(keep);
+      if (longer.isAfter(hit.until)) _probes[url] = (at: hit.at, until: longer, f: hit.f);
+      return hit.f;
+    }
     final f = ytDlp.then((y) => probeLink(Uri.parse(url), ytDlp: y));
-    _probes[url] = (now, f);
-    f.catchError((Object _) {
-      _probes.remove(url);
-      return LinkProbe.file(Uri(), -1);
-    });
+    final until = now.add(keep);
+    if (hit == null) {
+      _probes[url] = (at: now, until: until, f: f);
+      f.catchError((Object _) {
+        if (_probes[url]?.f == f) _probes.remove(url);
+        return LinkProbe.file(Uri(), -1);
+      });
+    } else {
+      f.then<void>((_) {
+        _probes[url] = (at: now, until: until, f: f);
+      }, onError: (Object _) {});
+    }
     return f;
+  }
+
+  /// [url] no longer needs keeping longer: back to the usual 10 minutes.
+  void release(String url) {
+    final hit = _probes[url];
+    if (hit == null) return;
+    final usual = hit.at.add(_probeTtl);
+    if (usual.isBefore(hit.until)) _probes[url] = (at: hit.at, until: usual, f: hit.f);
   }
 }

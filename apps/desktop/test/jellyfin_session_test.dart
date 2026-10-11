@@ -41,6 +41,10 @@ FakeJellyfin playbackFake() {
       return const JellyfinHttpResponse(204, '');
     });
   }
+  fake.on('POST', '/UserPlayedItems/$episodeId', (_, _) {
+    reports.add((path: '/UserPlayedItems', body: const {}));
+    return const JellyfinHttpResponse(200, '{"Played":true}');
+  });
   return fake;
 }
 
@@ -261,9 +265,43 @@ void main() {
         'ItemId': episodeId,
         'MediaSourceId': episodeId,
         'PlaySessionId': playSessionId,
-        'PositionTicks': 3005000000,
-      });
+        'PositionTicks': 0,
+      }, reason: '11 s watched is a peek: the resume point from before (none) stays');
       expect(errors, isEmpty);
+    });
+
+    test('watched to the end: Stopped without a position, then marked played', () async {
+      reporter.start(const PlayerSnapshot(position: 0, paused: false));
+      for (var i = 1; i <= 1420; i++) {
+        now = DateTime(2026, 1, 1, 20).add(Duration(seconds: i));
+        reporter.update(PlayerSnapshot(position: i.toDouble(), paused: false));
+      }
+      await reporter.stop(const PlayerSnapshot(position: 1420, paused: true));
+      expect(reports.map((r) => r.path.split('/').last).toList().sublist(reports.length - 2),
+          ['Stopped', 'UserPlayedItems']);
+      expect(reports[reports.length - 2].body.containsKey('PositionTicks'), isFalse);
+      final nearEnd = [for (final r in reports) if (r.path.endsWith('Progress')) r.body]
+          .where((b) => b.containsKey('PositionTicks') && b['PositionTicks'] >= 1207 * jellyfinTicksPerSecond);
+      expect(nearEnd, isEmpty, reason: 'near the end Progress carries no position: Jellyfin must not decide');
+    });
+
+    test('played before: a peek never unmarks it', () async {
+      final r = JellyfinProgressReporter(
+        client: accounts.clientFor(fixtureServerId)!,
+        itemId: episodeId,
+        source: fixtureSource(),
+        playSessionId: playSessionId,
+        playedBefore: true,
+        clock: () => now,
+      );
+      r.start(const PlayerSnapshot(position: 700, paused: false));
+      now = now.add(const Duration(seconds: 1));
+      r.update(const PlayerSnapshot(position: 701, paused: true));
+      await r.stop(const PlayerSnapshot(position: 701, paused: true));
+      expect(reports.map((r) => r.path.split('/').last),
+          ['Playing', 'UserPlayedItems', 'Progress', 'Stopped', 'UserPlayedItems']);
+      expect(reports[2].body.containsKey('PositionTicks'), isFalse);
+      expect(reports[3].body.containsKey('PositionTicks'), isFalse);
     });
 
     test('played to the end, then seeked back: a fresh Playing', () async {

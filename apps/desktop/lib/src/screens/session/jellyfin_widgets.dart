@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../jellyfin/session_media.dart';
 import '../../session/session_coordinator.dart' show AutoAdvance, autoAdvanceSecs;
+import '../../widgets/app_menu.dart' show AppGlass;
 import 'player_controls.dart' show FloatingPill;
 
 // Jellyfin pieces of the session player. Plain widgets fed by the
@@ -69,27 +70,36 @@ class EndOfEpisodeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
     final c = countdown;
-    return Card(
+    // The same card as Up next's (`UpNextCard`): the app's glass, 400 wide.
+    return AppGlass(
       key: const ValueKey('end-of-episode'),
-      color: Colors.black.withValues(alpha: 0.85),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 380),
+      child: SizedBox(
+        width: 400,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(c == null ? 'Up next' : 'Next episode in ${c.secondsLeft} s',
-                  style: t.labelLarge?.copyWith(color: Colors.white70)),
-              const SizedBox(height: 4),
+                  style: const TextStyle(color: Colors.white60, fontSize: 12)),
+              const SizedBox(height: 2),
               Text('Next: ${next.label}',
-                  maxLines: 2, overflow: TextOverflow.ellipsis, style: t.titleMedium),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600, height: 1.25)),
               if (c != null) ...[
-                const SizedBox(height: 8),
-                LinearProgressIndicator(value: c.secondsLeft / autoAdvanceSecs),
+                const SizedBox(height: 10),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(end: c.secondsLeft / autoAdvanceSecs),
+                    duration: const Duration(seconds: 1),
+                    builder: (context, v, _) =>
+                        LinearProgressIndicator(value: v, minHeight: 3, backgroundColor: const Color(0x1FFFFFFF)),
+                  ),
+                ),
               ],
               const SizedBox(height: 10),
               Row(

@@ -149,6 +149,9 @@ class _FakeJellyfin {
       res.statusCode = 204;
       return res.close();
     }
+    if (path.startsWith('/UserPlayedItems/') || path.startsWith('/UserItems/')) {
+      return json({'Played': path.startsWith('/UserPlayedItems/'), 'PlaybackPositionTicks': 0});
+    }
     if (RegExp(r'^/Videos/\w+/stream$').hasMatch(path)) return _stream(req);
     res.statusCode = 404;
     await res.close();
@@ -378,8 +381,13 @@ void main() {
         expect(ep1.last, 'Stopped');
         expect(ep1.where((k) => k == 'Stopped'), hasLength(1));
         final stopped1 = aCalls.lastWhere((s) => s.body?['ItemId'] == _ep1);
-        expect(stopped1.body!['PositionTicks'], greaterThan(19 * jellyfinTicksPerSecond),
-            reason: 'played to the end');
+        // Part of it watched, then a seek to the end: not watched (see
+        // WatchSession). A resume point capped at 85 % of the 20 s, so
+        // Jellyfin cannot mark it played on its own.
+        expect(stopped1.body!['PositionTicks'], lessThan(18 * 10000000),
+            reason: 'part way: resume point under 90 %, so not marked played');
+        expect(jelly.calls.any((c) => c.method == 'POST' && c.path == '/UserPlayedItems/$_ep1'), isFalse,
+            reason: 'seeking to the end is not watching');
         expect(stopped1.body!['PlaySessionId'], 'ps-ua-$_ep1');
         expect(ep2.first, 'Playing');
         expect(ep2.last, 'Stopped', reason: 'leaving reports Stopped');

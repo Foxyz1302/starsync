@@ -2,9 +2,9 @@ import 'package:sync_relay_core/core.dart';
 
 import '../jellyfin/session_media.dart' show compareMemberIds;
 
-// Who puts an Up next item up, and when to get the first one ready. Pure:
-// only what every client sees in `state` decides, so all clients agree
-// without a wire message (like the Jellyfin auto-advance swapper).
+// Who puts an Up next item up. Pure: only what every client sees in
+// `state` decides, so all clients agree without a wire message (like the
+// Jellyfin auto-advance swapper).
 
 /// Who puts [item] up: [id] a member id; null with [why] when nobody here
 /// can (the item is skipped), null without [why] when nobody is around
@@ -64,22 +64,6 @@ String queueHowLabel(QueueItem item, {required String selfId}) {
     QueueHow.direct => 'everyone fetches',
     QueueHow.jellyfin => 'Jellyfin',
   };
-}
-
-/// Seconds before the end at which the first Up next item is got ready.
-const queueWarmLeadSecs = 90.0;
-
-/// Whether to get the next item ready now: the current media is in its
-/// last [queueWarmLeadSecs], is buffered to its end, or has finished.
-bool queueWarmDue({
-  required String transport,
-  required double position,
-  required double duration,
-  required double bufferedTo,
-}) {
-  if (transport == 'finished') return true;
-  if (duration <= 0) return false;
-  return duration - position <= queueWarmLeadSecs || bufferedTo >= duration - 1;
 }
 
 /// "1:23:45" / "23:45" for [secs]; empty when unknown.

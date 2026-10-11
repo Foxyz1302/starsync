@@ -92,7 +92,9 @@ class JellyfinPlaybackReport {
   final String itemId;
   final String mediaSourceId;
   final String playSessionId;
-  final int positionTicks;
+  /// Null leaves it out: a Progress without it does not touch the saved
+  /// position or played state; a Stopped without it marks the item played.
+  final int? positionTicks;
   final bool isPaused;
   /// Jellyfin stream index ([JellyfinMediaStream.index]) of the audio track.
   final int? audioStreamIndex;
@@ -136,7 +138,7 @@ class JellyfinPlaybackReport {
         'ItemId': itemId,
         'MediaSourceId': mediaSourceId,
         'PlaySessionId': playSessionId,
-        'PositionTicks': positionTicks,
+        if (positionTicks != null) 'PositionTicks': positionTicks,
         'IsPaused': isPaused,
         'CanSeek': canSeek,
         'PlayMethod': playMethod,
@@ -149,7 +151,7 @@ class JellyfinPlaybackReport {
         'ItemId': itemId,
         'MediaSourceId': mediaSourceId,
         'PlaySessionId': playSessionId,
-        'PositionTicks': positionTicks,
+        if (positionTicks != null) 'PositionTicks': positionTicks,
       };
 }
 
@@ -540,19 +542,23 @@ class JellyfinClient {
   // ------------------------------------------------------------ progress
 
   /// `POST /Sessions/Playing`: playback started (Jellyfin shows the session
-  /// as playing and starts tracking the item).
+  /// as playing and starts tracking the item). Up to 10.11 this also sets
+  /// the item unplayed (resumable items); later servers leave it.
   Future<void> reportPlaybackStart(JellyfinPlaybackReport r) =>
       _json('POST', '/Sessions/Playing', body: r.toProgressJson());
 
   /// `POST /Sessions/Playing/Progress`: position, pause state and tracks.
-  /// Jellyfin saves the resume position from these.
+  /// With a position Jellyfin saves it like a stop does (below
+  /// "min resume" cleared, past "max resume" marked played); without one
+  /// the saved position and played state stay.
   Future<void> reportPlaybackProgress(JellyfinPlaybackReport r) =>
       _json('POST', '/Sessions/Playing/Progress', body: r.toProgressJson());
 
   /// `POST /Sessions/Playing/Stopped`: ends the session. The server then
   /// marks the item played if the position is past its "max resume" share
   /// (90% by default), keeps it as a resume point between 5% and 90%, and
-  /// clears the position below 5%.
+  /// clears the position below 5% (the played flag stays as it is in both).
+  /// Without a position it marks the item played and clears the position.
   Future<void> reportPlaybackStopped(JellyfinPlaybackReport r) =>
       _json('POST', '/Sessions/Playing/Stopped', body: r.toStoppedJson());
 

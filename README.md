@@ -84,7 +84,7 @@ bar while its controls are up), Esc leaves it. The controls show the
 show's cover, title and episode top left (a web video: its thumbnail and
 name; guests get the art too); before
 a video first plays, its banner fills the picture until playback starts.
-One pill above the controls says what playback waits for ("Press Space
+One pill bottom centre, just above the controls, says what playback waits for ("Press Space
 when you're ready", "Waiting for Bob and Mika · 2/3 ready", "Bob is
 loading…") or what went wrong, with Retry or Cancel when it helps. Chat and activity open in a panel on the right (chat button or
 Tab), ready to type; it shows messages, and its "Activity" toggle adds
@@ -127,8 +127,8 @@ disk. Nothing is uploaded or stored anywhere.
 
 What to watch, from three sources (the switch at the top). Drop a video,
 a folder or a link anywhere on the window, or press Ctrl+V outside a
-text field, and a small card asks how to open it (put it up, add the
-folder to Files, or fill Link).
+text field, and a small card asks how to open it (put it up, add it to
+Up next, add the folder to Files, or fill Link).
 
 - **Jellyfin**: your linked servers (see below); with none linked it
   points to Files and Link and offers Jellyfin as optional. Library chips beside the
@@ -162,14 +162,16 @@ and it plays for you alone ([Watch solo](#getting-started)).
 
 In a server (solo too), anything can wait its turn instead of going up
 now: **Add to queue** on the Link page (in the way you picked), or
-right-click a Jellyfin card or episode, a video in Files or a recent link
-for **Add to queue** / **Play next**; the Jellyfin details panel has a
-queue button (right-click it to play next). A link is checked first, like
-Put it up. Everyone shares one Up next and anyone can change it; what
+right-click a Jellyfin card or episode, a video in Files, a recent link
+or an episode on the Schedule for **Add to queue** / **Play next**; the
+Jellyfin details panel has a queue button (right-click it to play next),
+and the card for a dropped or pasted video or link has both. A link is
+checked first, like Put it up. The next item is kept ready on the app
+that will put it up, so skipping to it starts at once. Everyone shares one Up next and anyone can change it; what
 you added stays when you leave.
 
-In the player, **Up next · title** sits top right with the controls: ▶
-plays it now, the title opens the queue: drag rows to reorder, hover a
+In the player, **Up next · title** sits in the top bar next to the chat
+button: ⏭ plays it now, the title opens the queue: drag rows to reorder, hover a
 row to play it now (▶) or remove it (×), paste a link in the field or
 drop a link or a video on it to add. When a video ends, a card shows
 what is up next with a 10 s countdown (Cancel stops it on your screen)
@@ -269,10 +271,11 @@ chapter title and the time there. With the controls hidden it stays as a
 thin line (unless "Progress line when hidden" is off). Above it flat buttons: ≡ menu, Subtitles and Audio (with the
 track count), the shader badge (the active Anime4K mode, e.g. "A HQ"),
 ready, chapters, 1:30, previous / next episode, change video, volume, ⚙
-and fullscreen; the title top left, chat and back-to-library top right. Keys and skip buttons work
+and fullscreen; the title top left, Up next, chat and back-to-library top right. Keys and skip buttons work
 the same.
 
-Skipping: during the opening a "Skip OP" button floats in the corner (it
+Skipping: during the opening a "Skip OP" button shows bottom right, just
+above the controls (it
 jumps to the end of the opening), during the ending "Skip ED" (to the end
 of the ending only; what comes after is yours to skip). "Skip OP" and
 "Skip 1:30" show for 5 seconds when they come up, then only while the
@@ -324,7 +327,10 @@ Watching:
   directly with their own sign-in. Jellyfin tracks progress per account:
   your watched state, Continue watching and resume point follow what you
   saw (reported on start, every 10 s, on pause, resume, seek and track
-  change, and when it stops).
+  change, and when it stops). Watched means you actually played most of
+  it (or reached the ending after half), not where you stopped: opening
+  a watched episode to check a moment keeps it watched, and a quick peek
+  leaves no resume point.
 - Friends without an account watch through the server: whoever put the
   item up passes it on automatically, with their own sign-in, which never
   leaves their computer (only the current item, only to people in the

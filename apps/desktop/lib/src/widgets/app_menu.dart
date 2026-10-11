@@ -22,6 +22,9 @@ abstract final class AppMenuStyle {
   static const border = Color(0x1FFFFFFF);
   static const hover = Color(0x14FFFFFF);
   static const focus = Color(0x24FFFFFF);
+  /// The player's pills over the picture: lighter, so less of it is hidden.
+  static const pillGlass = Color(0x8C000000);
+  static const blur = 16.0;
   static const radius = 12.0;
   static const rowRadius = 8.0;
   static const rowHeight = 36.0;
@@ -51,6 +54,53 @@ abstract final class AppMenuStyle {
           ),
         ),
       );
+}
+
+/// The app's one frosted surface: a blur under a dark tint, a hairline
+/// border and (cards, menus) a soft shadow. Menus, popovers and the
+/// player's cards use it as is; the player's pills with [pill].
+class AppGlass extends StatelessWidget {
+  final Widget child;
+  final double radius;
+  final Color color;
+  final bool shadow;
+  const AppGlass({
+    super.key,
+    required this.child,
+    this.radius = AppMenuStyle.radius,
+    this.color = AppMenuStyle.glass,
+    this.shadow = true,
+  });
+
+  /// A stadium over the picture: the lighter tint, no shadow.
+  const AppGlass.pill({super.key, required this.child})
+      : radius = 999,
+        color = AppMenuStyle.pillGlass,
+        shadow = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = BorderRadius.circular(radius);
+    final glass = ClipRRect(
+      borderRadius: r,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: AppMenuStyle.blur, sigmaY: AppMenuStyle.blur),
+        child: Material(
+          color: color,
+          shape: RoundedRectangleBorder(borderRadius: r, side: const BorderSide(color: AppMenuStyle.border, width: 0.5)),
+          child: child,
+        ),
+      ),
+    );
+    if (!shadow) return glass;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: r,
+        boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 24, offset: Offset(0, 8))],
+      ),
+      child: glass,
+    );
+  }
 }
 
 /// One row: [label], a dim [hint] at the right, [checked] = the current
@@ -220,39 +270,24 @@ class _AppMenuPanelState extends State<_AppMenuPanel> {
   @override
   Widget build(BuildContext context) {
     final checks = widget.items.any((i) => i.checked != null);
-    final r = BorderRadius.circular(AppMenuStyle.radius);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: r,
-        boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 24, offset: Offset(0, 8))],
-      ),
-      child: ClipRRect(
-        borderRadius: r,
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-          child: Material(
-            key: const ValueKey('app-menu'),
-            color: AppMenuStyle.glass,
-            shape: AppMenuStyle.shape,
-            child: IntrinsicWidth(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(4),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (final (i, item) in widget.items.indexed)
-                      _MenuRow(
-                        key: i == _start ? _current : null,
-                        item: item,
-                        checks: checks,
-                        autofocus: i == _start,
-                        onTap: () => widget.onPick(i),
-                      ),
-                  ],
+    return AppGlass(
+      key: const ValueKey('app-menu'),
+      child: IntrinsicWidth(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final (i, item) in widget.items.indexed)
+                _MenuRow(
+                  key: i == _start ? _current : null,
+                  item: item,
+                  checks: checks,
+                  autofocus: i == _start,
+                  onTap: () => widget.onPick(i),
                 ),
-              ),
-            ),
+            ],
           ),
         ),
       ),

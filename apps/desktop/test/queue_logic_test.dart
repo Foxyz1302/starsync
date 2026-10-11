@@ -54,16 +54,6 @@ void main() {
     expect(queueJanitor([member('m9'), member('m1', stale: true), member('m2')]), 'm2');
   });
 
-  test('warming starts in the last 90 s, once buffered to the end, or at the end', () {
-    bool due(double pos, {double buffered = 0, String t = 'playing'}) =>
-        queueWarmDue(transport: t, position: pos, duration: 1000, bufferedTo: pos + buffered);
-    expect(due(100), isFalse);
-    expect(due(911), isTrue);
-    expect(due(100, buffered: 900), isTrue);
-    expect(due(0, t: 'finished'), isTrue);
-    expect(queueWarmDue(transport: 'playing', position: 5, duration: 0, bufferedTo: 5), isFalse);
-  });
-
   test('labels', () {
     expect(queueHowLabel(item(QueueHow.through), selfId: 'm2'), 'through you');
     expect(queueHowLabel(item(QueueHow.through), selfId: 'm1'), 'through Bob');

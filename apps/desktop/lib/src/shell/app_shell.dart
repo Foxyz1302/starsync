@@ -460,7 +460,8 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     _handoffOpen = true;
     final HandoffAction? action;
     try {
-      action = await showPopover<HandoffAction>(context, at: align, child: HandoffCard(item: item, solo: _alone.peek()));
+      action = await showPopover<HandoffAction>(context,
+          at: align, child: HandoffCard(item: item, solo: _alone.peek(), queue: _online.peek()));
     } finally {
       _handoffOpen = false;
     }
@@ -474,6 +475,22 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
           await FolderStore.instance.ensureLoaded();
           FolderStore.instance.addRecent(paths.first);
         }
+      case (HandoffVideos(:final paths), HandoffAction.queue || HandoffAction.playNext):
+        // In order: with Play next, the last one added goes first.
+        final next = action == HandoffAction.playNext;
+        for (final p in next ? paths.reversed : paths) {
+          final error = await SessionState.instance.coordinator.queue.add(FileMedia(p), next: next);
+          if (error != null) {
+            SessionState.instance.coordinator.showToast(error);
+            break;
+          }
+        }
+      case (HandoffLink(:final url), HandoffAction.queue || HandoffAction.playNext):
+        // In the Link page's mode, probed and refused like there.
+        final coord = SessionState.instance.coordinator;
+        final error = await coord.queue
+            .add(LinkMedia(url, relay: _picker.linkRelay), next: action == HandoffAction.playNext);
+        if (error != null) coord.showToast(error);
       case (HandoffVideos(:final paths), HandoffAction.addFolder):
         await _addFolder(File(paths.first).parent.path);
       case (HandoffFolder(:final path), _):
@@ -680,6 +697,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       ShellTab.schedule => SchedulePage(
           solo: alone,
           onPutUp: _putUp,
+          onAddToQueue: online ? coord.queue.add : null,
           onToast: coord.showToast,
         ),
       ShellTab.settings => SettingsTab(
