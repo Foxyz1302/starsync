@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:sync_relay_core/core.dart';
 
 import '../shell/motion.dart';
+import '../widgets/app_menu.dart';
 import 'accounts.dart';
 import 'browse_scope.dart';
 import 'cards.dart' show doubleClickTime, kindIcon;
@@ -392,17 +393,13 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
       children: [
         const Expanded(child: Text('Episodes', style: TextStyle(fontWeight: FontWeight.w600))),
         if (seasons.length > 1)
-          DropdownButton<String>(
-            key: const ValueKey('details-season'),
-            value: seasonId,
-            isDense: true,
-            underline: const SizedBox.shrink(),
-            borderRadius: BorderRadius.circular(10),
-            items: [
-              for (final s in seasons)
-                DropdownMenuItem(value: s.id, child: Text(s.name, overflow: TextOverflow.ellipsis)),
-            ],
-            onChanged: (id) => setState(() => _seasonId = id),
+          Flexible(
+            child: AppSelect<String?>(
+              key: const ValueKey('details-season'),
+              value: seasonId,
+              items: [for (final s in seasons) (s.id, s.name)],
+              onChanged: (id) => setState(() => _seasonId = id),
+            ),
           ),
       ],
     );

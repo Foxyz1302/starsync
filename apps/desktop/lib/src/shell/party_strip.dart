@@ -11,6 +11,7 @@ import '../screens/session/jellyfin_widgets.dart' show ViaHostBadge;
 import '../state/session_state.dart';
 import '../update/update_controller.dart';
 import '../widgets/app_keys.dart';
+import '../widgets/app_menu.dart';
 import '../widgets/window_buttons.dart';
 import 'avatar.dart';
 import 'motion.dart';
@@ -578,9 +579,8 @@ class _MemberTile extends StatelessWidget {
         ],
       ),
       subtitle: Text(status),
-      trailing: PopupMenuButton<String>(
+      trailing: AppMenuButton<String>(
         tooltip: 'More',
-        icon: const Icon(Icons.more_vert, size: 18),
         onSelected: (v) {
           switch (v) {
             case 'force':
@@ -593,18 +593,13 @@ class _MemberTile extends StatelessWidget {
               coord.joinBack();
           }
         },
-        itemBuilder: (_) => [
-          if (!m.out)
-            PopupMenuItem(
-              value: 'force',
-              child: Text(m.ready ? 'Force unready' : 'Force ready'),
-            ),
-          if (!info.self)
-            const PopupMenuItem(value: 'nudge', child: Text('Nudge')),
+        items: () => [
+          if (!m.out) AppMenuItem(value: 'force', label: m.ready ? 'Force unready' : 'Force ready'),
+          if (!info.self) const AppMenuItem(value: 'nudge', label: 'Nudge'),
           if (info.self && m.out)
-            const PopupMenuItem(value: 'back', child: Text('Join back'))
+            const AppMenuItem(value: 'back', label: 'Join back')
           else if (!m.out)
-            const PopupMenuItem(value: 'out', child: Text('Sit out')),
+            const AppMenuItem(value: 'out', label: 'Sit out'),
         ],
       ),
     );

@@ -10,6 +10,7 @@ import '../shaders/shader_presets.dart';
 import '../state/session_state.dart';
 import '../shell/motion.dart';
 import '../state/settings.dart';
+import '../widgets/app_menu.dart';
 import 'uosc/buttons.dart';
 import 'uosc/controls.dart';
 
@@ -56,27 +57,14 @@ class SettingRow extends StatelessWidget {
   }
 }
 
-DropdownButton<T> _dropdown<T>({
+AppSelect<T> _dropdown<T>({
   required Key key,
   required T value,
   required List<(T, String)> items,
   required ValueChanged<T> onChanged,
   bool expanded = false,
 }) =>
-    DropdownButton<T>(
-      key: key,
-      value: value,
-      isExpanded: expanded,
-      underline: const SizedBox.shrink(),
-      borderRadius: BorderRadius.circular(10),
-      items: [
-        for (final (v, label) in items)
-          DropdownMenuItem(value: v, child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis)),
-      ],
-      onChanged: (v) {
-        if (v != null) onChanged(v);
-      },
-    );
+    AppSelect<T>(key: key, value: value, items: items, onChanged: onChanged, expanded: expanded);
 
 /// Standard (our bars over media_kit's controls) or uosc. Live.
 class PlayerDesignSetting extends StatelessWidget {

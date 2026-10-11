@@ -3,6 +3,7 @@ import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
 import '../state/settings.dart';
+import '../widgets/app_menu.dart';
 import 'browse_scope.dart';
 import 'cards.dart';
 import 'home_rows.dart';
@@ -184,18 +185,18 @@ class _LatestRow extends StatelessWidget {
                   onPressed: () => scope.onOpen(LibraryRoute(view, sort: 'added')),
                   child: const Text('Show all'),
                 ),
-                PopupMenuButton<void>(
+                AppMenuButton<bool>(
                   key: ValueKey('latest-menu-${view.id}'),
                   tooltip: 'Row options',
-                  icon: const Icon(Icons.more_vert, size: 18),
-                  itemBuilder: (context) => [
-                    CheckedPopupMenuItem(
+                  items: () => [
+                    AppMenuItem(
                       key: const ValueKey('hide-rereleases'),
+                      value: !hide,
                       checked: hide,
-                      onTap: () => AppSettings.instance.setHideReReleases(!hide),
-                      child: const Text('Hide re-releases in Latest'),
+                      label: 'Hide re-releases in Latest',
                     ),
                   ],
+                  onSelected: AppSettings.instance.setHideReReleases,
                 ),
               ],
             ),

@@ -17,7 +17,8 @@ A five-minute tour. Details: [ARCHITECTURE.md](ARCHITECTURE.md), wire format:
         +----------------------------------------+
 
  video bytes come from somewhere else:
-   - a link (any http/https URL): each app fetches it directly
+   - a link (any http/https URL): the member who put it up passes it on
+     through the relay (or each app, or the server, fetches it)
    - a Jellyfin item: each app plays it with its own Jellyfin account,
      friends without one through the server
    - a file on the host's disk: the server streams it (/m/... endpoint)
@@ -87,9 +88,11 @@ for them until they join back.
 
 ## Where video comes from
 
-- **Link**: you paste an http(s) URL. Every app plays it directly with mpv;
-  a web page (YouTube, X, ...) goes through yt-dlp, which the app and the
-  server download and update by themselves.
+- **Link**: you paste an http(s) URL. By default your computer opens it and
+  passes it on (it plays for everyone whenever it plays for you, cookies
+  included); under "Other ways" every app plays it directly, or the server
+  fetches it once. A web page (YouTube, X, ...) goes through yt-dlp, which
+  the app and the server download and update by themselves.
   A pasted Jellyfin link becomes the Jellyfin item below when possible.
 - **Jellyfin item**: picked in the app's library browser. Shared as "this
   item on this Jellyfin server", never as a link with someone's sign-in.

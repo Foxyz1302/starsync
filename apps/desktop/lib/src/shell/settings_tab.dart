@@ -22,6 +22,7 @@ import '../sfx/synth_sfx.dart';
 import '../state/session_state.dart';
 import '../state/settings.dart';
 import '../update/update_controller.dart';
+import '../widgets/app_menu.dart';
 import 'avatar.dart';
 import 'motion.dart';
 
@@ -622,11 +623,15 @@ class _CookieBrowserDialogState extends State<_CookieBrowserDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            DropdownButtonFormField<String>(
-              initialValue: _browser,
-              decoration: const InputDecoration(labelText: 'Browser'),
-              items: [for (final b in cookieBrowsers) DropdownMenuItem(value: b, child: Text(b))],
-              onChanged: (v) => setState(() => _browser = v ?? _browser),
+            Row(
+              children: [
+                const Expanded(child: Text('Browser')),
+                AppSelect<String>(
+                  value: _browser,
+                  items: [for (final b in cookieBrowsers) (b, b)],
+                  onChanged: (v) => setState(() => _browser = v),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             TextField(
@@ -762,15 +767,11 @@ class NotificationsInfo extends StatelessWidget {
                       ),
                     ),
                     SignalBuilder(
-                      builder: (context) => DropdownButton<ChatPopups>(
+                      builder: (context) => AppSelect<ChatPopups>(
                         key: const ValueKey('chat-popups'),
                         value: AppSettings.instance.chatPopups.value,
-                        onChanged: (v) {
-                          if (v != null) AppSettings.instance.setChatPopups(v);
-                        },
-                        items: [
-                          for (final m in ChatPopups.values) DropdownMenuItem(value: m, child: Text(m.label)),
-                        ],
+                        onChanged: AppSettings.instance.setChatPopups,
+                        items: [for (final m in ChatPopups.values) (m, m.label)],
                       ),
                     ),
                   ],
@@ -832,17 +833,15 @@ class SoundSettings extends StatelessWidget {
           Row(
             children: [
               const Expanded(child: Text('Sound set')),
-              DropdownButton<String>(
+              AppSelect<String>(
                 key: const ValueKey('sound-preset'),
                 value: overall,
                 onChanged: (v) {
-                  if (v == null) return;
                   s.setSoundPreset(v);
                   _preview(SfxKind.ready);
                 },
                 items: [
-                  for (final MapEntry(key: p, value: (name, _)) in presetInfo.entries)
-                    DropdownMenuItem(value: p.name, child: Text(name)),
+                  for (final MapEntry(key: p, value: (name, _)) in presetInfo.entries) (p.name, name),
                 ],
               ),
             ],
@@ -867,19 +866,17 @@ class SoundSettings extends StatelessWidget {
                       children: [Text(name), Text(help, style: muted)],
                     ),
                   ),
-                  DropdownButton<String?>(
+                  AppSelect<String?>(
                     key: ValueKey('sound-preset-${kind.name}'),
                     value: per[kind.name],
-                    underline: const SizedBox.shrink(),
                     style: muted,
                     onChanged: (v) {
                       s.setSoundPresetFor(kind.name, v);
                       if (volume > 0) _preview(kind);
                     },
                     items: [
-                      const DropdownMenuItem<String?>(value: null, child: Text('Same as set')),
-                      for (final MapEntry(key: p, value: (name, _)) in presetInfo.entries)
-                        DropdownMenuItem<String?>(value: p.name, child: Text(name)),
+                      (null, 'Same as set'),
+                      for (final MapEntry(key: p, value: (name, _)) in presetInfo.entries) (p.name, name),
                     ],
                   ),
                   // A nudge always plays (an explicit poke): no switch,

@@ -27,7 +27,8 @@ class MediaPickerController extends ChangeNotifier {
   final TextEditingController link;
   final TextEditingController file;
   MediaKind _source;
-  LinkRelay _linkRelay = LinkRelay.direct;
+  // Through me unless picked otherwise (Library → Link).
+  LinkRelay _linkRelay = LinkRelay.me;
   JellyfinMedia? _jellyfin;
   JellyfinSelection? _selected;
 

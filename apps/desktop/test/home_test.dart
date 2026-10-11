@@ -87,7 +87,7 @@ void main() {
     expect(c.source, MediaKind.jellyfin);
     c.pasteText(' https://example.com/a.mkv ');
     expect(c.source, MediaKind.link);
-    expect(c.selection, const LinkMedia('https://example.com/a.mkv'));
+    expect(c.selection, const LinkMedia('https://example.com/a.mkv', relay: LinkRelay.me));
     c.pasteText('/home/me/b.mkv');
     expect(c.source, MediaKind.file);
     expect(c.selection, const FileMedia('/home/me/b.mkv'));

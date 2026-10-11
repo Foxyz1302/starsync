@@ -379,7 +379,9 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       if (error != null || !mounted) return error;
     }
     // Alone, a link plays direct: there is nobody to pass it on to.
-    if (media is LinkMedia && session.solo.peek()) media = LinkMedia(media.url, anyway: media.anyway);
+    if (media is LinkMedia && session.solo.peek()) {
+      media = LinkMedia(media.url, relay: LinkRelay.direct, anyway: media.anyway);
+    }
     final error = await session.coordinator.swapPicked(media);
     if (error != null || !mounted) return error;
     final f = session.lastForm;

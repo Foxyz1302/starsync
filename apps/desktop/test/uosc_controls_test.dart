@@ -16,6 +16,7 @@ import 'package:watch_together/src/shaders/shader_presets.dart';
 import 'package:watch_together/src/shell/settings_tab.dart';
 import 'package:watch_together/src/state/settings.dart';
 import 'package:watch_together/src/update/update_controller.dart';
+import 'package:watch_together/src/widgets/app_menu.dart';
 
 // The experimental mpv-style (uosc) controls, piece by piece (never the
 // session screen or a media_kit `Video`).
@@ -466,12 +467,12 @@ void main() {
     ));
     final design = find.byKey(const ValueKey('player-design'));
     expect(find.text('Player design'), findsOneWidget);
-    expect(tester.widget<DropdownButton<bool>>(design).value, isFalse);
+    expect(tester.widget<AppSelect<bool>>(design).value, isFalse);
     await tester.tap(design);
     await tester.pumpAndSettle();
     await tester.tap(find.text('uosc').last);
     await tester.pumpAndSettle();
     expect(s.mpvControls.value, isTrue);
-    expect(tester.widget<DropdownButton<bool>>(design).value, isTrue);
+    expect(tester.widget<AppSelect<bool>>(design).value, isTrue);
   });
 }

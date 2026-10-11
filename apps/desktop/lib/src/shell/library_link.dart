@@ -178,7 +178,17 @@ String agoText(DateTime at, DateTime now) {
 
 // -------------------------------------------------------------- widget
 
-const _modes = [
+// Through me is the default and the main choice: it plays whatever this
+// computer can open, and nobody can tell ahead which sites will want
+// sign-in cookies (YouTube may start asking any day). The other two sit
+// behind "Other ways".
+const _main = (
+  LinkRelay.me,
+  Icons.cell_tower,
+  'Through me',
+  'Your computer opens it and passes it on, so it plays for everyone whenever it plays for you.'
+);
+const _others = [
   (LinkRelay.direct, Icons.groups_outlined, 'Everyone fetches it', 'Each app plays the link itself.'),
   (
     LinkRelay.server,
@@ -186,7 +196,6 @@ const _modes = [
     'Server fetches it',
     'Downloaded once by the server. For links slow or blocked for some.'
   ),
-  (LinkRelay.me, Icons.cell_tower, 'Through me', 'Your computer passes it on. For links only you can open.'),
 ];
 
 String linkRelayHelp(LinkRelay r) => switch (r) {
@@ -232,6 +241,8 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
   String? _error;
   /// [_error] is the probe's problem: "Put it up anyway" is offered.
   bool _canForce = false;
+  /// "Other ways" opened (always shown while one of them is picked).
+  bool _otherWays = false;
 
   @override
   void initState() {
@@ -316,6 +327,16 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
       _canForce = canForce;
     });
   }
+
+  Widget _modeCard((LinkRelay, IconData, String, String) m, {bool compact = false}) => _ModeCard(
+        key: ValueKey('link-mode-${m.$1.name}'),
+        icon: m.$2,
+        title: m.$3,
+        sub: m.$4,
+        compact: compact,
+        selected: _c.linkRelay == m.$1,
+        onTap: () => setState(() => _c.linkRelay = m.$1),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -421,33 +442,63 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
                 const SizedBox(height: 28),
                 Text('How the others get it', style: t.titleSmall),
                 const SizedBox(height: 10),
-                LayoutBuilder(builder: (context, box) {
-                  final cards = [
-                    for (final m in _modes)
-                      _ModeCard(
-                        key: ValueKey('link-mode-${m.$1.name}'),
-                        icon: m.$2,
-                        title: m.$3,
-                        sub: m.$4,
-                        selected: _c.linkRelay == m.$1,
-                        onTap: () => setState(() => _c.linkRelay = m.$1),
+                _modeCard(_main),
+                const SizedBox(height: 6),
+                Builder(builder: (context) {
+                  final open = _otherWays || _c.linkRelay != LinkRelay.me;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextButton.icon(
+                        key: const ValueKey('link-other-ways'),
+                        // Closing while one of them is picked goes back to Through me.
+                        onPressed: () => setState(() {
+                          _otherWays = !open;
+                          if (open) _c.linkRelay = LinkRelay.me;
+                        }),
+                        style: TextButton.styleFrom(foregroundColor: scheme.onSurfaceVariant),
+                        iconAlignment: IconAlignment.end,
+                        icon: AnimatedRotation(
+                          turns: open ? 0.5 : 0,
+                          duration: easeTime,
+                          curve: ease,
+                          child: const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
+                        ),
+                        label: const Text('Other ways'),
                       ),
-                  ];
-                  if (box.maxWidth < 560) {
-                    return Column(children: [
-                      for (final (i, c) in cards.indexed) ...[if (i > 0) const SizedBox(height: 8), c],
-                    ]);
-                  }
-                  return IntrinsicHeight(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        for (final (i, c) in cards.indexed) ...[
-                          if (i > 0) const SizedBox(width: 10),
-                          Expanded(child: c),
-                        ],
-                      ],
-                    ),
+                      AnimatedSize(
+                        duration: easeTime,
+                        curve: ease,
+                        alignment: Alignment.topCenter,
+                        child: !open
+                            ? const SizedBox(width: double.infinity)
+                            : Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: LayoutBuilder(builder: (context, box) {
+                                  final cards = [for (final m in _others) _modeCard(m, compact: true)];
+                                  if (box.maxWidth < 560) {
+                                    return Column(children: [
+                                      for (final (i, c) in cards.indexed) ...[
+                                        if (i > 0) const SizedBox(height: 8),
+                                        c,
+                                      ],
+                                    ]);
+                                  }
+                                  return IntrinsicHeight(
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      children: [
+                                        for (final (i, c) in cards.indexed) ...[
+                                          if (i > 0) const SizedBox(width: 10),
+                                          Expanded(child: c),
+                                        ],
+                                      ],
+                                    ),
+                                  );
+                                }),
+                              ),
+                      ),
+                    ],
                   );
                 }),
                 const SizedBox(height: 8),
@@ -542,6 +593,8 @@ class _ModeCard extends StatelessWidget {
   final IconData icon;
   final String title, sub;
   final bool selected;
+  /// A secondary choice: icon beside the title, a quieter card.
+  final bool compact;
   final VoidCallback onTap;
   const _ModeCard({
     super.key,
@@ -550,6 +603,7 @@ class _ModeCard extends StatelessWidget {
     required this.sub,
     required this.selected,
     required this.onTap,
+    this.compact = false,
   });
 
   @override
@@ -565,23 +619,31 @@ class _ModeCard extends StatelessWidget {
           duration: easeTime,
           curve: ease,
           width: double.infinity,
-          padding: const EdgeInsets.all(12),
+          padding: EdgeInsets.all(compact ? 10 : 14),
           decoration: BoxDecoration(
             color: selected ? scheme.primary.withValues(alpha: 0.10) : scheme.surfaceContainerLow,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: selected ? scheme.primary : Colors.transparent, width: 2),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
+            crossAxisAlignment: compact ? CrossAxisAlignment.start : CrossAxisAlignment.center,
             children: [
-              Icon(icon, color: selected ? scheme.primary : scheme.onSurfaceVariant),
-              const SizedBox(height: 8),
-              Text(title, style: TextStyle(fontWeight: FontWeight.w600, color: selected ? scheme.primary : null)),
-              const SizedBox(height: 2),
-              Text(sub,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.grey, fontSize: 12)),
+              Icon(icon, size: compact ? 20 : 24, color: selected ? scheme.primary : scheme.onSurfaceVariant),
+              SizedBox(width: compact ? 10 : 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: TextStyle(fontWeight: FontWeight.w600, color: selected ? scheme.primary : null)),
+                    const SizedBox(height: 2),
+                    Text(sub,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                  ],
+                ),
+              ),
             ],
           ),
         ),

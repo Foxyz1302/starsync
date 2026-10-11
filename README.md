@@ -333,15 +333,15 @@ current season, else where you left it.
 Anyone can put up a file from their own computer, also on a dedicated
 server: it streams from your computer through the server to everyone (the
 server keeps a few minutes in memory, so seeks and skipping the opening
-are quick). Keep the app open while it plays. For a link you choose how
-the others get it:
-- Everyone fetches it (default): each app plays the link itself.
+are quick). Keep the app open while it plays. A link goes up "Through
+me": your computer opens it and passes it on, so it plays for everyone
+whenever it plays for you (you can't tell ahead which sites want cookies,
+and YouTube may start asking any day). Under "Other ways" there are two more:
+- Everyone fetches it: each app plays the link itself.
 - Server fetches it: the server downloads it once for everyone, for links
   that are slow or blocked for some. The server must be able to reach it,
   and it must have a password (an open server refuses: anyone could make
   it fetch addresses only it can reach).
-- Through me: your computer downloads it and passes it on, for links only
-  you can open.
 
 Web pages work in all three: the app and the dedicated server each
 download [yt-dlp](https://github.com/yt-dlp/yt-dlp) by themselves (checked
@@ -357,7 +357,7 @@ sites: keep the file private, and for YouTube consider a throwaway
 account (Google may flag accounts used with yt-dlp).
 YouTube works in all three too, and so do pages and links that only
 offer streaming playlists (HLS `.m3u8`, DASH `.mpd`, the HLS of X videos).
-The last two never show the link to anyone; they can't pass on live
+Through me and Server fetches it never show the link to anyone; they can't pass on live
 streams or DRM-protected video (use "Everyone fetches it" for live).
 Your upload has to beat the video's bitrate: a 25-minute 2 GB episode is
 about 11 Mbit/s.

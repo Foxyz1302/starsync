@@ -463,9 +463,9 @@ What gets relayed (`SessionCoordinator.swapPicked`):
 |---|---|
 | File, by the host | `/m` from the hosting app (no relay) |
 | File, by anyone else | relayed from that member's computer |
-| Link, "Everyone fetches it" (default) | each app fetches it |
+| Link, "Everyone fetches it" | each app fetches it |
 | Link, "Server fetches it" | the server reads it once into the buffer; the link is never broadcast; refused on an open server (it would fetch any address it can reach for anyone) |
-| Link, "Through me" | relayed from that member's computer; for links only they can open |
+| Link, "Through me" (default) | relayed from that member's computer; plays for everyone whenever it plays for them (their cookies, their network) |
 | Jellyfin item (browser pick or pasted link) | own account first, then the server's login (`/j`), then relayed from the member who put it up (with their sign-in, or the pasted link's key, which stays on their machine) |
 
 Relayed links are range-read: a media file as is, a web page as yt-dlp's
@@ -781,7 +781,17 @@ new one fading and scaling in from 0.985), `showPopover` (cards that fade
 and scale in from where they open; they scroll when the window is short)
 and `HScroll` (horizontal rows: mouse drag or Shift+wheel; the plain wheel
 always scrolls the page). Space never presses a focused button
-(`appShortcuts`): it is the ready key.
+(`appShortcuts`): it is the ready key. Menus are one widget
+(`widgets/app_menu.dart`): `showAppMenu` is a popup route anchored under
+the button (over it when the room below is short), frosted dark glass
+with a check on the current row, fading and scaling in; arrows move,
+Enter picks, Esc or a click outside closes, and being a route it keeps
+the player's keys off (fullscreen too). `AppSelect` is the value picker
+on it (the current label and a chevron on a soft rounded surface; every
+setting that picks one of a few values), `AppMenuButton` the ⋮ action
+menu. Material's own menus (the standard controls' track, chapter and
+shader menus, the Jellyfin sort and server switch) get the same surface
+from `AppMenuStyle.theme`; the uosc controls keep their own flat menus.
 
 - **Party strip** (`party_strip.dart`, 60 px): your avatar (profile card; 42 px like the party's),
   the Library / Schedule / Settings tabs with a growing underline (an
@@ -851,7 +861,10 @@ always scrolls the page). Space never presses a focused button
   (click picks the episode, double-click puts it up). A double-click on a
   card puts it up (a series: `playableFor`, its next episode). Link
   (`library_link.dart`): paste field, a preview (a page's yt-dlp title,
-  uploader, length and thumbnail, else the file name; see "yt-dlp"), the three relay modes online, and the
+  uploader, length and thumbnail, else the file name; see "yt-dlp"), the relay modes online ("Through me",
+  the controller's default, as the main card; "Everyone fetches it" and
+  "Server fetches it" under "Other ways", open while one of them is
+  picked, closing it goes back to Through me), and the
   last 12 links put up (`recentLinks` in the `connect_form` box). Files
   is `FilesPage` (`files/`): watched folders (`FolderStore`) scanned in
   an isolate, videos grouped by series; series start collapsed, a header

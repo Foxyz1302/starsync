@@ -281,9 +281,18 @@ void main() {
     expect(find.descendant(of: find.byKey(const ValueKey('link-preview')), matching: find.text('A video')),
         findsOneWidget);
     expect(find.text('youtube.com · Chan'), findsOneWidget);
+    // Through me by default; the other two behind "Other ways".
+    expect(h.controller.linkRelay, LinkRelay.me);
+    expect(find.byKey(const ValueKey('link-mode-direct')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('link-other-ways')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('link-mode-server')));
+    await settle(tester);
+    expect(h.controller.linkRelay, LinkRelay.server);
     await tester.tap(find.byKey(const ValueKey('link-mode-me')));
     await settle(tester);
     expect(h.controller.linkRelay, LinkRelay.me);
+    expect(find.byKey(const ValueKey('link-mode-direct')), findsOneWidget, reason: 'stays open until closed');
     expect(find.text(linkRelayHelp(LinkRelay.me)), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('link-put-up')));
     await settle(tester, 10);

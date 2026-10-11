@@ -307,7 +307,7 @@ void main() {
       final c = MediaPickerController();
       expect(c.selection, isNull);
       c.pasteText('https://example.com/a.mkv');
-      expect(c.selection, const LinkMedia('https://example.com/a.mkv'));
+      expect(c.selection, const LinkMedia('https://example.com/a.mkv', relay: LinkRelay.me));
       c.pasteText('/home/me/b.mkv');
       expect(c.selection, const FileMedia('/home/me/b.mkv'));
       c.source = MediaKind.jellyfin;
