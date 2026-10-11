@@ -1268,7 +1268,9 @@ Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
   series) kept alive under `Visibility(maintainState)` so back keeps
   scroll and loaded pages; search (300 ms debounce) overlays them. Where
   it is (server, stack, a data version that moves after watched-state
-  changes so rows reload in place, the Continue keys) is a
+  changes so rows reload in place — a change from the details panel, or
+  `JellyfinAccounts.watched` once a playback's Stopped report went out —,
+  the Continue keys) is a
   `BrowseController` shared with the header chips and the details panel.
   Cards (`cards.dart`) fill the width with whole columns (`fitColumns`);
   rows are `HScroll`s, rows and grids lazy builders; library grids page

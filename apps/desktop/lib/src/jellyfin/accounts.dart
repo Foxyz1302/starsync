@@ -543,6 +543,17 @@ class JellyfinAccounts extends ChangeNotifier {
   /// Drops cached browse results (refresh button, after a pick).
   void invalidate(String serverId) => _clearMemo(serverId);
 
+  final _watched = StreamController<String>.broadcast();
+
+  /// Server ids whose watched state this app just changed (a stop report):
+  /// their cached lists are gone, and browse views reload.
+  Stream<String> get watched => _watched.stream;
+
+  void watchedChanged(String serverId) {
+    _clearMemo(serverId);
+    _watched.add(serverId);
+  }
+
   @override
   void dispose() {
     _disposed = true;

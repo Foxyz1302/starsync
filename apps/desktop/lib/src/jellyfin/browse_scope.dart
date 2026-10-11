@@ -157,7 +157,14 @@ class BrowseController extends ChangeNotifier {
   final JellyfinAccounts accounts;
   /// Clock for the Continue row's age cut-off (tests pin it).
   final DateTime Function() now;
-  BrowseController(this.accounts, {this.now = DateTime.now});
+  BrowseController(this.accounts, {this.now = DateTime.now}) {
+    // Back from watching: the rows show what was just watched.
+    _watchedSub = accounts.watched.listen((id) {
+      if (!_disposed && id == serverId) dataChanged();
+    });
+  }
+
+  late final StreamSubscription<String> _watchedSub;
 
   String? _serverId;
   List<BrowseRoute> _stack = const [HomeRoute()];
@@ -259,6 +266,7 @@ class BrowseController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_watchedSub.cancel());
     super.dispose();
   }
 }

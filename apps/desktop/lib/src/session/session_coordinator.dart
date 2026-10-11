@@ -1750,6 +1750,7 @@ class SessionCoordinator {
           playedBefore: before?.played ?? false,
           resumeTicksBefore: before?.playbackPositionTicks ?? 0,
           onUnauthorized: () => jellyfin.markExpired(ref.serverId),
+          onStopped: () => jellyfin.watchedChanged(ref.serverId),
           onError: (e) {
             if (_jfToastShown) return;
             _jfToastShown = true;

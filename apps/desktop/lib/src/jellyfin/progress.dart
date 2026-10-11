@@ -56,6 +56,7 @@ class JellyfinProgressReporter {
     this.interval = const Duration(seconds: 10),
     this.onError,
     this.onUnauthorized,
+    this.onStopped,
     DateTime Function()? clock,
   })  : _clock = clock ?? DateTime.now,
         _keepPlayed = playedBefore,
@@ -66,6 +67,10 @@ class JellyfinProgressReporter {
   /// Past this share of the runtime Progress carries no position: Jellyfin
   /// marks an item played past its "max resume" share (90 % by default).
   static const _noPositionFrom = 0.85;
+
+  /// After Stopped (and a mark played) went out: the item's watched
+  /// state on the server may differ from what lists show.
+  final void Function()? onStopped;
 
   Future<void> _chain = Future.value();
   bool _playing = false;
@@ -178,7 +183,7 @@ class JellyfinProgressReporter {
         itemId: itemId, mediaSourceId: source.id, playSessionId: playSessionId, positionTicks: ticks);
     _send('Stopped', () => client.reportPlaybackStopped(report));
     if (ticks == null) _send('played', () => client.markPlayed(itemId));
-    return _chain;
+    return _chain = _chain.then((_) => onStopped?.call());
   }
 
   void _mark(PlayerSnapshot s) {
