@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../controls/uosc/controls.dart';
 import '../shell/motion.dart';
@@ -125,17 +126,22 @@ class AppMenuItem<T> {
 /// Opens the menu at [context]'s box (the button). Resolves to the picked
 /// value, or null when dismissed. [minWidth]: at least this wide (a picker
 /// is as wide as its button).
+///
+/// [textAt]: where the button's own label starts inside it; the menu then
+/// sits so its rows' text lines up with that label (a picker), else it
+/// lines up with the button's left edge.
 Future<T?> showAppMenu<T>(
   BuildContext context, {
   required List<AppMenuItem<T>> items,
   double minWidth = 0,
+  double? textAt,
 }) async {
-  final i = await _openMenu(context, items, minWidth);
+  final i = await _openMenu(context, items, minWidth, textAt);
   return i == null ? null : items[i].value;
 }
 
 /// The picked row's index (the value may itself be null).
-Future<int?> _openMenu(BuildContext context, List<AppMenuItem<Object?>> items, double minWidth) {
+Future<int?> _openMenu(BuildContext context, List<AppMenuItem<Object?>> items, double minWidth, [double? textAt]) {
   final navigator = Navigator.of(context);
   final overlay = navigator.overlay!.context.findRenderObject() as RenderBox;
   final box = context.findRenderObject() as RenderBox;
@@ -143,10 +149,13 @@ Future<int?> _openMenu(BuildContext context, List<AppMenuItem<Object?>> items, d
     box.localToGlobal(Offset.zero, ancestor: overlay),
     box.localToGlobal(box.size.bottomRight(Offset.zero), ancestor: overlay),
   );
+  // Lines the rows' text up with the button's label: panel padding (4)
+  // plus the row's text inset, against [textAt].
+  final shift = textAt == null ? 0.0 : textAt - 4 - _MenuRow.textInset(items.any((i) => i.checked != null));
   Future<int?> open() => navigator.push<int>(_AppMenuRoute(
-        anchor: anchor,
+        anchor: anchor.translate(shift, 0),
         items: items,
-        minWidth: minWidth,
+        minWidth: minWidth - shift,
         capturedThemes: InheritedTheme.capture(from: context, to: navigator.context),
       ));
   // Over the uosc controls: keep them up while the menu is open.
@@ -251,6 +260,7 @@ class _AppMenuPanel extends StatefulWidget {
 
 class _AppMenuPanelState extends State<_AppMenuPanel> {
   final _current = GlobalKey();
+  bool _keys = false;
 
   // Focus (and scroll to) the current row, else the first enabled one.
   late final int _start = () {
@@ -270,7 +280,7 @@ class _AppMenuPanelState extends State<_AppMenuPanel> {
   @override
   Widget build(BuildContext context) {
     final checks = widget.items.any((i) => i.checked != null);
-    return AppGlass(
+    final panel = AppGlass(
       key: const ValueKey('app-menu'),
       child: IntrinsicWidth(
         child: SingleChildScrollView(
@@ -285,12 +295,22 @@ class _AppMenuPanelState extends State<_AppMenuPanel> {
                   item: item,
                   checks: checks,
                   autofocus: i == _start,
+                  showFocus: _keys,
                   onTap: () => widget.onPick(i),
                 ),
             ],
           ),
         ),
       ),
+    );
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: (_, e) {
+        if (!_keys && e is KeyDownEvent) setState(() => _keys = true);
+        return KeyEventResult.ignored;
+      },
+      child: panel,
     );
   }
 }
@@ -299,8 +319,20 @@ class _MenuRow extends StatelessWidget {
   final AppMenuItem<Object?> item;
   final bool checks;
   final bool autofocus;
+  // Keyboard in use: the focused row shows (else focus stays invisible,
+  // so the current row doesn't look hovered when the menu opens).
+  final bool showFocus;
   final VoidCallback onTap;
-  const _MenuRow({super.key, required this.item, required this.checks, required this.autofocus, required this.onTap});
+  const _MenuRow(
+      {super.key,
+      required this.item,
+      required this.checks,
+      required this.autofocus,
+      required this.showFocus,
+      required this.onTap});
+
+  /// Where a row's text starts, from the row's left edge.
+  static double textInset(bool checks) => checks ? 8 + 22 : 12;
 
   @override
   Widget build(BuildContext context) {
@@ -313,17 +345,17 @@ class _MenuRow extends StatelessWidget {
       onTap: item.enabled ? onTap : null,
       borderRadius: BorderRadius.circular(AppMenuStyle.rowRadius),
       hoverColor: AppMenuStyle.hover,
-      focusColor: AppMenuStyle.focus,
+      focusColor: showFocus ? AppMenuStyle.focus : Colors.transparent,
       highlightColor: AppMenuStyle.focus,
       splashFactory: NoSplash.splashFactory,
       child: Container(
         height: AppMenuStyle.rowHeight,
-        padding: EdgeInsets.only(left: checks ? 6 : 12, right: 12),
+        padding: EdgeInsets.only(left: checks ? 8 : 12, right: 16),
         child: Row(
           children: [
             if (checks)
               SizedBox(
-                width: 26,
+                width: 22,
                 child: on ? Icon(Icons.check_rounded, size: 16, color: scheme.primary) : null,
               ),
             Flexible(
@@ -332,7 +364,7 @@ class _MenuRow extends StatelessWidget {
                 item.label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 14, color: color, fontWeight: on ? FontWeight.w600 : FontWeight.normal),
+                style: TextStyle(fontSize: 14, color: color),
               ),
             ),
             if (item.hint != null) ...[
@@ -351,6 +383,9 @@ class _MenuRow extends StatelessWidget {
 /// label) with the current one checked. [onChanged] null: disabled.
 /// [expanded]: fills the width it gets (the label ellipsizes).
 class AppSelect<T> extends StatefulWidget {
+  /// Where the label starts inside the button (its left padding); the
+  /// menu's text lines up with it.
+  static const labelInset = 10.0;
   final T value;
   final List<(T, String)> items;
   final ValueChanged<T>? onChanged;
@@ -378,7 +413,7 @@ class _AppSelectState<T> extends State<AppSelect<T>> {
     final items = [
       for (final (v, label) in widget.items) AppMenuItem<T>(value: v, label: label, checked: v == widget.value),
     ];
-    final i = await _openMenu(context, items, box.size.width);
+    final i = await _openMenu(context, items, box.size.width, AppSelect.labelInset);
     if (!mounted) return;
     setState(() => _open = false);
     if (i != null) widget.onChanged?.call(widget.items[i].$1);
@@ -409,7 +444,7 @@ class _AppSelectState<T> extends State<AppSelect<T>> {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
               curve: ease,
-              padding: const EdgeInsets.only(left: 10, right: 6, top: 6, bottom: 6),
+              padding: const EdgeInsets.only(left: AppSelect.labelInset, right: 6, top: 6, bottom: 6),
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: _open ? 0.10 : 0.05),
                 borderRadius: r,
