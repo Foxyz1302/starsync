@@ -110,8 +110,8 @@ String _apiBase(String root) {
   return '$server/api/v1/repos/$repo';
 }
 
-// The `dev` prerelease (created at main's head on first use): every old
-// asset deleted, then [files] uploaded. Its manifest's URL is fixed, so
+// The `dev` prerelease (created at main's head on first use): [files]
+// uploaded (the manifest last), the previous ones deleted. Its manifest's URL is fixed, so
 // test builds find each new one.
 Future<void> _publishDev(String root, List<File> files) async {
   final token = _token();
@@ -130,17 +130,23 @@ Future<void> _publishDev(String root, List<File> files) async {
         }) ??
         _die('could not create or find release dev');
     final id = rel['id'];
-    for (final a in (rel['assets'] as List? ?? const [])) {
-      if (a is Map) await c.delete('$api/releases/$id/assets/${a['id']}');
-    }
-    for (final f in files) {
+    final old = [for (final a in (rel['assets'] as List? ?? const [])) if (a is Map) a];
+    Future<void> upload(File f) {
       final name = f.uri.pathSegments.last;
       stdout.writeln('uploading $name ...');
-      await c.upload(
-          '$api/releases/$id/assets?name=${Uri.encodeQueryComponent(name)}',
-          f,
-          name);
+      return c.upload('$api/releases/$id/assets?name=${Uri.encodeQueryComponent(name)}', f, name);
     }
+
+    // The archive first, the old assets after, the manifest last: a failed
+    // upload leaves the previous build in place, never an empty release.
+    final manifest = files.last;
+    for (final f in files.take(files.length - 1)) {
+      await upload(f);
+    }
+    for (final a in old) {
+      await c.delete('$api/releases/$id/assets/${a['id']}');
+    }
+    await upload(manifest);
     stdout.writeln('published to dev.');
   } finally {
     http.close();
