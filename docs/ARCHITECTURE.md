@@ -282,7 +282,9 @@ be opened) before a duration is known is reported once per open
 (`onLoadError`), with ffmpeg's HTTP status when this player gets
 ffmpeg's log (ffmpeg logs through one mpv instance per process: the
 first one, and once that is disposed the next one created; the preload
-player passes the HTTP errors it gets on to the session player). That, a yt-dlp hook error and a failed `openUrl` become
+player passes the HTTP errors it gets on to the session player). Since
+every media gets its own player, the session player is often not that
+instance: the status is a bonus, load errors are detected either way. That, a yt-dlp hook error and a failed `openUrl` become
 the coordinator's `playerError` in plain words (`playErrorText`, core
 `link_probe.dart`: 412/precondition/login/cookies/sign in → "This site
 needs cookies — Settings → Player → yt-dlp → Cookies", 403 → "Not allowed
@@ -299,15 +301,15 @@ logged and kept in `pinMismatches`. Measured against the `/m` endpoint
 media_kit has no public `setProperty`/`getProperty`; the code calls them
 through a guarded dynamic call on `player.platform`. Hardware decoding comes from Settings (auto, off, custom)
 and is passed to the `VideoController`; env `SYNC_RELAY_HWDEC` (e.g. `no`)
-overrides it. It is read per player, so a change applies on the next join or
-Reload video.
+overrides it. It is read per player, so a change applies on the next media,
+join or Reload video.
 
 Shaders (per viewer, local only, no wire change): mpv `glsl-shaders`, set
 through the same dynamic `setProperty` and read back
 (`PlaybackController.applyShaders`). The value is the platform path list
 (`:` joined, `;` on Windows). One saved choice in `AppSettings`
 (`shaderPreset`, `shaderQuality`, `customShaders`): applied on every player
-creation (join, Reload video) and live when changed from the session (the
+creation (join, new media, Reload video) and live when changed from the session (the
 control bar's shader menu, Ctrl+0..6, both also save it). The Anime4K
 v4.0.1 files live in `apps/desktop/assets/shaders/anime4k/` (only the 14
 the presets use, plus its MIT LICENSE); mpv needs real paths, so
@@ -338,10 +340,29 @@ fragile: media_kit borrows whatever EGL context GDK left current on the main
 thread (upstream media-kit#1404), so an X11 session or a Flutter/GDK change
 can silently fall back to software.
 
-Player lifecycle: the `Player` and its `VideoController` live for one
-session: created on join, disposed on leave, replaced by `recreate()` for
-"Reload video" (button or Ctrl+R; volume kept), or by a promoted preload
-when Up next's first item goes up (see "Getting ready" under "Up next"). `openUrl` opens with `play: false`; play/pause/seek/rate come only from
+Player lifecycle: a `Player` and its `VideoController` live for one
+media: created on join, disposed on leave, replaced by `recreate()` for
+"Reload video" (button or Ctrl+R; volume kept), and replaced on every
+media change, so nothing a player went through (a stuck video output, a
+frozen frame) carries over to the next media. `openUrl` promotes the
+preload when it holds the new media (see "Getting ready" under "Up
+next"); otherwise, when the player already held media, it creates a fresh
+one first, set up as on join (pins, hwdec, yt-dlp hook, shaders, log
+level, observers) and, with the view up and the render mode known, its
+`VideoController` created and ready before the view swaps to it (else the
+view creates it and the render-mode probe runs on it). Both go through
+one hand-over (`_adopt`): observers move over, the view swaps to the new
+output (`generation`), volume (and so mute) and shaders carry over, and
+the old player is paused and disposed once the view let go of its
+texture (as on leave). A fresh player waits for the previous old one to
+be gone, so at most one old player lingers. The first open after join or
+Reload video uses the player just created; a reconnect or joining back to
+the media the player held keeps it (`_openedFor`). Cost (`SwitchTrace`
+`player`, headless, so without the `VideoController`): 45 to 65 ms per
+swap for one app in the process (mpv created and initialised, then
+pinned), about 150 ms with three in one process
+(`queue_switch_e2e_test` with `WT_SWITCH_PRELOAD=0`), against a cold
+switch of about 1.5 s. `openUrl` opens with `play: false`; play/pause/seek/rate come only from
 `StateDiff` actions, the play gate (`localPlayAllowed`: self in-set and
 ready) or the user's own seeks (see Sync model). A server seek within 0.5 s of the current position is skipped. `leave()`
 stops the player (otherwise audio keeps playing). On media change
@@ -917,11 +938,10 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   keeps it (still next). A link is opened again at the 30-minute refresh
   (stream URLs expire); a failed preload is not retried until then and
   changes nothing (the usual open follows). When the coordinator opens
-  the same URL and headers (`openUrl`), the preload is promoted instead:
-  it becomes the session player (log, marks and track observers move
-  over, volume, unmute, the full cache pins, shaders), the view swaps to
-  its video output (`generation`), and the old player is disposed once
-  the view let go of its texture (as on leave). Its buffer comes along,
+  the same URL and headers (`openUrl`), the preload is promoted instead
+  of a fresh player: it becomes the session player through the same
+  hand-over (see "Player lifecycle" under "Media"), unmuted and with the
+  full cache pins. Its buffer comes along,
   so the report sent right after the open already passes the gate: the
   start no longer waits for anyone's open. A promoted player is no
   longer the first mpv of the process, so ffmpeg's HTTP status reaches
@@ -933,8 +953,9 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   86 ms for the next episode and 35 ms for a direct link, against about
   1.5 s cold; at 300 ms and 12 Mbit/s 52 and 103 ms against about 2.9 s.
   `SwitchTrace` (env `SYNC_RELAY_TRACE_SWITCH=1` prints it) times each
-  phase of a media change: state, resolved, open, opened or preloaded,
-  buffered, playing.
+  phase of a media change: state, resolved, open, player (a fresh
+  player is up; see "Player lifecycle" under "Media"), opened or
+  preloaded, buffered, playing.
   The row of the item shows a dot on its picture's corner (a tooltip
   says which): hollow waiting, pulsing getting ready (resolving, then
   preloading its first 4 s), filled ready, red failed (tried again every

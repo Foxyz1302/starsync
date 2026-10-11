@@ -290,6 +290,10 @@ class SessionCoordinator {
   // Unlike [_mediaId] it survives a lost connection, so a reconnect to the
   // same media keeps the player, and a swap stops the previous media.
   int _playerMediaId = -1;
+  // [_playerMediaId] at the last open: the same media again (a reconnect,
+  // joining back) keeps the player, any other gets a fresh one (see
+  // [_openMedia]).
+  int _openedFor = -1;
   String? _openUrl;
   String _wsHost = '';
   int _wsPort = 0;
@@ -361,8 +365,9 @@ class SessionCoordinator {
         jellyfin = jellyfin ?? JellyfinAccounts.instance,
         trackPrefs = trackPrefs ?? TrackPrefs();
 
-  /// Player lifetime = one session: created here on connect, disposed by
-  /// [leave]. Never reused across sessions (a GPU-side video freeze sticks
+  /// The session's first player: created here on connect, disposed by
+  /// [leave]; each new media gets its own ([PlaybackController.openUrl]).
+  /// Never reused across sessions or media (a GPU-side video freeze sticks
   /// to the player).
   Future<void> initPlayer() async {
     if (_playerReady) return;
@@ -465,6 +470,7 @@ class SessionCoordinator {
     diff.reset();
     _mediaId = -1;
     _playerMediaId = -1;
+    _openedFor = -1;
     settledMediaId.value = -1;
     _openUrl = null;
     playerError.value = '';
@@ -552,9 +558,13 @@ class SessionCoordinator {
     });
   }
 
-  /// Opens [url] (with [headers] on every request); false on failure.
+  /// Opens [url] (with [headers] on every request); false on failure. A
+  /// new media gets a fresh player (or the preload holding it); the media
+  /// the player held before (a reconnect) keeps it.
   Future<bool> _openMedia(String url, {Map<String, String>? headers}) async {
     if (url == _openUrl) return true;
+    final keepPlayer = _playerMediaId == _openedFor;
+    _openedFor = _playerMediaId;
     _openUrl = url;
     _openHeaders = headers;
     diff.reset();
@@ -564,7 +574,10 @@ class SessionCoordinator {
     try {
       await _prepareYtDlp(url);
       switchTrace.mark(mediaId, SwitchTrace.open);
-      final promoted = await playback.openUrl(url, headers: headers);
+      final promoted = await playback.openUrl(url,
+          headers: headers,
+          keepPlayer: keepPlayer,
+          onFreshPlayer: () => switchTrace.mark(mediaId, SwitchTrace.player));
       switchTrace.mark(mediaId, promoted ? SwitchTrace.preloaded : SwitchTrace.opened);
       health.value =
           const HealthStatus(HealthSeverity.ok, 'connected');
@@ -938,6 +951,8 @@ class SessionCoordinator {
   Future<void> _leavePreviousMedia(int mediaId) async {
     final held = _playerMediaId;
     _playerMediaId = mediaId;
+    // Opened from the welcome, before any state: that was this media.
+    if (held == -1 && _openedFor == -1 && _openUrl != null) _openedFor = mediaId;
     if (held == -1 || held == mediaId) return;
     _openUrl = null;
     _openHeaders = null;

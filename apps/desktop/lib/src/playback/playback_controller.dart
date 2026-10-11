@@ -19,10 +19,11 @@ import '../sync/user_seek.dart';
 import 'media_marks.dart';
 import 'yt_dlp_app.dart' show AppYtDlp, ytdlFormat;
 
-/// Owns one mpv [Player] (and its [VideoController]) per session: created
+/// Owns the session's mpv [Player] (and its [VideoController]): created
 /// by [init] on join, released by [dispose] on leave, swapped by
-/// [recreate] for "Reload video". Never reuse a player across sessions —
-/// a GPU-side freeze sticks to the player, not to the widget.
+/// [recreate] for "Reload video" and by [openUrl] for every new media (a
+/// promoted preload or a fresh player). Never reuse a player for other
+/// media — a GPU-side freeze sticks to the player, not to the widget.
 class PlaybackController {
   /// Read-ahead target: about two minutes rides out short outages and
   /// makes skipping an intro instant.
@@ -202,6 +203,7 @@ class PlaybackController {
   Future<void> init() async {
     if (_player != null) return;
     _player = _newPlayer(bufferSize: maxBytes, logLevel: MPVLogLevel.warn); // see [logLevel]
+    _held = false;
     _shaders = '';
     renderMode.value = RenderMode.unknown;
     shaderNotice.value = null;
@@ -438,15 +440,22 @@ class PlaybackController {
 
   /// Opens [url] paused. [headers] go with every request for it (mpv
   /// `http-header-fields`): a Jellyfin token travels there, not in the URL.
-  /// When [preload] holds the same [url] and [headers], that player
-  /// becomes this one instead (true: promoted, its buffer comes along).
-  Future<bool> openUrl(String url, {Map<String, String>? headers}) async {
+  /// Each media gets its own player: when [preload] holds the same [url]
+  /// and [headers], that player becomes this one (true: promoted, its
+  /// buffer comes along); else a player that already held media is
+  /// replaced by a fresh one first ([onFreshPlayer] once it is up), unless
+  /// [keepPlayer] (the same media again, e.g. after a reconnect).
+  Future<bool> openUrl(String url,
+      {Map<String, String>? headers, bool keepPlayer = false, void Function()? onFreshPlayer}) async {
     if (!_ready) return false;
     final pre = _pre;
     if (pre != null && pre.matches(url, headers)) {
       if (await _promote(pre)) return true;
     }
+    if (_held && !keepPlayer && await _freshPlayer()) onFreshPlayer?.call();
+    if (!_ready) return false;
     try {
+      _held = true;
       _chapterJson = '';
       _httpError = null;
       _loadErrorSent = false;
@@ -635,6 +644,7 @@ class PlaybackController {
     _timeSubs.clear();
     _player = null;
     _video = null;
+    _held = false;
     alive.value = false;
     _clearMarks();
     await _settleUi();
@@ -706,11 +716,7 @@ class PlaybackController {
       await _pin('mute', 'yes', p);
       final path = ytdlPath ?? _ytdlPath;
       if (path != null) {
-        final dynamic platform = p.platform;
-        await platform?.setProperty('script-opts', 'ytdl_hook-ytdl_path=$path');
-        await platform?.setProperty('ytdl-format', ytdlFormat);
-        pre.ytdlRaw = await AppYtDlp.instance.mpvRawOptions();
-        await platform?.setProperty('ytdl-raw-options', pre.ytdlRaw);
+        pre.ytdlRaw = await _setYtdl(p, path);
         pre.ytdl = true;
       }
       // With a view up, its own video output: mpv decodes (media_kit
@@ -765,9 +771,8 @@ class PlaybackController {
     } catch (_) {}
   }
 
-  /// [pre] becomes the session player: the view swaps to its video
-  /// output ([generation]), volume, shaders, log level and the full cache
-  /// carry over, and the old player goes once the view let go of it.
+  /// [pre] becomes the session player ([_adopt]); the full cache pins
+  /// replace its small ones.
   Future<bool> _promote(_Preload pre) async {
     await pre.opened.future;
     final old = _player;
@@ -780,6 +785,83 @@ class PlaybackController {
     await pre.logSub?.cancel();
     if (!pre.ready.isCompleted) pre.ready.complete(true);
     final p = pre.player;
+    await _adopt(p, pre.video, ytdl: pre.ytdl, ytdlRaw: pre.ytdlRaw);
+    try {
+      await _pin('mute', 'no', p);
+      await _pinBufferProps(p);
+    } catch (e) {
+      debugPrint('promoted player settings: $e');
+    }
+    return true;
+  }
+
+  // The current player has had media opened in it (one fresh from [init]
+  // has not, so the first open after join or Reload video uses it).
+  bool _held = false;
+
+  // The last replaced player until it is disposed: a fresh player waits
+  // for it, so at most one old player lingers.
+  Future<void> _retiring = Future.value();
+
+  /// Replaces the current player with a fresh one set up like [init]'s
+  /// (pins, hwdec, volume, yt-dlp hook, shaders, observers), its video
+  /// output ready before the view swaps to it when the view is up. True
+  /// once it is the session player.
+  Future<bool> _freshPlayer() async {
+    await _retiring;
+    final old = _player;
+    if (old == null) return false;
+    final p = _newPlayer(bufferSize: maxBytes, logLevel: MPVLogLevel.warn); // see [logLevel]
+    VideoController? video;
+    var ytdl = false, ytdlRaw = '';
+    try {
+      pinMismatches.clear();
+      await _pinBufferProps(p);
+      await _pin('volume-max', '$maxVolume', p);
+      final path = _ytdlPath;
+      if (path != null) {
+        ytdlRaw = await _setYtdl(p, path);
+        ytdl = true;
+      }
+      // The view is up: the new output is created (and its texture
+      // registered) before the view swaps, so the old picture stays until
+      // then. Created by the view instead while the render mode is not
+      // known yet, so the probe hears its GL init ([video]).
+      if (_video != null && renderMode.peek() != RenderMode.unknown) {
+        video = VideoController(p, configuration: VideoControllerConfiguration(hwdec: _hwdecOverride));
+        await video.platform.future;
+      }
+    } catch (e) {
+      debugPrint('fresh player setup: $e');
+    }
+    // Disposed or reloaded meanwhile: that player stays.
+    if (!identical(old, _player)) {
+      try {
+        await p.dispose();
+      } catch (_) {}
+      return false;
+    }
+    await _adopt(p, video, ytdl: ytdl, ytdlRaw: ytdlRaw);
+    return true;
+  }
+
+  /// mpv's yt-dlp hook on [p] (see [useYtDlp]); returns the raw options set.
+  static Future<String> _setYtdl(Player p, String path) async {
+    final dynamic platform = p.platform;
+    await platform?.setProperty('script-opts', 'ytdl_hook-ytdl_path=$path');
+    await platform?.setProperty('ytdl-format', ytdlFormat);
+    final raw = await AppYtDlp.instance.mpvRawOptions();
+    await platform?.setProperty('ytdl-raw-options', raw);
+    return raw;
+  }
+
+  /// [p] becomes the session player (a promoted preload or a fresh
+  /// player): log, marks and track observers move over, the view swaps to
+  /// its video output ([generation]), volume and shaders carry over, and
+  /// the old player is paused and disposed once the view let go of its
+  /// texture (as in [dispose]).
+  Future<void> _adopt(SyncPlayer p, VideoController? video, {required bool ytdl, String ytdlRaw = ''}) async {
+    final old = _player!;
     final volume = old.state.volume;
     await _logSub?.cancel();
     for (final sub in _timeSubs) {
@@ -787,9 +869,10 @@ class PlaybackController {
     }
     _timeSubs.clear();
     _player = p;
-    _video = pre.video;
-    _ytdlSetOn = pre.ytdl ? p : null;
-    _ytdlRaw = pre.ytdlRaw;
+    _video = video;
+    _held = true;
+    _ytdlSetOn = ytdl ? p : null;
+    _ytdlRaw = ytdlRaw;
     _chapterJson = '';
     _httpError = null;
     _loadErrorSent = false;
@@ -805,23 +888,22 @@ class PlaybackController {
     _requestLog(p, logLevel);
     _watchMarks(p);
     generation.value++;
+    // Normally stopped already (the coordinator leaves the previous
+    // media first): never two sounds at once.
+    unawaited(old.pause().catchError((_) {}));
     try {
       await p.setVolume(volume);
-      await _pin('mute', 'no', p);
-      await _pinBufferProps(p);
     } catch (e) {
-      debugPrint('promoted player settings: $e');
+      debugPrint('new player volume: $e');
     }
     unawaited(applyShaders());
     unawaited(_refreshTracks());
-    // The view lets go of the old texture first (as in [dispose]).
-    unawaited(() async {
+    _retiring = () async {
       await _settleUi();
       try {
         await old.dispose();
       } catch (_) {}
-    }());
-    return true;
+    }();
   }
 
   Future<void> stop() async {

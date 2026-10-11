@@ -11,6 +11,8 @@ class SwitchTrace {
   static const state = 'state';
   static const resolved = 'resolved';
   static const open = 'open';
+  /// A fresh player is up for it (no preload held it).
+  static const player = 'player';
   static const opened = 'opened';
   static const preloaded = 'preloaded';
   static const buffered = 'buffered';
