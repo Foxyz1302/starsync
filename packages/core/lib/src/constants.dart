@@ -1,5 +1,5 @@
 abstract class RelayConstants {
-  static const int protoVersion = 11;
+  static const int protoVersion = 12;
 
   // Relay (`/r/...`): a member's bytes through the server's buffer.
   static const int relaySliceBytes = 1 << 20;
@@ -56,4 +56,12 @@ abstract class RelayConstants {
   /// minute; the server drops the rest silently.
   static const int nudgesPerSec = 3;
   static const int nudgesPerMin = 20;
+
+  /// Up next (`queue`): at most this many items; a title or second line
+  /// is cut to [maxQueueTextLength] characters; an item's picture is
+  /// capped like a poster ([maxPosterBytes]). A play request nobody acts on
+  /// ends after [queuePlayTimeoutSecs].
+  static const int maxQueueItems = 100;
+  static const int maxQueueTextLength = 200;
+  static const int queuePlayTimeoutSecs = 30;
 }

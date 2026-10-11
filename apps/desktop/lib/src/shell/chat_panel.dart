@@ -237,6 +237,15 @@ class ActivityRow extends StatelessWidget {
       return (Icons.bedtime, Colors.blueGrey, who == null || who.isEmpty ? 'is sitting out' : 'sat $who out');
     case 'back':
       return (Icons.login, Colors.green, 'joined back');
+    case 'queue-add':
+      return (Icons.playlist_add_rounded, scheme.primary, 'added ${f.target ?? ''} to Up next');
+    case 'queue-remove':
+      return (Icons.playlist_remove_rounded, Colors.grey, 'removed ${f.target ?? ''} from Up next');
+    case 'queue-skip':
+      final why = f.reason.isEmpty ? '' : ' · ${f.reason}';
+      return (Icons.redo_rounded, Colors.orange, 'skipped ${f.target ?? ''}$why');
+    case 'fetch-fail':
+      return (Icons.cloud_off, Colors.red, "couldn't fetch ${f.target ?? 'the video'}");
     default:
       final target = f.target == null || f.target!.isEmpty ? '' : ' ${f.target}';
       return (Icons.info_outline, Colors.grey, '${f.action}$target');

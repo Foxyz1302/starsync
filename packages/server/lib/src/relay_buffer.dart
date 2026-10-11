@@ -5,6 +5,8 @@ import 'dart:typed_data';
 
 import 'package:sync_relay_core/core.dart';
 
+import 'relay_stats.dart';
+
 final _log = createLogger('relay');
 
 /// One track's buffer on the server: a byte stream ([RelayBuffer]) or
@@ -16,6 +18,9 @@ abstract interface class TrackBuffer {
   int get cachedBytes;
   int get bytesFromFeed;
   int get bytesToViewers;
+  /// Runs while this buffer has a pull in flight; the relay gives its
+  /// tracks one, for the source's rate.
+  abstract FeedClock clock;
   /// Waits for the feed's first connect, up to the wait limit.
   Future<bool> ready();
   void detach(RelayFeed feed);
@@ -162,7 +167,15 @@ class RelayBuffer implements TrackBuffer {
   final _waiters = <int, List<Completer<void>>>{};
   final _blocked = <int, int>{}; // slice -> wait start (us)
   final _viewers = <String, _Viewer>{};
-  _Pull? _pull;
+  @override
+  FeedClock clock = FeedClock();
+  _Pull? _pullNow;
+  _Pull? get _pull => _pullNow;
+  set _pull(_Pull? p) {
+    if ((_pullNow == null) != (p == null)) p == null ? clock.stop() : clock.start();
+    _pullNow = p;
+  }
+
   var _reqSeq = 0;
   var _disposed = false;
   Completer<void> _kick = Completer();

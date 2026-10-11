@@ -342,6 +342,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.12.0"
+  leaf_widgets:
+    dependency: "direct main"
+    description:
+      path: "../../../leaf_widgets"
+      relative: true
+    source: path
+    version: "0.0.1"
   leak_tracker:
     dependency: transitive
     description:
@@ -777,14 +784,14 @@ packages:
       path: "../../packages/core"
       relative: true
     source: path
-    version: "1.1.1"
+    version: "1.1.2"
   sync_relay_server:
     dependency: "direct main"
     description:
       path: "../../packages/server"
       relative: true
     source: path
-    version: "1.1.1"
+    version: "1.1.2"
   synchronized:
     dependency: transitive
     description:

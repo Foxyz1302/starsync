@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 
 import 'constants.dart';
 import 'protocol.dart';
+import 'queue.dart';
 
 typedef SyncClock = DateTime Function();
 
@@ -59,6 +60,8 @@ class EngineMember {
   /// Its player cannot open the current media (`report.error`): outside
   /// the ready gate until a report clears it or the media changes.
   String error = '';
+  /// Bytes per second the server sent it lately (set by the server).
+  int rate = 0;
   DateTime lastSeen;
   EngineMember({
     required this.id,
@@ -101,6 +104,7 @@ class EngineMember {
         host: host,
         out: out,
         error: error,
+        rate: rate,
       );
 }
 
@@ -154,6 +158,9 @@ class SyncEngine {
   /// ride in `state.media.art`. Every swap clears it.
   ArtImage? poster;
   ArtImage? banner;
+  /// Up next ([EngineQueue]): in `state.queue`, edited by `queue`
+  /// messages, taken from by swaps that name an item.
+  final EngineQueue queue = EngineQueue();
   int _nextId = 1;
   // Who sent the seek that produced [_seekEventId], for the echo check.
   String? _seekBy;
@@ -211,6 +218,7 @@ class SyncEngine {
   /// Heartbeat: stale sweep, end of media.
   void tick() {
     sweepStale();
+    queue.tick(now);
     evaluate();
   }
 
@@ -272,7 +280,7 @@ class SyncEngine {
     if (hash.isEmpty) return null;
     if (poster?.hash == hash) return poster!.bytes;
     if (banner?.hash == hash) return banner!.bytes;
-    return null;
+    return queue.thumbFor(hash);
   }
 
   /// `state.media.art`; null when there is none.
@@ -397,9 +405,11 @@ class SyncEngine {
   }
 
   /// Returns false (no state change) for media with non-finite numbers.
-  bool applySwap(String actorToken, HelloMedia next) {
+  /// [queueId]: the Up next item this swap puts up; it leaves the queue.
+  bool applySwap(String actorToken, HelloMedia next, {String? queueId}) {
     if (!next.duration.isFinite || next.size < 0) return false;
     final actor = members[actorToken];
+    queue.swapped(queueId);
     mediaId++;
     media = next;
     swapBy = actorToken;
@@ -544,6 +554,8 @@ class SyncEngine {
       seekBy: bySeek ? _seekBy : null,
       seekSeq: bySeek ? _seekSeq : null,
       relay: relay,
+      queue: queue.items,
+      queuePlay: queue.play,
     );
   }
 }

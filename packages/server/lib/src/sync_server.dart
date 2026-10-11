@@ -148,6 +148,7 @@ class SyncServer {
       hub.engine.tick();
       hub.sweepClosedSockets();
       hub.dropSilentSockets();
+      hub.sampleRates();
       hub.broadcastState();
       hub.broadcastFeed();
     });

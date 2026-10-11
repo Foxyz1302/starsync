@@ -7,13 +7,14 @@ import 'package:sync_relay_core/core.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../screens/home/update_indicator.dart';
-import '../screens/session/jellyfin_widgets.dart' show ViaHostBadge;
+import '../session/delivery.dart';
 import '../state/session_state.dart';
 import '../update/update_controller.dart';
 import '../widgets/app_keys.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/window_buttons.dart';
 import 'avatar.dart';
+import 'delivery_line.dart';
 import 'motion.dart';
 
 /// The shell's tabs, in strip order.
@@ -34,10 +35,6 @@ const stripAvatarSize = 42.0;
 /// Below this window width the strip shows 3 avatars and no server text,
 /// so the tabs keep their room.
 const stripCompactBelow = 1100.0;
-
-/// The member plays the current Jellyfin item through the host's relay.
-bool viaHostOf(MemberView m, JellyfinRef? ref) =>
-    ref != null && m.jf[ref.serverId] == false;
 
 /// The 60 px strip over everything: your avatar (profile), the tabs, and
 /// the party: offline Join a friend / Host, solo a "Solo" chip, Invite
@@ -483,6 +480,9 @@ class MembersCard extends StatelessWidget {
             final address = hosting
                 ? null
                 : '${session.lastForm.host}:${session.lastForm.port}';
+            final delivery = r == null
+                ? null
+                : deliveryOf(r, selfId: coord.sync.memberId, names: coord.memberNames);
             return Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -494,11 +494,12 @@ class MembersCard extends StatelessWidget {
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
+                if (delivery != null) SourceLine(delivery: delivery),
                 for (final m in r?.members ?? const <MemberView>[])
                   _MemberTile(
                     member: m,
                     info: memberAvatarInfo(m, r, coord),
-                    viaHost: viaHostOf(m, coord.currentRef.value),
+                    delivery: delivery == null ? null : memberDeliveryOf(m, r!, delivery),
                   ),
                 if (r == null)
                   Padding(
@@ -540,11 +541,12 @@ class MembersCard extends StatelessWidget {
 class _MemberTile extends StatelessWidget {
   final MemberView member;
   final AvatarInfo info;
-  final bool viaHost;
+  /// How it gets the media and its buffer; null with nothing up or alone.
+  final MemberDelivery? delivery;
   const _MemberTile({
     required this.member,
     required this.info,
-    required this.viaHost,
+    this.delivery,
   });
 
   @override
@@ -575,10 +577,9 @@ class _MemberTile extends StatelessWidget {
           if (info.host) const Pill('host', Colors.amber),
           if (info.relaying)
             const Pill('passing the video on', Colors.lightBlueAccent),
-          if (viaHost) const ViaHostBadge(),
         ],
       ),
-      subtitle: Text(status),
+      subtitle: DeliveryStatus(status: status, delivery: delivery),
       trailing: AppMenuButton<String>(
         tooltip: 'More',
         onSelected: (v) {

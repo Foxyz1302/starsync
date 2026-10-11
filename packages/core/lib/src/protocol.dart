@@ -1,5 +1,6 @@
 import 'constants.dart';
 import 'errors.dart';
+import 'queue.dart';
 
 /// Reads an optional JSON number as a finite double. JSON like 1e400 decodes to
 /// Infinity, which would later break jsonEncode on every broadcast.
@@ -179,12 +180,22 @@ class RelayTrackSpec {
 /// [tracks]: the tracks of a media relayed as several played together, or
 /// as one segmented playlist; empty for one file. A member swap names
 /// them, the server fills them in for [fetch] once it has read the link.
+/// [rate] and [need] are the server's measures, 0 while unknown: bytes per
+/// second the source (or the server's own fetch) delivers while the
+/// buffer asks for bytes, and the media's average bitrate.
 class MediaRelay {
   final String source;
   final bool fetch;
   final bool live;
   final List<RelayTrackSpec> tracks;
-  const MediaRelay({this.source = '', this.fetch = false, this.live = false, this.tracks = const []});
+  final int rate;
+  final int need;
+  const MediaRelay(
+      {this.source = '', this.fetch = false, this.live = false, this.tracks = const [], this.rate = 0, this.need = 0});
+
+  /// The source is measured slower than the media plays (both known):
+  /// below 85 % of [need], so a rate close to it does not flicker.
+  bool get slow => rate > 0 && need > 0 && rate < need * 0.85;
 
   static const trackKinds = {'video', 'audio'};
   static const maxTracks = 4;
@@ -193,14 +204,21 @@ class MediaRelay {
   static bool validTracks(List<RelayTrackSpec> t) =>
       t.length <= maxTracks && (t.length > 1 || (t.length == 1 && t.single.pieces));
 
-  MediaRelay copyWith({bool? live, List<RelayTrackSpec>? tracks}) =>
-      MediaRelay(source: source, fetch: fetch, live: live ?? this.live, tracks: tracks ?? this.tracks);
+  MediaRelay copyWith({bool? live, List<RelayTrackSpec>? tracks, int? rate, int? need}) => MediaRelay(
+      source: source,
+      fetch: fetch,
+      live: live ?? this.live,
+      tracks: tracks ?? this.tracks,
+      rate: rate ?? this.rate,
+      need: need ?? this.need);
 
   Map<String, Object?> toJson() => {
         if (source.isNotEmpty) 'source': source,
         if (fetch) 'fetch': true,
         if (live) 'live': true,
         if (validTracks(tracks)) 'tracks': [for (final t in tracks) t.toJson()],
+        if (rate > 0) 'rate': rate,
+        if (need > 0) 'need': need,
       };
 
   /// Unknown kinds, a single byte track or too many make it one file.
@@ -212,8 +230,13 @@ class MediaRelay {
         source: json['source'] is String ? json['source'] as String : '',
         fetch: json['fetch'] == true,
         live: json['live'] == true,
-        tracks: ok ? List.unmodifiable(specs.cast<RelayTrackSpec>()) : const []);
+        tracks: ok ? List.unmodifiable(specs.cast<RelayTrackSpec>()) : const [],
+        rate: _byteRate(json['rate']),
+        need: _byteRate(json['need']));
   }
+
+  /// A bytes-per-second field: a finite non-negative number, else 0.
+  static int _byteRate(Object? v) => v is num && v.isFinite && v > 0 ? v.round() : 0;
 }
 
 class HelloMessage {
@@ -412,15 +435,23 @@ class SeekIntent {
 
 class SwapIntent {
   final HelloMedia media;
-  const SwapIntent({required this.media});
+  /// The Up next item this swap puts up (`queue[].id`); the server takes
+  /// it out of the queue with the swap, and ignores the swap when it is no
+  /// longer queued (someone else put it up first).
+  final String? queueId;
+  const SwapIntent({required this.media, this.queueId});
 
-  Map<String, Object?> toJson() => {'t': 'swap', 'media': media.toJson()};
+  Map<String, Object?> toJson() =>
+      {'t': 'swap', 'media': media.toJson(), if (queueId != null) 'queueId': queueId};
 
   factory SwapIntent.fromJson(Map<String, Object?> json) {
     if (json['t'] != 'swap') throw const ProtocolException('not a swap intent');
     final media = json['media'];
     if (media is! Map) throw const ProtocolException('swap missing media');
-    return SwapIntent(media: HelloMedia.fromJson(Map<String, Object?>.from(media)));
+    final queueId = json['queueId'];
+    return SwapIntent(
+        media: HelloMedia.fromJson(Map<String, Object?>.from(media)),
+        queueId: queueId is String && queueId.isNotEmpty ? queueId : null);
   }
 }
 
@@ -600,6 +631,9 @@ class MemberView {
   /// Why its player cannot open the current media (`report.error`); empty
   /// while it can. Errored: outside the ready gate.
   final String error;
+  /// Bytes per second the server sent this member lately (its file, the
+  /// Jellyfin relay or the relay); 0 when none.
+  final int rate;
   const MemberView({
     required this.id,
     required this.name,
@@ -612,6 +646,7 @@ class MemberView {
     this.host = false,
     this.out = false,
     this.error = '',
+    this.rate = 0,
   });
 
   Map<String, Object?> toJson() => {
@@ -626,6 +661,7 @@ class MemberView {
         if (host) 'host': true,
         if (out) 'out': true,
         if (error.isNotEmpty) 'error': error,
+        if (rate > 0) 'rate': rate,
       };
 
   factory MemberView.fromJson(Map<String, Object?> json) => MemberView(
@@ -640,6 +676,7 @@ class MemberView {
         host: json['host'] == true,
         out: json['out'] == true,
         error: memberErrorFromJson(json['error']),
+        rate: MediaRelay._byteRate(json['rate']),
       );
 }
 
@@ -674,6 +711,11 @@ class StateBroadcast {
   /// The server can relay the current Jellyfin media (`/j/...`) for viewers
   /// without their own access to it.
   final bool relay;
+  /// Up next, in order (see `QueueItem`); empty when nothing is queued.
+  final List<QueueItem> queue;
+  /// The queued item someone asked to play now, waiting for the member
+  /// who can put it up; null when none.
+  final String? queuePlay;
   const StateBroadcast({
     required this.eventId,
     required this.transport,
@@ -685,6 +727,8 @@ class StateBroadcast {
     this.seekBy,
     this.seekSeq,
     this.relay = false,
+    this.queue = const [],
+    this.queuePlay,
   });
 
   Map<String, Object?> toJson() => {
@@ -699,6 +743,8 @@ class StateBroadcast {
         if (seekBy != null) 'seekBy': seekBy,
         if (seekSeq != null) 'seekSeq': seekSeq,
         if (relay) 'relay': true,
+        if (queue.isNotEmpty) 'queue': [for (final q in queue) q.toJson()],
+        if (queuePlay != null) 'queuePlay': queuePlay,
       };
 
   factory StateBroadcast.fromJson(Map<String, Object?> json) {
@@ -721,6 +767,10 @@ class StateBroadcast {
       seekBy: json['seekBy'] as String?,
       seekSeq: json['seekSeq'] == null ? null : finiteInt(json['seekSeq'], 'seekSeq'),
       relay: (json['relay'] as bool?) ?? false,
+      queue: json['queue'] is List
+          ? (json['queue'] as List).map(QueueItem.fromJson).whereType<QueueItem>().toList()
+          : const [],
+      queuePlay: json['queuePlay'] is String ? json['queuePlay'] as String : null,
     );
   }
 }

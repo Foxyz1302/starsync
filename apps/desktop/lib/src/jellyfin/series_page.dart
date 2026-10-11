@@ -375,6 +375,7 @@ class _EpisodeTileState extends State<EpisodeTile> {
         key: ValueKey('episode-${e.id}'),
         focusColor: Colors.transparent,
         onTap: () => _tap(scope),
+        onSecondaryTap: () => scope.cardMenu(context, widget.episode),
         onHover: (h) => setState(() => _hover = h),
         onFocusChange: (f) => setState(() => _focus = f),
         child: Padding(

@@ -1,4 +1,4 @@
-# Protocol (proto = 11)
+# Protocol (proto = 12)
 
 Wire format only. Behavior (gate, clock, timeouts) is in
 [ARCHITECTURE.md](ARCHITECTURE.md). Source of truth:
@@ -30,7 +30,7 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
 ## Client to server
 
 ```
-{"t":"hello","proto":11,"secret":"","user":{"name":"","avatar":""},
+{"t":"hello","proto":12,"secret":"","user":{"name":"","avatar":""},
  "media":{"name":"","size":0,"duration":0,"url":null},"hostKey":"...",
  "resume":"<token>"}
 {"t":"ready","ready":true,"source":"manual"}      source: manual | auto
@@ -39,6 +39,7 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
 {"t":"swap","media":{"name":"","size":0,"duration":0,"url":"..."}}
 {"t":"swap","media":{"name":"","size":0,"duration":0,"jellyfin":{<ref>}}}
 {"t":"swap","media":{"name":"","size":123,"duration":0,"url":"...","relay":{}}}
+{"t":"swap","media":{...},"queueId":"q3"}         puts up an Up next item
 {"t":"report","position":123.1,"buffered":6.2,"eventId":41,
  "duration":1440.5,"mediaId":2,"jf":{"<serverId>":true},"error":"Not allowed (403)"}
 {"t":"ping","c":1767225600000}
@@ -47,6 +48,7 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
 {"t":"nudge","target":"<memberId>"}
 {"t":"profile","name":"...","avatar":"<base64>"}
 {"t":"art","mediaId":2,"poster":"<base64>","banner":"<base64>"}
+{"t":"queue","op":"add"|"move"|"remove"|"play"|"skip",...}   see "Queue"
 ```
 
 Field notes:
@@ -74,7 +76,10 @@ Field notes:
 - `report.jf` (optional): Jellyfin access per `ServerId`, `true` = this
   client plays the item with its own account, `false` = through the relay.
   Sticky: a report without `jf` keeps the last one. At most 8 entries, keys
-  up to 64 characters; others are dropped.
+  up to 64 characters; others are dropped. The reference client lists
+  every server it has a working account on as `true`, then the current
+  item's server as it plays it (so a queued Jellyfin item finds someone
+  to put it up while other media plays).
 - `report.error` (optional, omitted when empty): short plain text saying
   why this client's player cannot open the media `report.mediaId` (e.g.
   `Not allowed (403)`). The client sends it in every report while that
@@ -127,8 +132,8 @@ Field notes:
  "serverTime":"<ISO-8601 UTC>","mediaId":1,
  "media":{name,size,duration,url?,jellyfin?,relay?,swapBy?,art?}|absent,
  "members":[{"id","name","avatarHash"?,"ready","inSet","buffered","stale","jf"?,
-   "host"?,"out"?,"error"?}],
- "seekBy":"m1","seekSeq":3,"relay":true}
+   "host"?,"out"?,"error"?,"rate"?}],
+ "seekBy":"m1","seekSeq":3,"relay":true,"queue":[<item>]?,"queuePlay":"q3"?}
 {"t":"pong","c":1767225600000,"s":1767225600012}
 {"t":"feed","actor":"","action":"","target":"","reason":"","at":"<ISO-8601>"}
 {"t":"chat","text":"...","from":"<name>"}
@@ -161,17 +166,23 @@ Field notes:
   server's `hostKey` (see `hello.hostKey`). `members[].out` (omitted when
   false): the member sits out (see `out`). `members[].error` (omitted when
   empty): the member's player cannot open the current media (see
-  `report.error`).
+  `report.error`). `members[].rate` (omitted when 0): bytes per second
+  the server sent this member over the last 5 s (`/m`, `/j` and `/r`
+  together), two significant digits, under 10 kB/s counts as 0. Members
+  that fetch the media themselves read nothing from the server.
 - `pong.c` echoes the ping's `c`; `pong.s` is the server's clock in epoch ms
   (the clock `serverTime` uses). With `t3` the local receive time, the offset
   is `s - (c + t3) / 2`, accurate to half the round trip.
 - `feed.action` values: `ready`, `unready`, `force-ready`, `force-unready`,
   `force-play`, `force-hold`, `out`, `back`, `join`, `leave`, `stale`, `swap`,
-  `seek`, `pause`, `resume`, `finished`, `chat`, `rename`, `avatar`. `target`
+  `seek`, `pause`, `resume`, `finished`, `chat`, `rename`, `avatar`,
+  `queue-add`, `queue-remove`, `queue-skip`, `fetch-fail` (proto 12: the
+  server could not fetch the current media, `target` its name). `target`
   and `reason` are optional; `reason` carries `auto`/`manual` for ready and
   `silent too long` or `no signal` for leave/stale. `rename`: `actor` is the
   new name, `target` the old one. `avatar`: the actor changed only the
-  picture.
+  picture. `queue-*`: `target` is the item's title, `reason` (skip) why it
+  could not play (see "Queue").
 - Chat is delivered twice: a `chat` frame with the text and a textless
   `feed` with `action:"chat"`. Render the `chat` frame only; the reference
   client drops the textless feed entry.
@@ -207,8 +218,9 @@ state   media.art = {"poster":"<hash>","banner":"<hash>"}
 - `media.art` carries hashes like `avatarHash`; a key is omitted when that
   picture is absent, `art` when both are. The same picture as poster and
   banner (one hash) is a web video's thumbnail.
-- `GET /i/<sid>/<token>/<hash>`: as `/a/` (see "Avatars"); 404 when the
-  current media has no such art.
+- `GET /i/<sid>/<token>/<hash>`: as `/a/` (see "Avatars"); also the
+  pictures of queued items (`queue[].thumb`). 404 when neither the current
+  media nor a queued item has it.
 
 ## Jellyfin media
 
@@ -257,6 +269,7 @@ swap  media.relay = {}               the swapper's machine serves the bytes
       media.relay = {"fetch":true}   the server reads media.url itself
 state media.relay = {"source":"m2","live":true}   or {"fetch":true,"live":true}
       media.relay = {"fetch":true,"live":true,"tracks":[{"kind":"video"},{"kind":"audio"}]}
+      media.relay = {"source":"m2","live":true,"rate":4100000,"need":2300000}
 ```
 
 Tracks: a relayed media is one file, or tracks that viewers play as one
@@ -286,6 +299,15 @@ anything else means one file.
   channel is connected, or the server could read the link). `tracks`: as
   the swap named them, or, with `fetch`, set once the server has read the
   link (together with `live`).
+- `state.media.relay.rate` (omitted while unknown): bytes per second the
+  source (with `fetch`, the server's own fetch) delivers while the buffer
+  is waiting on it, smoothed over about 4 s of that time and present once
+  2 s of it are measured; it holds while the buffer is full and the
+  source idles. `need` (omitted while unknown): the media's average bytes
+  per second, the tracks' sizes over `media.duration` (a pieces track:
+  its segments in so far, after a minute of them). Both two significant
+  digits, updated once a second. `rate` under `need` means the source
+  cannot keep up; clients tell the source once per media.
 - `welcome.mediaUrl` for relayed media without `jellyfin`: this member's
   `/r/` URL; absent for the source itself (it plays its own copy) and for
   a fetched link the server has not read yet (clients open it on `live`).
@@ -360,6 +382,59 @@ is a fresh `hello` (with `resume` = the old token), after which the client
 re-sends its prior ready flag. If the old member was still there (unclean
 drop), `resume` takes it over and the token and media URL stay the same.
 
-## Reserved, not implemented
+## Queue (proto 12)
 
-Server-held queue (`queue-add`, `queue-skip`) would auto-advance like a swap.
+Up next: what plays after the current media, held by the server for
+everyone, in memory (a restart loses it). Any member edits it; items stay
+when their adder leaves. Behavior (who puts an item up, the countdown,
+skipping) is in [ARCHITECTURE.md](ARCHITECTURE.md), "Up next".
+
+```
+client {"t":"queue","op":"add","at":"end"|"next","item":{<item>},"thumb":"<base64>"}
+       {"t":"queue","op":"move","id":"q3","to":0}
+       {"t":"queue","op":"remove","id":"q3","why":"Bob left"}
+       {"t":"queue","op":"play","id":"q3"}
+       {"t":"queue","op":"skip"}
+       {"t":"swap","media":{...},"queueId":"q3"}
+state  "queue":[<item>,...], "queuePlay":"q3"
+<item> = {"id":"q3","media":{<swap media>},"how":"direct"|"server"|"through"|"file"|"jellyfin",
+          "title":"...","sub":"...","duration":213,"thumb":"<hash>",
+          "by":"m2","byName":"Bob","key":"<adder's handle>"}
+```
+
+- `add`: `item` without `id`, `by`, `byName`, `thumb` (the server sets
+  them: `id` `q<n>`, unique for the server's life; who sent it and their
+  name then). `at` `next` puts it first, else last. `thumb` (optional):
+  base64 picture, checked and capped like a poster (256 KiB decoded);
+  `item.thumb` is its hash, served at `/i/` (see "Media art") while the
+  item is queued. `title` and `sub` are cleaned like media names and cut
+  to 200 characters (an empty title becomes the media's name); `duration`
+  (seconds, omitted when unknown) is informational. At most 100 items;
+  over that the sender gets `err` `Up next is full (100 items)`.
+- `how` and what `media` must carry:
+  - `direct`: an http(s) `url`; everyone opens the link.
+  - `server`: an http(s) `url` and `relay` `{"fetch":true}`, on a server
+    with a password (as for a fetch swap). The server keeps the URL to
+    itself: the broadcast `media` has none.
+  - `through` (a link the adder passes on) / `file` (the adder's file):
+    `name` and `size` only, and `key` (8 to 64 of `[A-Za-z0-9_-]`): the
+    adder's own handle for the link or path, which never leave its app.
+    A `url` sent along is dropped.
+  - `jellyfin`: a `jellyfin` ref, checked like a swap's (any `media` with
+    a ref is `jellyfin`).
+  Anything else: `err` `bad message: ...`.
+- `move`: `id` to index `to` (clamped). `remove`: drops `id`; with `why`
+  (cut to 120 characters) it is a skip (feed `queue-skip` with the
+  reason; clients show it), else feed `queue-remove`. `add` gives feed
+  `queue-add`. Unknown ids are ignored.
+- `play`: moves `id` first and sets `state.queuePlay` to it: a request for
+  the member who can put it up to do so now. `skip` is `play` of the
+  first item. `queuePlay` ends with any swap, when the item is removed,
+  or after 30 s.
+- `swap.queueId`: the swap puts that item up and takes it off the queue
+  in the same step. A swap naming an item that is no longer queued is
+  ignored (someone put it up first). For a `server` item the swap may
+  leave out `url`: the server uses the one it kept. A swap without
+  `queueId` leaves the queue as it is.
+- `state.queue` (omitted when empty) and `state.queuePlay` (omitted when
+  none) ride in every state, `welcome.state` included.

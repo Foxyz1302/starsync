@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:sync_relay_core/core.dart';
 
 import 'relay_buffer.dart';
+import 'relay_stats.dart';
 
 final _log = createLogger('relay');
 
@@ -67,7 +68,18 @@ class PieceBuffer implements TrackBuffer {
   final _waiters = <int, List<Completer<void>>>{};
   final _aux = <int, int>{}; // init/key piece a request waits on -> since (us)
   final _viewers = <String, _Viewer>{};
-  _PiecePull? _pull;
+  @override
+  FeedClock clock = FeedClock();
+  _PiecePull? _pullNow;
+  _PiecePull? get _pull => _pullNow;
+  set _pull(_PiecePull? p) {
+    if ((_pullNow == null) != (p == null)) p == null ? clock.stop() : clock.start();
+    _pullNow = p;
+  }
+
+  /// The track's average bytes per second from the segments in so far;
+  /// null before a minute of it has arrived.
+  double? get bytesPerSec => _knownSecs >= 60 ? _knownBytes / _knownSecs : null;
   DateTime? _retryAt;
   var _disposed = false;
   Completer<void> _kick = Completer();

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../../shell/motion.dart';
+import '../../widgets/app_menu.dart';
 import '../folder_store.dart';
 import '../name_parser.dart';
 import '../scanner.dart';
@@ -54,6 +55,8 @@ class FilesPage extends StatefulWidget {
   final bool relayed;
   /// Plays [path] in the session; returns an error text, or null.
   final Future<String?> Function(String path) onPlay;
+  /// Adds [path] to Up next (right-click on a video); null: no server.
+  final Future<String?> Function(String path, {bool next})? onAddToQueue;
   final String? nowPlayingPath;
   /// Defaults to [thumbnailFor].
   final ThumbnailLoader? thumbnails;
@@ -70,6 +73,7 @@ class FilesPage extends StatefulWidget {
     this.solo = false,
     required this.relayed,
     required this.onPlay,
+    this.onAddToQueue,
     this.nowPlayingPath,
     this.thumbnails,
     this.scan,
@@ -237,6 +241,35 @@ class _FilesPageState extends State<FilesPage> {
           : PlayState.idle;
 
   VoidCallback _tapOf(String path) => () => _play(path);
+
+  /// Right-click on a video ([context]: its tile): Put it up, Add to
+  /// queue, Play next.
+  Future<void> _menu(BuildContext context, String path) async {
+    final add = widget.onAddToQueue;
+    if (add == null) return;
+    final pick = await showAppMenu<int>(context, items: [
+      AppMenuItem(value: 0, label: widget.solo ? 'Play' : 'Put it up'),
+      const AppMenuItem(value: 1, label: 'Add to queue'),
+      const AppMenuItem(value: 2, label: 'Play next'),
+    ]);
+    if (pick == null || !mounted) return;
+    if (pick == 0) return _play(path);
+    String? error;
+    try {
+      error = await add(path, next: pick == 2);
+    } catch (e) {
+      error = '$e';
+    }
+    if (error != null) _showError(error);
+  }
+
+  /// [child] with the right-click menu (when there is a server).
+  Widget _menuable(String path, Widget child) => widget.onAddToQueue == null
+      ? child
+      : KeyedSubtree(
+          key: ValueKey('menu:$path'),
+          child: Builder(
+              builder: (context) => GestureDetector(onSecondaryTap: () => _menu(context, path), child: child)));
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -468,14 +501,16 @@ class _FilesPageState extends State<FilesPage> {
         itemCount: recent.length,
         itemBuilder: (context, i) {
           final path = recent[i];
-          return _RecentRow(
-            key: ValueKey(path),
-            path: path,
-            state: _stateOf(path),
-            thumbs: _thumbs,
-            onTap: _tapOf(path),
-            onRemove: () => _store.removeRecent(path),
-          );
+          return _menuable(
+              path,
+              _RecentRow(
+                key: ValueKey(path),
+                path: path,
+                state: _stateOf(path),
+                thumbs: _thumbs,
+                onTap: _tapOf(path),
+                onRemove: () => _store.removeRecent(path),
+              ));
         },
       ),
     ];
@@ -582,16 +617,18 @@ class _FilesPageState extends State<FilesPage> {
               onTap: () => setState(() => _expanded.contains(id) ? _expanded.remove(id) : _expanded.add(id)),
             );
           }
-          return FileRow(
-            key: ValueKey(v.path),
-            path: v.path,
-            title: v.parsed.label.isEmpty ? v.parsed.series : v.parsed.label,
-            subtitle: v.name,
-            size: formatSize(v.size),
-            state: _stateOf(v.path),
-            thumbs: _thumbs,
-            onTap: _tapOf(v.path),
-          );
+          return _menuable(
+              v.path,
+              FileRow(
+                key: ValueKey(v.path),
+                path: v.path,
+                title: v.parsed.label.isEmpty ? v.parsed.series : v.parsed.label,
+                subtitle: v.name,
+                size: formatSize(v.size),
+                state: _stateOf(v.path),
+                thumbs: _thumbs,
+                onTap: _tapOf(v.path),
+              ));
         },
       ),
       // Everything else (movies, clips) as a thumbnail grid.
@@ -620,13 +657,15 @@ class _FilesPageState extends State<FilesPage> {
             itemCount: loose.length,
             itemBuilder: (context, i) {
               final v = loose[i];
-              return VideoCard(
-                key: ValueKey(v.path),
-                video: v,
-                state: _stateOf(v.path),
-                thumbs: _thumbs,
-                onTap: _tapOf(v.path),
-              );
+              return _menuable(
+                  v.path,
+                  VideoCard(
+                    key: ValueKey(v.path),
+                    video: v,
+                    state: _stateOf(v.path),
+                    thumbs: _thumbs,
+                    onTap: _tapOf(v.path),
+                  ));
             },
           );
         }),

@@ -78,6 +78,8 @@ class LibraryTab extends StatefulWidget {
   final BrowseStart? jellyfinStart;
   /// Puts the pick up; returns an error text, or null when sent.
   final Future<String?> Function(PickedMedia media) onPutUp;
+  /// Adds a pick to Up next; null without a server (no queue actions).
+  final AddToQueue? onAddToQueue;
   final VoidCallback? onPutUpDone;
   final VoidCallback? onOpenIntegrations;
   /// Defaults to [RecentLinks.instance].
@@ -97,6 +99,7 @@ class LibraryTab extends StatefulWidget {
     required this.solo,
     required this.isHost,
     required this.onPutUp,
+    this.onAddToQueue,
     this.onPutUpDone,
     this.jellyfinStart,
     this.onOpenIntegrations,
@@ -164,6 +167,13 @@ class _LibraryTabState extends State<LibraryTab> {
 
   /// A Jellyfin card or episode: a series goes up as its next episode.
   Future<String?> _putUpJellyfin(JellyfinSelection sel) async {
+    final pick = await _jellyfinPick(sel);
+    return pick is JellyfinMedia ? _put(pick) : pick as String;
+  }
+
+  /// What a Jellyfin card stands for (a series: its next episode), or an
+  /// error text.
+  Future<Object> _jellyfinPick(JellyfinSelection sel) async {
     final account = widget.accounts.account(sel.serverId);
     final client = widget.accounts.clientFor(sel.serverId);
     if (account == null || client == null) return 'that Jellyfin server is not linked any more';
@@ -175,7 +185,23 @@ class _LibraryTabState extends State<LibraryTab> {
       return e.message;
     }
     if (item == null) return 'nothing to play in there';
-    return _put(pickFor(account, item));
+    return pickFor(account, item);
+  }
+
+  /// "Add to queue" on a Jellyfin card, episode or the details panel.
+  Future<String?> _queueJellyfin(JellyfinSelection sel, {bool next = false}) async {
+    final add = widget.onAddToQueue;
+    if (add == null) return null;
+    final pick = await _jellyfinPick(sel);
+    return pick is JellyfinMedia ? add(pick, next: next) : pick as String;
+  }
+
+  /// A card's menu: errors as a snack bar.
+  Future<void> _cardQueue(JellyfinSelection sel, {bool next = false}) async {
+    final error = await _queueJellyfin(sel, next: next);
+    if (error != null && mounted) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(error)));
+    }
   }
 
   /// Double-click on a card: put it up, errors as a snack bar.
@@ -235,6 +261,7 @@ class _LibraryTabState extends State<LibraryTab> {
             selected: _c.selected,
             onSelect: _c.select,
             onPutUp: _doublePutUp,
+            onAddToQueue: widget.onAddToQueue == null ? null : _cardQueue,
             onOpenIntegrations: widget.onOpenIntegrations,
             start: widget.jellyfinStart,
             libraryStrip: false,
@@ -251,6 +278,7 @@ class _LibraryTabState extends State<LibraryTab> {
           recents: widget.recentLinks ?? RecentLinks.instance,
           probe: widget.probe,
           onPutUp: _put,
+          onAddToQueue: widget.onAddToQueue,
         ),
       MediaKind.file => _files(context),
     };
@@ -282,6 +310,7 @@ class _LibraryTabState extends State<LibraryTab> {
               selection: shown,
               solo: widget.solo,
               onPutUp: _putUpJellyfin,
+              onAddToQueue: widget.onAddToQueue == null ? null : _queueJellyfin,
               onClose: () => _c.select(null),
             ),
           ));
@@ -348,7 +377,13 @@ class _LibraryTabState extends State<LibraryTab> {
       if (b != null) {
         return b(context, solo: widget.solo, relayed: relayed, onPlay: play, nowPlayingPath: now);
       }
-      return FilesPage(solo: widget.solo, relayed: relayed, onPlay: play, nowPlayingPath: now);
+      final add = widget.onAddToQueue;
+      return FilesPage(
+          solo: widget.solo,
+          relayed: relayed,
+          onPlay: play,
+          onAddToQueue: add == null ? null : (path, {next = false}) => add(FileMedia(path), next: next),
+          nowPlayingPath: now);
     });
   }
 }

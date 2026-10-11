@@ -6,7 +6,9 @@ import 'package:relic/relic.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:web_socket/web_socket.dart';
 
+import 'queue_ops.dart';
 import 'relay_routes.dart';
+import 'relay_stats.dart';
 import 'session.dart';
 
 final _hubLog = createLogger('server_hub');
@@ -80,6 +82,29 @@ class ServerHub {
     changed();
   }
 
+  final _readRates = ReadRates();
+
+  /// Once a second: each member's read rate (`members[].rate`) and the
+  /// relay's source rate and bitrate (`media.relay.rate` / `need`). Goes
+  /// out with the next state.
+  void sampleRates() {
+    final tokens = session.tokens;
+    final rates = _readRates.sample(engine.now, {
+      for (final t in engine.members.keys) t: tokens[t]?.bytesServed ?? 0,
+    });
+    for (final m in engine.members.values) {
+      m.rate = rates[m.token] ?? 0;
+    }
+    final r = relay, m = engine.media;
+    final was = m?.relay;
+    if (r == null || m == null || was == null || r.mediaId != engine.mediaId) return;
+    r.sampleRate();
+    final rate = r.rate, need = r.need(m.duration);
+    if (rate != was.rate || need != was.need) {
+      engine.media = m.copyWith(relay: was.copyWith(rate: rate, need: need));
+    }
+  }
+
   bool isHostKey(String key) => hostKey.isNotEmpty && key == hostKey;
 
   /// The member a reconnecting client may take over with its old token:
@@ -148,6 +173,13 @@ class ServerHub {
     }
     engine.feed.add(
         FeedMessage(actor: from, action: 'chat', at: engine.now));
+    broadcastFeed();
+  }
+
+  /// The server's own fetch of [name] failed: everyone hears it (the
+  /// swapper also gets the reason as an error), not just "getting it…".
+  void fetchFailed(String name) {
+    engine.feed.add(FeedMessage(actor: 'server', action: 'fetch-fail', target: name, at: engine.now));
     broadcastFeed();
   }
 
@@ -314,7 +346,19 @@ void mountSyncRoute(
               hub.changed();
             case 'swap':
               if (token == null) return;
-              final parsed = SwapIntent.fromJson(decoded).media;
+              final swap = SwapIntent.fromJson(decoded);
+              var parsed = swap.media;
+              final queueId = swap.queueId;
+              if (queueId != null) {
+                // Already put up by someone else: nothing to do.
+                if (!hub.engine.queue.has(queueId)) return;
+                // A server-fetched item's link never left the server.
+                final hidden = hub.engine.queue.privateUrlOf(queueId);
+                if (hidden != null && (parsed.url ?? '').isEmpty) {
+                  parsed = HelloMedia(
+                      name: parsed.name, size: parsed.size, duration: parsed.duration, url: hidden, relay: parsed.relay);
+                }
+              }
               if (parsed.jellyfin != null) {
                 // By reference only: no URL (it could carry a token) is
                 // stored or broadcast for Jellyfin media.
@@ -330,7 +374,7 @@ void mountSyncRoute(
                         duration: parsed.duration,
                         jellyfin: ref,
                         relay: relayReq == null ? null : hub.relayFor(token, const MediaRelay()));
-                if (media == null || !hub.engine.applySwap(token, media)) {
+                if (media == null || !hub.engine.applySwap(token, media, queueId: queueId)) {
                   wsErr(ws, 'bad swap media');
                   return;
                 }
@@ -368,7 +412,7 @@ void mountSyncRoute(
                     size: parsed.size,
                     duration: parsed.duration,
                     relay: hub.relayFor(token, relayReq));
-                if (!hub.engine.applySwap(token, media)) {
+                if (!hub.engine.applySwap(token, media, queueId: queueId)) {
                   wsErr(ws, 'bad swap media');
                   return;
                 }
@@ -379,7 +423,10 @@ void mountSyncRoute(
                     ? ActiveRelay.fetch(hub.engine.mediaId, name, link!,
                         ytDlp: hub.ytDlp,
                         onLiveChanged: () => hub.relayLiveChanged(active),
-                        onFail: (why) => wsErr(ws, hub.fetchFailText(why)))
+                        onFail: (why) {
+                          wsErr(ws, hub.fetchFailText(why));
+                          hub.fetchFailed(name);
+                        })
                     : _memberRelay(hub, token, name, media.relay!.tracks);
                 hub.setRelay(active);
                 hub.changed();
@@ -399,7 +446,7 @@ void mountSyncRoute(
                 wsErr(ws, 'swap needs a url or the hosted file');
                 return;
               }
-              if (!hub.engine.applySwap(token, intent.media)) {
+              if (!hub.engine.applySwap(token, intent.media, queueId: queueId)) {
                 wsErr(ws, 'bad swap media');
                 return;
               }
@@ -464,6 +511,9 @@ void mountSyncRoute(
             case 'nudge':
               if (token == null) return;
               hub.nudge(token, NudgeIntent.fromJson(decoded).target);
+            case 'queue':
+              if (token == null) return;
+              handleQueueIntent(hub, token, ws, decoded);
           }
         } on ProtocolException catch (e) {
           wsErr(ws, 'bad message: ${e.message}');

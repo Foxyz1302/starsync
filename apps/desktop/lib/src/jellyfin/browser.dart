@@ -30,6 +30,8 @@ class JellyfinBrowser extends StatefulWidget {
   final JellyfinSelection? selected;
   final ValueChanged<JellyfinSelection> onSelect;
   final ValueChanged<JellyfinSelection> onPutUp;
+  /// Right-click on a card: Add to queue / Play next; null: no server.
+  final void Function(JellyfinSelection item, {bool next})? onAddToQueue;
   final VoidCallback? onOpenIntegrations;
   final Duration searchDebounce;
   /// Opens here instead of the remembered location (the series of the
@@ -43,6 +45,7 @@ class JellyfinBrowser extends StatefulWidget {
     required this.accounts,
     required this.onSelect,
     required this.onPutUp,
+    this.onAddToQueue,
     this.controller,
     this.selected,
     this.onOpenIntegrations,
@@ -221,6 +224,10 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
       selectedItemId: sel != null && sel.serverId == account.serverId ? sel.itemId : null,
       onSelect: (item) => widget.onSelect(JellyfinSelection(account.serverId, item.id, item)),
       onPutUp: (item) => widget.onPutUp(JellyfinSelection(account.serverId, item.id, item)),
+      onAddToQueue: widget.onAddToQueue == null
+          ? null
+          : (item, {next = false}) =>
+              widget.onAddToQueue!(JellyfinSelection(account.serverId, item.id, item), next: next),
       libraryStrip: widget.libraryStrip,
       child: Focus(
         onKeyEvent: _onKey,

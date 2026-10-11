@@ -420,7 +420,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   // --------------------------------------------------------------- handoff
 
   /// Nothing (a dialog, a popover) is over the shell.
-  bool get _onTop => !_handoffOpen && (ModalRoute.of(context)?.isCurrent ?? true);
+  bool get _onTop => !_handoffOpen && handoffHolds == 0 && (ModalRoute.of(context)?.isCurrent ?? true);
 
   /// Ctrl+V outside a text field (a focused field pastes on its own).
   bool _onKey(KeyEvent e) {
@@ -673,6 +673,8 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
                 ),
           jellyfinStart: _libraryStart,
           onPutUp: _putUp,
+          // Up next needs a server (a solo session has one).
+          onAddToQueue: online ? coord.queue.add : null,
           onOpenIntegrations: () => _openSettings(SettingsSection.integrations),
         ),
       ShellTab.schedule => SchedulePage(

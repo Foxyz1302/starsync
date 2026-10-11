@@ -12,9 +12,9 @@ import 'package:watch_together/src/jellyfin/session_media.dart';
 import 'package:watch_together/src/jellyfin/track_prefs.dart';
 import 'package:watch_together/src/screens/home/media_picker.dart';
 import 'package:watch_together/src/screens/session/jellyfin_widgets.dart';
+import 'package:watch_together/src/session/delivery.dart';
 import 'package:watch_together/src/session/session_coordinator.dart' show AutoAdvance;
 import 'package:watch_together/src/shell/library_tab.dart' show putUpJellyfinMedia;
-import 'package:watch_together/src/shell/party_strip.dart' show viaHostOf;
 
 import 'jellyfin_accounts_test.dart';
 import 'jellyfin_browser_test.dart' show app, setSize, settle;
@@ -341,11 +341,13 @@ void main() {
       expect(compareMemberIds('m9', 'm10'), lessThan(0));
     });
 
-    test('member badge: via host only for relay viewers of the current item', () {
-      expect(viaHostOf(member('m1', 'G', jf: {fixtureServerId: false}), episodeRef), isTrue);
-      expect(viaHostOf(member('m1', 'G', jf: {fixtureServerId: true}), episodeRef), isFalse);
-      expect(viaHostOf(member('m1', 'G'), episodeRef), isFalse);
-      expect(viaHostOf(member('m1', 'G', jf: {fixtureServerId: false}), null), isFalse);
+    test('member route: via server only for relay viewers of the current item', () {
+      DeliveryRoute? route(MemberView m, {bool relay = true}) =>
+          routeOf(m, DeliveryKind.jellyfin, '', episodeRef, relay);
+      expect(route(member('m1', 'G', jf: {fixtureServerId: false})), DeliveryRoute.server);
+      expect(route(member('m1', 'G', jf: {fixtureServerId: false}), relay: false), isNull);
+      expect(route(member('m1', 'G', jf: {fixtureServerId: true})), DeliveryRoute.direct);
+      expect(route(member('m1', 'G')), isNull);
     });
   });
 

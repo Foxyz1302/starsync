@@ -165,25 +165,3 @@ class JellyfinBlockedCard extends StatelessWidget {
     );
   }
 }
-
-/// Small member-list badge: plays the Jellyfin item through the host.
-class ViaHostBadge extends StatelessWidget {
-  const ViaHostBadge({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: 'No Jellyfin account here: watches through the host',
-      child: Container(
-        key: const ValueKey('via-host'),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-        decoration: BoxDecoration(
-          color: Colors.white10,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: Colors.white24),
-        ),
-        child: const Text('via host', style: TextStyle(fontSize: 10, color: Colors.white70)),
-      ),
-    );
-  }
-}

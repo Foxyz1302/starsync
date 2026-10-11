@@ -9,6 +9,11 @@ import '../files/ui/file_tiles.dart' show baseName;
 // field: what it is ([classifyHandoff], pure) and the small card that asks
 // how to open it ([HandoffCard]). The shell wires both.
 
+/// Open overlays over the shell that take drops and pastes themselves
+/// (the Up next popover, which is not a route): the shell's own handoff
+/// stays off while any is open.
+int handoffHolds = 0;
+
 /// What was dropped or pasted.
 sealed class Handoff {
   const Handoff();

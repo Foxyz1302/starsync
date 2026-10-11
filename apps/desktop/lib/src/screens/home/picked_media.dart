@@ -122,3 +122,7 @@ final class JellyfinMedia extends PickedMedia {
   @override
   String toString() => 'JellyfinMedia($serverId/$itemId "$title")';
 }
+
+/// Adds a pick to Up next (with [next]: right after what plays); returns
+/// an error text, or null when sent. Null where there is no server.
+typedef AddToQueue = Future<String?> Function(PickedMedia media, {bool next});

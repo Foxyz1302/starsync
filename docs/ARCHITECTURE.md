@@ -571,7 +571,28 @@ How bytes move:
   token after a resume); a different size (or piece count and roles)
   drops that track's buffer.
   `state.media.relay.live` follows the channel, and viewers show "waiting
-  for <name> to pass the video on" while it is down.
+  for <name> to pass the video on" while it is down, "<name> left:
+  playing what the server has" once the source left the server.
+- Stats (`relay_stats.dart`, `ServerHub.sampleRates` on the 1 s
+  heartbeat; wire in [PROTOCOL.md](PROTOCOL.md)): the source's rate is
+  its bytes over the time a pull is in flight (`FeedClock`, one per media
+  shared by its tracks, run by each buffer's pull), so a full buffer with
+  an idle source does not read as a slow one; smoothed over about 4 s of
+  that time (`SourceRate`). Its first-byte wait counts, so it reads a bit
+  under the uplink on short pulls. The need is the tracks' sizes over the
+  reported duration (pieces: their bytes per second once a minute of
+  segments is in). Each member's rate is its `bytesServed` change over
+  5 s (`ReadRates`), which follows what its player asks for, not what its
+  link could take. Two significant digits keep `state` from changing with
+  every byte. The app (`session/delivery.dart`) derives the rest from the
+  state: the kind (link, host's file, server's file, member relay, server
+  fetch, Jellyfin), each member's route (source; via server: relayed,
+  `/m`, or Jellyfin `jf` false; direct: links, Jellyfin `jf` true) and
+  buffer health (enough for `bufferNeed`, low, empty while playing). The
+  members card (`shell/delivery_line.dart`) shows it as a source line and
+  a dot per member; nothing goes on the picture. The source gets one toast
+  per media while `rate` < `need`. Not shown: a direct member's speed
+  (the server never sees its bytes).
 
 Measured (mpv 0.41 viewers, real server and source, a shaped link
 between source and server; `tool/relay_e2e.dart`, 2-minute 1080p test
@@ -727,8 +748,8 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   here for <server>, and nobody is passing it on" with a button that
   opens Integrations over the session; linking (or reconnecting) the
   account retries by itself. A 401 marks the account expired. The member
-  list shows "via host" for members whose `jf` is false for the current
-  item. A reconnect to the same item with `OwnPlay` keeps playing as is.
+  list shows "via server" for members whose `jf` is false for the current
+  item (see "Relay", Stats). A reconnect to the same item with `OwnPlay` keeps playing as is.
 - **Progress** (`JellyfinProgressReporter`, `OwnPlay` only): Playing once the
   file is open and mpv has picked its tracks; Progress every 10 s and at
   once on pause, resume, a seek (position more than 3 s from where playback
@@ -758,7 +779,9 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   `state`; a late joiner never saw that swap), so clients agree without a
   wire change. Cancel is local: it stops the countdown on that screen, and
   the swapper's Cancel stops the swap; a seek by anyone ends `finished`
-  and with it every countdown.
+  and with it every countdown. Only while Up next is empty and its
+  continuation was not cleared (see "Up next"); a queued item replaces
+  a countdown already running.
 - **Tracks**: the controls' Audio and Subtitles buttons list
   `PlaybackController.tracks`. A pick is applied, reported, and saved as a `TrackChoice`
   (language, title, codec, channels, forced/HI: from the Jellyfin streams
@@ -770,6 +793,86 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
 - **Change video**: the player's "Change video" opens the Library tab;
   Link goes through `mediaForLink`, a Jellyfin pick as a ref, a file
   through `ServerIsolate.setFile` (host) or the relay (`swapFile`).
+
+## Up next
+
+The queue: what plays after the current media. The server holds the list
+(`EngineQueue` in `packages/core/lib/src/queue.dart`, in memory, part of
+`state`; wire in [PROTOCOL.md](PROTOCOL.md), "Queue"), any member edits
+it by item id (ops never clash), items outlive their adder. The app side
+is `lib/src/queue/`: `QueueController` (owned by the coordinator, fed by
+every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
+`queue_ui.dart`.
+
+- **Adding** (`QueueController.add`, from "Add to queue" anywhere or the
+  popover): a link is probed like a swap (`AppYtDlp.probe`) and refused
+  when it will not play, in the chosen mode ("Through me" also needs
+  something a relay can read, "Server fetches it" a password on the
+  server; alone it is direct). The item carries the title, a second line
+  (uploader or site, the show and episode, a file's parsed episode), the
+  length when known, and a picture (a page's thumbnail, a Jellyfin
+  episode still or backdrop, a file's frame from `thumbnailFor`; JPEG,
+  under the poster cap) sent as `thumb`. A link passed on "through me"
+  and a file go up as a `key` only: the app keeps the URL or path in
+  memory under it and nothing else leaves it. The adder gets a toast
+  "Added … to Up next"; everyone else an activity-log line.
+- **Who puts an item up** (`queuePerformer`, from `state` alone, so all
+  clients agree): a link passed on or a file, only its adder (gone:
+  skipped, "Bob left"); a Jellyfin item, its adder when it plays that
+  server with its own account, else the lowest member id that does
+  (`jf`, which lists every working account; nobody: skipped); a link
+  everyone opens or the server fetches, its adder when present, else the
+  lowest active member id; for these, stale or sitting out counts as
+  away (an adder who is stale is waited for until it is gone). A skip is
+  a `remove` with the reason from the lowest member id that is not stale
+  (`queueJanitor`); the feed's `queue-skip` toasts on every screen.
+- **Advancing**: at `finished` with Up next waiting, every screen shows
+  `UpNextCard` (picture, title, who added it and how; with auto-advance on
+  a 10 s countdown with Cancel, else Play now only); at zero the app that
+  puts the first item up does, with a swap naming it (`swap.queueId`), so
+  the server takes it off in the same step and a second swap of it is
+  ignored. Cancel is per screen like the next-episode countdown. "Play
+  now" anywhere (a row, the card, the chip's ▶, `>` / Shift+N) swaps
+  directly from the app that can, else sends `play` and that app reacts
+  to `state.queuePlay`. With nothing up at all, the first item goes up as
+  soon as it is added. The swap goes through the usual paths
+  (`swapPicked`, `swapJellyfin`; a server-fetched item through
+  `swapQueued`, without the URL, its picture as the art), so relays, art
+  and refusals work as for any swap; when it fails the item is skipped
+  with the reason. A swap without `queueId` (a manual one) leaves the
+  queue alone. A member who puts its own link or file up while sitting
+  out comes back first; any other queued swap leaves the swapper out.
+- **Getting ready** (`queueWarmDue`): in the last 90 s of the current
+  media, once it is buffered to its end, or at `finished`, the app that
+  will put the first item up resolves its link (`AppYtDlp.probe`, kept 10
+  minutes, which the swap then reads), so the swap does not wait for
+  yt-dlp. A Jellyfin item, a file or a server-fetched link has nothing to
+  get ready there. Only the first item, only that app, nothing on the
+  server. Its row shows a dot: hollow waiting, pulsing getting ready,
+  filled ready, red failed (tried again when it comes up).
+- **Continues with**: not queued, computed here like the next episode:
+  with an own-account Jellyfin episode playing, the next three episodes
+  of the series (`/Shows/{id}/Episodes`, cached), greyed under Up next,
+  "+" adds one. "Clear" hides them for the media playing and keeps its
+  next-episode countdown from starting.
+- **UI**: `UpNextChip` top right under the top bar (under the party in
+  fullscreen), shown with the controls like the pills (`PillGate`) and
+  while its popover is open: "Up next · title", a +n count, ▶ plays it
+  now; without Up next the continuation ("Next · S1E8 …", ▶ = next
+  episode); nothing when both are empty. Its title opens the queue as a
+  `LeafPopover` (package `leaf_widgets`, an overlay rather than a route):
+  frosted glass like the app menus; rows with a 16:9 picture, title, second
+  line, "length · added by (avatar) name · how", a drag handle
+  (`ReorderableListView`, reordered here at once and sent as `move`), ▶
+  and × floating in on hover; "Continues with"; a "Paste a link to add"
+  field (focused on open, so the player's keys and Space rest while it
+  is up; Esc closes) and a drop zone for links and video files. Being no
+  route, it holds the shell's own drop and paste handling off while open
+  (`handoffHolds`). "Add to queue" elsewhere: the Link page's button
+  next to Put it up (in the chosen mode), a right-click menu on recent
+  links, Jellyfin cards, episodes and details-panel episodes, and Files
+  videos (Put it up / Add to queue / Play next), and a button in the
+  Jellyfin details panel (right-click: play next). None of it offline.
 
 ## Desktop UI
 
@@ -802,8 +905,9 @@ from `AppMenuStyle.theme`; the uosc controls keep their own flat menus.
   dialog; no avatars or chat), online the party: `AvatarStack` (host first, then
   ready; spreads on hover; 5 shown, 3 under 1100 px), the server name and
   "ready n/m" (hidden under 1100 px), chat with an unread badge, and Leave
-  (asks first). The stack opens the members card (status, host / relay
-  pills, "via host", "sitting out"; per member force ready, Nudge and Sit
+  (asks first). The stack opens the members card (the source line, then
+  per member status, route and buffer dot (see "Relay", Stats), host /
+  relay pills, "sitting out"; per member force ready, Nudge and Sit
   out (anyone, the host too), your own row Sit out / Join back; "Copy invite
   address": the dialled address when joined; hosting, `inviteAddresses`
   of `NetworkInterface.list` (IPv4, no loopback or link-local, private

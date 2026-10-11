@@ -4,6 +4,7 @@ export 'src/logging.dart';
 export 'src/clock_sync.dart';
 export 'src/config.dart';
 export 'src/protocol.dart';
+export 'src/queue.dart';
 export 'src/relay.dart';
 export 'src/relay_pieces.dart';
 export 'src/link_probe.dart';

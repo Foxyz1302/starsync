@@ -158,6 +158,32 @@ folder to Files, or fill Link).
 Put it up and the player opens. Not in a server, the buttons say Play
 and it plays for you alone ([Watch solo](#getting-started)).
 
+### Up next (the queue)
+
+In a server (solo too), anything can wait its turn instead of going up
+now: **Add to queue** on the Link page (in the way you picked), or
+right-click a Jellyfin card or episode, a video in Files or a recent link
+for **Add to queue** / **Play next**; the Jellyfin details panel has a
+queue button (right-click it to play next). A link is checked first, like
+Put it up. Everyone shares one Up next and anyone can change it; what
+you added stays when you leave.
+
+In the player, **Up next · title** sits top right with the controls: ▶
+plays it now, the title opens the queue: drag rows to reorder, hover a
+row to play it now (▶) or remove it (×), paste a link in the field or
+drop a link or a video on it to add. When a video ends, a card shows
+what is up next with a 10 s countdown (Cancel stops it on your screen)
+and it plays; `>` or Shift+N plays it at once. Under the queue,
+**Continues with** shows the next episodes of the Jellyfin series
+playing (greyed: they play only once Up next is empty); **+** adds one,
+**Clear** drops them for this episode.
+
+A link you pass on ("through me") or a file of yours can only be played
+by your app: if you left when its turn comes, it is skipped ("Skipped …:
+Foxyz left"). A Jellyfin item needs someone with an account on that
+server. Up next is kept by the server while it runs; restarting the
+server empties it.
+
 ## Dedicated server
 
 For an always-on box (no display needed): the release tarball also contains
@@ -302,7 +328,7 @@ Watching:
 - Friends without an account watch through the server: whoever put the
   item up passes it on automatically, with their own sign-in, which never
   leaves their computer (only the current item, only to people in the
-  session). They show "via host" in the member list (click the avatars). When the app hosts,
+  session). They show "via server" in the member list (click the avatars). When the app hosts,
   or a dedicated server has its own login (`--jellyfin <file>`, see
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), Jellyfin relay), the server
   fetches it itself instead.
@@ -361,6 +387,18 @@ Through me and Server fetches it never show the link to anyone; they can't pass 
 streams or DRM-protected video (use "Everyone fetches it" for live).
 Your upload has to beat the video's bitrate: a 25-minute 2 GB episode is
 about 11 Mbit/s.
+
+The member list (click the avatars) shows where the video comes from on
+top: who passes it on, or that the server fetches it, everyone plays the
+link, or everyone streams it from Jellyfin, with how many watch through
+the server and, for a relay, how fast it arrives against what the video
+needs (the bar's mark; past it is keeping up). It turns amber when the
+source is too slow or reconnecting, red when it left (the others play
+out what the server already has), and whoever passes it on is told once
+when their upload is too slow. Each member's line says how they get it
+("via server" with their speed, or "direct") after a dot for their
+buffer: green enough to play on, amber low, red empty. A red dot on one
+member while the source keeps up is their own connection.
 
 ## Video quality and shaders
 

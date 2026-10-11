@@ -7,6 +7,7 @@ import 'package:sync_relay_core/core.dart' show LinkProbe, hasMediaExtension, pa
 
 import '../playback/yt_dlp_app.dart';
 import '../screens/home/media_picker.dart';
+import '../widgets/app_menu.dart';
 import '../state/connect_prefs.dart';
 import 'motion.dart';
 
@@ -217,12 +218,15 @@ class LibraryLinkSource extends StatefulWidget {
   final bool solo;
   /// Puts the link up; returns an error text, or null when sent.
   final Future<String?> Function(LinkMedia media) onPutUp;
+  /// Adds the link to Up next in the chosen mode; null: no server.
+  final AddToQueue? onAddToQueue;
   final RecentLinks recents;
   final LinkProber probe;
   const LibraryLinkSource({
     super.key,
     required this.controller,
     required this.onPutUp,
+    this.onAddToQueue,
     required this.recents,
     this.solo = false,
     this.probe = defaultLinkProber,
@@ -328,6 +332,49 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
     });
   }
 
+  /// "Add to queue" (or, from a recent card's menu, [url] and [next]):
+  /// the link in the chosen mode; the probe refuses what will not play.
+  Future<void> _queue({String? url, bool next = false}) async {
+    final add = widget.onAddToQueue;
+    final link = url ?? _c.link.text.trim();
+    if (add == null || link.isEmpty || _busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _canForce = false;
+    });
+    String? error;
+    try {
+      error = await add(LinkMedia(link, relay: widget.solo ? LinkRelay.direct : _c.linkRelay), next: next);
+    } catch (e) {
+      error = '$e';
+    }
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _error = error;
+    });
+  }
+
+  /// Right-click on a recent link: put it up or queue it.
+  Future<void> _recentMenu(BuildContext context, RecentLink l) async {
+    final pick = await showAppMenu<String>(context, items: [
+      AppMenuItem(value: 'up', label: widget.solo ? 'Play' : 'Put it up'),
+      if (widget.onAddToQueue != null) ...const [
+        AppMenuItem(value: 'queue', label: 'Add to queue'),
+        AppMenuItem(value: 'next', label: 'Play next'),
+      ],
+    ]);
+    if (pick == null || !mounted) return;
+    _c.link.text = l.url;
+    switch (pick) {
+      case 'up':
+        await _go();
+      case 'queue' || 'next':
+        await _queue(url: l.url, next: pick == 'next');
+    }
+  }
+
   Widget _modeCard((LinkRelay, IconData, String, String) m, {bool compact = false}) => _ModeCard(
         key: ValueKey('link-mode-${m.$1.name}'),
         icon: m.$2,
@@ -372,6 +419,22 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
     );
+    final queue = widget.onAddToQueue == null
+        ? null
+        : Tooltip(
+            message: 'Plays after what is on now (right-click a recent link for Play next)',
+            waitDuration: const Duration(milliseconds: 600),
+            child: OutlinedButton.icon(
+              key: const ValueKey('link-add-queue'),
+              onPressed: url.isEmpty || _busy ? null : () => _queue(),
+              icon: const Icon(Icons.playlist_add_rounded),
+              label: const Text('Add to queue'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(0, 56),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              ),
+            ),
+          );
 
     return SingleChildScrollView(
       key: const ValueKey('media-link'),
@@ -408,8 +471,14 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
                         field,
                         const SizedBox(height: 10),
                         button,
+                        if (queue != null) ...[const SizedBox(height: 8), queue],
                       ])
-                    : Row(children: [Expanded(child: field), const SizedBox(width: 12), button]),
+                    : Row(children: [
+                        Expanded(child: field),
+                        const SizedBox(width: 12),
+                        button,
+                        if (queue != null) ...[const SizedBox(width: 8), queue],
+                      ]),
               ),
               if (solo || _error != null) ...[
                 const SizedBox(height: 8),
@@ -510,7 +579,8 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
                     ? const SizedBox.shrink()
                     : Padding(
                         padding: const EdgeInsets.only(top: 32),
-                        child: _RecentGrid(recents: recents, onPick: (l) => _c.link.text = l.url),
+                        child: _RecentGrid(
+                            recents: recents, onPick: (l) => _c.link.text = l.url, onMenu: _recentMenu),
                       ),
               ),
             ],
@@ -655,7 +725,9 @@ class _ModeCard extends StatelessWidget {
 class _RecentGrid extends StatelessWidget {
   final List<RecentLink> recents;
   final ValueChanged<RecentLink> onPick;
-  const _RecentGrid({required this.recents, required this.onPick});
+  /// Right-click: Put it up / Add to queue / Play next.
+  final void Function(BuildContext context, RecentLink link) onMenu;
+  const _RecentGrid({required this.recents, required this.onPick, required this.onMenu});
 
   @override
   Widget build(BuildContext context) {
@@ -680,9 +752,11 @@ class _RecentGrid extends StatelessWidget {
                   child: Tooltip(
                     message: l.url,
                     waitDuration: const Duration(milliseconds: 600),
-                    child: InkWell(
+                    // The card's own context: the menu opens at the card.
+                    child: Builder(builder: (context) => InkWell(
                       key: ValueKey('recent-link-${l.url}'),
                       onTap: () => onPick(l),
+                      onSecondaryTap: () => onMenu(context, l),
                       borderRadius: BorderRadius.circular(12),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -709,7 +783,7 @@ class _RecentGrid extends StatelessWidget {
                           ),
                         ],
                       ),
-                    ),
+                    )),
                   ),
                 ),
             ],

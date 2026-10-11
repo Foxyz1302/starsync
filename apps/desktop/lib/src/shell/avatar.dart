@@ -5,6 +5,7 @@ import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
 import '../screens/home/profile.dart';
+import '../session/delivery.dart';
 import '../session/session_coordinator.dart';
 import '../state/session_state.dart';
 import 'motion.dart';
@@ -22,6 +23,9 @@ class AvatarInfo {
   /// Why their player cannot open the media (`members[].error`): an error
   /// mark; empty when it can.
   final String error;
+  /// How it gets the media and its buffer ([MemberDelivery.detail]), for
+  /// the hover; empty when unknown.
+  final String delivery;
   const AvatarInfo({
     this.id = '',
     required this.name,
@@ -35,6 +39,7 @@ class AvatarInfo {
     this.self = false,
     this.out = false,
     this.error = '',
+    this.delivery = '',
   });
 }
 
@@ -103,6 +108,7 @@ AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator 
   final self = m.id.isNotEmpty && m.id == coord.sync.memberId;
   final relay = r == null ? null : stateMediaRelay(r);
   final playing = r?.media != null;
+  final delivery = r == null ? null : deliveryOf(r, selfId: coord.sync.memberId, names: coord.memberNames);
   return AvatarInfo(
     id: m.id,
     name: m.name,
@@ -118,6 +124,7 @@ AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator 
     self: self,
     out: m.out,
     error: m.error,
+    delivery: delivery == null ? '' : memberDeliveryOf(m, r!, delivery).detail,
   );
 }
 
@@ -304,9 +311,12 @@ class _AvatarStackState extends State<AvatarStack> {
                   left: i * step,
                   top: 0,
                   child: Tooltip(
-                    message: visible[i].error.isEmpty
-                        ? visible[i].name
-                        : "${visible[i].name} can't play this: ${visible[i].error}",
+                    message: [
+                      visible[i].error.isEmpty
+                          ? visible[i].name
+                          : "${visible[i].name} can't play this: ${visible[i].error}",
+                      if (visible[i].delivery.isNotEmpty) visible[i].delivery,
+                    ].join('\n'),
                     child: StatusAvatar(info: visible[i], size: size),
                   ),
                 ),

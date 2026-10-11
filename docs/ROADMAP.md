@@ -12,7 +12,8 @@ off by deleting it in the same commit as the code. Wire changes also edit
    ever be skipped.
 
 2. **Files**: next episode from Files (by parsed episode, with the
-   countdown). Later: tracking for file series.
+   countdown, and under Up next's "Continues with"). Later: tracking for
+   file series.
 
 3. **yt-dlp follow-ups** (see ARCHITECTURE "yt-dlp"): check that the
    bundled Windows libmpv has the ytdl hook (Lua) and plays `edl://` URLs
@@ -36,7 +37,10 @@ off by deleting it in the same commit as the code. Wire changes also edit
    filter on the Schedule from the user's AniList lists. This is the
    Schedule's personal tracking; AnimeFlow has no per-user follow.
 
-5. **Ops**: check shaders on Windows; the relay e2e "source drops
+5. **Ops**: `leaf_widgets` (the Up next popover's `LeafPopover`) is a
+   local path dependency: make it a git dependency like `fox_utils`
+   before the next release (CI cannot see the path), or go back to the
+   app's popover route. Check shaders on Windows; the relay e2e "source drops
    uncleanly and resumes" fails about half the time under the full suite.
 
 6. **Windows: first real use.** CI builds and publishes
@@ -52,8 +56,6 @@ off by deleting it in the same commit as the code. Wire changes also edit
      over instead of the buffer running dry.
    - "Bob can't open this link — relay it?": offer the relay to whoever put
      a direct link up when a viewer's player fails to open it.
-   - Show who is relaying and how fast in the member list; warn the source
-     when its upload is below the media's bitrate.
 
 8. **Jellyfin** (epic, below).
 
@@ -77,19 +79,22 @@ off by deleting it in the same commit as the code. Wire changes also edit
    - HTTP: move the app's clients (Jellyfin, AniList, AnimeFlow, updater)
      to dio from `fox_utils` when touching them, for retries/interceptors.
    - TLS: document a reverse proxy in front of the server.
-   - Playlist: `queue-add`, `queue-skip`, auto-advance like a swap.
+   - Up next follow-ups (see ARCHITECTURE "Up next"): getting the first
+     item ready only resolves its link; fetching its first seconds early
+     through the relay would make relayed starts instant too. A member
+     whose reconnect lands as a new member loses its "through me" links
+     and files in the queue (skipped as gone); the key could follow the
+     member. A whole season or a pick list at once ("Add the rest of the
+     season").
    - Sidecar subtitles.
 
 ## Epic: Jellyfin
 
 What is left (the rest is in [ARCHITECTURE.md](ARCHITECTURE.md), "Jellyfin
 in a session"):
-- Queue: put several library items (a season, a pick list) up as a
-  playlist that advances like a swap (shares `queue-add` / `queue-skip`
-  with the backlog's Playlist item).
-- Auto-advance cancel for everyone: today Cancel is per screen (the
-  designated swapper's Cancel stops the swap; a seek stops all). A shared
-  cancel needs a wire message.
+- Auto-advance cancel for everyone (the next episode and Up next): today
+  Cancel is per screen (the designated swapper's Cancel stops the swap; a
+  seek stops all). A shared cancel needs a wire message.
 - Sidecar (external) subtitle streams of Jellyfin items: only embedded
   tracks are mapped to mpv today.
 

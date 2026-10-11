@@ -6,3 +6,4 @@ export 'src/sync_server.dart';
 export 'src/jellyfin_relay.dart';
 export 'src/relay_buffer.dart';
 export 'src/relay_routes.dart';
+export 'src/relay_stats.dart';

@@ -14,6 +14,7 @@ class JellyfinPickerSource extends StatefulWidget {
   final JellyfinSelection? selected;
   final ValueChanged<JellyfinSelection> onSelect;
   final ValueChanged<JellyfinSelection> onPutUp;
+  final void Function(JellyfinSelection item, {bool next})? onAddToQueue;
   final VoidCallback? onOpenIntegrations;
   final BrowseStart? start;
   final bool libraryStrip;
@@ -25,6 +26,7 @@ class JellyfinPickerSource extends StatefulWidget {
     required this.accounts,
     required this.onSelect,
     required this.onPutUp,
+    this.onAddToQueue,
     this.controller,
     this.selected,
     this.onOpenIntegrations,
@@ -61,6 +63,7 @@ class _JellyfinPickerSourceState extends State<JellyfinPickerSource> {
           selected: widget.selected,
           onSelect: widget.onSelect,
           onPutUp: widget.onPutUp,
+          onAddToQueue: widget.onAddToQueue,
           onOpenIntegrations: widget.onOpenIntegrations,
           start: widget.start,
           libraryStrip: widget.libraryStrip,

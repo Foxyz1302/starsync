@@ -14,6 +14,7 @@ import '../controls/uosc/buttons.dart';
 import '../controls/uosc/controls.dart';
 import '../controls/uosc/timeline.dart';
 import '../controls/volume.dart';
+import '../queue/queue_ui.dart';
 import '../playback/media_marks.dart' show SkipKind, SkipOffer, formatClock;
 import '../screens/session/jellyfin_widgets.dart';
 import '../screens/session/player_controls.dart';
@@ -200,6 +201,12 @@ class _SessionPlayerState extends State<SessionPlayer> {
     // mpv's playlist keys (< >) and Shift+P / Shift+N: Jellyfin episodes.
     final shift = HardwareKeyboard.instance.isShiftPressed;
     if (event.character == '>' || (shift && key == LogicalKeyboardKey.keyN)) {
+      // Up next first, then the next episode.
+      if (coord.queue.items.peek().isNotEmpty) {
+        _lastKeyAt = now;
+        coord.queue.skip();
+        return true;
+      }
       if (coord.nextEpisode.peek() == null) return false;
       _lastKeyAt = now;
       coord.playNextEpisode();
@@ -287,6 +294,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                 _status(),
                 _progressLine(),
                 _jellyfinOverlay(),
+                _upNextChip(),
                 if (widget.fullscreen) ...[if (!SessionState.instance.solo.value) _pausedParty(), _unreadChip()],
               ] else
                 _miniOverlay(),
@@ -678,6 +686,8 @@ class _SessionPlayerState extends State<SessionPlayer> {
           final blocked = coord.jellyfinBlocked.value;
           final next = coord.nextEpisode.value;
           final countdown = coord.autoAdvance.value;
+          // Up next goes before the next episode.
+          final upNext = coord.queue.countdown.value;
           final finished = coord.serverState.value?.transport == 'finished';
           final pill = coord.nextPromptVisible.value;
           final SkipOffer? skip = coord.skipOffer.value;
@@ -692,7 +702,16 @@ class _SessionPlayerState extends State<SessionPlayer> {
                     onRetry: coord.retryJellyfin,
                   ),
                 ),
-              if (next != null && (finished || countdown != null))
+              if (upNext != null && finished)
+                Positioned(
+                  right: 24,
+                  bottom: 138,
+                  child: UpNextCard(queue: coord.queue, countdown: upNext),
+                )
+              // "Clear" in Up next hides the next episode for this media.
+              else if (next != null &&
+                  (finished || countdown != null) &&
+                  coord.queue.shownContinuation.value.isNotEmpty)
                 Positioned(
                   right: 24,
                   bottom: 138,
@@ -733,6 +752,24 @@ class _SessionPlayerState extends State<SessionPlayer> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  /// "Up next · <title>" top right, with the controls (and while its
+  /// popover is open); under the party in fullscreen.
+  Widget _upNextChip() {
+    final queue = _coord.queue;
+    return Positioned(
+      right: 16,
+      top: widget.fullscreen ? _barHeight + 60 : _topBarHeight + 8,
+      child: SignalBuilder(
+        builder: (context) => PillGate(
+          key: const ValueKey('up-next-gate'),
+          kind: 'up-next',
+          controlsShown: queue.popoverOpen.value ? const _AlwaysOn() : _controlsShown,
+          child: UpNextChip(queue: queue, onPlayNextEpisode: _coord.playNextEpisode),
+        ),
       ),
     );
   }
@@ -906,6 +943,17 @@ class _SessionPlayerState extends State<SessionPlayer> {
       ),
     );
   }
+}
+
+/// Always up (a pill whose popover is open).
+class _AlwaysOn implements ValueListenable<bool> {
+  const _AlwaysOn();
+  @override
+  bool get value => true;
+  @override
+  void addListener(VoidCallback listener) {}
+  @override
+  void removeListener(VoidCallback listener) {}
 }
 
 /// A floating pill's visibility: only while the controls are up (the

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 import 'package:signals/signals_flutter.dart';
@@ -23,6 +24,8 @@ import '../sync/avatar_cache.dart';
 import '../sync/state_diff.dart';
 import '../sync/sync_client.dart';
 import '../sync/user_seek.dart';
+import '../queue/queue_controller.dart';
+import 'delivery.dart';
 import 'health.dart';
 import 'idle.dart';
 import 'media_art.dart';
@@ -168,6 +171,10 @@ class SessionCoordinator {
   /// The app's yt-dlp and link probes (tests pass their own).
   final AppYtDlp ytDlp;
   final SyncClient sync = SyncClient();
+  /// Up next: the server's queue, adding to it, and putting items up.
+  late final QueueController queue = QueueController(this);
+  /// The server has a password (it fetches links only then).
+  bool get serverHasPassword => (_params?.secret ?? '').isNotEmpty;
   /// Member pictures by `avatarHash`, fetched from the server.
   late final AvatarCache avatars = AvatarCache(sync);
   /// The current media's poster and banner by `state.media.art` hash.
@@ -282,7 +289,7 @@ class SessionCoordinator {
   // This client's last swap, until a state shows it landed (a newer
   // mediaId than [after] with this member as `swapBy`): its art goes up then.
   // [link]: the web link it came from (a relayed one has no `url`).
-  ({HelloMedia media, int after, String? link})? _pendingArt;
+  ({HelloMedia media, int after, String? link, Uint8List? art})? _pendingArt;
   AniListClient? _aniList;
   // What this member serves for media [$1]; survives a reconnect (the
   // state then looks new again).
@@ -291,6 +298,10 @@ class SessionCoordinator {
   int _relaySourceMediaId = -1;
   /// This member serves the current media's bytes through the server.
   final relaying = signal<bool>(false);
+  /// Names by member id, kept after they leave (a relay source that left).
+  final memberNames = MemberNames();
+  // The media this member was told its upload is too slow for.
+  int _slowWarnedFor = -1;
   /// What this client put up last in this connection (a solo session
   /// carries it over when it becomes a hosted server).
   PickedMedia? get lastPick => _lastPick;
@@ -388,6 +399,17 @@ class SessionCoordinator {
       }
     }
     _memberErrors = now;
+  }
+
+  /// Remembers names, and tells this member once per media when it
+  /// passes the video on slower than the video plays.
+  void _warnSlowSource(StateBroadcast r) {
+    memberNames.observe(r);
+    if (_slowWarnedFor == r.mediaId) return;
+    final warning = slowSourceWarning(r, sync.memberId);
+    if (warning == null) return;
+    _slowWarnedFor = r.mediaId;
+    _pushToast(warning);
   }
 
   bool _reloadingVideo = false;
@@ -502,6 +524,7 @@ class SessionCoordinator {
   }
 
   void _subscribe() {
+    queue.attach();
     _stateSub ??= sync.states.listen(_onState);
     _feedSub ??= sync.feeds.listen(_onFeed);
     _nudgeSub ??= sync.nudges.listen(_onNudge);
@@ -576,8 +599,9 @@ class SessionCoordinator {
         jellyfinPlan.peek() is! OwnPlay;
     if (waiting) {
       final who = r.members.where((m) => m.id == relay.source).firstOrNull?.name;
+      final gone = memberNames[relay.source] ?? 'the member who put this up';
       health.value = HealthStatus(HealthSeverity.warn,
-          who == null ? 'the member who put this up left' : 'waiting for $who to pass the video on');
+          who == null ? '$gone left: playing what the server has' : 'waiting for $who to pass the video on');
       _relayWaitShown = true;
     } else if (_relayWaitShown) {
       _relayWaitShown = false;
@@ -652,6 +676,7 @@ class SessionCoordinator {
     _lastStateAt = DateTime.now().toUtc();
     serverState.value = r;
     _toastMemberErrors(r);
+    _warnSlowSource(r);
     _checkPlayerError(r.mediaId);
     _maybeSendArt(r);
     _queuedState = r;
@@ -918,6 +943,10 @@ class SessionCoordinator {
         ...toasts.peek(),
         ToastItem(id: _toastId, text: text, at: DateTime.now().toUtc(), actor: f.actor)
       ];
+    }
+    // The server gave up fetching what everyone waits for.
+    if (f.action == 'fetch-fail' && _awaitLiveFor != -1 && _awaitLiveFor == serverState.peek()?.mediaId) {
+      health.value = const HealthStatus(HealthSeverity.error, "the server couldn't fetch this video");
     }
     final selfName = selfMember.peek()?.name;
     // Sat out by someone else: say who (the feed names members by name).
@@ -1259,12 +1288,23 @@ class SessionCoordinator {
     sync.sendNudge(memberId);
   }
 
-  void _swap(HelloMedia media, {String? link}) {
-    // Putting something up means watching it: back first.
+  /// [queueId]: the Up next item this puts up (the server takes it off
+  /// the queue); [art]: a picture to send as its art (a queued item's).
+  void _swap(HelloMedia media, {String? link, String? queueId, Uint8List? art}) {
+    // Putting something up means watching it: back first. Not for Up next
+    // coming up by itself: whoever puts it up may be sitting out.
     final self = selfMember.peek();
-    if (self != null && self.out) sync.sendOut(self.id, false);
-    _pendingArt = (media: media, after: serverState.peek()?.mediaId ?? 0, link: link ?? media.url);
-    sync.sendSwap(media);
+    if (self != null && self.out && queueId == null) sync.sendOut(self.id, false);
+    _pendingArt = (media: media, after: serverState.peek()?.mediaId ?? 0, link: link ?? media.url, art: art);
+    sync.sendSwap(media, queueId: queueId);
+  }
+
+  /// An Up next item put up as queued, for one this app cannot build
+  /// itself (a server-fetched link: the server has the URL); [art] goes up
+  /// as its art.
+  void swapQueued(HelloMedia media, String queueId, {Uint8List? art}) {
+    markInput();
+    _swap(media, queueId: queueId, art: art);
   }
 
   void _maybeSendArt(StateBroadcast r) {
@@ -1272,17 +1312,19 @@ class SessionCoordinator {
     if (pending == null || r.mediaId <= pending.after) return;
     if (sync.memberId.isEmpty || r.media?['swapBy'] != sync.memberId) return;
     _pendingArt = null;
-    unawaited(_sendArt(r.mediaId, pending.media, pending.link));
+    unawaited(_sendArt(r.mediaId, pending.media, pending.link, given: pending.art));
   }
 
   /// Fetches the art of [media] (this client's swap, now [mediaId], from
   /// web [link] if any) and sends it; quietly nothing on any failure.
-  Future<void> _sendArt(int mediaId, HelloMedia media, String? link) async {
+  Future<void> _sendArt(int mediaId, HelloMedia media, String? link, {Uint8List? given}) async {
     try {
       final ref = media.jellyfin;
       final client = ref == null ? null : jellyfin.clientFor(ref.serverId);
       final ArtBytes? bytes;
-      if (ref != null && client != null) {
+      if (given != null) {
+        bytes = (poster: given, banner: given);
+      } else if (ref != null && client != null) {
         bytes = await jellyfinArt(client, ref.itemId);
       } else if (ref == null && (link ?? '').isNotEmpty) {
         // A web link is not a show: never guess. A page's thumbnail is
@@ -1312,13 +1354,14 @@ class SessionCoordinator {
   /// probe's [LinkProbe.problem], or unreachable) is refused with the
   /// reason in plain words unless [anyway]. Returns an error text, or null
   /// when sent.
-  Future<String?> swapLink(String url, {LinkRelay relay = LinkRelay.direct, bool anyway = false}) async {
+  Future<String?> swapLink(String url,
+      {LinkRelay relay = LinkRelay.direct, bool anyway = false, String? queueId}) async {
     markInput();
     _lastPick = LinkMedia(url, relay: relay, anyway: anyway);
     final media = await mediaForLink(jellyfin, url);
     if (media.jellyfin != null) {
       _pendingOrigin = _JellyfinOrigin(url);
-      _swap(media.copyWith(relay: const MediaRelay()));
+      _swap(media.copyWith(relay: const MediaRelay()), queueId: queueId);
       return null;
     }
     LinkProbe? probe;
@@ -1334,7 +1377,7 @@ class SessionCoordinator {
     final uri = Uri.tryParse(url) ?? Uri();
     final name = probe?.title ?? (probe != null || hasMediaExtension(uri) || uri.host.isEmpty ? media.name : uri.host);
     if (relay == LinkRelay.direct) {
-      _swap(HelloMedia(name: name, size: 0, duration: 0, url: url));
+      _swap(HelloMedia(name: name, size: 0, duration: 0, url: url), queueId: queueId);
       return null;
     }
     if (relay == LinkRelay.me) {
@@ -1366,7 +1409,7 @@ class SessionCoordinator {
       }
       _pendingOrigin = _LinkOrigin(url, probe, y);
       _swap(HelloMedia(
-          name: name, size: size, duration: 0, relay: MediaRelay(tracks: specs)), link: url);
+          name: name, size: size, duration: 0, relay: MediaRelay(tracks: specs)), link: url, queueId: queueId);
       return null;
     }
     // The server reads it with its own yt-dlp; only a page this app knows
@@ -1376,7 +1419,8 @@ class SessionCoordinator {
       return probe.relayProblem;
     }
     _swap(HelloMedia(
-        name: name, size: max(0, probe?.size ?? 0), duration: 0, url: url, relay: const MediaRelay(fetch: true)));
+        name: name, size: max(0, probe?.size ?? 0), duration: 0, url: url, relay: const MediaRelay(fetch: true)),
+        queueId: queueId);
     return null;
   }
 
@@ -1390,43 +1434,44 @@ class SessionCoordinator {
 
   /// A Jellyfin pick (browser, next / previous episode) goes up as a ref,
   /// relayed by this member for viewers without an account.
-  void swapJellyfin(JellyfinMedia media) {
+  void swapJellyfin(JellyfinMedia media, {String? queueId}) {
     markInput();
     _lastPick = media;
     _pendingOrigin = const _JellyfinOrigin(null);
-    _swap(mediaForPick(media).copyWith(relay: const MediaRelay()));
+    _swap(mediaForPick(media).copyWith(relay: const MediaRelay()), queueId: queueId);
   }
 
   /// A file on this computer. The host's app serves it itself; anyone
   /// else's goes through the server's relay. Returns an error text, or null
   /// when sent.
-  Future<String?> swapFile(String path) async {
+  Future<String?> swapFile(String path, {String? queueId}) async {
     markInput();
     _lastPick = FileMedia(path);
     final host = hostFile;
     if (host != null) {
       final file = await host(path);
       if (file == null) return 'file not found — check the path';
-      _swap(HelloMedia(name: file.name, size: file.size, duration: 0));
+      _swap(HelloMedia(name: file.name, size: file.size, duration: 0), queueId: queueId);
       return null;
     }
     final file = File(path);
     if (!await file.exists()) return 'file not found — check the path';
     _pendingOrigin = _FileOrigin(path);
     _swap(HelloMedia(
-        name: file.uri.pathSegments.last, size: await file.length(), duration: 0, relay: const MediaRelay()));
+        name: file.uri.pathSegments.last, size: await file.length(), duration: 0, relay: const MediaRelay()),
+        queueId: queueId);
     return null;
   }
 
-  /// Any picker selection.
-  Future<String?> swapPicked(PickedMedia media) async {
+  /// Any picker selection; [queueId] when it is an Up next item.
+  Future<String?> swapPicked(PickedMedia media, {String? queueId}) async {
     switch (media) {
       case LinkMedia(:final url, :final relay, :final anyway):
-        return swapLink(url, relay: relay, anyway: anyway);
+        return swapLink(url, relay: relay, anyway: anyway, queueId: queueId);
       case JellyfinMedia():
-        swapJellyfin(media);
+        swapJellyfin(media, queueId: queueId);
       case FileMedia(:final path):
-        return swapFile(path);
+        return swapFile(path, queueId: queueId);
     }
     return null;
   }
@@ -1541,11 +1586,18 @@ class SessionCoordinator {
     return relayUrlFor(_wsHost, _wsPort, sync.token, ref.itemId);
   }
 
+  /// `report.jf`: every linked account that works (so a queued Jellyfin
+  /// item finds someone to put it up while other media plays), then how
+  /// the current item plays here.
   Map<String, bool>? _jfAccessFor(StateBroadcast r) {
+    final linked = {
+      for (final a in jellyfin.accounts)
+        if (jellyfin.statusOf(a.serverId) != JellyfinAccountStatus.expired) a.serverId: true,
+    };
     final ref = _jfRef;
     final access = jellyfinPlan.peek()?.jfAccess;
-    if (ref == null || access == null || r.mediaId != _jfMediaId) return null;
-    return {ref.serverId: access};
+    if (ref == null || access == null || r.mediaId != _jfMediaId) return linked.isEmpty ? null : linked;
+    return {...linked, ref.serverId: access};
   }
 
   /// Resolves [ref] for this viewer and opens it: own account (direct
@@ -1720,7 +1772,9 @@ class SessionCoordinator {
     }
     nextPromptVisible.value = false;
     final next = nextEpisode.peek();
+    // Up next goes first; "Clear" in it hides the next episode here.
     if (next == null ||
+        !queue.continuationShown(r.mediaId) ||
         !AppSettings.instance.autoAdvance.peek() ||
         _advanceDoneFor == r.mediaId ||
         autoAdvance.peek()?.mediaId == r.mediaId) {

@@ -10,6 +10,7 @@ import 'package:web_socket/web_socket.dart';
 import 'media_endpoint.dart';
 import 'piece_buffer.dart';
 import 'relay_buffer.dart';
+import 'relay_stats.dart';
 import 'session.dart';
 
 final _log = createLogger('relay');
@@ -56,8 +57,38 @@ class ActiveRelay {
   var _local = const <LocalRelayFeed>[];
   RelicWebSocket? _channel;
   var _channelFeeds = const <ChannelRelayFeed>[];
+  /// Shared by the tracks: time any of them waits on the source.
+  final clock = FeedClock();
+  final _rate = SourceRate();
 
   ActiveRelay._(this.mediaId, this.name, this.sourceToken, this.onLiveChanged);
+
+  /// Takes the bytes the source sent so far, for [rate]; the server calls
+  /// it once a second.
+  void sampleRate() => _rate.sample(buffers.fold(0, (a, b) => a + b.bytesFromFeed), clock.busy);
+
+  /// Bytes per second the source delivers while the buffer asks for bytes
+  /// (`media.relay.rate`); 0 until measured.
+  int get rate => _rate.rate;
+
+  /// The media's average bytes per second for a [duration] in seconds
+  /// (`media.relay.need`): byte tracks by size, pieces tracks from the
+  /// pieces in so far; 0 while any track is unknown.
+  int need(double duration) {
+    if (buffers.isEmpty) return 0;
+    var total = 0.0;
+    for (final b in buffers) {
+      if (b is RelayBuffer) {
+        if (b.size <= 0 || duration <= 0) return 0;
+        total += b.size / duration;
+      } else if (b is PieceBuffer) {
+        final r = b.bytesPerSec;
+        if (r == null) return 0;
+        total += r;
+      }
+    }
+    return roundRate(total);
+  }
 
   int _nextId() => ++_ids;
 
@@ -69,6 +100,9 @@ class ActiveRelay {
             for (final t in this.tracks)
               t.pieces ? PieceBuffer(nextId: _nextId, rate: _piecesRate(t.kind)) : RelayBuffer(nextId: _nextId),
           ];
+    for (final b in buffers) {
+      b.clock = clock;
+    }
     if (!_known.isCompleted) _known.complete();
   }
 

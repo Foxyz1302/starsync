@@ -186,6 +186,7 @@ class _MediaCardState extends State<MediaCard> {
         focusColor: Colors.transparent,
         hoverColor: Colors.transparent,
         onTap: () => _tap(scope),
+        onSecondaryTap: () => scope.cardMenu(context, item),
         onHover: (h) => setState(() => _hover = h),
         onFocusChange: (f) => setState(() => _focus = f),
         child: Column(

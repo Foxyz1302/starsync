@@ -6,6 +6,7 @@ import 'package:sync_relay_core/core.dart';
 
 import 'accounts.dart';
 import 'format.dart';
+import '../widgets/app_menu.dart';
 
 /// One level of the library browser's back stack.
 sealed class BrowseRoute {
@@ -274,6 +275,9 @@ class BrowseScope extends InheritedWidget {
   final ValueChanged<JellyfinItem> onSelect;
   /// Double-click: put it up (a series: its next episode).
   final ValueChanged<JellyfinItem> onPutUp;
+  /// Adds it to Up next (with next: right after what plays); null: no
+  /// server, the cards have no menu.
+  final void Function(JellyfinItem item, {bool next})? onAddToQueue;
   /// Home shows the library chips itself (the Library tab has them in its
   /// header instead).
   final bool libraryStrip;
@@ -287,6 +291,7 @@ class BrowseScope extends InheritedWidget {
     required this.selectedItemId,
     required this.onSelect,
     required this.onPutUp,
+    this.onAddToQueue,
     this.libraryStrip = true,
     required super.child,
   });
@@ -295,6 +300,26 @@ class BrowseScope extends InheritedWidget {
       context.dependOnInheritedWidgetOfExactType<BrowseScope>()!;
 
   void onOpen(BrowseRoute route) => controller.open(route);
+
+  /// Right-click on a playable card ([context]: the card): Put it up, Add
+  /// to queue, Play next. Nothing without a server.
+  Future<void> cardMenu(BuildContext context, JellyfinItem item) async {
+    final queue = onAddToQueue;
+    if (queue == null || !isSelectable(item)) return;
+    final pick = await showAppMenu<int>(context, items: const [
+      AppMenuItem(value: 0, label: 'Put it up'),
+      AppMenuItem(value: 1, label: 'Add to queue'),
+      AppMenuItem(value: 2, label: 'Play next'),
+    ]);
+    switch (pick) {
+      case 0:
+        onPutUp(item);
+      case 1:
+        queue(item);
+      case 2:
+        queue(item, next: true);
+    }
+  }
 
   /// Cached browse call on this server.
   Future<T> load<T>(String key, Future<T> Function(JellyfinClient c) fn) =>

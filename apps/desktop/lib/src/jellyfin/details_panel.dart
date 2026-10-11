@@ -45,12 +45,16 @@ class JellyfinDetailsPanel extends StatefulWidget {
   final bool solo;
   /// Puts [item] (playable) up; returns an error text, or null when sent.
   final Future<String?> Function(JellyfinSelection item) onPutUp;
+  /// Adds [item] to Up next (with next: right after what plays); null: no
+  /// server, no queue actions.
+  final Future<String?> Function(JellyfinSelection item, {bool next})? onAddToQueue;
   final VoidCallback onClose;
   const JellyfinDetailsPanel({
     super.key,
     required this.controller,
     required this.selection,
     required this.onPutUp,
+    this.onAddToQueue,
     required this.onClose,
     this.solo = false,
   });
@@ -121,6 +125,46 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
       _busy = false;
       _error = error;
     });
+  }
+
+  Future<void> _queue(JellyfinItem target, {bool next = false}) async {
+    final add = widget.onAddToQueue;
+    if (add == null || _busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    String? error;
+    try {
+      error = await add(JellyfinSelection(_serverId, target.id, target), next: next);
+    } catch (e) {
+      error = '$e';
+    }
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _error = error;
+    });
+  }
+
+  /// Right-click on an episode ([context]: its row): Put it up, Add to
+  /// queue, Play next.
+  Future<void> _episodeMenu(BuildContext context, JellyfinItem e) async {
+    if (widget.onAddToQueue == null) return;
+    setState(() => _targetId = e.id);
+    final pick = await showAppMenu<int>(context, items: [
+      AppMenuItem(value: 0, label: widget.solo ? 'Play' : 'Put it up'),
+      const AppMenuItem(value: 1, label: 'Add to queue'),
+      const AppMenuItem(value: 2, label: 'Play next'),
+    ]);
+    switch (pick) {
+      case 0:
+        await _putUp(e);
+      case 1:
+        await _queue(e);
+      case 2:
+        await _queue(e, next: true);
+    }
   }
 
   /// Runs a watched-state change, then lets every row reload.
@@ -308,6 +352,16 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
                         : const Icon(Icons.play_arrow),
                     label: Text(label, overflow: TextOverflow.ellipsis),
                   ),
+                  if (playable != null && widget.onAddToQueue != null)
+                    GestureDetector(
+                      onSecondaryTap: _busy ? null : () => _queue(playable, next: true),
+                      child: IconButton(
+                        key: const ValueKey('details-add-queue'),
+                        onPressed: _busy ? null : () => _queue(playable),
+                        tooltip: 'Add to queue (right-click: play next)',
+                        icon: const Icon(Icons.playlist_add_rounded),
+                      ),
+                    ),
                   if (playable != null)
                     IconButton(
                       key: const ValueKey('details-watched'),
@@ -413,10 +467,12 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
     return Material(
       color: isTarget ? scheme.primary.withValues(alpha: 0.10) : Colors.transparent,
       borderRadius: BorderRadius.circular(8),
-      child: InkWell(
+      // The row's own context: its menu opens at the row.
+      child: Builder(builder: (context) => InkWell(
         key: ValueKey('details-episode-${e.id}'),
         borderRadius: BorderRadius.circular(8),
         onTap: () => _tapEpisode(e),
+        onSecondaryTap: () => _episodeMenu(context, e),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 4),
           child: Row(
@@ -461,7 +517,7 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
             ],
           ),
         ),
-      ),
+      )),
     );
   }
 }
