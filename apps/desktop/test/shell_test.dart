@@ -374,19 +374,19 @@ void main() {
     final app = shellToastFor(ToastItem(id: 3, text: 'Bob joined', at: at), who);
     expect(app.who, isNull);
     expect(app.text, 'Bob joined');
-    final froze = shellToastFor(ToastItem(id: 4, text: 'Video froze — reloaded', at: at), who);
-    expect(froze.who, isNull);
+    final notice = shellToastFor(ToastItem(id: 4, text: 'Shaders off', at: at), who);
+    expect(notice.who, isNull);
   });
 
   testWidgets('toasts slide in with an avatar and leave after their time', (tester) async {
     await tester.pumpWidget(const MaterialApp(home: Scaffold(body: PartyToasts(life: Duration(seconds: 1)))));
-    coord.toasts.value = [ToastItem(id: 1, text: 'Video froze — reloaded', at: DateTime.now())];
+    coord.toasts.value = [ToastItem(id: 1, text: 'Shaders off', at: DateTime.now())];
     await tester.pump();
     await tester.pump();
-    expect(find.text('Video froze — reloaded'), findsOneWidget);
+    expect(find.text('Shaders off'), findsOneWidget);
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
-    expect(find.text('Video froze — reloaded'), findsNothing);
+    expect(find.text('Shaders off'), findsNothing);
   });
 
   testWidgets('status avatar fills its box at any size', (tester) async {

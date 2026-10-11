@@ -27,8 +27,26 @@ const _keyWelcomeDismissed = 'welcomeDismissed';
 const _keySoundPresetFor = 'soundPresetFor';
 const _keyUnreadyOnSwap = 'unreadyOnSwap';
 const _keyIdleSitsOut = 'idleSitsOut';
+const _keyChatPopups = 'chatPopups';
 
 enum HwdecMode { auto, off, custom }
+
+/// When chat messages pop up as toasts (they always reach the chat).
+enum ChatPopups {
+  all('All'),
+  paused('Only when paused'),
+  off('Off');
+
+  final String label;
+  const ChatPopups(this.label);
+
+  /// Whether a chat message pops up now ([playing]: the video plays).
+  bool shows({required bool playing}) => switch (this) {
+        ChatPopups.all => true,
+        ChatPopups.paused => !playing,
+        ChatPopups.off => false,
+      };
+}
 
 class AppSettings {
   static final AppSettings instance = AppSettings();
@@ -52,6 +70,8 @@ class AppSettings {
   /// A 2 px progress line at the bottom of the video while the controls
   /// are hidden (both designs). Applies live.
   final progressLine = signal(true);
+  /// Chat message toasts. Applies live.
+  final chatPopups = signal(ChatPopups.all);
   /// App sounds (`sfx/`): 0..1, 0 = silent.
   final soundVolume = signal(1.0);
   /// `SfxKind` names switched off one by one.
@@ -109,6 +129,8 @@ class AppSettings {
       if (hideRe is bool) hideReReleases.value = hideRe;
       final line = box.get(_keyProgressLine);
       if (line is bool) progressLine.value = line;
+      final popups = box.get(_keyChatPopups);
+      chatPopups.value = ChatPopups.values.where((m) => m.name == popups).firstOrNull ?? ChatPopups.all;
       final vol = box.get(_keySoundVolume);
       if (vol is num) soundVolume.value = vol.toDouble().clamp(0, 1);
       final off = box.get(_keySoundsOff);
@@ -179,6 +201,11 @@ class AppSettings {
   void setProgressLine(bool on) {
     progressLine.value = on;
     _put(_keyProgressLine, on);
+  }
+
+  void setChatPopups(ChatPopups mode) {
+    chatPopups.value = mode;
+    _put(_keyChatPopups, mode.name);
   }
 
   void setSoundVolume(double v) {

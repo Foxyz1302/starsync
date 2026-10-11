@@ -23,7 +23,6 @@ import '../shaders/shader_presets.dart';
 import '../state/session_state.dart';
 import '../state/settings.dart';
 import '../widgets/app_keys.dart';
-import '../widgets/shown_frame_probe.dart';
 import '../widgets/text_focus.dart';
 import '../widgets/window_buttons.dart';
 import 'avatar.dart';
@@ -93,7 +92,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
   // `Video` (it never swaps controllers in place).
   var _videoGen = -1;
   var _videoKey = GlobalKey<VideoState>();
-  final _frameProbe = ShownFrameProbe();
   final _noFocus = FocusNode(skipTraversal: true, canRequestFocus: false);
   DateTime? _lastKeyAt;
   late final void Function() _stopShaderWatch;
@@ -114,7 +112,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
   void initState() {
     super.initState();
     _coord.jellyfin.ensureLoaded();
-    _coord.playback.shownFrame = _frameProbe.sample;
     HardwareKeyboard.instance.addHandler(_globalKey);
     // Tab (AppKeys) reaches the chat through here in fullscreen.
     AppKeys.addChatToggle(_toggleChat);
@@ -132,8 +129,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_globalKey);
     AppKeys.removeChatToggle(_toggleChat);
-    final playback = _coord.playback;
-    if (playback.shownFrame == _frameProbe.sample) playback.shownFrame = null;
     _stopShaderWatch();
     _noFocus.dispose();
     _controlsShown.dispose();
@@ -287,11 +282,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
           return Stack(
             fit: StackFit.expand,
             children: [
-              // The frozen-picture watchdog captures this boundary: the
-              // video (and its controls), not the window around it.
-              RepaintBoundary(
-                child: Stack(fit: StackFit.expand, children: [video, _frameProbe.anchor()]),
-              ),
+              video,
               if (_full) ...[
                 _status(),
                 _progressLine(),
@@ -755,15 +746,18 @@ class _SessionPlayerState extends State<SessionPlayer> {
       );
 
   /// Fullscreen hides the strip and its chat badge: while there is unread
-  /// chat and the controls are down, a small glass chip says so top right.
+  /// chat, the controls are down and the video is not playing, a small
+  /// glass chip says so top right (while it plays, only the controls' chat
+  /// button shows the count: nothing sits on the picture).
   Widget _unreadChip() => Positioned(
         right: 16,
         top: 16,
         child: IgnorePointer(
           child: ValueListenableBuilder<bool>(
             valueListenable: _controlsShown,
-            builder: (context, shown, _) {
-              final on = widget.unread > 0 && !widget.chatOpen && !shown;
+            builder: (context, shown, _) => SignalBuilder(builder: (context) {
+              final playing = _coord.serverState.value?.transport == 'playing';
+              final on = widget.unread > 0 && !widget.chatOpen && !shown && !playing;
               return AnimatedOpacity(
                 duration: easeTime,
                 curve: ease,
@@ -783,7 +777,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                   ),
                 ),
               );
-            },
+            }),
           ),
         ),
       );

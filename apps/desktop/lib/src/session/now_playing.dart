@@ -11,6 +11,10 @@ class NowPlaying {
   final String bannerHash;
   const NowPlaying({required this.title, this.episode, this.posterHash = '', this.bannerHash = ''});
 
+  /// The art is a web video's thumbnail (the same picture as cover and
+  /// banner): shown wide, under the video's own name.
+  bool get thumbnail => posterHash.isNotEmpty && posterHash == bannerHash;
+
   @override
   bool operator ==(Object other) =>
       other is NowPlaying &&

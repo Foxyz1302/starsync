@@ -200,7 +200,8 @@ class SessionCoordinator {
   /// Neighbouring episodes this viewer can put up (own account only).
   final previousEpisode = signal<EpisodeLink?>(null);
   final nextEpisode = signal<EpisodeLink?>(null);
-  /// The floating "Next episode" pill near the end of an episode.
+  /// The floating "Next episode" pill from a known ending (Outro segment
+  /// or ED chapter, [nextPromptStart]) on.
   final nextPromptVisible = signal(false);
   /// End-of-episode countdown; null when none runs here.
   final autoAdvance = signal<AutoAdvance?>(null);
@@ -269,13 +270,18 @@ class SessionCoordinator {
   int _epoch = 0;
   Timer? _reconnectTimer;
   int _mediaId = -1;
+  // The mediaId whose media the player holds (or is opening); -1 for none.
+  // Unlike [_mediaId] it survives a lost connection, so a reconnect to the
+  // same media keeps the player, and a swap stops the previous media.
+  int _playerMediaId = -1;
   String? _openUrl;
   String _wsHost = '';
   int _wsPort = 0;
   _RelayOrigin? _pendingOrigin;
   // This client's last swap, until a state shows it landed (a newer
   // mediaId than [after] with this member as `swapBy`): its art goes up then.
-  ({HelloMedia media, int after})? _pendingArt;
+  // [link]: the web link it came from (a relayed one has no `url`).
+  ({HelloMedia media, int after, String? link})? _pendingArt;
   AniListClient? _aniList;
   // What this member serves for media [$1]; survives a reconnect (the
   // state then looks new again).
@@ -341,7 +347,6 @@ class SessionCoordinator {
   Future<void> initPlayer() async {
     if (_playerReady) return;
     try {
-      playback.onFrozen = () => unawaited(reloadVideo(auto: true));
       playback.onYtdlError = _setPlayerError;
       playback.onLoadError = _setPlayerError;
       playback.onUserSeek = (d) => _userSeek(d.inMicroseconds / 1e6);
@@ -386,12 +391,12 @@ class SessionCoordinator {
 
   bool _reloadingVideo = false;
 
-  /// "Reload video" (button, Ctrl+R, frozen-picture watchdog): fresh
+  /// "Reload video" (button, Ctrl+R, status menu): fresh
   /// player + video output, current media reopened. While it runs the
   /// player counts as not ready, so reports/seek detection pause and the
   /// next broadcast resyncs position and play/pause (diff reset + play
   /// edge). The ready flag is never touched.
-  Future<void> reloadVideo({bool auto = false}) async {
+  Future<void> reloadVideo() async {
     // Also allowed after a failed reload (player gone, session still on).
     if (_params == null || _reloadingVideo) return;
     _reloadingVideo = true;
@@ -411,16 +416,6 @@ class SessionCoordinator {
       _playerReady = playback.alive.peek();
       _reloadingVideo = false;
     }
-    if (auto) {
-      _toastId++;
-      toasts.value = [
-        ...toasts.peek(),
-        ToastItem(
-            id: _toastId,
-            text: 'Video froze — reloaded',
-            at: DateTime.now().toUtc())
-      ];
-    }
   }
 
   void markInput() => _idle.activity(DateTime.now().toUtc());
@@ -436,6 +431,7 @@ class SessionCoordinator {
     _wsPort = params.port;
     diff.reset();
     _mediaId = -1;
+    _playerMediaId = -1;
     _openUrl = null;
     playerError.value = '';
     _memberErrors = const {};
@@ -713,6 +709,7 @@ class SessionCoordinator {
         _seekGate.reset();
         _clearPendingSeek();
         _leaveJellyfinItem();
+        await _leavePreviousMedia(r.mediaId);
         final name = (r.media?['name'] as String?) ?? '';
         if (ref != null) {
           await _playJellyfin(ref, r,
@@ -837,12 +834,29 @@ class SessionCoordinator {
     starving.value = null;
     if (_mediaId == -1 && _openUrl == null) return;
     _mediaId = -1;
+    _playerMediaId = -1;
     _openUrl = null;
     _openHeaders = null;
     _seekGate.reset();
     _clearPendingSeek();
     diff.reset();
     _leaveJellyfinItem();
+    if (!_playerReady) return;
+    try {
+      await playback.stop();
+    } catch (_) {}
+  }
+
+  /// A new media [mediaId]: the previous one leaves the player at once, so
+  /// nobody sees or hears it while the new one resolves, is fetched by the
+  /// server or opens. A reconnect to the media the player holds keeps it.
+  Future<void> _leavePreviousMedia(int mediaId) async {
+    final held = _playerMediaId;
+    _playerMediaId = mediaId;
+    if (held == -1 || held == mediaId) return;
+    _openUrl = null;
+    _openHeaders = null;
+    diff.reset();
     if (!_playerReady) return;
     try {
       await playback.stop();
@@ -959,11 +973,15 @@ class SessionCoordinator {
       // Duration only once the open media is the server's current one.
       // Sitting out: still a report (it keeps this member fresh), empty.
       final known = !_lastOut && !_opening && _openUrl != null && _mediaId == r.mediaId;
+      // The buffer counts only while the player holds the server's current
+      // media: before a swap's media is open it is the previous one's (or
+      // none), and the start must wait for this member.
+      final holds = !_lastOut && !_opening && _openUrl != null && _playerMediaId == r.mediaId;
       _checkPlayerError(r.mediaId);
       final error = playerError.peek();
       sync.sendReport(
         position: _lastOut ? 0 : playback.positionSecs,
-        buffered: _lastOut ? 0 : playback.bufferedSecsAhead,
+        buffered: holds ? playback.bufferedSecsAhead : 0,
         eventId: r.eventId,
         duration: known ? playback.durationSecs : 0,
         mediaId: known ? r.mediaId : 0,
@@ -1240,11 +1258,11 @@ class SessionCoordinator {
     sync.sendNudge(memberId);
   }
 
-  void _swap(HelloMedia media) {
+  void _swap(HelloMedia media, {String? link}) {
     // Putting something up means watching it: back first.
     final self = selfMember.peek();
     if (self != null && self.out) sync.sendOut(self.id, false);
-    _pendingArt = (media: media, after: serverState.peek()?.mediaId ?? 0);
+    _pendingArt = (media: media, after: serverState.peek()?.mediaId ?? 0, link: link ?? media.url);
     sync.sendSwap(media);
   }
 
@@ -1253,24 +1271,24 @@ class SessionCoordinator {
     if (pending == null || r.mediaId <= pending.after) return;
     if (sync.memberId.isEmpty || r.media?['swapBy'] != sync.memberId) return;
     _pendingArt = null;
-    unawaited(_sendArt(r.mediaId, pending.media));
+    unawaited(_sendArt(r.mediaId, pending.media, pending.link));
   }
 
-  /// Fetches the art of [media] (this client's swap, now [mediaId]) and
-  /// sends it; quietly nothing on any failure.
-  Future<void> _sendArt(int mediaId, HelloMedia media) async {
+  /// Fetches the art of [media] (this client's swap, now [mediaId], from
+  /// web [link] if any) and sends it; quietly nothing on any failure.
+  Future<void> _sendArt(int mediaId, HelloMedia media, String? link) async {
     try {
       final ref = media.jellyfin;
       final client = ref == null ? null : jellyfin.clientFor(ref.serverId);
       final ArtBytes? bytes;
       if (ref != null && client != null) {
         bytes = await jellyfinArt(client, ref.itemId);
-      } else if (ref == null && (media.url ?? '').isNotEmpty) {
+      } else if (ref == null && (link ?? '').isNotEmpty) {
         // A web link is not a show: never guess. A page's thumbnail is
-        // its banner.
-        final thumb = (await _probeFor(media.url!))?.info?.thumbnail;
+        // its cover and banner both.
+        final thumb = (await _probeFor(link!))?.info?.thumbnail;
         final uri = thumb == null ? null : Uri.tryParse(thumb);
-        bytes = uri == null ? null : (banner: await fetchImage(uri, const {}, RelayConstants.maxBannerBytes), poster: null);
+        bytes = uri == null ? null : await thumbnailArt(uri);
       } else {
         final name = ref == null ? media.name : jellyfinTitle(ref.title, ref.subtitle).$1;
         bytes = await aniListArt(_aniList ??= AniListClient(), name);
@@ -1347,7 +1365,7 @@ class SessionCoordinator {
       }
       _pendingOrigin = _LinkOrigin(url, probe, y);
       _swap(HelloMedia(
-          name: name, size: size, duration: 0, relay: MediaRelay(tracks: specs)));
+          name: name, size: size, duration: 0, relay: MediaRelay(tracks: specs)), link: url);
       return null;
     }
     // The server reads it with its own yt-dlp; only a page this app knows
@@ -1672,7 +1690,7 @@ class SessionCoordinator {
       final item = (jellyfinPlan.peek() as OwnPlay?)?.item;
       final at = nextPromptStart(item, Duration(milliseconds: (duration * 1000).round()),
           endingStart: playback.ending.peek()?.start);
-      show = snap.position * 1000 >= at.inMilliseconds;
+      show = at != null && snap.position * 1000 >= at.inMilliseconds;
     }
     nextPromptVisible.value = show;
   }

@@ -16,7 +16,6 @@ import '../shaders/shader_presets.dart';
 import '../state/settings.dart';
 import '../sync/state_diff.dart';
 import '../sync/user_seek.dart';
-import 'frame_watchdog.dart';
 import 'media_marks.dart';
 import 'yt_dlp_app.dart' show AppYtDlp, ytdlFormat;
 
@@ -41,9 +40,6 @@ class PlaybackController {
 
   SyncPlayer? _player;
   VideoController? _video;
-  Timer? _watchTimer;
-  bool _probing = false;
-  final FrameWatchdog _watchdog = FrameWatchdog();
   StreamSubscription<PlayerLog>? _logSub;
   final List<StreamSubscription<Object?>> _timeSubs = [];
   String _chapterJson = '';
@@ -59,9 +55,6 @@ class PlaybackController {
   /// True while a live player exists. The video view shows plain black
   /// otherwise, so no texture outlives its player.
   final alive = signal(false);
-
-  /// Called once when the watchdog sees a frozen picture.
-  void Function()? onFrozen;
 
   /// mpv's yt-dlp hook could not open the current link (its error text).
   void Function(String error)? onYtdlError;
@@ -108,10 +101,6 @@ class PlaybackController {
 
   Player? _ytdlSetOn;
   String _ytdlRaw = '';
-
-  /// Fingerprint of the picture on screen, installed by the video view
-  /// (`ShownFrameProbe.sample`). Without it the watchdog stays idle.
-  Future<int?> Function()? shownFrame;
 
   Player get player => _player!;
 
@@ -217,8 +206,6 @@ class PlaybackController {
     await _pinBufferProps();
     await _pin('volume-max', '$maxVolume');
     await applyShaders();
-    _watchdog.reset();
-    _watchTimer = Timer.periodic(const Duration(seconds: 1), (_) => _watch());
     generation.value++;
     alive.value = true;
   }
@@ -439,73 +426,6 @@ class PlaybackController {
     }
   }
 
-  /// Fingerprint of the decoder's current frame (mpv `screenshot-raw`,
-  /// off-thread); null without video.
-  Future<int?> _sourceFrame(Player p) async {
-    try {
-      final raw = await p.screenshot(format: null);
-      return raw == null || raw.isEmpty ? null : hashSpread(raw);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// A suspected freeze is real only if mpv's own frames still move: a
-  /// still scene looks frozen on screen too.
-  Future<bool> _sourceMoving(Player p) async {
-    final a = await _sourceFrame(p);
-    await Future.delayed(const Duration(milliseconds: 500));
-    if (!identical(p, _player) || !p.state.playing) return false;
-    final b = await _sourceFrame(p);
-    return a != null && b != null && a != b;
-  }
-
-  static bool get _windowVisible {
-    try {
-      final s = WidgetsBinding.instance.lifecycleState;
-      return s == null ||
-          s == AppLifecycleState.resumed ||
-          s == AppLifecycleState.inactive;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<void> _watch() async {
-    final p = _player;
-    final probe = shownFrame;
-    // Only meaningful once the video view is up.
-    if (p == null || _video == null || probe == null || _probing) return;
-    _probing = true;
-    try {
-      final frames = await probe();
-      if (!identical(p, _player)) return;
-      final s = p.state;
-      final eligible = s.playing &&
-          !s.buffering &&
-          !s.completed &&
-          s.rate > 0 &&
-          (s.width ?? 0) > 0 &&
-          _windowVisible;
-      final fired = _watchdog.feed(FrameSample(
-        at: DateTime.now(),
-        position: positionSecs,
-        frames: frames,
-        eligible: eligible,
-      ));
-      if (fired) {
-        if (await _sourceMoving(p) && identical(p, _player)) {
-          debugPrint('video watchdog: picture stuck while mpv frames move');
-          onFrozen?.call();
-        } else {
-          _watchdog.dismiss();
-        }
-      }
-    } finally {
-      _probing = false;
-    }
-  }
-
   /// Opens [url] paused. [headers] go with every request for it (mpv
   /// `http-header-fields`): a Jellyfin token travels there, not in the URL.
   Future<void> openUrl(String url, {Map<String, String>? headers}) async {
@@ -689,8 +609,6 @@ class PlaybackController {
   Future<void> dispose() async {
     final p = _player;
     if (p == null) return;
-    _watchTimer?.cancel();
-    _watchTimer = null;
     await _logSub?.cancel();
     _logSub = null;
     for (final sub in _timeSubs) {

@@ -320,14 +320,13 @@ Future<({EpisodeLink? previous, EpisodeLink? next})> findAdjacentEpisodes(OwnPla
 
 /// When the floating "Next episode" pill appears: at [endingStart] (the
 /// ED: Jellyfin Outro segment or ED-titled chapter, see `endingRange`)
-/// when one is known inside [runtime], else the last two minutes of
-/// [runtime] (all of it for shorter media).
-Duration nextPromptStart(JellyfinItem? item, Duration runtime, {Duration? endingStart}) {
+/// when one is known inside [runtime]. Null otherwise: no guessed ending,
+/// the end-of-episode card at the real end is the only prompt then.
+Duration? nextPromptStart(JellyfinItem? item, Duration runtime, {Duration? endingStart}) {
   if (endingStart != null && endingStart > Duration.zero && endingStart < runtime) {
     return endingStart;
   }
-  const lead = Duration(minutes: 2);
-  return runtime > lead ? runtime - lead : Duration.zero;
+  return null;
 }
 
 /// Who performs the auto-advance swap, so several counting clients do not

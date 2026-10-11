@@ -429,6 +429,24 @@ void main() {
       expect(engine.members['b']!.inSet, isTrue);
       expect(engine.transport, Transport.held);
     });
+
+    test("the previous media's buffer never starts the new one", () {
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applyReady('a', true);
+      engine.applyReady('b', true);
+      engine.applySwap('a', ep2);
+      final oldEvent = engine.eventId - 1;
+      // Sent before the swap reached the clients, landing after it.
+      engine.applyReport('a', 30, 20.0, oldEvent, mediaId: 1);
+      engine.applyReport('b', 30, 20.0, oldEvent, mediaId: 1);
+      expect(engine.members['a']!.buffered, 0);
+      engine.tick();
+      expect(engine.transport, Transport.held);
+      engine.applyReport('a', 0, 6.0, engine.eventId, mediaId: 2);
+      engine.applyReport('b', 0, 6.0, engine.eventId, mediaId: 2);
+      expect(engine.transport, Transport.playing);
+    });
   });
 
   group('force with actor feed', () {

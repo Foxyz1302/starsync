@@ -723,8 +723,8 @@ class _AnimeFlowCardState extends State<AnimeFlowCard> {
   }
 }
 
-/// What pops up and what makes a sound. No switches: there is nothing to
-/// choose yet.
+/// What pops up (chat pop-ups: [AppSettings.chatPopups]) and what makes
+/// a sound.
 class NotificationsInfo extends StatelessWidget {
   const NotificationsInfo({super.key});
 
@@ -746,11 +746,39 @@ class NotificationsInfo extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              line('Joins, leaves, video changes and chat',
+              line('Joins, leaves and video changes',
                   'Pop up bottom left for 5 s, with the person\'s picture'),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Chat messages'),
+                          Text('Pop up the same way; always in Chat & activity (Tab)', style: muted),
+                        ],
+                      ),
+                    ),
+                    SignalBuilder(
+                      builder: (context) => DropdownButton<ChatPopups>(
+                        key: const ValueKey('chat-popups'),
+                        value: AppSettings.instance.chatPopups.value,
+                        onChanged: (v) {
+                          if (v != null) AppSettings.instance.setChatPopups(v);
+                        },
+                        items: [
+                          for (final m in ChatPopups.values) DropdownMenuItem(value: m, child: Text(m.label)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               line('Sat out or nudged by someone', 'Only on your end, with their picture'),
               line('Ready, seeks and pauses', 'Only in Chat & activity (Tab), never as a pop-up'),
-              line('App notices', 'Shader changes, a frozen video reloaded, the idle warning'),
+              line('App notices', 'Shader changes, the idle warning'),
             ],
           ),
         ),

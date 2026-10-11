@@ -81,16 +81,19 @@ corner; double-click or ⤢ makes it big again, × sits you out (below) and
 double-click on the picture goes fullscreen (the strip hides, the party
 shows in a corner while paused, the window buttons sit in the player's top
 bar while its controls are up), Esc leaves it. The controls show the
-show's cover, title and episode top left (guests get the cover too); before
+show's cover, title and episode top left (a web video: its thumbnail and
+name; guests get the art too); before
 a video first plays, its banner fills the picture until playback starts.
 One pill above the controls says what playback waits for ("Press Space
 when you're ready", "Waiting for Bob and Mika · 2/3 ready", "Bob is
 loading…") or what went wrong, with Retry or Cancel when it helps. Chat and activity open in a panel on the right (chat button or
 Tab), ready to type; it shows messages, and its "Activity" toggle adds
 joins, ready, seeks and the like between them. Joins, leaves, chat and
-other news also pop up bottom left with the person's avatar; click a message to open the chat. Unread chat
-shows as a count on the chat buttons and, in fullscreen with the controls
-hidden, as a small chip top right.
+other news also pop up bottom left with the person's avatar; click a message to open the chat
+(Settings → Notifications → Chat messages: All, Only when paused or Off;
+messages always reach the chat). Unread chat shows as a count on the chat
+buttons and, in fullscreen with the controls hidden and the video paused,
+as a small chip top right.
 
 Your name and picture change for everyone in the server right away; the
 colour is yours only.
@@ -308,8 +311,9 @@ Watching:
 
 Episodes: the ⏮ / ⏭ buttons next to the controls (or `<` / `>`,
 Shift+P / Shift+N) put up the previous or next episode for everyone. From
-the ending (when it is known, see Skipping above; else in the last two
-minutes) a "Next episode" button floats in the corner. When an
+the ending, when it is known (see Skipping above), a "Next episode"
+button floats in the corner; when it is not, nothing shows before the
+end. When an
 episode ends, a card shows what is next with Play next; with "Play the
 next episode automatically" (Settings, on by default) it counts down 10 s
 first, and Cancel stops it on your screen (seeking back stops it for
@@ -379,7 +383,7 @@ fails to load shows a toast and switches shaders off.
 - "host offline - check address and port": wrong address, or the port is not open.
 - "wrong server password": password mismatch.
 - "host runs a different version": update the app on both sides.
-- Picture frozen but sound fine: Ctrl+R reloads the video; the app also does it automatically.
+- Picture frozen but sound fine: Ctrl+R reloads the video.
 - Everyone waits at "waiting for X": X has not buffered 4 seconds yet or has not pressed Space.
 - Windows: the build is new; if something is off there, say so.
 

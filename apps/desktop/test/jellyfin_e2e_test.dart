@@ -301,9 +301,9 @@ void main() {
         a.toggleReady();
         await _poll(() => all.every((x) => x.playback.player.state.playing), 'playing again');
 
-        // Account holders see the "Next episode" prompt (this item is
-        // shorter than its 2 min lead); the guest cannot put it up.
-        await _poll(() => a.nextPromptVisible.peek(), 'next prompt');
+        // No known ending (no Outro segment, no ED chapter): no floating
+        // "Next episode" prompt mid-episode, only the card at the end.
+        expect(a.nextPromptVisible.peek(), isFalse);
         expect(b.nextPromptVisible.peek(), isFalse);
 
         // Alice and the guest pick English; it carries to the next episode.

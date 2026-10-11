@@ -1,16 +1,19 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:image/image.dart' as img;
 import 'package:sync_relay_core/core.dart';
 
 import '../files/name_parser.dart';
 import '../schedule/anilist.dart';
 
 // Art for media this client swapped in (`art`, see PROTOCOL.md "Media
-// art"): Jellyfin images with this install's account, else an AniList
-// title search. Everything here fails quietly to "no art".
+// art"): Jellyfin images with this install's account, a web link's
+// thumbnail, else an AniList title search. Everything here fails quietly
+// to "no art".
 
 /// Poster and banner bytes; either may be null.
 typedef ArtBytes = ({Uint8List? poster, Uint8List? banner});
@@ -66,6 +69,31 @@ Future<ArtBytes?> aniListArt(AniListClient aniList, String name,
   ).wait;
   final poster = cover ?? (match.coverSmall == match.cover ? null : await get(match.coverSmall, RelayConstants.maxPosterBytes));
   return (poster: poster, banner: banner);
+}
+
+/// A web video's thumbnail at [url] as both cover and banner (the same
+/// bytes, so the same hash: what tells clients it is a thumbnail, see
+/// `NowPlaying.thumbnail`); shrunk to a JPEG under the cover cap when
+/// larger; null when it cannot be had.
+Future<ArtBytes?> thumbnailArt(Uri url,
+    {Future<Uint8List?> Function(Uri url, Map<String, String> headers, int maxBytes) fetch = fetchImage}) async {
+  var bytes = await fetch(url, const {}, 8 * 1024 * 1024);
+  if (bytes != null && bytes.length > RelayConstants.maxPosterBytes) bytes = await _shrinkApart(bytes);
+  return bytes == null ? null : (poster: bytes, banner: bytes);
+}
+
+// Its own function, so the isolate's closure holds nothing but [raw].
+Future<Uint8List?> _shrinkApart(Uint8List raw) => Isolate.run<Uint8List?>(() => _shrinkThumbnail(raw));
+
+Uint8List? _shrinkThumbnail(Uint8List raw) {
+  final decoded = img.decodeImage(raw);
+  if (decoded == null) return null;
+  for (final width in const [1280, 960, 640]) {
+    final small = decoded.width > width ? img.copyResize(decoded, width: width, interpolation: img.Interpolation.average) : decoded;
+    final jpg = img.encodeJpg(small, quality: 82);
+    if (jpg.length <= RelayConstants.maxPosterBytes) return jpg;
+  }
+  return null;
 }
 
 /// GET [url]: the bytes when 200, at most [maxBytes] and a known image

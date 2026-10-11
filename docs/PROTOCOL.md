@@ -68,6 +68,9 @@ Field notes:
 - `report.duration` / `report.mediaId` (optional, omitted when 0): the open
   media's length in seconds and the `mediaId` it belongs to. The server takes
   the first one whose `mediaId` is current while its media duration is 0.
+  `report.buffered` is the current media's: a client sends 0 while its
+  player does not hold it yet, and the server counts a report whose
+  `mediaId` names an earlier media as `buffered` 0.
 - `report.jf` (optional): Jellyfin access per `ServerId`, `true` = this
   client plays the item with its own account, `false` = through the relay.
   Sticky: a report without `jf` keeps the last one. At most 8 entries, keys
@@ -202,7 +205,8 @@ state   media.art = {"poster":"<hash>","banner":"<hash>"}
   decoded bytes) counts as none. A later `art` replaces the earlier one
   whole; any swap clears it.
 - `media.art` carries hashes like `avatarHash`; a key is omitted when that
-  picture is absent, `art` when both are.
+  picture is absent, `art` when both are. The same picture as poster and
+  banner (one hash) is a web video's thumbnail.
 - `GET /i/<sid>/<token>/<hash>`: as `/a/` (see "Avatars"); 404 when the
   current media has no such art.
 
@@ -273,7 +277,8 @@ anything else means one file.
   server password`: an open server would fetch any address it can reach
   for anyone). A web page `url` is read through the server's yt-dlp; when
   the server cannot read the link, the swapper later gets `The server
-  can't fetch this link: <reason>`. Any later swap ends the relay.
+  can't fetch this link: <reason>`; when yt-dlp failed and the server has
+  no cookies, the reason is `it has no cookies (...)` instead. Any later swap ends the relay.
   `tracks` on a member's swap names the tracks its source will serve; the
   server ignores it with `fetch` and with `jellyfin`.
 - `state.media.relay.source`: member id of the source (absent with

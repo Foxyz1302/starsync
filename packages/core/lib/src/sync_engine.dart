@@ -429,7 +429,11 @@ class SyncEngine {
     _setError(member, mediaId == this.mediaId ? error : '');
     _seen(member);
     if (jf != null) member.jf = Map.unmodifiable(jf);
-    member.buffered = member.out || !buffered.isFinite || buffered < 0 ? 0 : buffered;
+    // A report for an earlier media (sent before the swap reached the
+    // client) says nothing about this one's buffer.
+    final earlier = mediaId != 0 && mediaId != this.mediaId;
+    member.buffered =
+        member.out || earlier || !buffered.isFinite || buffered < 0 ? 0 : buffered;
     final m = media;
     // First report of the length wins; only for the media the client has open.
     if (m != null && m.duration <= 0 && mediaId == this.mediaId &&

@@ -34,6 +34,23 @@ class ServerHub {
     return ref != null && cred != null && cred.serverId.isNotEmpty && cred.serverId == ref.serverId;
   }
 
+  /// What the swapper reads when the server cannot fetch a link ([why]
+  /// from the relay). A yt-dlp failure on a server without cookies says
+  /// so, unless cookies would not help (unknown site, gone, unreachable).
+  String fetchFailText(String why) {
+    const head = "The server can't fetch this link";
+    final y = ytDlp;
+    final plain = playErrorText(why);
+    final cookiesMightHelp = y != null &&
+        y.enabled &&
+        why.contains('yt-dlp') &&
+        !const {unsupportedUrlText, notFoundText, unreachableText}.contains(plain) &&
+        y.cookies.read(count: false) == null;
+    return cookiesMightHelp
+        ? '$head: it has no cookies (set them in Settings → Player → yt-dlp on the hosting app, or --yt-dlp-cookies)'
+        : '$head: $why';
+  }
+
   StateBroadcast stateBroadcast() => engine.broadcast(relay: relayAvailable);
 
   /// The relay of the current media (`/r/...`), if it is relayed.
@@ -362,7 +379,7 @@ void mountSyncRoute(
                     ? ActiveRelay.fetch(hub.engine.mediaId, name, link!,
                         ytDlp: hub.ytDlp,
                         onLiveChanged: () => hub.relayLiveChanged(active),
-                        onFail: (why) => wsErr(ws, "The server can't fetch this link: $why"))
+                        onFail: (why) => wsErr(ws, hub.fetchFailText(why)))
                     : _memberRelay(hub, token, name, media.relay!.tracks);
                 hub.setRelay(active);
                 hub.changed();

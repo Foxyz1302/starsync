@@ -47,18 +47,20 @@ Widget fadeInImage(ImageProvider image, {BoxFit fit = BoxFit.cover}) => Image(
     );
 
 /// The portrait cover (2:3) of the current media, a quiet tile with a
-/// film icon until (or unless) its art arrives.
+/// film icon until (or unless) its art arrives; [wide] (a video
+/// thumbnail): 16:9 at the same height.
 class ArtCover extends StatelessWidget {
   final String hash;
   final double width;
-  const ArtCover({super.key, required this.hash, this.width = 40});
+  final bool wide;
+  const ArtCover({super.key, required this.hash, this.width = 40, this.wide = false});
 
   @override
   Widget build(BuildContext context) {
     final image = artImage(hash);
     final r = BorderRadius.circular(width >= 80 ? 10 : 6);
     return Container(
-      width: width,
+      width: wide ? width * 1.5 * 16 / 9 : width,
       height: width * 1.5,
       decoration: BoxDecoration(
         borderRadius: r,
@@ -116,7 +118,7 @@ class NowPlayingBlock extends StatelessWidget {
         key: ValueKey('now-playing:${n.title}\n${episode ?? ''}'),
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (cover) ...[ArtCover(hash: n.posterHash), const SizedBox(width: 12)],
+          if (cover) ...[ArtCover(hash: n.posterHash, wide: n.thumbnail), const SizedBox(width: 12)],
           Flexible(
             child: Column(
               mainAxisSize: MainAxisSize.min,

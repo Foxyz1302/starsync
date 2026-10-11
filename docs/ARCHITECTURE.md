@@ -98,7 +98,11 @@ Loosely modeled on Syncplay, with a different readiness design.
   the media `duration` and its `mediaId` once the player knows it. The
   server stores `buffered` and liveness, and takes the first reported
   duration for the current media (swap resets it); a report with `eventId`
-  older than current has its position ignored.
+  older than current has its position ignored. `buffered` is the current
+  media's only: the client sends 0 until the player holds it (a swap's
+  media still resolving, being fetched by the server or opening), and the
+  server counts a report naming an earlier `mediaId` as 0, so the old
+  media's buffer never passes the gate for the new one.
 - **Ready gate** (HELD to PLAYING): the in-set is non-empty and every
   in-set member is ready, fresh and has `buffered >= need`. `need` is 4 s
   (`minBufferSecs`), or near the end what is left minus 2 s
@@ -336,17 +340,10 @@ session: created on join, disposed on leave, replaced by `recreate()` for
 `StateDiff` actions, the play gate (`localPlayAllowed`: self in-set and
 ready) or the user's own seeks (see Sync model). A server seek within 0.5 s of the current position is skipped. `leave()`
 stops the player (otherwise audio keeps playing). On media change
-(`mediaId` bump) the coordinator opens the new URL and `StateDiff` seeks to 0,
-holds and resets rate.
-
-Frozen picture: `FrameWatchdog` samples about once a second. It hashes a
-small capture of the compositor's centre (`ShownFrameProbe`) and suspects a
-freeze when position advances while that hash stays constant for 3 s. Two
-differing mpv `screenshot-raw` frames show the decoder is still producing
-pictures, which confirms the freeze (a still scene is dismissed). A confirmed
-freeze reloads the video with a toast. It fires once until the picture moves
-again for 10 s, so it cannot loop. Seeks, pause, buffering and a hidden window
-disarm it.
+(`mediaId` bump) the coordinator stops the previous media at once (no old
+picture or sound while the new one resolves, is fetched or opens; a
+reconnect to the media the player holds keeps it), then opens the new URL
+and `StateDiff` seeks to 0, holds and resets rate.
 
 Chapters, segments, tracks (`PlaybackController` signals, values from
 `playback/media_marks.dart`, no widgets; any controls UI reads them):
@@ -673,7 +670,7 @@ all three link modes. Nothing is bundled or installed by hand.
   (`AppYtDlp.probe`, remembered 10 minutes; media file names too, not a
   Jellyfin item link) for the
   Link preview and the swap: a page is named by its title, never its URL
-  tail, and its thumbnail goes up as the banner (no poster). A link with a
+  tail, and its thumbnail goes up as its art (see "Media art"). A link with a
   problem, or one the probe cannot reach ("Couldn't reach the site"), is
   not put up in any mode: the Link page shows the reason (preview and
   under the button) and offers "Put it up anyway" (`LinkMedia.anyway`),
@@ -747,9 +744,9 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   `/Shows/{id}/Episodes` call; `episodeBefore` / `episodeAfter`) gives the
   previous and next episode. The controls show previous / next buttons
   (also `<` `>`, Shift+P / Shift+N); from `nextPromptStart` (the ending's
-  start when one is known, see "Skip rules", else the last 2 min of the
-  runtime) a floating "Next episode" pill shows outside the auto-hiding
-  controls. Auto-advance still waits for `finished`. Any
+  start, see "Skip rules") a floating "Next episode" pill shows outside
+  the auto-hiding controls. Without a known ending there is no pill (never
+  a guessed time); the end card at `finished` is the only prompt. Auto-advance still waits for `finished`. Any
   of them swaps to that episode's ref with the clicker's account. Guests
   (relay, blocked) see none of it.
 - **Auto-advance** (Settings, on by default): at `finished` with a known
@@ -978,12 +975,16 @@ always scrolls the page). Space never presses a focused button
   feed lines between them. Opening focuses the field; Tab or Esc in it
   close the panel and focus goes back where it was. Unread chat badges
   the strip's and both player designs' chat buttons; in fullscreen with
-  the controls down a glass chip (`PlayerGlass`) top right shows it.
+  the controls down and the video not playing a glass chip
+  (`PlayerGlass`) top right shows it (while it plays nothing sits on the
+  picture).
   **Toasts** (`toasts.dart`): the coordinator's toasts bottom left, with
   the avatar of their `ToastItem.actor` (feed and chat toasts; the app's
   own have none); each
   slides in, stays 5 s, then slides out and collapses its gap. A click on
-  a chat toast opens the chat; the others let clicks through.
+  a chat toast opens the chat; the others let clicks through. Chat toasts
+  follow `AppSettings.chatPopups` (Settings → Notifications: All, Only
+  when paused, Off); the message is in the chat either way.
 
 Settings persist in two Hive boxes: `connect_form` (last form, recent
 servers and links, the profile picture and colour; saved even when a join
@@ -1187,7 +1188,11 @@ testers land back on stable. `0.0.0-dev` (a dev run) checks nothing.
 - Media art the same way (`/i/...`, `ArtCache` as `coordinator.art`): the
   member who swapped the media in fetches poster and banner once the state
   shows its swap landed (`media_art.dart`: Jellyfin series/item images with
-  its own account, else an AniList title search on the parsed release
-  name) and sends `art`, so guests without Jellyfin get covers too.
+  its own account; a web link's yt-dlp thumbnail, the one the Library's
+  Recent grid shows, as poster and banner both, shrunk to a JPEG under the
+  poster cap when larger; else an AniList title search on the parsed
+  release name) and sends `art`, so guests without Jellyfin get covers too.
   `coordinator.nowPlaying` derives title, episode line and art hashes from
-  `state.media` (`now_playing_info.dart`).
+  `state.media` (`now_playing_info.dart`); poster and banner of one hash
+  mark a thumbnail (`NowPlaying.thumbnail`): the media name as is, no
+  episode line, a 16:9 cover in the controls and none on the start card.

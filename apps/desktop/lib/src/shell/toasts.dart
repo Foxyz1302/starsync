@@ -5,6 +5,7 @@ import 'package:signals/signals_flutter.dart';
 
 import '../session/session_coordinator.dart' show ToastItem;
 import '../state/session_state.dart';
+import '../state/settings.dart';
 import 'avatar.dart';
 import 'motion.dart';
 
@@ -47,7 +48,7 @@ ShellToast shellToastFor(ToastItem t, AvatarInfo Function(String name) avatar) {
 /// The coordinator's toasts as cards with avatars, bottom-left: each
 /// slides in, stays [life], then slides out and collapses its gap. A click
 /// on a chat toast opens the chat ([onOpenChat]); the rest let clicks
-/// through.
+/// through. Chat toasts follow [AppSettings.chatPopups].
 class PartyToasts extends StatefulWidget {
   final Duration life;
   final VoidCallback? onOpenChat;
@@ -76,8 +77,13 @@ class _PartyToastsState extends State<PartyToasts> {
       if (fresh.isEmpty) return;
       // Only new toasts re-run this, not the party they mention.
       untracked(() {
+        final playing = coord.serverState.value?.transport == 'playing';
+        final popups = AppSettings.instance.chatPopups.value;
         for (final t in fresh) {
-          _add(shellToastFor(t, (n) => avatarForName(n, coord)));
+          final toast = shellToastFor(t, (n) => avatarForName(n, coord));
+          // Chat per Settings → Notifications (it is in the chat either way).
+          if (toast.chat && !popups.shows(playing: playing)) continue;
+          _add(toast);
         }
       });
     });

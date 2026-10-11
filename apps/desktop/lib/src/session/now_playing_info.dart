@@ -16,6 +16,10 @@ NowPlaying? nowPlayingOf(Map<String, Object?>? media) {
   final art = media['art'] is Map ? media['art'] as Map : const {};
   final poster = art['poster'] is String ? art['poster'] as String : '';
   final banner = art['banner'] is String ? art['banner'] as String : '';
+  // A web video's thumbnail: its name as is, no episode guessing.
+  if (poster.isNotEmpty && poster == banner) {
+    return NowPlaying(title: name, posterHash: poster, bannerHash: banner);
+  }
   final ref = refOfStateMedia(media);
   final (title, episode) = ref != null
       ? jellyfinTitle(ref.title.isNotEmpty ? ref.title : name, ref.subtitle)

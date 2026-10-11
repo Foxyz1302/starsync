@@ -82,7 +82,8 @@ class StartCard extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                if (!small) ...[
+                // A thumbnail already fills the card as the banner.
+                if (!small && !now.thumbnail) ...[
                   ArtCover(hash: now.posterHash, width: coverWidth),
                   const SizedBox(width: 24),
                 ],
