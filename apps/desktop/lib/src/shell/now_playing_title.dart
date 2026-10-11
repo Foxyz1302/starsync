@@ -4,6 +4,8 @@ import 'package:signals/signals_flutter.dart';
 
 import '../session/now_playing.dart';
 import '../state/session_state.dart';
+import '../widgets/app_menu.dart';
+import '../widgets/copy_open.dart';
 import 'motion.dart';
 
 /// Tests: art bytes by hash instead of the session's cache.
@@ -153,21 +155,57 @@ class NowPlayingBlock extends StatelessWidget {
   }
 }
 
-/// [NowPlayingBlock] of the session's current media.
+/// [NowPlayingBlock] of the session's current media; right-click copies
+/// its title or link, or opens it ([nowPlayingMenu]).
 class NowPlayingTitle extends StatelessWidget {
   final bool cover;
   final bool compact;
   const NowPlayingTitle({super.key, this.cover = true, this.compact = false});
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-        listenable: artChanges(),
-        builder: (context, _) => SignalBuilder(
-          builder: (context) => NowPlayingBlock(
-            now: SessionState.instance.coordinator.nowPlaying.value,
-            cover: cover,
-            compact: compact,
+  Widget build(BuildContext context) => GestureDetector(
+        onSecondaryTap: () => nowPlayingMenu(context),
+        child: ListenableBuilder(
+          listenable: artChanges(),
+          builder: (context, _) => SignalBuilder(
+            builder: (context) => NowPlayingBlock(
+              now: SessionState.instance.coordinator.nowPlaying.value,
+              cover: cover,
+              compact: compact,
+            ),
           ),
         ),
       );
+}
+
+/// Copy title; with the link known here ([SessionCoordinator.currentLink])
+/// Copy link and Open in browser; a Jellyfin item on a server linked here,
+/// Open in Jellyfin. [context]: where the menu opens.
+Future<void> nowPlayingMenu(BuildContext context) async {
+  final coord = SessionState.instance.coordinator;
+  final now = coord.nowPlaying.peek();
+  if (now == null) return;
+  final link = coord.currentLink();
+  final ref = coord.currentRef.peek();
+  final page = ref == null ? null : coord.jellyfin.webUrlOf(ref.serverId, ref.itemId);
+  final episode = now.episode;
+  final title = episode == null || episode.isEmpty ? now.title : '${now.title} · $episode';
+  final pick = await showAppMenu<String>(context, items: [
+    const AppMenuItem(value: 'title', label: ReuseText.copyTitle),
+    if (link != null) ...const [
+      AppMenuItem(value: 'link', label: ReuseText.copyLink),
+      AppMenuItem(value: 'open', label: ReuseText.openInBrowser),
+    ],
+    if (page != null) const AppMenuItem(value: 'jellyfin', label: ReuseText.openInJellyfin),
+  ]);
+  switch (pick) {
+    case 'title':
+      await copyToClipboard(title, done: 'Title copied');
+    case 'link':
+      await copyToClipboard(link!, done: 'Link copied');
+    case 'open':
+      await openLink(link!);
+    case 'jellyfin':
+      await openLink(page!);
+  }
 }

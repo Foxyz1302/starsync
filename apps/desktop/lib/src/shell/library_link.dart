@@ -3,11 +3,13 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:sync_relay_core/core.dart' show LinkProbe, hasMediaExtension, parseJellyfinLink, playErrorText;
+import 'package:sync_relay_core/core.dart'
+    show LinkProbe, hasMediaExtension, parseJellyfinLink, playErrorText, unreachableText;
 
 import '../playback/yt_dlp_app.dart';
 import '../screens/home/media_picker.dart';
 import '../widgets/app_menu.dart';
+import '../widgets/copy_open.dart';
 import '../state/connect_prefs.dart';
 import 'motion.dart';
 
@@ -22,20 +24,33 @@ class RecentLink {
   final String url;
   final String title;
   final String? thumbnail;
+  /// The preview's second line ("youtube.com · Channel · 3:07"); null for
+  /// links kept before it was.
+  final String? subtitle;
   final DateTime at;
-  const RecentLink({required this.url, required this.title, this.thumbnail, required this.at});
+  const RecentLink({required this.url, required this.title, this.thumbnail, this.subtitle, required this.at});
 
-  Map<String, Object?> toJson() =>
-      {'url': url, 'title': title, 'thumb': ?thumbnail, 'at': at.millisecondsSinceEpoch};
+  /// What it showed when put up (the host for a second line, when older).
+  LinkPreview get preview =>
+      LinkPreview(title: title, subtitle: subtitle ?? _host(Uri.tryParse(url) ?? Uri()), thumbnail: thumbnail);
+
+  Map<String, Object?> toJson() => {
+        'url': url,
+        'title': title,
+        'thumb': ?thumbnail,
+        'sub': ?subtitle,
+        'at': at.millisecondsSinceEpoch,
+      };
 
   static RecentLink? fromJson(Object? j) {
     if (j is! Map) return null;
-    final url = j['url'], title = j['title'], at = j['at'], thumb = j['thumb'];
+    final url = j['url'], title = j['title'], at = j['at'], thumb = j['thumb'], sub = j['sub'];
     if (url is! String || url.isEmpty) return null;
     return RecentLink(
       url: url,
       title: title is String && title.isNotEmpty ? title : LinkMedia(url).label,
       thumbnail: thumb is String && thumb.isNotEmpty ? thumb : null,
+      subtitle: sub is String && sub.isNotEmpty ? sub : null,
       at: DateTime.fromMillisecondsSinceEpoch(at is int ? at : 0),
     );
   }
@@ -61,13 +76,18 @@ List<RecentLink> decodeRecentLinks(Object? raw) {
 class RecentLinks {
   static final RecentLinks instance = RecentLinks();
 
-  RecentLinks({Future<Object?> Function()? read, Future<void> Function(String value)? write})
+  /// [read] / [write] given (tests): [previews] defaults to one kept in
+  /// memory only.
+  RecentLinks({Future<Object?> Function()? read, Future<void> Function(String value)? write, LinkPreviewStore? previews})
       : _read = read ?? _hiveRead,
-        _write = write ?? _hiveWrite;
+        _write = write ?? _hiveWrite,
+        previews = previews ?? (read == null && write == null ? LinkPreviewStore() : LinkPreviewStore.memory());
 
   final Future<Object?> Function() _read;
   final Future<void> Function(String value) _write;
   final links = ValueNotifier<List<RecentLink>>(const []);
+  /// What links pasted or put up before turned out to be.
+  final LinkPreviewStore previews;
   Future<void>? _load;
 
   static Future<Object?> _hiveRead() async =>
@@ -112,6 +132,108 @@ class LinkPreview {
   /// null when it looks playable.
   final String? problem;
   const LinkPreview({required this.title, required this.subtitle, this.thumbnail, this.problem});
+
+  /// Display text only: never a cookie or a resolved stream URL.
+  Map<String, Object?> toJson() => {'title': title, 'sub': subtitle, 'thumb': ?thumbnail};
+
+  static LinkPreview? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final title = j['title'], sub = j['sub'], thumb = j['thumb'];
+    if (title is! String || title.isEmpty || sub is! String) return null;
+    return LinkPreview(title: title, subtitle: sub, thumbnail: thumb is String && thumb.isNotEmpty ? thumb : null);
+  }
+}
+
+/// A [LinkPreview] kept, and when it was found.
+typedef StoredLinkPreview = ({LinkPreview preview, DateTime at});
+
+/// How long a kept preview is shown as is; older, it is shown and
+/// refreshed quietly behind it.
+const linkPreviewFreshFor = Duration(days: 1);
+
+const _keyLinkPreviews = 'linkPreviews';
+
+/// What links turned out to be, by URL, so a link pasted or picked again
+/// shows its preview at once instead of waiting seconds for yt-dlp. Only
+/// links that looked playable, at most [maxEntries] (the oldest go), in
+/// the `connect_form` box. Display text only ([LinkPreview.toJson]).
+class LinkPreviewStore {
+  static const maxEntries = 200;
+
+  LinkPreviewStore({Future<Object?> Function()? read, Future<void> Function(String value)? write})
+      : _read = read ?? _hiveRead,
+        _write = write ?? _hiveWrite;
+
+  /// Kept in memory only.
+  LinkPreviewStore.memory()
+      : _read = _none,
+        _write = _drop;
+
+  final Future<Object?> Function() _read;
+  final Future<void> Function(String value) _write;
+  // Oldest first (insertion order); a put moves an entry to the end.
+  final _entries = <String, StoredLinkPreview>{};
+  Future<void>? _load;
+
+  static Future<Object?> _none() async => null;
+  static Future<void> _drop(String _) async {}
+
+  static Future<Object?> _hiveRead() async =>
+      (connectFormBoxIfOpen() ?? await openConnectFormBox()).get(_keyLinkPreviews);
+
+  static Future<void> _hiveWrite(String value) async =>
+      (connectFormBoxIfOpen() ?? await openConnectFormBox()).put(_keyLinkPreviews, value);
+
+  Future<void> ensureLoaded() => _load ??= () async {
+        try {
+          final raw = await _read();
+          final j = raw is String ? jsonDecode(raw) : raw;
+          if (j is! Map) return;
+          final read = <String, StoredLinkPreview>{};
+          for (final e in j.entries) {
+            final v = e.value;
+            final p = LinkPreview.fromJson(v);
+            if (e.key is! String || p == null || v is! Map) continue;
+            final at = v['at'];
+            read[e.key as String] = (preview: p, at: DateTime.fromMillisecondsSinceEpoch(at is int ? at : 0));
+          }
+          // Something found meanwhile is newer.
+          final sorted = read.entries.toList()..sort((a, b) => a.value.at.compareTo(b.value.at));
+          final mine = Map.of(_entries);
+          _entries
+            ..clear()
+            ..addEntries(sorted.where((e) => !mine.containsKey(e.key)))
+            ..addAll(mine);
+        } catch (e) {
+          debugPrint('load link previews failed: $e');
+        }
+      }();
+
+  /// [url]'s kept preview, if any (after [ensureLoaded]).
+  StoredLinkPreview? lookup(String url) => _entries[url];
+
+  /// Keeps [preview] of [url] when it looked playable; one with a problem
+  /// forgets what was kept. Loads first, so a save never drops what is on
+  /// disk.
+  Future<void> put(String url, LinkPreview preview, {DateTime? at}) async {
+    await ensureLoaded();
+    _entries.remove(url);
+    if (preview.problem == null) _entries[url] = (preview: preview, at: at ?? DateTime.now());
+    while (_entries.length > maxEntries) {
+      _entries.remove(_entries.keys.first);
+    }
+    await _save();
+  }
+
+  Future<void> _save() async {
+    try {
+      await _write(jsonEncode({
+        for (final e in _entries.entries) e.key: {...e.value.preview.toJson(), 'at': e.value.at.millisecondsSinceEpoch},
+      }));
+    } catch (e) {
+      debugPrint('save link previews failed: $e');
+    }
+  }
 }
 
 /// What a link is (see [AppYtDlp.probe]).
@@ -163,6 +285,19 @@ Future<LinkPreview?> previewLink(String url, {LinkProber probe = defaultLinkProb
     ].join(' · '),
     thumbnail: info.thumbnail,
   );
+}
+
+/// [url]'s preview at once when it was kept before ([LinkPreviewStore]),
+/// else probed and kept (the Up next popover's paste; the Link page has
+/// its own refresh rules).
+Future<LinkPreview?> cachedLinkPreview(String url, {RecentLinks? recents, LinkProber probe = defaultLinkProber}) async {
+  final store = (recents ?? RecentLinks.instance).previews;
+  await store.ensureLoaded();
+  final kept = store.lookup(url);
+  if (kept != null) return kept.preview;
+  final p = await previewLink(url, probe: probe);
+  if (p != null && parseJellyfinLink(url) == null) unawaited(store.put(url, p));
+  return p;
 }
 
 /// "today", "yesterday", "3 days ago", "last week", "5 weeks ago", ...
@@ -248,12 +383,18 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
   /// "Other ways" opened (always shown while one of them is picked).
   bool _otherWays = false;
 
+  LinkPreviewStore get _store => widget.recents.previews;
+
   @override
   void initState() {
     super.initState();
     widget.recents.ensureLoaded();
     _c.link.addListener(_typed);
     _typed();
+    // A link already in the field may have been seen before.
+    _store.ensureLoaded().then((_) {
+      if (mounted && _c.link.text.trim() == _previewUrl) _preview(_previewUrl);
+    });
   }
 
   @override
@@ -267,7 +408,12 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
     final url = _c.link.text.trim();
     if (url == _previewUrl) return;
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 350), () => _preview(url));
+    // Seen before (picked from Recent, pasted again): at once.
+    if (_previews.containsKey(url) || _known(url) != null) {
+      _preview(url);
+    } else {
+      _debounce = Timer(const Duration(milliseconds: 350), () => _preview(url));
+    }
     if (mounted) {
       setState(() {
         _error = null;
@@ -276,15 +422,56 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
     }
   }
 
+  /// What [url] was found to be before: the kept preview, else what its
+  /// Recent card showed.
+  StoredLinkPreview? _known(String url) {
+    if (url.isEmpty) return null;
+    final kept = _store.lookup(url);
+    if (kept != null) return kept;
+    for (final l in widget.recents.links.value) {
+      if (l.url == url) return (preview: l.preview, at: l.at);
+    }
+    return null;
+  }
+
+  /// The preview of [url]: from this page's memory, else kept from before
+  /// (refreshed quietly once older than [linkPreviewFreshFor]), else
+  /// probed (yt-dlp takes seconds).
   Future<void> _preview(String url) async {
     _previewUrl = url;
     if (url.isEmpty || _previews.containsKey(url)) {
       if (mounted) setState(() {});
       return;
     }
+    final known = _known(url);
+    if (known != null) {
+      _previews[url] = known.preview;
+      if (mounted) setState(() {});
+      if (DateTime.now().difference(known.at) > linkPreviewFreshFor) unawaited(_refresh(url));
+      return;
+    }
     final p = await previewLink(url, probe: widget.probe);
     _previews[url] = p;
+    _keep(url, p);
     if (mounted) setState(() {});
+  }
+
+  /// Probes [url] again behind what is shown; a site out of reach keeps
+  /// what was found before. Returns the preview shown afterwards.
+  Future<LinkPreview?> _refresh(String url) async {
+    final p = await previewLink(url, probe: widget.probe);
+    if (p == null || p.problem == unreachableText) return _previews[url];
+    _previews[url] = p;
+    _keep(url, p);
+    if (mounted) setState(() {});
+    return p;
+  }
+
+  /// Keeps what [url] turned out to be for next time (a Jellyfin link's
+  /// preview needs no probe).
+  void _keep(String url, LinkPreview? p) {
+    if (p == null || parseJellyfinLink(url) != null) return;
+    unawaited(_store.put(url, p));
   }
 
   Future<void> _paste() async {
@@ -314,13 +501,23 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
         error = '$e';
       }
     }
-    final canForce = problem != null;
+    var canForce = problem != null;
+    if (error != null && problem == null && !anyway) {
+      // The kept preview said it plays but it did not: show what it is now
+      // (the put-up just probed it, so this is quick), "anyway" if refused.
+      canForce = (await _refresh(url))?.problem != null;
+    }
     if (error == null) {
-      final p = _previews[url] ?? await previewLink(url, probe: widget.probe);
+      var p = _previews[url];
+      if (p == null) {
+        p = _previews[url] = await previewLink(url, probe: widget.probe);
+        _keep(url, p);
+      }
       unawaited(widget.recents.add(RecentLink(
         url: url,
         title: p?.title ?? LinkMedia(url).label,
         thumbnail: p?.thumbnail,
+        subtitle: p?.problem == null ? p?.subtitle : null,
         at: DateTime.now(),
       )));
     }
@@ -356,7 +553,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
     });
   }
 
-  /// Right-click on a recent link: put it up or queue it.
+  /// Right-click on a recent link: put it up or queue it, copy or open it.
   Future<void> _recentMenu(BuildContext context, RecentLink l) async {
     final pick = await showAppMenu<String>(context, items: [
       AppMenuItem(value: 'up', label: widget.solo ? 'Play' : 'Put it up'),
@@ -364,14 +561,42 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
         AppMenuItem(value: 'queue', label: 'Add to queue'),
         AppMenuItem(value: 'next', label: 'Play next'),
       ],
+      const AppMenuItem(value: 'copy', label: ReuseText.copyLink),
+      const AppMenuItem(value: 'title', label: ReuseText.copyTitle),
+      const AppMenuItem(value: 'open', label: ReuseText.openInBrowser),
     ]);
     if (pick == null || !mounted) return;
+    switch (pick) {
+      case 'copy':
+        return copyToClipboard(l.url, done: 'Link copied');
+      case 'title':
+        return copyToClipboard(l.title, done: 'Title copied');
+      case 'open':
+        return openLink(l.url);
+    }
     _c.link.text = l.url;
     switch (pick) {
       case 'up':
         await _go();
       case 'queue' || 'next':
         await _queue(url: l.url, next: pick == 'next');
+    }
+  }
+
+  /// Right-click on the preview: copy or open the link.
+  Future<void> _previewMenu(BuildContext context, String url, LinkPreview? p) async {
+    final pick = await showAppMenu<String>(context, items: [
+      const AppMenuItem(value: 'copy', label: ReuseText.copyLink),
+      if (p != null) const AppMenuItem(value: 'title', label: ReuseText.copyTitle),
+      const AppMenuItem(value: 'open', label: ReuseText.openInBrowser),
+    ]);
+    switch (pick) {
+      case 'copy':
+        await copyToClipboard(url, done: 'Link copied');
+      case 'title':
+        await copyToClipboard(p!.title, done: 'Title copied');
+      case 'open':
+        await openLink(url);
     }
   }
 
@@ -504,7 +729,12 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
                     ? const SizedBox(width: double.infinity)
                     : Padding(
                         padding: const EdgeInsets.only(top: 14),
-                        child: _PreviewCard(preview: preview, loading: loading),
+                        child: Builder(
+                          builder: (context) => GestureDetector(
+                            onSecondaryTap: () => _previewMenu(context, url, preview),
+                            child: _PreviewCard(preview: preview, loading: loading),
+                          ),
+                        ),
                       ),
               ),
               if (!solo) ...[
@@ -725,7 +955,7 @@ class _ModeCard extends StatelessWidget {
 class _RecentGrid extends StatelessWidget {
   final List<RecentLink> recents;
   final ValueChanged<RecentLink> onPick;
-  /// Right-click: Put it up / Add to queue / Play next.
+  /// Right-click: Put it up / Add to queue / Play next, copy or open it.
   final void Function(BuildContext context, RecentLink link) onMenu;
   const _RecentGrid({required this.recents, required this.onPick, required this.onMenu});
 

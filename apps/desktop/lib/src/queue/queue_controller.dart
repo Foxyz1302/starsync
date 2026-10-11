@@ -265,6 +265,25 @@ class QueueController {
     }
   }
 
+  /// [item]'s link as this app may hand it out (Copy link, Open in
+  /// browser): a link everyone opens (it is in the state), or a link this
+  /// app passes on (its adder). Null otherwise: a server-fetched link stays
+  /// with the server, another member's passed-on link with them.
+  String? linkOf(QueueItem item) => switch (item.how) {
+        QueueHow.direct => item.media.url,
+        QueueHow.through when item.by == _me => switch (_local[item.key]?.pick) {
+            LinkMedia(:final url) => url,
+            _ => null,
+          },
+        _ => null,
+      };
+
+  /// [item]'s page on its Jellyfin server, when that server is linked here.
+  String? jellyfinPageOf(QueueItem item) {
+    final ref = item.media.jellyfin;
+    return ref == null ? null : coord.jellyfin.webUrlOf(ref.serverId, ref.itemId);
+  }
+
   // ------------------------------------------------------------ editing
 
   void move(String id, int to) {

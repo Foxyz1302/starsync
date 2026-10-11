@@ -7,6 +7,7 @@ import 'package:sync_relay_core/core.dart';
 import 'accounts.dart';
 import 'format.dart';
 import '../widgets/app_menu.dart';
+import '../widgets/copy_open.dart';
 
 /// One level of the library browser's back stack.
 sealed class BrowseRoute {
@@ -271,6 +272,14 @@ class BrowseController extends ChangeNotifier {
   }
 }
 
+/// An item's title to copy: an episode with its series ("Show · Name").
+String jellyfinCopyTitle(JellyfinItem item) {
+  final series = item.seriesName;
+  return item.kind == JellyfinItemKind.episode && series != null && series.isNotEmpty
+      ? '$series · ${item.name}'
+      : item.name;
+}
+
 /// What every browser page needs, provided by [JellyfinBrowser].
 class BrowseScope extends InheritedWidget {
   final JellyfinAccounts accounts;
@@ -284,7 +293,7 @@ class BrowseScope extends InheritedWidget {
   /// Double-click: put it up (a series: its next episode).
   final ValueChanged<JellyfinItem> onPutUp;
   /// Adds it to Up next (with next: right after what plays); null: no
-  /// server, the cards have no menu.
+  /// server (the cards' menu then only copies and opens).
   final void Function(JellyfinItem item, {bool next})? onAddToQueue;
   /// Home shows the library chips itself (the Library tab has them in its
   /// header instead).
@@ -309,23 +318,30 @@ class BrowseScope extends InheritedWidget {
 
   void onOpen(BrowseRoute route) => controller.open(route);
 
-  /// Right-click on a playable card ([context]: the card): Put it up, Add
-  /// to queue, Play next. Nothing without a server.
+  /// Right-click on a card ([context]: the card): Put it up, Add to queue,
+  /// Play next (playable, in a server), Copy title, Open in Jellyfin.
   Future<void> cardMenu(BuildContext context, JellyfinItem item) async {
-    final queue = onAddToQueue;
-    if (queue == null || !isSelectable(item)) return;
-    final pick = await showAppMenu<int>(context, items: const [
-      AppMenuItem(value: 0, label: 'Put it up'),
-      AppMenuItem(value: 1, label: 'Add to queue'),
-      AppMenuItem(value: 2, label: 'Play next'),
+    final queue = isSelectable(item) ? onAddToQueue : null;
+    final pick = await showAppMenu<int>(context, items: [
+      if (queue != null) ...const [
+        AppMenuItem(value: 0, label: 'Put it up'),
+        AppMenuItem(value: 1, label: 'Add to queue'),
+        AppMenuItem(value: 2, label: 'Play next'),
+      ],
+      const AppMenuItem(value: 3, label: ReuseText.copyTitle),
+      const AppMenuItem(value: 4, label: ReuseText.openInJellyfin),
     ]);
     switch (pick) {
       case 0:
         onPutUp(item);
       case 1:
-        queue(item);
+        queue!(item);
       case 2:
-        queue(item, next: true);
+        queue!(item, next: true);
+      case 3:
+        await copyToClipboard(jellyfinCopyTitle(item), done: 'Title copied');
+      case 4:
+        await openLink(jellyfinWebUrl(client.baseUrl, item.id, serverId: account.serverId));
     }
   }
 

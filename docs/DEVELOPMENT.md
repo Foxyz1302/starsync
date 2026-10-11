@@ -21,7 +21,9 @@ cd packages/server && dart compile exe --define=APP_VERSION=<x.y.z> bin/server.d
 ```
 
 `APP_VERSION` defaults to `0.0.0-dev`; the packagers stamp it from the
-desktop pubspec into both the app and the server. Setting `DISCORD_WEBHOOK_URL` makes the packager post the
+desktop pubspec into both the app and the server. `tool/package_linux.sh`
+also passes `GIT_COMMIT` (what the app shows: "Updater" in
+[ARCHITECTURE.md](ARCHITECTURE.md)). Setting `DISCORD_WEBHOOK_URL` makes the packager post the
 tarball to Discord (never commit it). The packager always compiles the
 dedicated server (with the Flutter SDK's `dart`) into the tarball as
 `watch-together-server`, also with `--skip-build`.

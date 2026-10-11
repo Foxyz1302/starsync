@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:sync_relay_core/core.dart';
 
 import '../state/session_state.dart';
+import '../widgets/app_menu.dart';
+import '../widgets/copy_open.dart';
 import '../widgets/text_focus.dart';
 import 'avatar.dart';
 
@@ -158,34 +160,59 @@ class ActivityRow extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final time = _clock(item.at);
     if (item.action == 'chat') {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            StatusAvatar(info: avatarForName(item.actor), size: 34, badges: false),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+      final link = firstLinkIn(item.reason);
+      // Right-click on the text: its selection menu plus the whole message
+      // and its link; beside it, the same as the app's menu.
+      final message = SelectableText(
+        item.reason,
+        contextMenuBuilder: (context, state) => AdaptiveTextSelectionToolbar.buttonItems(
+          anchors: state.contextMenuAnchors,
+          buttonItems: [
+            ...state.contextMenuButtonItems,
+            for (final (label, action) in _messageActions(item.reason, link))
+              ContextMenuButtonItem(
+                label: label,
+                onPressed: () {
+                  state.hideToolbar();
+                  action();
+                },
+              ),
+          ],
+        ),
+      );
+      return Builder(
+        builder: (context) => GestureDetector(
+          onSecondaryTap: () => _messageMenu(context, item.reason, link),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                StatusAvatar(info: avatarForName(item.actor), size: 34, badges: false),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Flexible(
-                        child: Text(item.actor,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(item.actor,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontWeight: FontWeight.w700)),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(time, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11)),
+                        ],
                       ),
-                      const SizedBox(width: 6),
-                      Text(time, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11)),
+                      message,
                     ],
                   ),
-                  SelectableText(item.reason),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       );
     }
@@ -204,6 +231,28 @@ class ActivityRow extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The first http(s) link in [text], if any.
+String? firstLinkIn(String text) => RegExp(r'https?://[^\s<>"]+', caseSensitive: false).firstMatch(text)?.group(0);
+
+/// What a chat message offers: Copy message, and its link's Copy link and
+/// Open in browser.
+List<(String, VoidCallback)> _messageActions(String text, String? link) => [
+      (ReuseText.copyMessage, () => copyToClipboard(text, done: 'Message copied')),
+      if (link != null) ...[
+        (ReuseText.copyLink, () => copyToClipboard(link, done: 'Link copied')),
+        (ReuseText.openInBrowser, () => openLink(link)),
+      ],
+    ];
+
+/// Right-click beside a chat message: [_messageActions] in the app's menu.
+Future<void> _messageMenu(BuildContext context, String text, String? link) async {
+  final actions = _messageActions(text, link);
+  final pick = await showAppMenu<int>(context, items: [
+    for (final (i, (label, _)) in actions.indexed) AppMenuItem(value: i, label: label),
+  ]);
+  if (pick != null) actions[pick].$2();
 }
 
 /// Icon, colour and wording of a member's feed action.

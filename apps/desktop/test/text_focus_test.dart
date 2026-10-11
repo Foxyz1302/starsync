@@ -30,4 +30,16 @@ void main() {
     field.dispose();
     button.dispose();
   });
+
+  testWidgets('focus under a KeyboardClaim counts as typing', (tester) async {
+    final claimed = FocusNode();
+    await tester.pumpWidget(MaterialApp(
+      home: KeyboardClaim(child: Focus(focusNode: claimed, child: const SizedBox())),
+    ));
+    expect(textInputFocused(), isFalse);
+    claimed.requestFocus();
+    await tester.pump();
+    expect(textInputFocused(), isTrue);
+    claimed.dispose();
+  });
 }

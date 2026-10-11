@@ -746,7 +746,7 @@ all three link modes. Nothing is bundled or installed by hand.
   (`AppYtDlp.probe`, remembered 10 minutes, longer for Up next's first
   item (see "Up next"); media file names too, not a
   Jellyfin item link) for the
-  Link preview and the swap: a page is named by its title, never its URL
+  Link preview (kept on disk too; see "Tabs" under Desktop UI) and the swap: a page is named by its title, never its URL
   tail, and its thumbnail goes up as its art (see "Media art"). A link with a
   problem, or one the probe cannot reach ("Couldn't reach the site"), is
   not put up in any mode: the Link page shows the reason (preview and
@@ -1021,10 +1021,23 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   the menus' paddings and row hover, 64 px rows with an 80 px 16:9
   picture, title, second line, "length · added by (avatar) name · how", a drag handle
   (`ReorderableListView`, reordered here at once and sent as `move`), ▶
-  and × floating in on hover; "Continues with"; a "Paste a link to add"
-  field (focused on open, so the player's keys and Space rest while it
-  is up; Esc closes) and a drop zone for links and video files. Being no
-  route, it holds the shell's own drop and paste handling off while open
+  and × floating in on hover, right-click for Play now, Remove, Copy
+  title, and Copy link / Open in browser only for a link known here
+  (`QueueController.linkOf`: a link everyone opens, or one passed on by
+  this app, which only its adder has; never a server-fetched link or
+  another member's) and Open in Jellyfin for an item of a server linked
+  here; "Continues with". The panel itself holds focus on open, inside a
+  `KeyboardClaim` (`widgets/text_focus.dart`: focus under it counts as a
+  text field's, so the player's keys and Space rest while it is up; Esc
+  closes). Ctrl+V there adds the clipboard's video files, else the links
+  in its text, at once (an ordinary paste while typing in the field); "+ Add
+  link" opens a small field (Enter adds, Esc closes it); links and video
+  files can be dropped on it. Each addition is a row of its own under
+  the items: the link's title and thumbnail as soon as they are known
+  (`cachedLinkPreview`: a kept preview at once, else the same probe the
+  add runs), "Adding…", then "Added" (gone shortly after, the item itself
+  being in the list) or why not (× dismisses). Being no route, it holds
+  the shell's own drop and paste handling off while open
   (`handoffHolds`). "Add to queue" elsewhere, on every source: the Link
   page's button next to Put it up (in the chosen mode), a right-click
   `showAppMenu` (Put it up / Add to queue / Play next) on recent links,
@@ -1061,6 +1074,19 @@ setting that picks one of a few values), `AppMenuButton` the ⋮ action
 menu. Material's own menus (the standard controls' track, chapter and
 shader menus, the Jellyfin sort and server switch) get the same surface
 from `AppMenuStyle.theme`; the uosc controls keep their own flat menus.
+Reusing what the app shows (`widgets/copy_open.dart`): one wording
+(`ReuseText`: Copy link, Copy title, Copy message, Open in browser, Open
+in Jellyfin) in every right-click menu that offers it, and a toast
+confirming a copy ("Link copied"); a browser that will not start copies
+the link instead. Offered on recent links and the Link preview (Copy
+link, Copy title, Open in browser), Up next rows (see "Up next"), the
+now-playing title (Copy title; with the link known here,
+`SessionCoordinator.currentLink`: one this app put up, or one in the
+state, Copy link and Open in browser; a Jellyfin item of a server linked
+here, Open in Jellyfin), Jellyfin cards and episodes (Copy title, an
+episode with its series; Open in Jellyfin: `jellyfinWebUrl`, the item's
+page on its server's web UI, no credentials; also a button in the details
+panel) and chat messages (Copy message, and a link in it).
 
 - **Party strip** (`party_strip.dart`, 60 px): your avatar (profile card; 42 px like the party's),
   the Library / Schedule / Settings tabs with a growing underline (an
@@ -1135,7 +1161,18 @@ from `AppMenuStyle.theme`; the uosc controls keep their own flat menus.
   the controller's default, as the main card; "Everyone fetches it" and
   "Server fetches it" under "Other ways", open while one of them is
   picked, closing it goes back to Through me), and the
-  last 12 links put up (`recentLinks` in the `connect_form` box). Files
+  last 12 links put up (`recentLinks` in the `connect_form` box: URL,
+  title, thumbnail, the preview's second line, when). A link seen before
+  previews at once, without yt-dlp: `LinkPreviewStore` (`linkPreviews` in
+  the same box) keeps what a probe found for up to 200 links that looked
+  playable (title, second line, thumbnail URL and when; never cookies or
+  resolved stream URLs), else a recent link's card stands in. Older than a
+  day it is still shown and probed again quietly behind it (a site out of
+  reach keeps it; a problem replaces it and is not kept). Putting it up
+  or queueing resolves as before (reusing a probe still in memory); when
+  that fails although the kept preview looked fine, the preview is
+  probed again and shows why, with "Put it up anyway" when it is a
+  problem. Files
   is `FilesPage` (`files/`): watched folders (`FolderStore`) scanned in
   an isolate, videos grouped by series; series start collapsed, a header
   click opens one and open ones stay open for the app session
@@ -1214,8 +1251,9 @@ from `AppMenuStyle.theme`; the uosc controls keep their own flat menus.
   The player keys (Settings → Keyboard shortcuts) work while the player is
   full and nothing is in front of it; ↑ / ↓ step the volume. Space (ready)
   and Tab (chat) are app-wide: `AppKeys` (`widgets/app_keys.dart`, around
-  the shell) takes them first while in a server, unless a text field has
-  focus or a dialog or menu is in front. Tab reaches the shell's chat
+  the shell) takes them first while in a server, unless a text field (or
+  a `KeyboardClaim`, see "Up next") has focus or a dialog or menu is in
+  front. Tab reaches the shell's chat
   toggle through `ChatKey` (the strip while shown, the player in
   fullscreen). The app's shortcuts map Tab / Shift+Tab to nothing, so focus
   never lands on a button Space would press. Something coming up while the player
@@ -1382,7 +1420,16 @@ a new kind appears (Skip ED and Next episode never without the controls).
 Volume (`controls/volume.dart`, both
 designs): mpv's `volume-max` is pinned to `PlaybackController.maxVolume`
 (150) per player; `VolumeBar` runs 0..150 with a tick at 100 and the part
-above in amber; the wheel and ↑ / ↓ step 5 %, clamped.
+above in amber; the wheel and ↑ / ↓ step 5 % (`volumeStep`), clamped.
+The wheel works anywhere on the full player (`VolumeWheel` around the
+player's stack): `WheelSteps` makes a mouse notch one step and adds up
+small smooth-scroll deltas, ignores mostly-horizontal scrolls, and claims
+the event through `pointerSignalResolver`, so anything under the mouse
+that scrolls (lists, menus, popovers in their own routes) or the volume
+buttons themselves take it first. A wheel or key step flashes the
+design's readout for 1 s (`VolumeFlash`): uosc's vertical volume slider
+at the right edge (`controls/uosc/volume_flash.dart`, after uosc's
+`Volume.lua`), else a pill under the top bar (`VolumeReadout`).
 
 The uosc player design (`controls/uosc/`, after mpv's uosc theme;
 "Player design" = `AppSettings.mpvControls`, default Standard): the `Video`'s
@@ -1391,12 +1438,27 @@ the setting live. `UoscControls` is our
 own frame (no media_kit controls state): mouse movement shows it, 3 s
 without any hides it and the cursor; `hold` keeps it up during a timeline
 drag and while a menu route is open, double-click toggles fullscreen.
-`UoscTimeline` runs the full width at the bottom: played part filled,
-`cacheRect` (position to `buffered`) hatched (`hatchLines`), chapter
-diamonds on the top edge, current time and duration in boxes inside it, a
-hover tip with the chapter title over the hover time; hidden, it shrinks
-to a 2 px line with chapter ticks (faded out when the progress line
-setting is off). Above it a row of flat buttons: menu (≡:
+`UoscTimeline` ports uosc's `Timeline.lua` (style `line`, uosc's defaults
+at scale 1, `UoscTimelineSpec`) across the full width at the bottom: a
+40 px band (plus a 1 px top border) of black at 0.9; the position is a
+2 px white line, no filled part, and times map around it
+(`UoscTimelineGeometry`, uosc's `t2x` / `get_time_at_x`); the uncached
+part (from `buffered`, or the position when that is behind, to the end)
+carries uosc's stripe texture (white then black "/" stripes, 0.2 / 0.4
+strong); chapter diamonds sit on the top edge (white 0.8, 1 px black
+border, doubled and clickable to jump while the mouse is within twice
+their radius); elapsed time left and the time remaining ("-01:47:30")
+right in 20 px outlined text, inverted where it crosses the line; while
+less than 60 s is buffered ahead (and the cache does not reach the end)
+a small "12s" rides right of the line. Hover: a faint 1 px line and a
+black tooltip with the time (the chapter title, bold, above it). A press
+seeks, every drag move seeks, and after release the line stays at the
+target until the position catches up (at most 2 s). Hidden, it animates
+down (100 ms) to uosc's progress line: 2 px with a 20 px position
+marker, chapters as small diamonds (faded out when the progress line
+setting is off). We know only the end of mpv's cache, so a dropped back
+buffer is not hatched; uosc's pause while dragging, keyframe seeks for
+fast drags, thumbnails and the fullscreen scale (1.3) are left out. Above it a row of flat buttons: menu (≡:
 change video, chat & activity, reload, mark everyone ready, fullscreen,
 leave),
 subtitles and audio with track counts, a shader badge ("A HQ", opening the
@@ -1457,7 +1519,12 @@ running exe on NTFS. The manifest's `assets` maps `linux-x64` /
 `windows-x64` to archive URLs; top-level `url` (Linux) is for builds <= 0.2.1. The version is
 stamped into both binaries with `APP_VERSION` (`--dart-define` for the app,
 `--define` for `dart compile exe`; dev runs report `0.0.0-dev` and the app
-skips checks). CLI: `watch-together-server --upgrade` (no display needed;
+skips checks). What the app shows (`displayVersion`, `screens/home/ui.dart`;
+About and the tooltip of the strip's Settings tab): a release's version,
+a test build's with its commit (`GIT_COMMIT`, short hash, `-dirty` with
+uncommitted changes, passed by `tool/package_linux.sh`), and for a dev
+run the pubspec's version (`FLUTTER_BUILD_NAME`, which the Flutter tool
+defines for every build and run) with "dev run". CLI: `watch-together-server --upgrade` (no display needed;
 the shipped `update.sh` / `update.bat` run it), `--check-update` prints only;
 it ends with "restart the server to run <version>". `watch_together --upgrade`
 does the same from the app binary. In the app, `UpdateController`

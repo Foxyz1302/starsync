@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:fox_utils/fox_utils.dart' show DesktopDropX, DropTarget;
+import 'package:flutter/services.dart';
+import 'package:fox_utils/fox_utils.dart' show ClipboardX, DesktopDropX, DropTarget;
 import 'package:leaf_widgets/leaf_widgets.dart' show LeafPopover, LeafPopoverController;
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
@@ -18,9 +19,12 @@ import '../screens/home/picked_media.dart';
 import '../session/session_coordinator.dart' show autoAdvanceSecs;
 import '../shell/avatar.dart';
 import '../shell/handoff.dart' show handoffHolds;
+import '../shell/library_link.dart' show LinkPreview, cachedLinkPreview;
 import '../shell/motion.dart';
 import '../state/session_state.dart';
-import '../widgets/app_menu.dart' show AppGlass, AppMenuStyle;
+import '../widgets/app_menu.dart' show AppGlass, AppMenuItem, AppMenuStyle, showAppMenu;
+import '../widgets/copy_open.dart';
+import '../widgets/text_focus.dart' show KeyboardClaim;
 import 'queue_controller.dart';
 import 'queue_logic.dart';
 
@@ -546,22 +550,47 @@ class _RoundIconState extends State<_RoundIcon> {
 
 // ----------------------------------------------------------------- panel
 
-/// The queue, under the chip: Up next (drag to reorder, ▶ / × on hover),
-/// "Continues with" (greyed, + adds one), a field to paste a link, and
-/// drops of links and video files.
+/// The queue, under the chip: Up next (drag to reorder, ▶ / × on hover,
+/// right-click for more), "Continues with" (greyed, + adds one), and ways
+/// to add: Ctrl+V anywhere in it adds the clipboard's link (or video
+/// files), "+ Add link" opens a small field, and links and video files can
+/// be dropped on it. What is being added shows as a row of its own (the
+/// link's title and picture while it resolves, then "Added", or why not).
 class QueuePanel extends StatefulWidget {
   final QueueController queue;
   final VoidCallback onClose;
-  const QueuePanel({super.key, required this.queue, required this.onClose});
+  /// Tests: the clipboard instead of the system's (files, then text).
+  final Future<({List<String> files, String? text})> Function()? readClipboard;
+  /// Tests: the preview of a link being added.
+  final Future<LinkPreview?> Function(String url)? preview;
+  const QueuePanel({super.key, required this.queue, required this.onClose, this.readClipboard, this.preview});
 
   @override
   State<QueuePanel> createState() => _QueuePanelState();
 }
 
+/// Something being added from the popover: its link's preview while it
+/// resolves, then done or why not.
+class _Adding {
+  final int id;
+  final String label;
+  LinkPreview? preview;
+  String? error;
+  bool done = false;
+  _Adding(this.id, this.label);
+}
+
 class _QueuePanelState extends State<QueuePanel> {
+  /// The panel's own focus: the player's keys and Space rest while it has
+  /// it ([KeyboardClaim]), Ctrl+V lands here.
+  final _focus = FocusNode(debugLabel: 'queue-panel');
   final _field = TextEditingController();
-  final _focus = FocusNode();
-  bool _busy = false;
+  final _fieldFocus = FocusNode(debugLabel: 'queue-add-field');
+  /// "+ Add link" opened the field.
+  bool _typing = false;
+  final _adding = <_Adding>[];
+  int _addingIds = 0;
+  /// A paste or drop with nothing to add.
   String? _error;
   bool _dragging = false;
   // Reordered here before the server's state says so (no jump back while
@@ -574,8 +603,6 @@ class _QueuePanelState extends State<QueuePanel> {
   @override
   void initState() {
     super.initState();
-    // Typing and Esc land here, not on the player (its keys pause while a
-    // text field has focus).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focus.requestFocus();
     });
@@ -585,53 +612,187 @@ class _QueuePanelState extends State<QueuePanel> {
   void dispose() {
     _field.dispose();
     _focus.dispose();
+    _fieldFocus.dispose();
     super.dispose();
   }
 
-  Future<void> _add(List<PickedMedia> picks) async {
-    if (picks.isEmpty || _busy) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    String? error;
-    for (final p in picks) {
-      error = await _q.add(p) ?? error;
-    }
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _error = error;
-      if (error == null) _field.clear();
-    });
+  /// Back to the panel (after a menu, or the field closing), so its keys
+  /// keep working.
+  void _refocus() {
+    if (mounted) _focus.requestFocus();
   }
 
-  void _submit() {
-    final text = _field.text.trim();
-    if (text.isEmpty) return;
-    if (!RegExp(r'^https?://\S+$', caseSensitive: false).hasMatch(text)) {
-      setState(() => _error = 'Paste a link (http:// or https://)');
+  KeyEventResult _key(FocusNode node, KeyEvent e) {
+    if (e is! KeyDownEvent) return KeyEventResult.ignored;
+    final keys = HardwareKeyboard.instance;
+    if (e.logicalKey == LogicalKeyboardKey.keyV &&
+        (keys.isControlPressed || keys.isMetaPressed) &&
+        !keys.isShiftPressed &&
+        !keys.isAltPressed) {
+      // Typing a link: an ordinary paste into it.
+      if (_fieldFocus.hasFocus && _field.text.isNotEmpty) return KeyEventResult.ignored;
+      unawaited(_paste());
+      return KeyEventResult.handled;
+    }
+    // Esc in the field closes the field; else the popover's own (it fades out).
+    if (e.logicalKey == LogicalKeyboardKey.escape && _typing) {
+      _closeField();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  Future<({List<String> files, String? text})> _readClipboard() async {
+    var files = const <String>[];
+    String? text;
+    try {
+      files = await ClipboardX.readFiles();
+    } catch (_) {}
+    if (files.isEmpty) {
+      try {
+        text = await ClipboardX.readText();
+      } catch (_) {}
+    }
+    return (files: files, text: text);
+  }
+
+  /// Ctrl+V: the clipboard's video files, else the links in its text.
+  Future<void> _paste() async {
+    final clip = await (widget.readClipboard ?? _readClipboard)();
+    final picks = _picksFrom([...clip.files, ...?clip.text?.split(RegExp(r'\s+'))]);
+    if (!mounted) return;
+    if (picks.isEmpty) {
+      setState(() => _error = 'Nothing to add: copy a link (http:// or https://) or a video file');
       return;
     }
-    // Links go "through me" by default, like the Link page (alone: direct).
-    _add([LinkMedia(text, relay: LinkRelay.me)]);
+    if (_typing && _field.text.isEmpty) _closeField();
+    _add(picks);
   }
 
-  void _dropped(List<String> paths) {
+  /// Links (passed on "through me", like the Link page; alone: direct) and
+  /// video files among [raw], once each.
+  List<PickedMedia> _picksFrom(Iterable<String> raw) {
+    final seen = <String>{};
     final picks = <PickedMedia>[];
-    for (final raw in paths) {
-      final p = raw.trim();
-      if (RegExp(r'^https?://', caseSensitive: false).hasMatch(p)) {
+    for (final r in raw) {
+      final p = r.trim();
+      if (p.isEmpty || !seen.add(p)) continue;
+      if (RegExp(r'^https?://\S+$', caseSensitive: false).hasMatch(p)) {
         picks.add(LinkMedia(p, relay: LinkRelay.me));
       } else if (kindOf(p) == FileKind.video) {
         picks.add(FileMedia(p));
       }
     }
+    return picks;
+  }
+
+  /// Adds [picks] in order, each shown as a row until it is in (or why
+  /// not).
+  Future<void> _add(List<PickedMedia> picks) async {
+    setState(() {
+      _error = null;
+      _adding.removeWhere((a) => a.error != null);
+    });
+    final rows = [for (final p in picks) _Adding(_addingIds++, p.label)];
+    setState(() => _adding.addAll(rows));
+    for (final (i, p) in picks.indexed) {
+      final row = rows[i];
+      if (p case LinkMedia(:final url)) {
+        // Its title and picture while it resolves (at once when seen before).
+        unawaited((widget.preview ?? cachedLinkPreview)(url).then((v) {
+          if (mounted) setState(() => row.preview = v);
+        }, onError: (Object _) {}));
+      }
+      String? error;
+      try {
+        error = await _q.add(p);
+      } catch (e) {
+        error = '$e';
+      }
+      if (!mounted) return;
+      setState(() {
+        row.error = error;
+        row.done = error == null;
+      });
+      if (error == null) {
+        // The item itself shows up in the list; this row goes shortly after.
+        Timer(const Duration(milliseconds: 1500), () {
+          if (mounted) setState(() => _adding.remove(row));
+        });
+      }
+    }
+  }
+
+  void _openField() {
+    setState(() {
+      _typing = true;
+      _error = null;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _fieldFocus.requestFocus();
+    });
+  }
+
+  void _closeField() {
+    setState(() {
+      _typing = false;
+      _field.clear();
+    });
+    _refocus();
+  }
+
+  void _submit() {
+    final text = _field.text.trim();
+    if (text.isEmpty) return;
+    final picks = _picksFrom(text.split(RegExp(r'\s+'))).whereType<LinkMedia>().toList();
+    if (picks.isEmpty) {
+      setState(() => _error = 'Type or paste a link (http:// or https://)');
+      return;
+    }
+    _closeField();
+    _add(picks);
+  }
+
+  void _dropped(List<String> paths) {
+    final picks = _picksFrom(paths);
     if (picks.isEmpty) {
       setState(() => _error = 'Drop a video file or a link');
       return;
     }
     _add(picks);
+  }
+
+  /// Right-click on a queued row: Play now, Remove, Copy title, and with
+  /// its link known here ([QueueController.linkOf]) Copy link and Open in
+  /// browser; a Jellyfin item on a server linked here, Open in Jellyfin.
+  Future<void> _rowMenu(BuildContext context, QueueItem item) async {
+    final link = _q.linkOf(item);
+    final page = _q.jellyfinPageOf(item);
+    final pick = await showAppMenu<String>(context, items: [
+      const AppMenuItem(value: 'play', label: 'Play now'),
+      const AppMenuItem(value: 'remove', label: 'Remove'),
+      const AppMenuItem(value: 'title', label: ReuseText.copyTitle),
+      if (link != null) ...const [
+        AppMenuItem(value: 'link', label: ReuseText.copyLink),
+        AppMenuItem(value: 'open', label: ReuseText.openInBrowser),
+      ],
+      if (page != null) const AppMenuItem(value: 'jellyfin', label: ReuseText.openInJellyfin),
+    ]);
+    _refocus();
+    switch (pick) {
+      case 'play':
+        _q.playNow(item.id);
+      case 'remove':
+        _q.remove(item.id);
+      case 'title':
+        await copyToClipboard(item.title, done: 'Title copied');
+      case 'link':
+        await copyToClipboard(link!, done: 'Link copied');
+      case 'open':
+        await openLink(link!);
+      case 'jellyfin':
+        await openLink(page!);
+    }
   }
 
   List<QueueItem> _ordered(List<QueueItem> items) {
@@ -670,7 +831,7 @@ class _QueuePanelState extends State<QueuePanel> {
   @override
   Widget build(BuildContext context) {
     final height = MediaQuery.sizeOf(context).height;
-    return DropTarget(
+    final drop = DropTarget(
       onDragEntered: (_) => setState(() => _dragging = true),
       onDragExited: (_) => setState(() => _dragging = false),
       onDragDone: (d) {
@@ -704,13 +865,15 @@ class _QueuePanelState extends State<QueuePanel> {
                     children: [
                       _header(items.length),
                       Flexible(
-                        child: items.isEmpty && cont.isEmpty
+                        child: items.isEmpty && cont.isEmpty && _adding.isEmpty
                             ? _empty()
                             : ListView(
                                 shrinkWrap: true,
                                 padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
                                 children: [
-                                  if (items.isEmpty)
+                                  if (items.isEmpty && _adding.isNotEmpty)
+                                    const SizedBox.shrink()
+                                  else if (items.isEmpty)
                                     const Padding(
                                       padding: EdgeInsets.fromLTRB(12, 2, 12, 8),
                                       child: Text('Nothing added yet. What plays next is below.',
@@ -744,10 +907,17 @@ class _QueuePanelState extends State<QueuePanel> {
                                           members: r?.members ?? const [],
                                           selfId: selfId,
                                           warm: i == 0 && warm?.id == item.id ? warm!.state : null,
+                                          onMenu: _rowMenu,
                                         );
                                       },
                                     ),
-                                  if (cont.isNotEmpty) ..._continuation(cont, items.isEmpty),
+                                  for (final a in _adding)
+                                    _AddingRow(
+                                      key: ValueKey('queue-adding-${a.id}'),
+                                      adding: a,
+                                      onDismiss: () => setState(() => _adding.remove(a)),
+                                    ),
+                                  if (cont.isNotEmpty) ..._continuation(cont, items.isEmpty && _adding.isEmpty),
                                 ],
                               ),
                       ),
@@ -761,6 +931,7 @@ class _QueuePanelState extends State<QueuePanel> {
         ),
       ),
     );
+    return KeyboardClaim(child: Focus(focusNode: _focus, onKeyEvent: _key, child: drop));
   }
 
   // Text lines up with the rows' (4 panel + 12 row padding).
@@ -793,8 +964,8 @@ class _QueuePanelState extends State<QueuePanel> {
             Text('Nothing up next', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
             SizedBox(height: 4),
             Text(
-              'Paste a link below, drop a video or a link here, or pick "Add to queue" in the library. '
-              'It plays when this one ends.',
+              'Press Ctrl+V to add a copied link, drop a video or a link here, or pick "Add to queue" '
+              'in the library. It plays when this one ends.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.35),
             ),
@@ -822,63 +993,179 @@ class _QueuePanelState extends State<QueuePanel> {
         for (final e in cont) _ContinuationRow(episode: e, queue: _q),
       ];
 
-  Widget _footer() => Container(
-        decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppMenuStyle.border, width: 0.5))),
-        padding: const EdgeInsets.all(8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              key: const ValueKey('queue-add-field'),
-              controller: _field,
-              focusNode: _focus,
-              // Read-only while adding, not disabled: focus stays here, so
-              // Space and the arrows do not reach the player.
-              readOnly: _busy,
-              style: const TextStyle(fontSize: 14),
-              onSubmitted: (_) => _submit(),
-              // The app's field look (as `AppSelect`): a faint fill, a
-              // hairline, the accent while focused.
-              decoration: InputDecoration(
-                isDense: true,
-                filled: true,
-                fillColor: const Color(0x0DFFFFFF),
-                hintText: _dragging ? 'Drop to add' : 'Paste a link to add',
-                hintStyle: const TextStyle(color: Colors.white38, fontSize: 14),
-                prefixIcon: const Icon(Icons.add_link_rounded, size: 18, color: Colors.white54),
-                prefixIconConstraints: const BoxConstraints(minWidth: 38),
-                suffixIcon: _busy
-                    ? const Padding(
-                        padding: EdgeInsets.all(10),
-                        child: SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2)),
-                      )
-                    : null,
-                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppMenuStyle.rowRadius),
-                  borderSide: const BorderSide(color: AppMenuStyle.border, width: 0.5),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppMenuStyle.rowRadius),
-                  borderSide: BorderSide(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.6), width: 0.5),
-                ),
-              ),
-            ),
-            AnimatedSize(
-              duration: easeTime,
-              curve: ease,
-              alignment: Alignment.topCenter,
-              child: _error == null
-                  ? const SizedBox(width: double.infinity)
-                  : Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
-                      child: Text(_error!, style: TextStyle(color: Colors.orange.shade300, fontSize: 12)),
-                    ),
-            ),
-          ],
+  // "+ Add link" (Ctrl+V and drops work without it), or the small field
+  // it opens; under it what a paste or drop could not use.
+  Widget _footer() {
+    final accent = Theme.of(context).colorScheme.primary;
+    final Widget row;
+    if (_typing) {
+      row = TextField(
+        key: const ValueKey('queue-add-field'),
+        controller: _field,
+        focusNode: _fieldFocus,
+        style: const TextStyle(fontSize: 13),
+        onSubmitted: (_) => _submit(),
+        // The app's field look (as `AppSelect`): a faint fill, a hairline,
+        // the accent while focused.
+        decoration: InputDecoration(
+          isDense: true,
+          filled: true,
+          fillColor: const Color(0x0DFFFFFF),
+          hintText: 'https://…  (Enter adds)',
+          hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+          prefixIcon: const Icon(Icons.add_link_rounded, size: 16, color: Colors.white54),
+          prefixIconConstraints: const BoxConstraints(minWidth: 34),
+          suffixIcon: _RoundIcon(
+            icon: Icons.close_rounded,
+            size: 16,
+            color: Colors.white54,
+            tooltip: 'Close (Esc)',
+            onPressed: _closeField,
+          ),
+          contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppMenuStyle.rowRadius),
+            borderSide: const BorderSide(color: AppMenuStyle.border, width: 0.5),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppMenuStyle.rowRadius),
+            borderSide: BorderSide(color: accent.withValues(alpha: 0.6), width: 0.5),
+          ),
         ),
       );
+    } else {
+      row = Row(
+        children: [
+          TextButton.icon(
+            key: const ValueKey('queue-add-link'),
+            onPressed: _openField,
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white70,
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppMenuStyle.rowRadius)),
+            ),
+            icon: const Icon(Icons.add_rounded, size: 18),
+            label: const Text('Add link', style: TextStyle(fontSize: 13)),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(left: 8, right: 8),
+              child: Text(
+                _dragging ? 'Drop to add' : 'Ctrl+V pastes · drop here',
+                textAlign: TextAlign.end,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: _dragging ? accent : Colors.white38, fontSize: 12),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    return Container(
+      decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppMenuStyle.border, width: 0.5))),
+      padding: const EdgeInsets.all(6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          row,
+          AnimatedSize(
+            duration: easeTime,
+            curve: ease,
+            alignment: Alignment.topCenter,
+            child: _error == null
+                ? const SizedBox(width: double.infinity)
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 4, 10, 2),
+                    child: Text(_error!,
+                        key: const ValueKey('queue-add-error'),
+                        style: TextStyle(color: Colors.orange.shade300, fontSize: 12)),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A link or file being added from the popover, in the rows' metrics: the
+/// link's picture and title as soon as they are known, then "Added" (the
+/// row leaves shortly after) or why not (× dismisses it).
+class _AddingRow extends StatelessWidget {
+  final _Adding adding;
+  final VoidCallback onDismiss;
+  const _AddingRow({super.key, required this.adding, required this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    final a = adding;
+    final p = a.preview;
+    final thumb = p?.thumbnail;
+    final error = a.error;
+    final Widget status;
+    if (error != null) {
+      status = Text(error,
+          maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.orange.shade300, fontSize: 12));
+    } else if (a.done) {
+      status = const Row(children: [
+        Icon(Icons.check_rounded, size: 14, color: Color(0xFF7CF29C)),
+        SizedBox(width: 4),
+        Text('Added', style: _subStyle),
+      ]);
+    } else {
+      status = const Row(children: [
+        SizedBox.square(dimension: 10, child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.white54)),
+        SizedBox(width: 6),
+        Text('Adding…', style: _subStyle),
+      ]);
+    }
+    return AnimatedOpacity(
+      duration: easeTime,
+      opacity: a.done ? 0.6 : 1,
+      child: SizedBox(
+        height: queueRowHeight,
+        child: Row(
+          children: [
+            const SizedBox(width: _lead),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(
+                width: _thumb,
+                height: _thumb * 9 / 16,
+                child: thumb == null
+                    ? _blank(Icons.link_rounded, _thumb)
+                    : Image.network(thumb,
+                        fit: BoxFit.cover, errorBuilder: (_, _, _) => _blank(Icons.link_rounded, _thumb)),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(p?.title ?? a.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: _titleStyle),
+                  const SizedBox(height: 2),
+                  status,
+                ],
+              ),
+            ),
+            if (error != null)
+              _RoundIcon(
+                icon: Icons.close_rounded,
+                size: 18,
+                color: Colors.white70,
+                tooltip: 'Dismiss',
+                onPressed: onDismiss,
+              ),
+            const SizedBox(width: 8),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 // ------------------------------------------------------------------ rows
@@ -1009,6 +1296,8 @@ class _QueueRow extends StatefulWidget {
   final String selfId;
   /// The first item's readiness when this app puts it up; null: no dot.
   final WarmState? warm;
+  /// Right-click ([context]: the row).
+  final void Function(BuildContext context, QueueItem item) onMenu;
   const _QueueRow({
     super.key,
     required this.index,
@@ -1017,6 +1306,7 @@ class _QueueRow extends StatefulWidget {
     required this.members,
     required this.selfId,
     required this.warm,
+    required this.onMenu,
   });
 
   @override
@@ -1122,7 +1412,10 @@ class _QueueRowState extends State<_QueueRow> {
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
-      child: Stack(children: [row, actions]),
+      child: GestureDetector(
+        onSecondaryTap: () => widget.onMenu(context, item),
+        child: Stack(children: [row, actions]),
+      ),
     );
   }
 }

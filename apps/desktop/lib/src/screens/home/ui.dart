@@ -1,9 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:sync_relay_core/core.dart' show appVersion, isDevBuild;
 
 /// Product name (working title). Change it here only.
 const appName = 'Starsync';
 
 const repoUrl = 'https://git.example.org/Foxyz/sync_replay_project';
+
+/// The pubspec's version: the Flutter tool defines it for every build and
+/// run (`flutter run` too).
+const _pubspecVersion = String.fromEnvironment('FLUTTER_BUILD_NAME');
+
+/// The short commit a packaged build was made from (`tool/package_linux.sh`;
+/// `-dirty` with uncommitted changes); empty otherwise.
+const _gitCommit = String.fromEnvironment('GIT_COMMIT');
+
+/// The version to show: a release's own ("1.1.2"), a test build's with its
+/// commit ("1.1.3-dev.12 · 1a2b3c4"), and for a dev run (no `APP_VERSION`)
+/// the pubspec's with "dev" ("1.1.2 · dev run").
+String displayVersion({String version = appVersion, String pubspec = _pubspecVersion, String commit = _gitCommit}) {
+  if (version == '0.0.0-dev') return pubspec.isEmpty ? 'dev run' : '$pubspec · dev run';
+  return isDevBuild(version) && commit.isNotEmpty ? '$version · $commit' : version;
+}
 
 const kRadius = 12.0;
 const kGap = 16.0;

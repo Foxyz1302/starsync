@@ -35,8 +35,15 @@ ARCH="x64"
 VERSION="${VERSION:-$(sed -n 's/^version: \([0-9.]*\).*/\1/p' "$APP/pubspec.yaml")}"
 if [[ -z "$VERSION" ]]; then echo "error: version not found in $APP/pubspec.yaml" >&2; exit 1; fi
 
+# The commit the app shows next to a test build's version (About, the
+# Settings tab's tooltip); -dirty with uncommitted changes.
+COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || true)"
+if [[ -n "$COMMIT" && -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+  COMMIT="$COMMIT-dirty"
+fi
+
 if [[ "$SKIP_BUILD" != "1" ]]; then
-  (cd "$APP" && flutter build linux --release --dart-define=APP_VERSION="$VERSION")
+  (cd "$APP" && flutter build linux --release --dart-define=APP_VERSION="$VERSION" --dart-define=GIT_COMMIT="$COMMIT")
 fi
 
 BUNDLE="$APP/build/linux/$ARCH/release/bundle"

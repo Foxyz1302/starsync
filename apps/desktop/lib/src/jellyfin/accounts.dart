@@ -194,6 +194,13 @@ class JellyfinAccounts extends ChangeNotifier {
   JellyfinAccount? account(String serverId) =>
       _accounts.where((a) => a.serverId == serverId).firstOrNull;
 
+  /// [itemId]'s page in the web UI of linked server [serverId] ("Open in
+  /// Jellyfin"); null when that server is not linked here.
+  String? webUrlOf(String serverId, String itemId) {
+    final a = account(serverId);
+    return a == null ? null : jellyfinWebUrl(a.baseUrl, itemId, serverId: serverId);
+  }
+
   /// The chosen default, else the first linked server.
   JellyfinAccount? get defaultAccount =>
       (_defaultServerId == null ? null : account(_defaultServerId!)) ?? _accounts.firstOrNull;

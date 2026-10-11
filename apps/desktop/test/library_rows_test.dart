@@ -189,6 +189,25 @@ void main() {
       expect(decodeRecentLinks(jsonEncode([{'url': ''}, {'url': 'https://a/b.mkv'}])).single.title, 'b.mkv');
     });
 
+    test('kept previews: playable ones only, display text, survive a reload', () async {
+      String? disk;
+      LinkPreviewStore store() => LinkPreviewStore(read: () async => disk, write: (v) async => disk = v);
+      final a = store();
+      await a.put('https://a', const LinkPreview(title: 'A', subtitle: 'a · Chan · 3:07', thumbnail: 'https://i/a.jpg'),
+          at: DateTime.utc(2026, 1, 2));
+      await a.put('https://b', const LinkPreview(title: 'B', subtitle: 'b', problem: 'Not found (404)'));
+      expect(a.lookup('https://b'), isNull);
+      final b = store();
+      await b.ensureLoaded();
+      final kept = b.lookup('https://a')!;
+      expect((kept.preview.title, kept.preview.subtitle, kept.preview.thumbnail),
+          ('A', 'a · Chan · 3:07', 'https://i/a.jpg'));
+      expect(kept.at.isAtSameMomentAs(DateTime.utc(2026, 1, 2)), isTrue);
+      // A problem later forgets it.
+      await b.put('https://a', const LinkPreview(title: 'A', subtitle: 'a', problem: 'Not allowed (403)'));
+      expect(b.lookup('https://a'), isNull);
+    });
+
     test('preview: a page by yt-dlp, a file by its name, else why not', () async {
       final yt = await previewLink('https://www.youtube.com/watch?v=abc',
           probe: (url) async => LinkProbe.page(Uri.parse(url),

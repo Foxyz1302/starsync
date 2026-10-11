@@ -64,6 +64,15 @@ String? normalizeItemId(String id) {
   return id.replaceAll('-', '').toLowerCase();
 }
 
+/// [itemId]'s page in the web UI of the server at [baseUrl] (the form
+/// [parseJellyfinLink] reads back). No credentials: whoever opens it signs
+/// in on that server.
+String jellyfinWebUrl(String baseUrl, String itemId, {String? serverId}) {
+  final base = baseUrl.replaceAll(RegExp(r'/+$'), '');
+  final server = serverId == null || serverId.isEmpty ? '' : '&serverId=${Uri.encodeQueryComponent(serverId)}';
+  return '$base/web/#/details?id=${Uri.encodeQueryComponent(itemId)}$server';
+}
+
 /// Recognises a Jellyfin item link and reduces it to (baseUrl, itemId):
 /// - web UI: `/web/#/details?id=X&serverId=S`, `/web/index.html#!/details?id=X`,
 ///   any `#/...?id=X` route;

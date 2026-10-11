@@ -1464,7 +1464,26 @@ class SessionCoordinator {
     if (pending == null || r.mediaId <= pending.after) return;
     if (sync.memberId.isEmpty || r.media?['swapBy'] != sync.memberId) return;
     _pendingArt = null;
+    final link = pending.link;
+    _ownLink = link == null || link.isEmpty ? null : (r.mediaId, link);
     unawaited(_sendArt(r.mediaId, pending.media, pending.link, given: pending.art));
+  }
+
+  /// The link this app put up as [StateBroadcast.mediaId] (passed on or
+  /// fetched by the server, so not in the state).
+  (int, String)? _ownLink;
+
+  /// The link of what plays, as this app may hand it out (Copy link, Open
+  /// in browser): one this app put up, else one everyone opens (it is in
+  /// the state); null otherwise (another member's passed-on link, a
+  /// server fetch by someone else, Jellyfin, files).
+  String? currentLink() {
+    final r = serverState.peek();
+    if (r == null || r.media == null) return null;
+    final own = _ownLink;
+    if (own != null && own.$1 == r.mediaId) return own.$2;
+    final url = stateMediaUrl(r);
+    return url != null && (url.startsWith('http://') || url.startsWith('https://')) ? url : null;
   }
 
   /// Fetches the art of [media] (this client's swap, now [mediaId], from
@@ -2177,6 +2196,7 @@ class SessionCoordinator {
     stopWarmSource();
     _pendingOrigin = null;
     _pendingArt = null;
+    _ownLink = null;
     _activeOrigin = null;
     _playerReady = false;
     try {

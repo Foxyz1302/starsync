@@ -1,17 +1,18 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../screens/home/ui.dart' show appName, displayVersion;
 import '../screens/home/update_indicator.dart';
 import '../session/delivery.dart';
 import '../state/session_state.dart';
 import '../update/update_controller.dart';
 import '../widgets/app_keys.dart';
 import '../widgets/app_menu.dart';
+import '../widgets/copy_open.dart';
 import '../widgets/window_buttons.dart';
 import 'avatar.dart';
 import 'delivery_line.dart';
@@ -124,6 +125,8 @@ class PartyStrip extends StatelessWidget {
                             label: t.label,
                             selected: t == tab,
                             compact: compact,
+                            // The version, a rest of the mouse away.
+                            tooltip: t == ShellTab.settings ? '$appName ${displayVersion()}' : null,
                             onTap: () => onTab(t),
                           ),
                       ],
@@ -364,18 +367,21 @@ class StripTab extends StatelessWidget {
   final bool selected;
   final bool compact;
   final VoidCallback onTap;
+  /// Shown after resting on the tab.
+  final String? tooltip;
   const StripTab({
     super.key,
     required this.label,
     required this.selected,
     required this.onTap,
     this.compact = false,
+    this.tooltip,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Semantics(
+    final tab = Semantics(
       selected: selected,
       button: true,
       child: InkWell(
@@ -413,6 +419,8 @@ class StripTab extends StatelessWidget {
         ),
       ),
     );
+    final tip = tooltip;
+    return tip == null ? tab : Tooltip(message: tip, waitDuration: const Duration(milliseconds: 600), child: tab);
   }
 }
 
@@ -517,8 +525,7 @@ class MembersCard extends StatelessWidget {
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
                         key: const ValueKey('copy-invite'),
-                        onPressed: () =>
-                            Clipboard.setData(ClipboardData(text: address)),
+                        onPressed: () => copyToClipboard(address, done: 'Invite address copied'),
                         icon: const Icon(Icons.copy, size: 16),
                         label: const Text('Copy invite address'),
                       ),
@@ -628,7 +635,7 @@ class _HostInviteState extends State<_HostInvite> {
       future: _addresses,
       builder: (context, snap) {
         final list = snap.data ?? const <String>[];
-        void copy(String a) => Clipboard.setData(ClipboardData(text: a));
+        void copy(String a) => copyToClipboard(a, done: 'Invite address copied');
         return Padding(
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           child: Column(

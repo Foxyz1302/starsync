@@ -3,6 +3,7 @@ import 'package:sync_relay_core/core.dart';
 
 import '../shell/motion.dart';
 import '../widgets/app_menu.dart';
+import '../widgets/copy_open.dart';
 import 'accounts.dart';
 import 'browse_scope.dart';
 import 'cards.dart' show doubleClickTime, kindIcon;
@@ -148,14 +149,19 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
   }
 
   /// Right-click on an episode ([context]: its row): Put it up, Add to
-  /// queue, Play next.
+  /// queue, Play next (in a server), Copy title, Open in Jellyfin.
   Future<void> _episodeMenu(BuildContext context, JellyfinItem e) async {
-    if (widget.onAddToQueue == null) return;
-    setState(() => _targetId = e.id);
+    final queue = widget.onAddToQueue != null;
+    if (queue) setState(() => _targetId = e.id);
+    final client = _client;
     final pick = await showAppMenu<int>(context, items: [
-      AppMenuItem(value: 0, label: widget.solo ? 'Play' : 'Put it up'),
-      const AppMenuItem(value: 1, label: 'Add to queue'),
-      const AppMenuItem(value: 2, label: 'Play next'),
+      if (queue) ...[
+        AppMenuItem(value: 0, label: widget.solo ? 'Play' : 'Put it up'),
+        const AppMenuItem(value: 1, label: 'Add to queue'),
+        const AppMenuItem(value: 2, label: 'Play next'),
+      ],
+      const AppMenuItem(value: 3, label: ReuseText.copyTitle),
+      if (client != null) const AppMenuItem(value: 4, label: ReuseText.openInJellyfin),
     ]);
     switch (pick) {
       case 0:
@@ -164,6 +170,10 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
         await _queue(e);
       case 2:
         await _queue(e, next: true);
+      case 3:
+        await copyToClipboard(jellyfinCopyTitle(e), done: 'Title copied');
+      case 4:
+        await openLink(jellyfinWebUrl(client!.baseUrl, e.id, serverId: _serverId));
     }
   }
 
@@ -382,6 +392,13 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
                       tooltip: 'Open the series page',
                       onPressed: () => _c.open(SeriesRoute(d.series!, seasonId: seasonId)),
                       icon: const Icon(Icons.open_in_new),
+                    ),
+                  if (client != null)
+                    IconButton(
+                      key: const ValueKey('details-open-jellyfin'),
+                      tooltip: ReuseText.openInJellyfin,
+                      onPressed: () => openLink(jellyfinWebUrl(client.baseUrl, shown.id, serverId: _serverId)),
+                      icon: const Icon(Icons.open_in_browser_rounded),
                     ),
                 ],
               ),

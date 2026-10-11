@@ -82,12 +82,15 @@ double-click on the picture goes fullscreen (the strip hides, the party
 shows in a corner while paused, the window buttons sit in the player's top
 bar while its controls are up), Esc leaves it. The controls show the
 show's cover, title and episode top left (a web video: its thumbnail and
-name; guests get the art too); before
+name; guests get the art too; right-click to copy the title, or the link
+when you have it, or open it in the browser or Jellyfin); before
 a video first plays, its banner fills the picture until playback starts.
 One pill bottom centre, just above the controls, says what playback waits for ("Press Space
 when you're ready", "Waiting for Bob and Mika · 2/3 ready", "Bob is
 loading…") or what went wrong, with Retry or Cancel when it helps. Chat and activity open in a panel on the right (chat button or
-Tab), ready to type; it shows messages, and its "Activity" toggle adds
+Tab), ready to type; it shows messages (select text to copy it, or
+right-click for Copy message and, with a link in it, Copy link / Open in
+browser), and its "Activity" toggle adds
 joins, ready, seeks and the like between them. Joins, leaves, chat and
 other news also pop up bottom left with the person's avatar; click a message to open the chat
 (Settings → Notifications → Chat messages: Only when paused by default,
@@ -143,12 +146,16 @@ Up next, add the folder to Files, or fill Link).
   details open on the right with "Put it up · S1E3", mark watched /
   unwatched, remove from Continue and the episode list (click an episode
   to choose it). Double-click a card or an episode to put it up at once.
+  Right-click a card or an episode to copy its title or open it in
+  Jellyfin's web page (the details panel has that button too).
 - **Link**: paste an http(s) link: a video file, or a web page with a
   video (YouTube, X, and whatever else yt-dlp knows). The preview shows
   what it is (a page's title, uploader, length and thumbnail, else the
   file name); in a server, pick how the
   others get it (everyone fetches it, the server fetches it, or through
-  you). Your last 12 links are listed under it. A link that does not
+  you). Your last 12 links are listed under it (right-click one to copy
+  or open it). A link seen before shows its preview at once, without
+  asking the site again. A link that does not
   open here (needs cookies, 403, 404, not a video) says why and goes up
   only with "Put it up anyway"; in the player, whoever cannot play it is
   named ("Bob can't play this: Not allowed (403)") and nobody waits for them.
@@ -179,8 +186,11 @@ In the player, Up next sits in the top bar next to the chat button: the
 next item's picture and title (or the next episode's). Rest the mouse on
 it for a larger preview (who added it, its length, whether it is ready
 to start); ⏭ plays it now, a click opens the queue: drag rows to reorder, hover a
-row to play it now (▶) or remove it (×), paste a link in the field or
-drop a link or a video on it to add. When a video ends, a card shows
+row to play it now (▶) or remove it (×), right-click it for more (copy its
+title or link, open it in the browser or in Jellyfin). To add, press
+Ctrl+V with the queue open (a copied link or video file goes in at once,
+its title and picture showing while it is checked), type one after
+**+ Add link**, or drop a link or a video on it. When a video ends, a card shows
 what is up next with a 10 s countdown (Cancel stops it on your screen)
 and it plays; `>` or Shift+N plays it at once. Under the queue,
 **Continues with** shows the next episodes of the Jellyfin series
@@ -241,7 +251,7 @@ integrations (linked Jellyfin servers, below, the AnimeFlow connection:
 "connected as <name>" with what you may do, or why not, and playing the
 next episode automatically); Notifications & sounds (what pops up; the sound
 volume and sound set, and every sound with a preview, its own set and a switch); Updates; Keyboard shortcuts (read-only); About
-(the version).
+(the version; resting the mouse on the Settings tab shows it too).
 
 Player settings live in the player: ⚙ at the right end of its controls
 (both designs) opens them, and Settings → Player has the same ones (plus
@@ -266,16 +276,20 @@ Controls: the seek bar marks chapter starts with a diamond; hovering it
 shows the time and the chapter title. The chapters button lists them
 (current one checked; click to jump). "1:30" skips ahead 1:30. Audio and
 Subtitles buttons (with the track count) list tracks as "Japanese · E-AC3
-2.0 · title"; subtitles have Off. Volume (hover the speaker, scroll on
-it, or Up/Down) goes to 150 % like mpv: past the tick at 100 % the bar
-turns amber and mpv amplifies.
+2.0 · title"; subtitles have Off. Volume (scroll anywhere on the video,
+hover the speaker, or Up/Down) goes to 150 % like mpv: past the tick at
+100 % the bar turns amber and mpv amplifies; a scroll or key shows the
+volume for a moment. Lists and menus under the mouse scroll as usual.
 
 The uosc player design (⚙ → Player design, Standard by default,
-switches right away): video controls modeled on mpv's uosc theme. A thick
-timeline across the bottom shows the played part, the cached part ahead
-(hatched), chapter starts as diamonds and the time; hovering it shows the
-chapter title and the time there. With the controls hidden it stays as a
-thin line (unless "Progress line when hidden" is off). Above it flat buttons: ≡ menu, Subtitles and Audio (with the
+switches right away): video controls modeled on mpv's uosc theme. A
+translucent timeline across the bottom marks the position with a thin
+line, hatches the part not downloaded yet, shows chapter starts as
+diamonds (click one to jump), the elapsed time left, the time remaining
+right and, while less than a minute is buffered, the buffered seconds
+next to the position; hovering it shows the time there and the chapter
+title. With the controls hidden it stays as a thin line (unless
+"Progress line when hidden" is off). Above it flat buttons: ≡ menu, Subtitles and Audio (with the
 track count), the shader badge (the active Anime4K mode, e.g. "A HQ"),
 ready, chapters, 1:30, previous / next episode, change video, volume, ⚙
 and fullscreen; the title top left, Up next, chat and back-to-library top right. Keys and skip buttons work
