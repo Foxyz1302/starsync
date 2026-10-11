@@ -8,6 +8,7 @@ import 'package:watch_together/src/controls/uosc/controls.dart';
 import 'package:watch_together/src/controls/uosc/menu.dart';
 import 'package:watch_together/src/controls/uosc/style.dart';
 import 'package:watch_together/src/controls/uosc/timeline.dart';
+import 'package:watch_together/src/controls/volume.dart' show VolumeWheel;
 import 'package:watch_together/src/jellyfin/track_prefs.dart';
 import 'package:watch_together/src/playback/media_marks.dart';
 import 'package:watch_together/src/playback/playback_controller.dart' show RenderMode;
@@ -76,74 +77,76 @@ void main() {
     expect(formatUoscTime(const Duration(seconds: -4)), '00:00');
   });
 
-  group('cache hatching math', () {
-    test('cached range runs from the position to the cache end', () {
-      const size = Size(1000, 30);
-      final r = cacheRect(size, position: m(6), buffered: m(9), duration: m(24))!;
-      expect(r.left, 250);
-      expect(r.right, 375);
-      expect(r.top, 0);
-      expect(r.bottom, 30);
-      expect(cacheRect(size, position: m(6), buffered: m(6), duration: m(24)), isNull);
-      expect(cacheRect(size, position: m(6), buffered: m(5), duration: m(24)), isNull, reason: 'behind');
-      expect(cacheRect(size, position: m(6), buffered: m(9), duration: Duration.zero), isNull);
-      // Clamped to the bar.
-      expect(cacheRect(size, position: m(20), buffered: m(40), duration: m(24))!.right, 1000);
+  group('timeline math (uosc)', () {
+    test('uosc clock: trimmed by the duration, minus kept', () {
+      expect(uoscClock(m(4, 22), const Duration(hours: 1, minutes: 52)), '00:04:22');
+      expect(uoscClock(-const Duration(hours: 1, minutes: 47, seconds: 30), const Duration(hours: 1, minutes: 52)),
+          '-01:47:30');
+      expect(uoscClock(m(6), m(24)), '06:00');
+      expect(uoscClock(-m(18), m(24)), '-18:00');
+      expect(uoscClock(const Duration(seconds: 7), const Duration(seconds: 40)), '07');
+      expect(uoscClock(Duration.zero, m(24)), '00:00');
     });
 
-    test('45° strokes, evenly spaced, covering the whole range', () {
-      const r = Rect.fromLTRB(100, 0, 160, 30);
-      final lines = hatchLines(r, spacing: 6);
-      for (final (a, b) in lines) {
-        expect(a.dy, r.bottom);
-        expect(b.dy, r.top);
-        expect(b.dx - a.dx, r.height, reason: '45°');
-        // Every stroke crosses the range.
-        expect(b.dx, greaterThan(r.left));
-        expect(a.dx, lessThan(r.right));
-      }
-      for (var i = 1; i < lines.length; i++) {
-        expect(lines[i].$1.dx - lines[i - 1].$1.dx, 6);
-      }
-      // No gap at either edge: the first stroke starts left of the range's
-      // bottom-left corner diagonal, the last one within a step of the end.
-      expect(lines.first.$1.dx, lessThanOrEqualTo(r.left - r.height + 6));
-      expect(lines.last.$1.dx, greaterThan(r.right - 6));
-      expect(hatchLines(Rect.zero), isEmpty);
+    test('uncached part: from the cache end (or the position) to the end', () {
+      expect(uncachedFrom(position: m(6), buffered: m(9), duration: m(24)), 9 / 24);
+      expect(uncachedFrom(position: m(6), buffered: m(5), duration: m(24)), 6 / 24, reason: 'stale cache end');
+      expect(uncachedFrom(position: m(6), buffered: Duration.zero, duration: m(24)), isNull, reason: 'unknown');
+      expect(uncachedFrom(position: m(6), buffered: m(24), duration: m(24)), isNull, reason: 'cached to the end');
+      expect(uncachedFrom(position: m(6), buffered: m(9), duration: Duration.zero), isNull);
+    });
+
+    test('cache label: seconds ahead, under 60 s, not when cached to the end', () {
+      expect(cacheLabel(position: m(6), buffered: m(6, 30), duration: m(24)), '30s');
+      expect(cacheLabel(position: m(6), buffered: m(6), duration: m(24)), '0s');
+      expect(cacheLabel(position: m(6), buffered: m(5), duration: m(24)), '0s');
+      expect(cacheLabel(position: m(6), buffered: m(7), duration: m(24)), isNull, reason: 'a minute or more');
+      expect(cacheLabel(position: m(23, 40), buffered: m(24), duration: m(24)), isNull, reason: 'eof cached');
+      expect(cacheLabel(position: m(6), buffered: Duration.zero, duration: m(24)), isNull);
+    });
+
+    test('geometry: times map around the position line', () {
+      const g = UoscTimelineGeometry(width: 1000, size: 40, progress: 0.5);
+      expect(g.lineLeft, 499);
+      expect(g.lineRight, 501);
+      expect(g.x(0), 0.5);
+      expect(g.x(1), 1000 - 0.5);
+      expect(g.x(0.75), greaterThan(g.lineRight), reason: 'past the line');
+      expect(g.fractionAt(500), 0.5, reason: 'on the line: the position');
+      expect(g.fractionAt(0), 0);
+      expect(g.fractionAt(1000), 1);
+      expect(g.fractionAt(g.x(0.25)), moreOrLessEquals(0.25, epsilon: 0.001));
+      expect(g.fractionAt(g.x(0.75)), moreOrLessEquals(0.75, epsilon: 0.001));
+      // Collapsing: the line widens to 20 px over the last eighth.
+      expect(UoscTimelineGeometry.sizeAt(1), 40);
+      expect(UoscTimelineGeometry.sizeAt(0), 2);
+      expect(UoscTimelineGeometry.lineWidthAt(40), 2);
+      expect(UoscTimelineGeometry.lineWidthAt(2), 20);
     });
   });
 
   group('timeline', () {
-    testWidgets('elapsed part filled, time boxes inside the bar', (tester) async {
+    testWidgets('position line, elapsed left, remaining right, cache label', (tester) async {
       await tester.pumpWidget(host(UoscTimeline(
-          position: m(6), duration: m(24), buffered: m(8), chapters: chapters, onSeek: (_) {})));
+          position: m(6), duration: m(24), buffered: m(6, 30), chapters: chapters, onSeek: (_) {})));
       final bar = tester.getRect(find.byKey(const ValueKey('uosc-timeline')));
       expect(bar.width, 800, reason: 'the whole width (the test window)');
       expect(bar.height, UoscTimeline.height);
       final p = painter(tester);
       expect(p.played, 0.25);
-      expect(p.hatched, isTrue);
-      expect(p.cache(bar.size), cacheRect(bar.size, position: m(6), buffered: m(8), duration: m(24)));
-      expect(boxText(tester, 'uosc-time'), '06:00');
-      expect(boxText(tester, 'uosc-duration'), '24:00');
-      final time = tester.getRect(find.byKey(const ValueKey('uosc-time')));
-      expect(time.left, greaterThanOrEqualTo(bar.left));
-      expect(time.top, greaterThanOrEqualTo(bar.top));
-      expect(time.bottom, lessThanOrEqualTo(bar.bottom));
-      expect(time.center.dx, lessThan(bar.left + 80), reason: 'at the left');
+      expect(p.geometry.lineRight - p.geometry.lineLeft, UoscTimelineSpec.lineWidth, reason: 'a line, no fill');
+      expect(p.visibility, 1);
+      expect(p.uncached, 6.5 / 24);
+      expect(p.elapsed, '06:00');
+      expect(p.remaining, '-18:00');
+      expect(p.cache, '30s');
+      expect(p.textOpacity, 1);
     });
 
-    testWidgets('a diamond on the top edge at each chapter start but the first', (tester) async {
+    testWidgets('a diamond on the top edge at each chapter start', (tester) async {
       await tester.pumpWidget(host(UoscTimeline(
           position: m(1), duration: m(24), chapters: chapters, onSeek: (_) {})));
-      expect(find.byKey(const ValueKey('uosc-chapter-0')), findsNothing, reason: 'starts at 0');
-      final bar = tester.getRect(find.byKey(const ValueKey('uosc-timeline')));
-      for (final c in chapters.skip(1)) {
-        final mark = tester.getCenter(find.byKey(ValueKey('uosc-chapter-${c.index}')));
-        expect(mark.dx, moreOrLessEquals(bar.left + bar.width * c.start.inSeconds / m(24).inSeconds, epsilon: 0.5),
-            reason: c.title);
-        expect(mark.dy, moreOrLessEquals(bar.top, epsilon: 0.5), reason: 'on the top edge');
-      }
+      expect(painter(tester).chapters, [for (final c in chapters) c.start.inSeconds / m(24).inSeconds]);
     });
 
     testWidgets('hover: chapter title over the hover time, above the bar', (tester) async {
@@ -151,8 +154,9 @@ void main() {
           position: m(1), duration: m(24), chapters: chapters, onSeek: (_) {})));
       final bar = tester.getRect(find.byKey(const ValueKey('uosc-timeline')));
       final mouse = await mouseAt(tester, Offset.zero);
+      final g = painter(tester).geometry;
       // 01:51 of 24:00: inside "Opening".
-      await mouse.moveTo(Offset(bar.left + bar.width * (111 / (24 * 60)), bar.center.dy));
+      await mouse.moveTo(Offset(bar.left + g.x(111 / (24 * 60)) + 0.2, bar.center.dy));
       await tester.pump();
       expect(boxText(tester, 'uosc-hover-chapter'), 'Opening');
       expect(boxText(tester, 'uosc-hover-time'), '01:51');
@@ -169,21 +173,34 @@ void main() {
       expect(find.byKey(const ValueKey('uosc-hover-time')), findsNothing);
     });
 
-    testWidgets('hidden controls: a thin line with chapter ticks, no boxes, no input', (tester) async {
+    testWidgets('a press on a hovered diamond jumps to its chapter', (tester) async {
+      final seeks = <Duration>[];
+      await tester.pumpWidget(host(UoscTimeline(
+          position: m(1), duration: m(24), chapters: chapters, onSeek: seeks.add)));
+      final bar = tester.getRect(find.byKey(const ValueKey('uosc-timeline')));
+      final at = Offset(bar.left + painter(tester).geometry.x(2 / 24) + 3, bar.top + 2);
+      final mouse = await mouseAt(tester, at);
+      await mouse.moveTo(at);
+      await tester.pump();
+      expect(painter(tester).hoveredChapter, 2);
+      expect(boxText(tester, 'uosc-hover-time'), '02:00');
+      await mouse.down(at);
+      await mouse.up();
+      await tester.pump();
+      expect(seeks, [m(2)]);
+    });
+
+    testWidgets('hidden controls: the progress line, no text, no input', (tester) async {
       final seeks = <Duration>[];
       await tester.pumpWidget(host(UoscTimeline(
           position: m(12), duration: m(24), buffered: m(14), chapters: chapters, expanded: false, onSeek: seeks.add)));
       final bar = tester.getRect(find.byKey(const ValueKey('uosc-timeline')));
       expect(bar.height, UoscTimeline.collapsedHeight);
-      expect(painter(tester).played, 0.5);
-      expect(painter(tester).hatched, isFalse);
-      expect(find.byKey(const ValueKey('uosc-chapter-1')), findsNothing);
-      for (final c in chapters.skip(1)) {
-        final tick = tester.getRect(find.byKey(ValueKey('uosc-chapter-tick-${c.index}')));
-        expect(tick.center.dx, moreOrLessEquals(bar.left + bar.width * c.start.inSeconds / m(24).inSeconds, epsilon: 0.5));
-        expect(tick.width, lessThanOrEqualTo(2));
-      }
-      expect(find.byKey(const ValueKey('uosc-time')), findsNothing);
+      final p = painter(tester);
+      expect(p.played, 0.5);
+      expect(p.visibility, 0);
+      expect(p.geometry.lineWidth, UoscTimelineSpec.progressLineWidth);
+      expect(p.textOpacity, 0);
       final mouse = await mouseAt(tester, Offset.zero);
       await mouse.moveTo(bar.center);
       await tester.pump();
@@ -192,19 +209,26 @@ void main() {
       expect(seeks, isEmpty);
     });
 
-    testWidgets('drag seeks on every move and on release', (tester) async {
+    testWidgets('press seeks, every drag move seeks, release holds the target', (tester) async {
       final seeks = <Duration>[];
       await tester.pumpWidget(host(UoscTimeline(
           position: m(1), duration: m(24), chapters: chapters, onSeek: seeks.add)));
       final bar = tester.getRect(find.byKey(const ValueKey('uosc-timeline')));
-      final g = await tester.startGesture(Offset(bar.left + bar.width / 4, bar.center.dy), kind: PointerDeviceKind.mouse);
-      expect(seeks, isEmpty, reason: 'press alone does not seek');
-      await g.moveTo(Offset(bar.left + bar.width / 2, bar.center.dy));
+      final g = painter(tester).geometry;
+      final g0 = await tester.startGesture(Offset(bar.left + g.x(0.25), bar.center.dy), kind: PointerDeviceKind.mouse);
+      expect(seeks, hasLength(1), reason: 'the press seeks');
+      expect(seeks.single.inSeconds, closeTo(6 * 60, 2));
+      await g0.moveTo(Offset(bar.left + bar.width / 2, bar.center.dy));
       await tester.pump();
-      expect(boxText(tester, 'uosc-time'), '12:00', reason: 'follows the drag');
-      await g.moveTo(Offset(bar.left + bar.width * 3 / 4, bar.center.dy));
-      await g.up();
-      expect(seeks, [m(12), m(18), m(18)]);
+      expect(painter(tester).elapsed, uoscClock(seeks.last, m(24)), reason: 'follows the drag');
+      await g0.moveTo(Offset(bar.left + bar.width * 3 / 4, bar.center.dy));
+      await g0.up();
+      await tester.pump();
+      expect(seeks, hasLength(3), reason: 'release at the last move: no repeat');
+      expect(painter(tester).played, moreOrLessEquals(seeks.last.inMilliseconds / m(24).inMilliseconds, epsilon: 0.01),
+          reason: 'shows the target until the position catches up');
+      await tester.pump(const Duration(seconds: 3));
+      expect(painter(tester).played, 1 / 24, reason: 'never confirmed: back to the position');
     });
   });
 
@@ -245,7 +269,9 @@ void main() {
       await mouse.moveTo(const Offset(420, 220));
       await tester.pump();
       expect(buttonsOpacity(tester), 1);
-      expect(tester.getRect(find.byKey(const ValueKey('uosc-timeline'))).height, UoscTimeline.height);
+      await tester.pump(UoscTimeline.animation);
+      expect(tester.getRect(find.byKey(const ValueKey('uosc-timeline'))).height, UoscTimeline.height,
+          reason: 'grown back (animated)');
     });
 
     testWidgets('a long drag keeps the controls up', (tester) async {
@@ -341,9 +367,52 @@ void main() {
       await tester.sendEventToBinding(PointerScrollEvent(
           kind: PointerDeviceKind.mouse,
           position: tester.getCenter(find.byKey(const ValueKey('uosc-volume'))),
-          scrollDelta: const Offset(0, -20)));
+          scrollDelta: const Offset(0, -60)));
       await tester.pump();
-      expect(got, [0, 80, 85]);
+      expect(got, [0, 80, 85], reason: 'a notch is one step');
+      for (var i = 0; i < 3; i++) {
+        await tester.sendEventToBinding(PointerScrollEvent(
+            kind: PointerDeviceKind.mouse,
+            position: tester.getCenter(find.byKey(const ValueKey('uosc-volume'))),
+            scrollDelta: const Offset(0, 20)));
+      }
+      await tester.pump();
+      expect(got, [0, 80, 85, 80], reason: 'smooth deltas add up to a step');
+    });
+  });
+
+  group('volume wheel', () {
+    testWidgets('anywhere: vertical steps; lists scroll instead; sideways is nothing', (tester) async {
+      final steps = <int>[];
+      final list = ScrollController();
+      addTearDown(list.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: VolumeWheel(
+          onStep: steps.add,
+          child: Stack(children: [
+            const Positioned.fill(child: ColoredBox(color: Colors.black)),
+            Positioned(
+              right: 0,
+              top: 0,
+              width: 200,
+              height: 200,
+              child: ListView(controller: list, children: [for (var i = 0; i < 50; i++) Text('row $i')]),
+            ),
+          ]),
+        ),
+      ));
+      Future<void> wheel(Offset at, Offset delta) =>
+          tester.sendEventToBinding(PointerScrollEvent(kind: PointerDeviceKind.mouse, position: at, scrollDelta: delta));
+      await wheel(const Offset(100, 400), const Offset(0, -60));
+      await wheel(const Offset(100, 400), const Offset(0, 60));
+      expect(steps, [1, -1], reason: 'up louder, down quieter');
+      await wheel(const Offset(100, 400), const Offset(60, 0));
+      await wheel(const Offset(100, 400), const Offset(60, -10));
+      expect(steps, [1, -1], reason: 'sideways');
+      await wheel(const Offset(700, 100), const Offset(0, 60));
+      await tester.pump();
+      expect(steps, [1, -1], reason: 'the list took it');
+      expect(list.offset, greaterThan(0));
     });
   });
 

@@ -10,8 +10,8 @@ import '../controls_probe.dart' show ControlsHold;
 // bottom with a row of flat buttons above it, the title top left and a
 // corner widget top right.
 // Mouse movement shows them; after [UoscControls.hideAfter] without any
-// they fade out, the timeline shrinks to a 2 px line (gone when "Progress
-// line when hidden" is off) and the cursor hides. Our own frame: no
+// they fade out, the timeline shrinks to uosc's progress line (gone when
+// "Progress line when hidden" is off) and the cursor hides. Our own frame: no
 // media_kit controls state to reach into.
 
 class UoscControls extends StatefulWidget {

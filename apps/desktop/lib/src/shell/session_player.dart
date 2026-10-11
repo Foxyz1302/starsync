@@ -14,6 +14,7 @@ import '../controls/player_settings.dart';
 import '../controls/uosc/buttons.dart';
 import '../controls/uosc/controls.dart';
 import '../controls/uosc/timeline.dart';
+import '../controls/uosc/volume_flash.dart';
 import '../controls/volume.dart';
 import '../queue/queue_ui.dart';
 import '../playback/media_marks.dart' show SkipKind, SkipOffer, formatClock;
@@ -109,6 +110,8 @@ class _SessionPlayerState extends State<SessionPlayer> {
   // The mouse on a floating element, or the Up next popover open, keeps
   // the controls up.
   final _hold = ControlsHold();
+  // Ticks on each wheel / key volume step: flashes the volume readout.
+  final _volumeFlash = ValueNotifier(0);
   late final void Function() _stopPopoverWatch;
 
   SessionCoordinator get _coord => SessionState.instance.coordinator;
@@ -143,6 +146,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
     _noFocus.dispose();
     _controlsShown.dispose();
     _hold.dispose();
+    _volumeFlash.dispose();
     super.dispose();
   }
 
@@ -161,6 +165,14 @@ class _SessionPlayerState extends State<SessionPlayer> {
   /// Menu, Ctrl+0..6: saved as the choice (also used on the next join)
   /// and applied live. A null quality keeps the saved one.
   void _pickShader(ShaderPreset preset, ShaderQuality? quality) => applyShaderChoice(preset, quality);
+
+  /// One volume step up (+1) or down (-1), from the wheel or ↑ / ↓;
+  /// flashes the design's volume readout.
+  void _stepVolume(int step) {
+    final player = _coord.playback.player;
+    player.setVolume(stepVolume(player.state.volume, step * volumeStep));
+    _volumeFlash.value++;
+  }
 
   void _toggleChat() {
     _coord.markInput();
@@ -239,8 +251,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
       return true;
     }
     if (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.arrowDown) {
-      final player = coord.playback.player;
-      player.setVolume(stepVolume(player.state.volume, key == LogicalKeyboardKey.arrowUp ? 5 : -5));
+      _stepVolume(key == LogicalKeyboardKey.arrowUp ? 1 : -1);
       return true;
     }
     if (key == LogicalKeyboardKey.arrowRight) {
@@ -296,21 +307,28 @@ class _SessionPlayerState extends State<SessionPlayer> {
           }
           final VideoControlsBuilder? controls = _full ? _sessionControls : null;
           final video = widget.videoBuilder?.call(context, controls) ?? _video(controls);
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              video,
-              if (_full) ...[
-                _progressLine(),
-                _blockedCard(),
-                _actionArea(),
-                if (widget.fullscreen) ...[if (!SessionState.instance.solo.value) _pausedParty(), _unreadChip()],
-              ] else
-                _miniOverlay(),
-              // Sitting out: nothing is loaded; the card covers the
-              // empty player (which stays mounted for joining back).
-              if (_coord.selfOut.value) _sitOut(),
-            ],
+          // The wheel anywhere on the full player steps the volume
+          // (lists, menus and popovers under the mouse scroll instead).
+          return VolumeWheel(
+            enabled: _full,
+            onStep: _stepVolume,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                video,
+                if (_full) ...[
+                  _progressLine(),
+                  _blockedCard(),
+                  _actionArea(),
+                  if (widget.fullscreen) ...[if (!SessionState.instance.solo.value) _pausedParty(), _unreadChip()],
+                  _volumeReadout(),
+                ] else
+                  _miniOverlay(),
+                // Sitting out: nothing is loaded; the card covers the
+                // empty player (which stays mounted for joining back).
+                if (_coord.selfOut.value) _sitOut(),
+              ],
+            ),
           );
         }),
       ),
@@ -697,6 +715,60 @@ class _SessionPlayerState extends State<SessionPlayer> {
   static double _bottomControlsHeight(bool uosc) => uosc
       ? UoscControls.buttonRowHeight + UoscControls.rowBottomPadding + UoscTimeline.height
       : _barHeight + ChapterSeekBar.height;
+
+  /// The volume flash after a wheel or key step, in the design in use:
+  /// uosc's vertical slider at the right edge (centred between the top
+  /// buttons and the bottom controls, as uosc places it), else a pill
+  /// under the top bar.
+  Widget _volumeReadout() {
+    final playback = _coord.playback;
+    Widget withVolume(Widget Function(double v) build) => StreamBuilder<double>(
+          stream: playback.player.stream.volume,
+          initialData: playback.player.state.volume,
+          builder: (context, v) => build(v.data ?? 100),
+        );
+    return SignalBuilder(builder: (context) {
+      if (AppSettings.instance.mpvControls.value) {
+        const top = 12 + UoscControls.buttonRowHeight;
+        final bottom = _bottomControlsHeight(true);
+        return Positioned(
+          right: UoscVolumeSlider.width / 2,
+          top: top,
+          bottom: bottom,
+          width: UoscVolumeSlider.width,
+          child: LayoutBuilder(builder: (context, c) {
+            final h = UoscVolumeSlider.heightFor(c.maxHeight);
+            if (h <= UoscVolumeSlider.width) return const SizedBox.shrink();
+            return Align(
+              // Centred with the mute button's room below, like uosc.
+              alignment: Alignment.center,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: UoscVolumeSlider.width),
+                child: SizedBox(
+                  height: h,
+                  child: VolumeFlash(
+                    trigger: _volumeFlash,
+                    builder: (context) => withVolume((v) => UoscVolumeSlider(volume: v)),
+                  ),
+                ),
+              ),
+            );
+          }),
+        );
+      }
+      return Positioned(
+        left: 0,
+        right: 0,
+        top: _topBarHeight + 8,
+        child: Center(
+          child: VolumeFlash(
+            trigger: _volumeFlash,
+            builder: (context) => withVolume((v) => VolumeReadout(volume: v)),
+          ),
+        ),
+      );
+    });
+  }
 
   /// The action area: one band above the bottom controls for everything
   /// that floats there. The status pill (the ready prompt among it)

@@ -1,4 +1,3 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart' show JellyfinStreamType;
@@ -168,7 +167,7 @@ class _UoscBadgeButtonState extends State<UoscBadgeButton> {
 }
 
 /// Volume: click mutes / unmutes, hovering shows a [VolumeBar] up to
-/// [maxVolume], the wheel steps 5 %.
+/// [maxVolume], the wheel steps [volumeStep].
 class UoscVolumeButton extends StatefulWidget {
   /// 0..[maxVolume].
   final double volume;
@@ -180,6 +179,7 @@ class UoscVolumeButton extends StatefulWidget {
 }
 
 class _UoscVolumeButtonState extends State<UoscVolumeButton> {
+  final _steps = WheelSteps();
   double _beforeMute = 100;
   bool _hover = false;
 
@@ -191,11 +191,8 @@ class _UoscVolumeButtonState extends State<UoscVolumeButton> {
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: Listener(
-        onPointerSignal: (e) {
-          if (e is PointerScrollEvent && e.scrollDelta.dy != 0) {
-            widget.onChanged(stepVolume(v, e.scrollDelta.dy < 0 ? 5 : -5));
-          }
-        },
+        // Claimed here, so the player's own wheel handler skips it.
+        onPointerSignal: (e) => _steps.handle(e, (step) => widget.onChanged(stepVolume(v, step * volumeStep))),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [

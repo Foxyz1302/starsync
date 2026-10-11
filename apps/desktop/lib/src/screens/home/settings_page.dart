@@ -12,7 +12,7 @@ import 'update_indicator.dart';
 const sessionShortcuts = [
   ('Space', 'Toggle ready'),
   ('← / →', 'Seek back / forward 10 s'),
-  ('↑ / ↓', 'Volume up / down (up to 150 %)'),
+  ('↑ / ↓, wheel', 'Volume up / down (up to 150 %)'),
   ('Shift+→', 'Skip 1:30 (for everyone)'),
   ('PgUp / PgDn', 'Previous / next chapter'),
   ('F', 'Toggle fullscreen'),

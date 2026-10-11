@@ -4,9 +4,7 @@ import 'package:flutter/material.dart';
 // owner runs it: flat black panels, white icons, a muted blue fill.
 
 abstract final class UoscStyle {
-  /// Timeline background and the boxes on it.
-  static const bar = Color(0xCC000000);
-  /// Played part of the timeline; also the active menu row.
+  /// The active menu row.
   static const fill = Color(0xFF4C6A8E);
   /// Menus and tooltips.
   static const panel = Color(0xF0101010);
@@ -51,8 +49,8 @@ class UoscTooltip extends StatelessWidget {
   }
 }
 
-/// A small dark box with one line of text (the timeline's times, the
-/// hover chapter title).
+/// A small dark box with one line of text (the timeline's hover time and
+/// chapter title).
 class UoscBox extends StatelessWidget {
   final String text;
   final Color color;
