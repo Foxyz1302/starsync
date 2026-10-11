@@ -25,8 +25,9 @@ Response _plain(int status) => Response(status, body: Body.fromString('status $s
 
 /// `GET /j/<sid>/<token>/<itemId>`: relays byte ranges of the current
 /// Jellyfin media from [credential]'s server to a viewer, for guests without
-/// their own access. Only the active ref's item on the credential's server,
-/// only for a valid viewer token: no open proxy. Range goes up as sent;
+/// their own access. Only the active ref's item, or Up next's first one
+/// ([next], so viewers can get it ready), on the credential's server, only
+/// for a valid viewer token: no open proxy. Range goes up as sent;
 /// status, Content-Range, Content-Length, Content-Type and Accept-Ranges
 /// come back as Jellyfin sent them (a 401/403 from Jellyfin is the server's
 /// credential failing, so the viewer gets 502). Bytes stream through without
@@ -39,6 +40,7 @@ void mountJellyfinRelayRoute(
   SessionMap sessions,
   JellyfinCredential? Function() credential,
   HttpClient Function() client, {
+  JellyfinRef? Function()? next,
   String pattern = '/j/:sid/:token/:itemId',
   void Function(String token, MediaLog log)? onLog,
   Duration timeout = const Duration(seconds: 20),
@@ -56,12 +58,14 @@ void mountJellyfinRelayRoute(
       default:
         return _plain(401);
     }
-    final ref = session.media?.jellyfin;
     final cred = credential();
-    if (ref == null || cred == null || cred.serverId.isEmpty || cred.serverId != ref.serverId) {
-      return _plain(404);
-    }
-    if (!_sameItemId(itemId, ref.itemId)) return _plain(403);
+    if (cred == null || cred.serverId.isEmpty) return _plain(404);
+    JellyfinRef? onLogin(JellyfinRef? r) => r != null && cred.serverId == r.serverId ? r : null;
+    final current = onLogin(session.media?.jellyfin);
+    final upNext = onLogin(next?.call());
+    if (current == null && upNext == null) return _plain(404);
+    final ref = [current, upNext].firstWhere((r) => r != null && _sameItemId(itemId, r.itemId), orElse: () => null);
+    if (ref == null) return _plain(403);
 
     final range = req.headers['range']?.join(',');
     final HttpClientRequest upReq;

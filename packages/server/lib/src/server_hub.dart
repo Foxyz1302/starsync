@@ -30,8 +30,16 @@ class ServerHub {
       : engine = engine ?? SyncEngine();
 
   /// The current media is a Jellyfin ref on the server [jellyfin] logs in to.
-  bool get relayAvailable {
-    final ref = session.media?.jellyfin;
+  bool get relayAvailable => _onLogin(session.media?.jellyfin);
+
+  /// Up next's first item is a Jellyfin ref on that server: `/j` serves it
+  /// too, so viewers without access get it ready.
+  bool get relayNextAvailable => _onLogin(nextJellyfinRef);
+
+  /// Up next's first item's Jellyfin ref (null: none, or not a ref).
+  JellyfinRef? get nextJellyfinRef => engine.queue.items.firstOrNull?.media.jellyfin;
+
+  bool _onLogin(JellyfinRef? ref) {
     final cred = jellyfin;
     return ref != null && cred != null && cred.serverId.isNotEmpty && cred.serverId == ref.serverId;
   }
@@ -53,7 +61,7 @@ class ServerHub {
         : '$head: $why';
   }
 
-  StateBroadcast stateBroadcast() => engine.broadcast(relay: relayAvailable);
+  StateBroadcast stateBroadcast() => engine.broadcast(relay: relayAvailable, relayNext: relayNextAvailable);
 
   /// The relay of the current media (`/r/...`), if it is relayed.
   ActiveRelay? relay;

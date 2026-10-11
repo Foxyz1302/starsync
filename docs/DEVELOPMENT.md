@@ -39,7 +39,9 @@ the dedicated binary. Prints `READY port=... name=...` and stops on SIGINT
 or SIGTERM. Then Join from one or more apps at `127.0.0.1:8080`. Or just
 Host from the app. mpv env override:
 `SYNC_RELAY_HWDEC` (wins over the Settings choice). `SYNC_RELAY_VO` has no
-effect with embedded video: media_kit forces `vo=libmpv`.
+effect with embedded video: media_kit forces `vo=libmpv`. `SYNC_RELAY_PRELOAD=0`
+turns Up next's preload player off; `SYNC_RELAY_TRACE_SWITCH=1` prints
+the timings of each media change (`SwitchTrace`).
 
 Harnesses in `tool/` (own `pubspec.yaml`, `dart run tool/<name>.dart`):
 `range_logger` (serve a file and log every Range request), `shaper`
@@ -52,7 +54,10 @@ and `e2e_check` (simulated viewers against a live server).
 - `cd apps/desktop && flutter test test/<file>`.
 - Real-mpv tests: `sync_playback_e2e`, `coord_presence`, `video_reload_e2e`,
   `seek_drag_e2e`, `end_of_file_e2e`, `readahead_e2e`, `jellyfin_e2e` (a
-  local fake Jellyfin over HTTP; tests never talk to a real Jellyfin). The sync and
+  local fake Jellyfin over HTTP; tests never talk to a real Jellyfin),
+  `queue_switch_e2e` (times Up next switches against a delayed, rate-capped
+  fake Jellyfin and link host; `WT_SWITCH_PRELOAD=0` for the cold path,
+  `WT_SWITCH_DELAY_MS` / `WT_SWITCH_RATE_KBS` for the link). The sync and
   end-of-file ones expect `~/Videos/chiyo.mp4`; others generate media with
   ffmpeg into `WT_TEST_TMP`. Headless mpv (no video output attached) won't
   open video-only files, so test media needs an audio track. Tests always log

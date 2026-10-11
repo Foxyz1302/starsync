@@ -711,6 +711,10 @@ class StateBroadcast {
   /// The server can relay the current Jellyfin media (`/j/...`) for viewers
   /// without their own access to it.
   final bool relay;
+  /// The server can relay Up next's first item the same way (it is a
+  /// Jellyfin ref on the server's login), so viewers without access get
+  /// it ready before it goes up.
+  final bool relayNext;
   /// Up next, in order (see `QueueItem`); empty when nothing is queued.
   final List<QueueItem> queue;
   /// The queued item someone asked to play now, waiting for the member
@@ -727,6 +731,7 @@ class StateBroadcast {
     this.seekBy,
     this.seekSeq,
     this.relay = false,
+    this.relayNext = false,
     this.queue = const [],
     this.queuePlay,
   });
@@ -743,6 +748,7 @@ class StateBroadcast {
         if (seekBy != null) 'seekBy': seekBy,
         if (seekSeq != null) 'seekSeq': seekSeq,
         if (relay) 'relay': true,
+        if (relayNext) 'relayNext': true,
         if (queue.isNotEmpty) 'queue': [for (final q in queue) q.toJson()],
         if (queuePlay != null) 'queuePlay': queuePlay,
       };
@@ -767,6 +773,7 @@ class StateBroadcast {
       seekBy: json['seekBy'] as String?,
       seekSeq: json['seekSeq'] == null ? null : finiteInt(json['seekSeq'], 'seekSeq'),
       relay: (json['relay'] as bool?) ?? false,
+      relayNext: json['relayNext'] == true,
       queue: json['queue'] is List
           ? (json['queue'] as List).map(QueueItem.fromJson).whereType<QueueItem>().toList()
           : const [],

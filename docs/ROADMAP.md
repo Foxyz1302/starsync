@@ -56,6 +56,25 @@ off by deleting it in the same commit as the code. Wire changes also edit
      over instead of the buffer running dry.
    - "Bob can't open this link — relay it?": offer the relay to whoever put
      a direct link up when a viewer's player fails to open it.
+   - Preload relayed Up next items (see ARCHITECTURE "Getting ready"):
+     today a link passed on "through me", another member's file, a
+     server-fetched link and the host's own file are opened cold by
+     everyone but their source when they go up (their relay or `/m`
+     starts with the swap), so the gate waits for the slowest open. Plan
+     (wire change): the server holds a second, small relay for Up next's
+     first item, keyed by its queue id. Its adder's app dials a second
+     source for it as soon as it is first (`/r/.../source` naming the
+     queue id); a server-fetched item starts its fetch then;
+     `state.queue[0].relay` (`live`, `tracks`) tells viewers when and
+     how to open `/r/<sid>/<token>/q/<queueId>/<name>` in their preload
+     player. The buffer keeps only the head and tail pins plus about
+     32 MiB ahead of the viewers until the swap, pulls nothing while
+     nobody preloads, and is dropped when the item stops being first. A
+     swap with `queueId` turns it into the media's relay (same buffer;
+     the `q/` URL keeps working for that media, so the preloads match
+     and are promoted). The host's file: the hosting app hands the
+     server the first item's path early and `/m` serves it under a
+     `next/` name until the swap.
 
 8. **Jellyfin** (epic, below).
 

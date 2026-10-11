@@ -34,7 +34,7 @@ class UpNextCountdown {
   const UpNextCountdown({required this.mediaId, required this.item, this.secondsLeft});
 }
 
-/// The first item's readiness, on the app that puts it up.
+/// The first item's readiness on this app.
 enum WarmState { idle, warming, ready, failed }
 
 class QueueController {
@@ -51,8 +51,8 @@ class QueueController {
 
   final countdown = signal<UpNextCountdown?>(null);
 
-  /// The first item's id and how ready it is here (only on the app that
-  /// puts it up; null elsewhere).
+  /// The first item's id and how ready it is here (null: nothing to get
+  /// ready on this app).
   final warm = signal<({String id, WarmState state})?>(null);
 
   /// The natural continuation of what plays: the next episodes of the
@@ -88,9 +88,12 @@ class QueueController {
       final plan = coord.jellyfinPlan.value;
       unawaited(_loadContinuation(next, plan));
     });
-    // The continuation and the state decide what to get ready.
+    // The continuation and the state decide what to get ready; the media
+    // playing having started (or sitting out) lets the preload go.
     effect(() {
       shownContinuation.value;
+      coord.settledMediaId.value;
+      coord.selfOut.value;
       final r = coord.serverState.value;
       untracked(() => _warm(r));
     });
@@ -326,6 +329,7 @@ class QueueController {
   // --------------------------------------------------------- per state
 
   void _onState(StateBroadcast r) {
+    _lastState = r;
     _prune(r);
     final queue = r.queue;
     final play = r.queuePlay;
@@ -490,58 +494,98 @@ class QueueController {
   String? _warmUrl;
   Timer? _warmTimer;
   int _warmGen = 0;
+  // What the preload player should hold once the media playing has
+  // started (null: nothing); [_preloadFresh]: open it again (a link's
+  // refresh).
+  ({String url, Map<String, String>? headers})? _preloadWant;
+  bool _preloadFresh = false;
+  String _preloadKey = '';
+  bool _preloadBusy = false;
+  bool _preloadOk = true;
+  int _preloadGen = 0;
+  StateBroadcast? _lastState;
 
-  /// What this app gets ready: Up next's first item when it is the one
-  /// that puts it up; with Up next empty, the first continuation episode
-  /// (only here when this app plays the series with its own account, and
-  /// its ▶ puts it up from here). Null: nothing.
-  ({String id, String? url, JellyfinRef? ref})? _warmTarget(StateBroadcast? r) {
+  bool _ownAccount(String serverId) =>
+      coord.jellyfin.account(serverId) != null && coord.jellyfin.statusOf(serverId) != JellyfinAccountStatus.expired;
+
+  /// What this app gets ready: Up next's first item, else (Up next empty)
+  /// the first continuation episode (only here when this app plays the
+  /// series with its own account). Every app does, each its own copy (see
+  /// [_WarmTarget]); while sitting out only the probe of a link this app
+  /// puts up (its swap reads it). Null: nothing.
+  _WarmTarget? _warmTarget(StateBroadcast? r) {
+    final t = _warmTargetHere(r);
+    if (t == null || !coord.selfOut.peek()) return t;
+    return t.probe == null ? null : _WarmTarget(t.id, probe: t.probe);
+  }
+
+  _WarmTarget? _warmTargetHere(StateBroadcast? r) {
     if (r == null) return null;
     final head = r.queue.firstOrNull;
     if (head != null) {
-      if (queuePerformer(head, r.members).id != _me) return null;
+      final performer = queuePerformer(head, r.members).id == _me;
       final local = _local[head.key]?.pick;
-      return switch (head.how) {
-        QueueHow.direct => (id: head.id, url: head.media.url, ref: null),
-        QueueHow.through => (id: head.id, url: local is LinkMedia ? local.url : null, ref: null),
-        QueueHow.jellyfin => (id: head.id, url: null, ref: head.media.jellyfin),
-        QueueHow.file || QueueHow.server => (id: head.id, url: null, ref: null),
-      };
+      switch (head.how) {
+        case QueueHow.jellyfin:
+          final ref = head.media.jellyfin;
+          if (ref == null) return null;
+          if (_ownAccount(ref.serverId)) return _WarmTarget(head.id, ref: ref);
+          // No account here: the server's login passes it on (`/j`).
+          final relay = r.relayNext ? coord.jellyfinRelayUrl(ref) : null;
+          return relay == null ? null : _WarmTarget(head.id, open: relay);
+        case QueueHow.direct:
+          final url = head.media.url;
+          if (url == null) return null;
+          return _WarmTarget(head.id, probe: performer ? url : null, open: url);
+        case QueueHow.through:
+          // Only its adder has the link; the others' relay starts with the swap.
+          if (!performer) return null;
+          final url = local is LinkMedia ? local.url : null;
+          return _WarmTarget(head.id, probe: url, open: url);
+        case QueueHow.file:
+          if (!performer) return null;
+          // The host's own file plays from its `/m` URL once it is up.
+          return _WarmTarget(head.id, open: local is FileMedia && coord.hostFile == null ? local.path : null);
+        case QueueHow.server:
+          return performer ? _WarmTarget(head.id) : null;
+      }
     }
     final next = shownContinuation.peek().firstOrNull;
     if (next == null) return null;
-    return (id: 'next:${next.item.id}', url: null, ref: mediaForPick(next.pick).jellyfin);
+    return _WarmTarget('next:${next.item.id}', ref: mediaForPick(next.pick).jellyfin);
   }
 
-  /// Keeps the one item this app puts up next ready, so a skip or the end
-  /// of what plays starts it at once: a link probed (`AppYtDlp.probe`,
-  /// kept while it stays first), a Jellyfin item resolved with this app's
-  /// account ([SessionCoordinator.warmJellyfin]). Done as soon as it is
-  /// first here, again before that runs out, dropped when it is no longer
-  /// first. A file or a link the server fetches has nothing to get ready.
+  /// Keeps the one item that plays next ready on this app, so a skip or
+  /// the end of what plays starts it at once: a link probed when this app
+  /// puts it up (`AppYtDlp.probe`, kept while it stays first), a Jellyfin
+  /// item resolved with this app's account
+  /// ([SessionCoordinator.warmJellyfin]), and then opened in the hidden
+  /// preload player ([SessionCoordinator.preloadMedia]) once the media
+  /// playing has started. Done as soon as it is first, again before that
+  /// runs out, dropped when it is no longer first.
   void _warm(StateBroadcast? r) {
     final t = _warmTarget(r);
-    final ref = t?.ref;
-    final key = t == null ? '' : '${t.id}|${t.url}|${ref?.serverId}/${ref?.itemId}/${ref?.mediaSourceId}';
-    if (key == _warmKey) return;
-    _dropWarm(r);
-    _warmKey = key;
-    if (t == null) {
-      if (warm.peek() != null) warm.value = null;
-      return;
+    final key = t?.key ?? '';
+    if (key != _warmKey) {
+      _dropWarm(r);
+      _warmKey = key;
+      if (t == null) {
+        if (warm.peek() != null) warm.value = null;
+      } else if (t.empty) {
+        warm.value = (id: t.id, state: WarmState.ready);
+      } else {
+        warm.value = (id: t.id, state: WarmState.warming);
+        _resolveWarm(t, fresh: false);
+      }
     }
-    if (t.url == null && ref == null) {
-      warm.value = (id: t.id, state: WarmState.ready);
-      return;
-    }
-    warm.value = (id: t.id, state: WarmState.warming);
-    _resolveWarm(t, fresh: false);
+    _syncPreload(r);
   }
 
   void _dropWarm(StateBroadcast? r) {
     _warmTimer?.cancel();
     _warmTimer = null;
     _warmGen++;
+    _preloadWant = null;
     final url = _warmUrl;
     _warmUrl = null;
     if (url != null) coord.ytDlp.release(url);
@@ -550,31 +594,87 @@ class QueueController {
     if (w != null && !sameJellyfinItem(w.ref, refOfStateMedia(r?.media))) coord.warmJellyfin = null;
   }
 
-  void _resolveWarm(({String id, String? url, JellyfinRef? ref}) t, {required bool fresh}) {
+  void _resolveWarm(_WarmTarget t, {required bool fresh}) {
     final gen = ++_warmGen;
     unawaited(() async {
-      var ok = false;
+      var ok = true;
+      ({String url, Map<String, String>? headers})? open;
       try {
-        final url = t.url, ref = t.ref;
-        if (url != null) {
-          _warmUrl = url;
-          final p = await coord.ytDlp.probe(url, keep: _warmKeep, fresh: fresh).timeout(const Duration(seconds: 60));
+        final probe = t.probe, ref = t.ref, url = t.open;
+        if (probe != null) {
+          _warmUrl = probe;
+          final p = await coord.ytDlp.probe(probe, keep: _warmKeep, fresh: fresh).timeout(const Duration(seconds: 60));
           ok = p.problem == null;
-        } else if (ref != null) {
+        }
+        if (ref != null) {
           final plan = await resolveJellyfinRef(coord.jellyfin, ref, relay: false, relayUrl: null);
           if (gen != _warmGen) return;
+          ok = plan is OwnPlay;
           if (plan is OwnPlay) {
             coord.warmJellyfin = (ref: ref, plan: plan, until: DateTime.now().add(_warmKeep));
-            ok = true;
+            open = (url: plan.url, headers: plan.headers);
           }
+        } else if (url != null && ok) {
+          open = (url: url, headers: null);
         }
       } catch (e) {
+        ok = false;
         debugPrint('queue: getting ${t.id} ready: $e');
       }
       if (gen != _warmGen) return;
-      warm.value = (id: t.id, state: ok ? WarmState.ready : WarmState.failed);
+      _preloadWant = ok ? open : null;
+      // A refresh opens a link again (a page's stream URLs expire); the
+      // same Jellyfin stream stays as it is.
+      _preloadFresh = fresh && ok && t.ref == null && open != null;
+      final waits = ok && open != null && coord.playback.preloadEnabled;
+      warm.value = (id: t.id, state: !ok ? WarmState.failed : (waits ? WarmState.warming : WarmState.ready));
+      _syncPreload(coord.serverState.peek());
       _warmTimer = Timer(ok ? _warmRefresh : _warmRetry, () => _resolveWarm(t, fresh: true));
     }());
+  }
+
+  /// Puts [_preloadWant] in the preload player, or drops what it holds;
+  /// only once the media playing has started (its own open goes first,
+  /// and a preload a swap is about to take is never replaced before), at
+  /// once while sitting out (nothing preloads then).
+  void _syncPreload(StateBroadcast? r) {
+    // The newest state seen here: the coordinator's lags behind while the
+    // same `state` is still being handed to it.
+    final seen = _lastState;
+    if (r == null || (seen != null && seen.mediaId > r.mediaId)) r = seen;
+    if (r == null) return;
+    final out = coord.selfOut.peek();
+    if (!out && r.media != null && coord.settledMediaId.peek() != r.mediaId) return;
+    final want = out ? null : _preloadWant;
+    final playback = coord.playback;
+    if (want == null) {
+      _preloadKey = '';
+      _preloadGen++;
+      if (playback.preloadUrl != null) unawaited(playback.dropPreload());
+      return;
+    }
+    if (!playback.preloadEnabled) return;
+    final key = '${want.url}|${want.headers}';
+    final fresh = _preloadFresh;
+    // Asked for already: in flight, there, or failed (tried again with the
+    // next refresh). One that went away (Reload video) is asked again.
+    if (!fresh && key == _preloadKey && (_preloadBusy || !_preloadOk || playback.preloadUrl == want.url)) return;
+    _preloadFresh = false;
+    _preloadKey = key;
+    _preloadBusy = true;
+    final gen = ++_preloadGen;
+    final id = warm.peek()?.id;
+    unawaited(coord.preloadMedia(want.url, headers: want.headers, fresh: fresh).then((ok) {
+      if (gen != _preloadGen) return;
+      _preloadBusy = false;
+      _preloadOk = ok;
+      // A preload that fails leaves the usual open: nothing to say.
+      if (!ok) debugPrint('queue: preload of $id failed');
+      final w = warm.peek();
+      if (w != null && w.id == id && w.state == WarmState.warming) {
+        warm.value = (id: w.id, state: WarmState.ready);
+      }
+    }));
   }
 
   // -------------------------------------------------------- continuation
@@ -609,4 +709,19 @@ class QueueController {
       debugPrint('queue: continuation of $seriesId: $e');
     }
   }
+}
+
+/// What [QueueController] gets ready for one item on this app: [probe] a
+/// link (the app that puts it up), resolve [ref] with this app's own
+/// account, and preload [open] (or the resolved stream). None of it:
+/// nothing to do here, and it is ready ([empty]).
+class _WarmTarget {
+  final String id;
+  final String? probe;
+  final JellyfinRef? ref;
+  final String? open;
+  const _WarmTarget(this.id, {this.probe, this.ref, this.open});
+
+  bool get empty => probe == null && ref == null && open == null;
+  String get key => '$id|$probe|$open|${ref?.serverId}/${ref?.itemId}/${ref?.mediaSourceId}';
 }

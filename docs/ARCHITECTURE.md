@@ -103,6 +103,9 @@ Loosely modeled on Syncplay, with a different readiness design.
   media still resolving, being fetched by the server or opening), and the
   server counts a report naming an earlier `mediaId` as 0, so the old
   media's buffer never passes the gate for the new one.
+  Besides the 1 s tick, a report goes out right after a new media is
+  open and, while HELD, the moment the buffer reaches `need`, so the gate
+  does not wait for the next tick.
 - **Ready gate** (HELD to PLAYING): the in-set is non-empty and every
   in-set member is ready, fresh and has `buffered >= need`. `need` is 4 s
   (`minBufferSecs`), or near the end what is left minus 2 s
@@ -277,8 +280,9 @@ or a 5xx is retried, at most 3 times per read and 4 s apart at most; a
 fatal "No video or audio streams selected", or an EDL track that cannot
 be opened) before a duration is known is reported once per open
 (`onLoadError`), with ffmpeg's HTTP status when this player gets
-ffmpeg's log (ffmpeg logs through one mpv instance per process, the
-first one alive). That, a yt-dlp hook error and a failed `openUrl` become
+ffmpeg's log (ffmpeg logs through one mpv instance per process: the
+first one, and once that is disposed the next one created; the preload
+player passes the HTTP errors it gets on to the session player). That, a yt-dlp hook error and a failed `openUrl` become
 the coordinator's `playerError` in plain words (`playErrorText`, core
 `link_probe.dart`: 412/precondition/login/cookies/sign in → "This site
 needs cookies — Settings → Player → yt-dlp → Cookies", 403 → "Not allowed
@@ -336,14 +340,16 @@ can silently fall back to software.
 
 Player lifecycle: the `Player` and its `VideoController` live for one
 session: created on join, disposed on leave, replaced by `recreate()` for
-"Reload video" (button or Ctrl+R; volume kept). `openUrl` opens with `play: false`; play/pause/seek/rate come only from
+"Reload video" (button or Ctrl+R; volume kept), or by a promoted preload
+when Up next's first item goes up (see "Getting ready" under "Up next"). `openUrl` opens with `play: false`; play/pause/seek/rate come only from
 `StateDiff` actions, the play gate (`localPlayAllowed`: self in-set and
 ready) or the user's own seeks (see Sync model). A server seek within 0.5 s of the current position is skipped. `leave()`
 stops the player (otherwise audio keeps playing). On media change
 (`mediaId` bump) the coordinator stops the previous media at once (no old
 picture or sound while the new one resolves, is fetched or opens; a
 reconnect to the media the player holds keeps it), then opens the new URL
-and `StateDiff` seeks to 0, holds and resets rate.
+(or promotes the preload holding it) and `StateDiff` seeks to 0, holds
+and resets rate.
 
 Chapters, segments, tracks (`PlaybackController` signals, values from
 `playback/media_marks.dart`, no widgets; any controls UI reads them):
@@ -436,8 +442,10 @@ relay stays off. The token is never logged (`toString` and config parse
 errors leave it out).
 
 - Available (`state.relay`) only while the current media is a ref whose
-  `serverId` equals the credential's. Only that item is relayed, only to a
-  valid viewer token: no open proxy.
+  `serverId` equals the credential's; `state.relayNext` likewise for Up
+  next's first item, which `/j` also serves so guests can preload it
+  (see "Getting ready" under "Up next"). Only those two items are
+  relayed, only to a valid viewer token: no open proxy.
 - Each request opens `/Videos/{id}/stream?static=true&mediaSourceId=` with
   `Authorization: MediaBrowser` built from exactly the configured fields
   (Jellyfin rewrites a token's device fields from the header), forwards
@@ -873,23 +881,64 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   with the reason. A swap without `queueId` (a manual one) leaves the
   queue alone. A member who puts its own link or file up while sitting
   out comes back first; any other queued swap leaves the swapper out.
-- **Getting ready** (`QueueController._warm`): the one item this app
-  puts up next is kept ready all the time, so a skip, Play now or the
-  end of the media starts it at once. That is the first Up next item on
-  the app that puts it up (`queuePerformer`), else, with Up next empty,
-  the first "Continues with" episode on an app that has it. It is
-  resolved as soon as it is first there (or this app becomes the one),
-  again every 30 minutes, and dropped when it stops being first: a link
-  is probed (`AppYtDlp.probe` with `keep`: the result stays 35 minutes
-  instead of 10 and a refresh replaces it only once it is in; swaps read
-  it from there); a Jellyfin item is resolved with this app's account
+- **Getting ready** (`QueueController._warm`): every app keeps the one
+  item that plays next ready all the time, its own copy, so a skip, Play
+  now or the end of the media starts it at once. That is the first Up
+  next item, else, with Up next empty, the first "Continues with"
+  episode (on the apps that have it); while sitting out only the probe
+  of a link this app puts up (its swap reads it). Per
+  kind: a Jellyfin item is resolved with this app's account
   (`resolveJellyfinRef`: PlaybackInfo and the item) into
   `SessionCoordinator.warmJellyfin`, which `_playJellyfin` takes instead
-  of resolving when the same ref goes up within those 35 minutes and the
-  account is unchanged. A file or a server-fetched link has nothing to
-  get ready. One item, one app, nothing on the server. Its row shows a
-  dot on its picture's corner (a tooltip says which): hollow waiting, pulsing getting ready, filled ready, red failed
-  (tried again every 2 minutes).
+  of resolving when the same ref goes up within 35 minutes and the
+  account is unchanged; without an account it is the server's `/j` URL
+  when `state.relayNext` says the server's login passes it on (see
+  "Jellyfin relay"). A link everyone opens is that link; the app that
+  puts it up also probes it (`AppYtDlp.probe` with `keep`: kept 35
+  minutes instead of 10, a refresh replaces it only once it is in; swaps
+  read it from there). A link passed on "through me" and a file only on
+  their adder's app (the link, the path; not the host's own file, which
+  plays from `/m`). A server-fetched link and others' relayed items have
+  nothing to get ready (the relay starts with the swap; see ROADMAP). It
+  is resolved as soon as it is first there, again every 30 minutes, and
+  dropped when it stops being first.
+  **Preload**: once resolved, the stream is opened in a second, hidden
+  mpv player (`PlaybackController.preload`, through
+  `SessionCoordinator.preloadMedia`): paused at the start, muted, with
+  its own video output when the session view is up (media_kit starts a
+  player with `vid=no`; the output decodes the first frame), the same
+  pins, hwdec and yt-dlp hook as the session player but a 48 MiB forward
+  and 8 MiB back cache (`preloadBytes`), mpv log at `error`. One at a
+  time; it waits until the media playing has started here
+  (`SessionCoordinator.settledMediaId`: opened, failed or nothing to
+  open), so it never competes with that open and a preload a swap is
+  about to take is never replaced first; a removed, reordered or replaced
+  first item swaps or drops it then, a manual swap to something else
+  keeps it (still next). A link is opened again at the 30-minute refresh
+  (stream URLs expire); a failed preload is not retried until then and
+  changes nothing (the usual open follows). When the coordinator opens
+  the same URL and headers (`openUrl`), the preload is promoted instead:
+  it becomes the session player (log, marks and track observers move
+  over, volume, unmute, the full cache pins, shaders), the view swaps to
+  its video output (`generation`), and the old player is disposed once
+  the view let go of its texture (as on leave). Its buffer comes along,
+  so the report sent right after the open already passes the gate: the
+  start no longer waits for anyone's open. A promoted player is no
+  longer the first mpv of the process, so ffmpeg's HTTP status reaches
+  it only when it happens to be the instance ffmpeg logs through (load
+  errors themselves are still detected; see "Media"). Off with env
+  `SYNC_RELAY_PRELOAD=0`. Measured (`queue_switch_e2e_test`, a fake
+  Jellyfin and link host answering after 120 ms at 24 Mbit/s, two
+  account holders and a `/j` guest): ⏭ to the server playing 59 to
+  86 ms for the next episode and 35 ms for a direct link, against about
+  1.5 s cold; at 300 ms and 12 Mbit/s 52 and 103 ms against about 2.9 s.
+  `SwitchTrace` (env `SYNC_RELAY_TRACE_SWITCH=1` prints it) times each
+  phase of a media change: state, resolved, open, opened or preloaded,
+  buffered, playing.
+  The row of the item shows a dot on its picture's corner (a tooltip
+  says which): hollow waiting, pulsing getting ready (resolving, then
+  preloading its first 4 s), filled ready, red failed (tried again every
+  2 minutes).
 - **Continues with**: not queued, computed here like the next episode:
   with an own-account Jellyfin episode playing, the next three episodes
   of the series (`/Shows/{id}/Episodes`, cached), greyed under Up next,

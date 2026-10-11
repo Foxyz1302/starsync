@@ -1,4 +1,4 @@
-# Protocol (proto = 12)
+# Protocol (proto = 13)
 
 Wire format only. Behavior (gate, clock, timeouts) is in
 [ARCHITECTURE.md](ARCHITECTURE.md). Source of truth:
@@ -21,7 +21,8 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
 - `GET /health` returns JSON (`ok`, `name`, `proto`, `viewers`, `bytesServed`,
   `uptimeSecs`; unauthenticated). `GET /m/<sid>/<token>/<name>`
   serves the host's file (Range table in ARCHITECTURE.md).
-  `GET /j/<sid>/<token>/<itemId>` relays the current Jellyfin media (see
+  `GET /j/<sid>/<token>/<itemId>` relays the current Jellyfin media and
+  Up next's first one (see
   "Jellyfin media" below). `/r/<sid>/<token>/...` is the relay of a
   member's media (see "Relay" below). `GET /a/<sid>/<token>/<hash>` serves
   a member's picture (see "Avatars" below), `GET /i/<sid>/<token>/<hash>`
@@ -30,7 +31,7 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
 ## Client to server
 
 ```
-{"t":"hello","proto":12,"secret":"","user":{"name":"","avatar":""},
+{"t":"hello","proto":13,"secret":"","user":{"name":"","avatar":""},
  "media":{"name":"","size":0,"duration":0,"url":null},"hostKey":"...",
  "resume":"<token>"}
 {"t":"ready","ready":true,"source":"manual"}      source: manual | auto
@@ -133,7 +134,8 @@ Field notes:
  "media":{name,size,duration,url?,jellyfin?,relay?,swapBy?,art?}|absent,
  "members":[{"id","name","avatarHash"?,"ready","inSet","buffered","stale","jf"?,
    "host"?,"out"?,"error"?,"rate"?}],
- "seekBy":"m1","seekSeq":3,"relay":true,"queue":[<item>]?,"queuePlay":"q3"?}
+ "seekBy":"m1","seekSeq":3,"relay":true,"relayNext":true,"queue":[<item>]?,
+ "queuePlay":"q3"?}
 {"t":"pong","c":1767225600000,"s":1767225600012}
 {"t":"feed","actor":"","action":"","target":"","reason":"","at":"<ISO-8601>"}
 {"t":"chat","text":"...","from":"<name>"}
@@ -159,7 +161,9 @@ Field notes:
   member left, and for the media the server started with). `media.art`:
   see "Media art". `seekBy` (member id) and `seekSeq` are present only while the current
   `eventId` came from a seek. `relay` (omitted when false): the server can
-  relay the current Jellyfin media. `members[].jf` is the member's last
+  relay the current Jellyfin media. `relayNext` (omitted when false, proto
+  13): it can relay Up next's first item too (a Jellyfin ref on the same
+  login), so viewers without access preload it from `/j`. `members[].jf` is the member's last
   `report.jf`, omitted when it never sent one. `members[].avatarHash`
   (omitted when the member has no picture) names the picture's bytes (see
   "Avatars"). `members[].host` (omitted when false): the member sent the
@@ -243,12 +247,13 @@ state   media.art = {"poster":"<hash>","banner":"<hash>"}
   without one plays the relay URL when `state.relay` is true: `welcome.relayUrl`,
   or after a swap built like the `/m` one from the host it dialled:
   `http://<host>/j/default/<token>/<itemId>`.
-- `GET /j/<sid>/<token>/<itemId>`: the server fetches
+- `GET /j/<sid>/<token>/<itemId>`: for the current item or, when
+  `state.relayNext`, Up next's first one, the server fetches
   `/Videos/<itemId>/stream?static=true&mediaSourceId=<id>` (the original
   file) with its own credential and streams it through. `Range` is forwarded
   as sent; status, `Content-Range`, `Content-Length`, `Content-Type` and
   `Accept-Ranges` come back as Jellyfin sent them. Errors: 401 bad token,
-  403 not the current item, 404 no relay for the current media,
+  403 neither of those items, 404 no relay for either,
   410 unknown session, 502 Jellyfin unreachable or rejecting the server's
   credential. Bytes count toward `bytesServed`.
 - Pasted Jellyfin links sent as plain `url` stay plain links.

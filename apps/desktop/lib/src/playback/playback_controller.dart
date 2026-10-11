@@ -3,7 +3,7 @@ import 'dart:ffi' show Int8;
 import 'dart:io';
 
 import 'package:ffi/ffi.dart' show StringUtf8Pointer, malloc;
-import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/foundation.dart' show listEquals, mapEquals;
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -82,6 +82,7 @@ class PlaybackController {
     final p = _player;
     if (p == null) return;
     try {
+      _ytdlPath = path;
       final dynamic platform = p.platform;
       if (!identical(p, _ytdlSetOn)) {
         await platform?.setProperty('script-opts', 'ytdl_hook-ytdl_path=$path');
@@ -101,6 +102,7 @@ class PlaybackController {
 
   Player? _ytdlSetOn;
   String _ytdlRaw = '';
+  String? _ytdlPath;
 
   Player get player => _player!;
 
@@ -188,16 +190,18 @@ class PlaybackController {
     return AppSettings.instance.hwdec.peek();
   }
 
+  SyncPlayer _newPlayer({required int bufferSize, required MPVLogLevel logLevel}) => SyncPlayer(
+          configuration: PlayerConfiguration(
+        bufferSize: bufferSize,
+        libass: true,
+        vo: Platform.environment['SYNC_RELAY_VO'],
+        logLevel: logLevel,
+      ))
+        ..onUserSeek = (d) => onUserSeek?.call(d);
+
   Future<void> init() async {
     if (_player != null) return;
-    _player = SyncPlayer(
-        configuration: PlayerConfiguration(
-      bufferSize: maxBytes,
-      libass: true,
-      vo: Platform.environment['SYNC_RELAY_VO'],
-      logLevel: MPVLogLevel.warn, // see [logLevel]
-    ))
-      ..onUserSeek = (d) => onUserSeek?.call(d);
+    _player = _newPlayer(bufferSize: maxBytes, logLevel: MPVLogLevel.warn); // see [logLevel]
     _shaders = '';
     renderMode.value = RenderMode.unknown;
     shaderNotice.value = null;
@@ -223,9 +227,9 @@ class PlaybackController {
     }
   }
 
-  Future<void> _pin(String property, String value) async {
+  Future<void> _pin(String property, String value, [Player? on]) async {
     try {
-      final dynamic platform = player.platform;
+      final dynamic platform = (on ?? player).platform;
       await platform?.setProperty(property, value);
       final got = '${await platform?.getProperty(property)}';
       if (!pinMatches(value, got)) {
@@ -238,17 +242,17 @@ class PlaybackController {
     }
   }
 
-  Future<void> _pinBufferProps() async {
-    pinMismatches.clear();
-    await _pin('demuxer-readahead-secs', '$readAheadSecs');
-    await _pin('cache-secs', '$readAheadSecs');
-    await _pin('demuxer-max-bytes', '$maxBytes');
-    await _pin('demuxer-max-back-bytes', '$maxBackBytes');
+  Future<void> _pinBufferProps([Player? on, int ahead = maxBytes, int back = maxBackBytes]) async {
+    if (on == null) pinMismatches.clear();
+    await _pin('demuxer-readahead-secs', '$readAheadSecs', on);
+    await _pin('cache-secs', '$readAheadSecs', on);
+    await _pin('demuxer-max-bytes', '$ahead', on);
+    await _pin('demuxer-max-back-bytes', '$back', on);
     final hwdec = _hwdecOverride;
     if (hwdec != null) {
-      await _pin('hwdec', hwdec);
+      await _pin('hwdec', hwdec, on);
     }
-    await _pin('stream-lavf-o', streamLavfOptions);
+    await _pin('stream-lavf-o', streamLavfOptions, on);
   }
 
   /// ffmpeg's HTTP options (mpv `stream-lavf-o`, comma form): reconnect
@@ -371,10 +375,7 @@ class PlaybackController {
       return;
     }
     // Nothing playable opened (a track of mpv's yt-dlp EDL refused, ...).
-    if (!_loadErrorSent &&
-        duration.peek() == Duration.zero &&
-        ((log.prefix == 'cplayer' && log.level == 'fatal') ||
-            (log.prefix == 'demux' && log.level == 'error'))) {
+    if (!_loadErrorSent && _loadFailed(log, duration.peek())) {
       _loadErrorSent = true;
       final http = _httpError;
       onLoadError?.call(http == null ? 'the video stream could not be opened' : 'the video server answered $http');
@@ -397,6 +398,15 @@ class PlaybackController {
         _turnShadersOff('Shaders failed in mpv (${log.text}) — turned off');
       });
     }
+  }
+
+  /// [log] says the media could not be opened: before a [duration] is
+  /// known, mpv's fatal "nothing to play" or a demuxer error, or a yt-dlp
+  /// hook error.
+  static bool _loadFailed(PlayerLog log, Duration duration) {
+    if (log.prefix == 'ytdl_hook') return log.level == 'error' || log.level == 'fatal';
+    return duration == Duration.zero &&
+        ((log.prefix == 'cplayer' && log.level == 'fatal') || (log.prefix == 'demux' && log.level == 'error'));
   }
 
   void _setRenderMode(RenderMode mode) {
@@ -428,8 +438,14 @@ class PlaybackController {
 
   /// Opens [url] paused. [headers] go with every request for it (mpv
   /// `http-header-fields`): a Jellyfin token travels there, not in the URL.
-  Future<void> openUrl(String url, {Map<String, String>? headers}) async {
-    if (!_ready) return;
+  /// When [preload] holds the same [url] and [headers], that player
+  /// becomes this one instead (true: promoted, its buffer comes along).
+  Future<bool> openUrl(String url, {Map<String, String>? headers}) async {
+    if (!_ready) return false;
+    final pre = _pre;
+    if (pre != null && pre.matches(url, headers)) {
+      if (await _promote(pre)) return true;
+    }
     try {
       _chapterJson = '';
       _httpError = null;
@@ -439,6 +455,7 @@ class PlaybackController {
       buffered.value = Duration.zero;
       // An empty map, not null: media_kit caches headers per URI.
       await player.open(Media(url, httpHeaders: headers ?? const {}), play: false);
+      return false;
     } catch (e, st) {
       debugPrint('open ${Uri.tryParse(url)?.replace(query: '') ?? 'media'} failed: $e\n$st');
       rethrow;
@@ -607,6 +624,7 @@ class PlaybackController {
   /// Release the player. The view drops its texture first ([alive] goes
   /// false, one frame passes), then mpv is torn down.
   Future<void> dispose() async {
+    await dropPreload();
     final p = _player;
     if (p == null) return;
     await _logSub?.cancel();
@@ -637,6 +655,173 @@ class PlaybackController {
       }
       await Future.delayed(const Duration(milliseconds: 350));
     } catch (_) {}
+  }
+
+  // ------------------------------------------------------------ preload
+  //
+  // A second, hidden player holding what plays next (Up next's first
+  // item), open paused at its start and muted, with a small cache: its
+  // first seconds are in before anyone asks. [openUrl] for the same URL
+  // promotes it to the session player (see ARCHITECTURE.md "Getting
+  // ready"). One at a time.
+
+  /// Preloading on (env `SYNC_RELAY_PRELOAD=0` turns it off; tests set it).
+  bool preloadEnabled = Platform.environment['SYNC_RELAY_PRELOAD'] != '0';
+
+  /// The preload's forward cache: its first seconds and the container's
+  /// index, at little memory. Raised to [maxBytes] when promoted.
+  static const preloadBytes = 48 * 1024 * 1024;
+  static const _preloadBackBytes = 8 * 1024 * 1024;
+
+  _Preload? _pre;
+
+  /// The URL preloaded now (null: none).
+  String? get preloadUrl => _pre?.url;
+
+  /// Opens [url] in the hidden preload player (replacing any other), and
+  /// completes once [need] seconds are buffered or the whole media is:
+  /// true, false when it failed (or was dropped or replaced meanwhile).
+  /// The same [url] and [headers] again is the same preload unless
+  /// [fresh]. [ytdlPath]: mpv's yt-dlp hook for web pages.
+  Future<bool> preload(String url,
+      {Map<String, String>? headers, String? ytdlPath, double need = 4, bool fresh = false}) async {
+    if (!preloadEnabled || !_ready) return false;
+    final had = _pre;
+    if (had != null && had.matches(url, headers) && !had.failed && !fresh) return had.ready.future;
+    // Set before any await: a second call for the same URL finds it.
+    _pre = null;
+    if (had != null) unawaited(_disposePreload(had));
+    final p = _newPlayer(bufferSize: preloadBytes, logLevel: MPVLogLevel.error);
+    final pre = _pre = _Preload(p, url, headers ?? const {});
+    pre.logSub = p.stream.log.listen((log) {
+      // ffmpeg logs through one mpv per process: the first one, and once
+      // that is gone (a promotion disposes it) the next one created, which
+      // can be this preload. Its HTTP errors still name the session's.
+      if (log.prefix == 'ffmpeg') return _onLog(log);
+      if (_loadFailed(log, p.state.duration)) pre.fail();
+    });
+    try {
+      await _pinBufferProps(p, preloadBytes, _preloadBackBytes);
+      await _pin('volume-max', '$maxVolume', p);
+      await _pin('mute', 'yes', p);
+      final path = ytdlPath ?? _ytdlPath;
+      if (path != null) {
+        final dynamic platform = p.platform;
+        await platform?.setProperty('script-opts', 'ytdl_hook-ytdl_path=$path');
+        await platform?.setProperty('ytdl-format', ytdlFormat);
+        pre.ytdlRaw = await AppYtDlp.instance.mpvRawOptions();
+        await platform?.setProperty('ytdl-raw-options', pre.ytdlRaw);
+        pre.ytdl = true;
+      }
+      // With a view up, its own video output: mpv decodes (media_kit
+      // starts players with vid=no) and the first frame is there.
+      if (_video != null) {
+        pre.video = VideoController(p, configuration: VideoControllerConfiguration(hwdec: _hwdecOverride));
+        await pre.video!.platform.future;
+      }
+      if (!identical(_pre, pre)) {
+        pre.fail();
+        return false;
+      }
+      await p.open(Media(url, httpHeaders: headers ?? const {}), play: false);
+      if (!pre.opened.isCompleted) pre.opened.complete();
+    } catch (e) {
+      debugPrint('preload failed: $e');
+      pre.fail();
+      return false;
+    }
+    unawaited(_watchPreload(pre, need));
+    return pre.ready.future;
+  }
+
+  Future<void> _watchPreload(_Preload pre, double need) async {
+    final end = DateTime.now().add(const Duration(seconds: 60));
+    while (identical(_pre, pre) && !pre.failed && DateTime.now().isBefore(end)) {
+      final st = pre.player.state;
+      final secs = st.duration.inMilliseconds / 1000;
+      final buffered = (st.buffer - st.position).inMilliseconds / 1000;
+      if (secs > 0 && (buffered >= need || st.buffer.inMilliseconds / 1000 >= secs - 0.5)) {
+        if (!pre.ready.isCompleted) pre.ready.complete(true);
+        return;
+      }
+      await Future.delayed(const Duration(milliseconds: 200));
+    }
+    if (!pre.ready.isCompleted) pre.ready.complete(false);
+  }
+
+  /// Drops the preload (nothing to get ready, or something else is).
+  Future<void> dropPreload() async {
+    final pre = _pre;
+    if (pre == null) return;
+    _pre = null;
+    await _disposePreload(pre);
+  }
+
+  Future<void> _disposePreload(_Preload pre) async {
+    pre.fail();
+    await pre.logSub?.cancel();
+    try {
+      await pre.player.dispose();
+    } catch (_) {}
+  }
+
+  /// [pre] becomes the session player: the view swaps to its video
+  /// output ([generation]), volume, shaders, log level and the full cache
+  /// carry over, and the old player goes once the view let go of it.
+  Future<bool> _promote(_Preload pre) async {
+    await pre.opened.future;
+    final old = _player;
+    if (!identical(_pre, pre) || old == null) return false;
+    _pre = null;
+    if (pre.failed) {
+      unawaited(_disposePreload(pre));
+      return false;
+    }
+    await pre.logSub?.cancel();
+    if (!pre.ready.isCompleted) pre.ready.complete(true);
+    final p = pre.player;
+    final volume = old.state.volume;
+    await _logSub?.cancel();
+    for (final sub in _timeSubs) {
+      await sub.cancel();
+    }
+    _timeSubs.clear();
+    _player = p;
+    _video = pre.video;
+    _ytdlSetOn = pre.ytdl ? p : null;
+    _ytdlRaw = pre.ytdlRaw;
+    _chapterJson = '';
+    _httpError = null;
+    _loadErrorSent = false;
+    _shaders = '';
+    final at = p.state.position.inMilliseconds;
+    position.value = Duration(milliseconds: at - at % 250);
+    duration.value = p.state.duration;
+    final ms = p.state.buffer.inMilliseconds;
+    buffered.value = Duration(milliseconds: ms - ms % 250);
+    chapters.value = const [];
+    tracks.value = const [];
+    _logSub = p.stream.log.listen(_onLog);
+    _requestLog(p, logLevel);
+    _watchMarks(p);
+    generation.value++;
+    try {
+      await p.setVolume(volume);
+      await _pin('mute', 'no', p);
+      await _pinBufferProps(p);
+    } catch (e) {
+      debugPrint('promoted player settings: $e');
+    }
+    unawaited(applyShaders());
+    unawaited(_refreshTracks());
+    // The view lets go of the old texture first (as in [dispose]).
+    unawaited(() async {
+      await _settleUi();
+      try {
+        await old.dispose();
+      } catch (_) {}
+    }());
+    return true;
   }
 
   Future<void> stop() async {
@@ -670,4 +855,28 @@ bool pinMatches(String wanted, String got) {
   if (wanted == got) return true;
   final a = double.tryParse(wanted), b = double.tryParse(got);
   return a != null && b != null && a == b;
+}
+
+class _Preload {
+  final SyncPlayer player;
+  final String url;
+  final Map<String, String> headers;
+  VideoController? video;
+  StreamSubscription<PlayerLog>? logSub;
+  /// Completes once the media is handed to mpv (or the preload failed).
+  final opened = Completer<void>();
+  bool ytdl = false;
+  String ytdlRaw = '';
+  bool failed = false;
+  final ready = Completer<bool>();
+  _Preload(this.player, this.url, this.headers);
+
+  bool matches(String url, Map<String, String>? headers) =>
+      url == this.url && mapEquals(headers ?? const {}, this.headers);
+
+  void fail() {
+    failed = true;
+    if (!ready.isCompleted) ready.complete(false);
+    if (!opened.isCompleted) opened.complete();
+  }
 }

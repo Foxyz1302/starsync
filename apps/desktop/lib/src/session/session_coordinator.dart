@@ -31,6 +31,7 @@ import 'idle.dart';
 import 'media_art.dart';
 import 'now_playing.dart';
 import 'now_playing_info.dart';
+import 'switch_trace.dart';
 
 /// Thrown when a connect is superseded by cancel/leave before it finished.
 class ConnectCancelled implements Exception {
@@ -180,6 +181,8 @@ class SessionCoordinator {
   /// The current media's poster and banner by `state.media.art` hash.
   late final ArtCache art = ArtCache(sync);
   final PlaybackController playback = PlaybackController();
+  /// Timings of each media change here (see [SwitchTrace]).
+  final SwitchTrace switchTrace = SwitchTrace();
   final StateDiff diff = StateDiff();
 
   final health =
@@ -367,6 +370,7 @@ class SessionCoordinator {
       playback.onYtdlError = _setPlayerError;
       playback.onLoadError = _setPlayerError;
       playback.onUserSeek = (d) => _userSeek(d.inMicroseconds / 1e6);
+      _bufferSub ??= playback.buffered.subscribe((_) => _onBuffered());
       await playback.init();
       _playerReady = true;
     } catch (e, st) {
@@ -418,6 +422,7 @@ class SessionCoordinator {
   }
 
   bool _reloadingVideo = false;
+  void Function()? _bufferSub;
 
   /// "Reload video" (button, Ctrl+R, status menu): fresh
   /// player + video output, current media reopened. While it runs the
@@ -460,6 +465,7 @@ class SessionCoordinator {
     diff.reset();
     _mediaId = -1;
     _playerMediaId = -1;
+    settledMediaId.value = -1;
     _openUrl = null;
     playerError.value = '';
     _memberErrors = const {};
@@ -553,38 +559,83 @@ class SessionCoordinator {
     _openHeaders = headers;
     diff.reset();
     _opening = true;
+    final mediaId = _mediaId;
+    var ok = false;
     try {
       await _prepareYtDlp(url);
-      await playback.openUrl(url, headers: headers);
+      switchTrace.mark(mediaId, SwitchTrace.open);
+      final promoted = await playback.openUrl(url, headers: headers);
+      switchTrace.mark(mediaId, promoted ? SwitchTrace.preloaded : SwitchTrace.opened);
       health.value =
           const HealthStatus(HealthSeverity.ok, 'connected');
-      return true;
+      ok = true;
     } catch (e) {
       debugPrint('open media failed: $e');
       _setPlayerError('$e');
-      return false;
     } finally {
       _opening = false;
     }
+    // Tell the server at once (a preloaded media already has its buffer).
+    final r = serverState.peek();
+    if (ok && r != null && r.mediaId == mediaId && url == _openUrl && sync.token.isNotEmpty && _playerReady) {
+      _sendReport(r);
+    }
+    return ok;
+  }
+
+  // The media whose buffer reached the gate's need was reported at once.
+  int _bufferReportedFor = -1;
+
+  /// While held, the report that the buffer reached the gate's need goes
+  /// out as it happens, not on the next tick.
+  void _onBuffered() {
+    final r = serverState.peek();
+    if (r == null || r.transport != 'held' || _bufferReportedFor == r.mediaId) return;
+    if (_lastOut || _opening || _openUrl == null || _playerMediaId != r.mediaId || !_playerReady) return;
+    if (sync.token.isEmpty || playback.bufferedSecsAhead < r.bufferNeed) return;
+    _bufferReportedFor = r.mediaId;
+    _sendReport(r);
   }
 
   /// A web link (not this server's): mpv's yt-dlp hook gets the app's
   /// managed yt-dlp, downloaded first if needed; a media file name does
   /// not wait for that.
   Future<void> _prepareYtDlp(String url) async {
+    final path = await _ytDlpPathFor(url);
+    if (path != null) await playback.useYtDlp(path);
+  }
+
+  /// The yt-dlp mpv's hook needs for [url] (null: none, not a web link).
+  Future<String?> _ytDlpPathFor(String url) async {
     final uri = Uri.tryParse(url);
-    if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) return;
-    if (uri.host == _wsHost && uri.port == _wsPort) return;
+    if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) return null;
+    if (uri.host == _wsHost && uri.port == _wsPort) return null;
     try {
       final y = await ytDlp.ytDlp;
       final ready = y.ensure();
-      final path = hasMediaExtension(uri)
+      return hasMediaExtension(uri)
           ? y.path
           : await ready.timeout(const Duration(seconds: 90), onTimeout: () => null);
-      if (path != null) await playback.useYtDlp(path);
     } catch (e) {
       debugPrint('yt-dlp not ready: $e');
+      return null;
     }
+  }
+
+  /// The media of the latest `state` is open here (or has nothing to
+  /// open, could not, or waits for the server): its mediaId. Up next
+  /// preloads what comes next only then, so the two never compete, and a
+  /// preload a swap is about to take is never replaced first.
+  final settledMediaId = signal(-1);
+
+  /// Opens [url] in the hidden preload player ([PlaybackController.preload]);
+  /// [openUrl] for the same URL and headers then starts from it. True
+  /// once its first seconds are in.
+  Future<bool> preloadMedia(String url, {Map<String, String>? headers, bool fresh = false}) async {
+    if (!_playerReady) return false;
+    final path = await _ytDlpPathFor(url);
+    if (!_playerReady) return false;
+    return playback.preload(url, headers: headers, ytdlPath: path, fresh: fresh);
   }
 
   bool _relayWaitShown = false;
@@ -680,6 +731,7 @@ class SessionCoordinator {
   void _onState(StateBroadcast r) {
     _lastStateAt = DateTime.now().toUtc();
     serverState.value = r;
+    if (r.transport == 'playing') switchTrace.mark(r.mediaId, SwitchTrace.playing);
     _toastMemberErrors(r);
     _warnSlowSource(r);
     _checkPlayerError(r.mediaId);
@@ -717,6 +769,7 @@ class SessionCoordinator {
     _lastEventId = r.eventId;
     if (r.mediaId != _mediaId) {
       _mediaId = r.mediaId;
+      switchTrace.start(r.mediaId);
       final ref = refOfStateMedia(r.media);
       // Back after a dropped connection on the same item played with our
       // own account: nothing to resolve or reopen.
@@ -779,6 +832,7 @@ class SessionCoordinator {
       }
       _seekGate.reset();
       _clearPendingSeek();
+      if (_mediaId == r.mediaId) settledMediaId.value = r.mediaId;
     } else if (_awaitLiveFor == r.mediaId && (stateMediaRelay(r)?.live ?? false)) {
       _awaitLiveFor = -1;
       await _openMedia(
@@ -998,6 +1052,31 @@ class SessionCoordinator {
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
 
+  /// The 1 s `report` (also sent at once when a new media is open, so the
+  /// server's gate does not wait for the next tick).
+  void _sendReport(StateBroadcast r) {
+    // Duration only once the open media is the server's current one.
+    // Sitting out: still a report (it keeps this member fresh), empty.
+    final known = !_lastOut && !_opening && _openUrl != null && _mediaId == r.mediaId;
+    // The buffer counts only while the player holds the server's current
+    // media: before a swap's media is open it is the previous one's (or
+    // none), and the start must wait for this member.
+    final holds = !_lastOut && !_opening && _openUrl != null && _playerMediaId == r.mediaId;
+    _checkPlayerError(r.mediaId);
+    final error = playerError.peek();
+    final buffered = holds ? playback.bufferedSecsAhead : 0.0;
+    if (holds && buffered >= r.bufferNeed) switchTrace.mark(r.mediaId, SwitchTrace.buffered);
+    sync.sendReport(
+      position: _lastOut ? 0 : playback.positionSecs,
+      buffered: buffered,
+      eventId: r.eventId,
+      duration: known ? playback.durationSecs : 0,
+      mediaId: known ? r.mediaId : 0,
+      jf: _jfAccessFor(r),
+      error: known && _playerErrorFor == r.mediaId ? error : '',
+    );
+  }
+
   Future<void> _tick() async {
     final now = DateTime.now().toUtc();
     toasts.value =
@@ -1005,24 +1084,7 @@ class SessionCoordinator {
     final r = serverState.peek();
     if (sync.token.isNotEmpty) sync.sendPing();
     if (sync.token.isNotEmpty && r != null && _playerReady) {
-      // Duration only once the open media is the server's current one.
-      // Sitting out: still a report (it keeps this member fresh), empty.
-      final known = !_lastOut && !_opening && _openUrl != null && _mediaId == r.mediaId;
-      // The buffer counts only while the player holds the server's current
-      // media: before a swap's media is open it is the previous one's (or
-      // none), and the start must wait for this member.
-      final holds = !_lastOut && !_opening && _openUrl != null && _playerMediaId == r.mediaId;
-      _checkPlayerError(r.mediaId);
-      final error = playerError.peek();
-      sync.sendReport(
-        position: _lastOut ? 0 : playback.positionSecs,
-        buffered: holds ? playback.bufferedSecsAhead : 0,
-        eventId: r.eventId,
-        duration: known ? playback.durationSecs : 0,
-        mediaId: known ? r.mediaId : 0,
-        jf: _jfAccessFor(r),
-        error: known && _playerErrorFor == r.mediaId ? error : '',
-      );
+      _sendReport(r);
       if (!_lastOut) {
         _checkSeekLanded(r);
         unawaited(_tickJellyfin(r));
@@ -1580,6 +1642,9 @@ class SessionCoordinator {
     );
   }
 
+  /// This member's `/j/` URL for [ref] (the server's Jellyfin login).
+  String? jellyfinRelayUrl(JellyfinRef ref) => _relayUrlFor(ref);
+
   String? _relayUrlFor(JellyfinRef ref) {
     if (sync.token.isEmpty) return null;
     final welcome = sync.relayUrl;
@@ -1632,6 +1697,7 @@ class SessionCoordinator {
       if (gen == _jfGen) _opening = false;
     }
     if (gen != _jfGen) return;
+    switchTrace.mark(r.mediaId, SwitchTrace.resolved);
     // This member put it up: serve it to viewers without an account, with
     // its own sign-in, else the pasted link (played directly here too).
     if (origin != null) {
@@ -2046,6 +2112,7 @@ class SessionCoordinator {
     await _nudgeSub?.cancel();
     await _errSub?.cancel();
     await _statusSub?.cancel();
+    _bufferSub?.call();
     _aniList?.close();
     await sync.dispose();
     await playback.dispose();

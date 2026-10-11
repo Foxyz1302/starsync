@@ -11,6 +11,7 @@ const _serverId = 'fakeserver01';
 const _item = '0123456789abcdef0123456789abcdef';
 const _source = 'fedcba9876543210fedcba9876543210';
 const _slowItem = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const _nextItem = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const _token = 'JF-SECRET-TOKEN';
 
 const _cred = JellyfinCredential(
@@ -366,6 +367,28 @@ void main() {
       final req = await http.get('127.0.0.1', server.boundPort, '/j/other/$token/$_item');
       expect((await req.close()).statusCode, 410);
       expect(jf.uris, isEmpty, reason: 'nothing reached Jellyfin');
+    });
+
+    test('Up next first item on the login: relayNext, and /j serves it too', () async {
+      await setUpRef(_item);
+      final a = clients.first;
+      expect(a.lastState!.containsKey('relayNext'), isFalse);
+      expect((await relayGet(token, _nextItem)).statusCode, 403);
+      a.send(const QueueIntent.add(QueueItem(
+              media: HelloMedia(
+                  name: 'Next',
+                  size: 0,
+                  duration: 0,
+                  jellyfin: JellyfinRef(serverId: _serverId, itemId: _nextItem, mediaSourceId: _source)),
+              how: QueueHow.jellyfin,
+              title: 'Next'))
+          .toJson());
+      await _until(() => a.lastState?['relayNext'] == true, 'relayNext');
+      final res = await relayGet(token, _nextItem, range: 'bytes=0-99');
+      expect(res.statusCode, 206);
+      expect(await readAll(res), bytes.sublist(0, 100));
+      expect((await relayGet(token, _item, range: 'bytes=0-9')).statusCode, 206, reason: 'the current one still');
+      expect((await relayGet(token, _slowItem)).statusCode, 403, reason: 'nothing else');
     });
 
     test('non-Jellyfin media: 404', () async {

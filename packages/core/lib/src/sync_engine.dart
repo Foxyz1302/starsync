@@ -535,7 +535,7 @@ class SyncEngine {
 
   /// [relay]: whether the server can relay the current Jellyfin media; the
   /// engine does not know the server's credential.
-  StateBroadcast broadcast({bool relay = false}) {
+  StateBroadcast broadcast({bool relay = false, bool relayNext = false}) {
     final bySeek = _seekEventId == eventId;
     return StateBroadcast(
       eventId: eventId,
@@ -554,6 +554,7 @@ class SyncEngine {
       seekBy: bySeek ? _seekBy : null,
       seekSeq: bySeek ? _seekSeq : null,
       relay: relay,
+      relayNext: relayNext,
       queue: queue.items,
       queuePlay: queue.play,
     );

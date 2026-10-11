@@ -66,13 +66,16 @@ void main() {
           MemberView(id: 'm2', name: 'b', ready: false, inSet: false, buffered: 0, stale: false),
         ],
         relay: true,
+        relayNext: true,
       );
       final json = wire(state.toJson());
       expect(json['relay'], true);
+      expect(json['relayNext'], true);
       expect((json['members'] as List)[0], containsPair('jf', {'abc123': false}));
       expect((json['members'] as List)[1], isNot(contains('jf')));
       final back = StateBroadcast.fromJson(json);
       expect(back.relay, isTrue);
+      expect(back.relayNext, isTrue);
       expect(back.members[0].jf, {'abc123': false});
       expect(back.members[1].jf, isEmpty);
       expect(HelloMedia.fromJson(back.media!).jellyfin, ref);
@@ -80,7 +83,9 @@ void main() {
       final plain = StateBroadcast(
           eventId: 1, transport: 'held', position: 0, serverTime: DateTime.utc(2026), mediaId: 1, members: const []);
       expect(plain.toJson().containsKey('relay'), isFalse);
+      expect(plain.toJson().containsKey('relayNext'), isFalse);
       expect(StateBroadcast.fromJson(wire(plain.toJson())).relay, isFalse);
+      expect(StateBroadcast.fromJson(wire(plain.toJson())).relayNext, isFalse);
     });
 
     test('welcome relayUrl round-trips, omitted when null', () {

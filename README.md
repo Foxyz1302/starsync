@@ -166,8 +166,10 @@ right-click a Jellyfin card or episode, a video in Files, a recent link
 or an episode on the Schedule for **Add to queue** / **Play next**; the
 Jellyfin details panel has a queue button (right-click it to play next),
 and the card for a dropped or pasted video or link has both. A link is
-checked first, like Put it up. The next item is kept ready on the app
-that will put it up, so skipping to it starts at once. Everyone shares one Up next and anyone can change it; what
+checked first, like Put it up. Every app keeps the next item ready,
+its first seconds already loaded, so skipping to it starts at once
+(not yet for a link passed on, someone else's file or one the server
+fetches: those load when they go up). Everyone shares one Up next and anyone can change it; what
 you added stays when you leave.
 
 In the player, Up next sits in the top bar next to the chat button: the

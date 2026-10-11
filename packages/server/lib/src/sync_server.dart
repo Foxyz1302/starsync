@@ -98,7 +98,7 @@ class SyncServer {
     mountAvatarRoute(_app, hub);
     mountArtRoute(_app, hub);
     mountJellyfinRelayRoute(
-        _app, sessions, () => hub.jellyfin, () => _relayClient ??= HttpClient());
+        _app, sessions, () => hub.jellyfin, () => _relayClient ??= HttpClient(), next: () => hub.nextJellyfinRef);
     // advertiseHost is only an explicit override; otherwise echo what the client dialled.
     String authority(String dialledHost) => config.advertiseHost.isNotEmpty
         ? '${config.advertiseHost}:$boundPort'
