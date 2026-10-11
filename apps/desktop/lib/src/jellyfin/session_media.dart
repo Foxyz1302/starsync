@@ -318,15 +318,17 @@ Future<({EpisodeLink? previous, EpisodeLink? next})> findAdjacentEpisodes(OwnPla
   }
 }
 
-/// When the floating "Next episode" pill appears: at [endingStart] (the
+/// Where the "Next episode" pill's window starts: at [endingStart] (the
 /// ED: Jellyfin Outro segment or ED-titled chapter, see `endingRange`)
-/// when one is known inside [runtime]. Null otherwise: no guessed ending,
-/// the end-of-episode card at the real end is the only prompt then.
-Duration? nextPromptStart(JellyfinItem? item, Duration runtime, {Duration? endingStart}) {
+/// when one is known inside [runtime], else the last two minutes of
+/// [runtime] (all of it for shorter media). The pill shows only while the
+/// controls are up (`PillGate`), so a guessed window costs nothing.
+Duration nextPromptStart(JellyfinItem? item, Duration runtime, {Duration? endingStart}) {
   if (endingStart != null && endingStart > Duration.zero && endingStart < runtime) {
     return endingStart;
   }
-  return null;
+  const lead = Duration(minutes: 2);
+  return runtime > lead ? runtime - lead : Duration.zero;
 }
 
 /// Who performs the auto-advance swap, so several counting clients do not

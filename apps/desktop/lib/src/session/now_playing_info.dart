@@ -1,3 +1,5 @@
+import 'package:sync_relay_core/core.dart' show hasMediaExtension;
+
 import '../files/name_parser.dart';
 import '../jellyfin/session_media.dart';
 import 'now_playing.dart';
@@ -16,15 +18,36 @@ NowPlaying? nowPlayingOf(Map<String, Object?>? media) {
   final art = media['art'] is Map ? media['art'] as Map : const {};
   final poster = art['poster'] is String ? art['poster'] as String : '';
   final banner = art['banner'] is String ? art['banner'] as String : '';
-  // A web video's thumbnail: its name as is, no episode guessing.
-  if (poster.isNotEmpty && poster == banner) {
-    return NowPlaying(title: name, posterHash: poster, bannerHash: banner);
-  }
   final ref = refOfStateMedia(media);
+  // A web video: its name as is, no episode guessing, its thumbnail as
+  // the art. Told by the art once it is up (the same picture as cover and
+  // banner), before that by the media itself, so it never changes layout.
+  final web = poster.isNotEmpty || banner.isNotEmpty ? poster == banner : ref == null && isWebVideo(media);
+  if (web) {
+    return NowPlaying(title: name, posterHash: poster, bannerHash: banner, thumbnail: true);
+  }
   final (title, episode) = ref != null
       ? jellyfinTitle(ref.title.isNotEmpty ? ref.title : name, ref.subtitle)
       : fileTitle(name);
   return NowPlaying(title: title, episode: episode, posterHash: poster, bannerHash: banner);
+}
+
+/// [media] (`state.media`, not Jellyfin) is a web page's video, whose art
+/// will be its thumbnail: a shared http(s) link that is no media file (the
+/// everyone-opens-it mode), or a relayed one (passed on by a member or
+/// fetched by the server: the URL stays private) named by the page's title,
+/// not a file name. A relayed file keeps its file name's extension.
+bool isWebVideo(Map<String, Object?> media) {
+  final url = media['url'];
+  if (url is String && url.isNotEmpty) {
+    final uri = Uri.tryParse(url);
+    return uri != null &&
+        (uri.isScheme('http') || uri.isScheme('https')) &&
+        uri.host.isNotEmpty &&
+        !hasMediaExtension(uri);
+  }
+  final name = media['name'] is String ? media['name'] as String : '';
+  return media['relay'] is Map && name.isNotEmpty && !_ext.hasMatch(name);
 }
 
 /// Jellyfin: [name] is the item's, [subtitle] "Series · S1E6" (or

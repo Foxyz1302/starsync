@@ -90,8 +90,8 @@ loading…") or what went wrong, with Retry or Cancel when it helps. Chat and ac
 Tab), ready to type; it shows messages, and its "Activity" toggle adds
 joins, ready, seeks and the like between them. Joins, leaves, chat and
 other news also pop up bottom left with the person's avatar; click a message to open the chat
-(Settings → Notifications → Chat messages: All, Only when paused or Off;
-messages always reach the chat). Unread chat shows as a count on the chat
+(Settings → Notifications → Chat messages: Only when paused by default,
+or All, or Off; messages always reach the chat). Unread chat shows as a count on the chat
 buttons and, in fullscreen with the controls hidden and the video paused,
 as a small chip top right.
 
@@ -248,9 +248,10 @@ the same.
 
 Skipping: during the opening a "Skip OP" button floats in the corner (it
 jumps to the end of the opening), during the ending "Skip ED" (to the end
-of the ending only; what comes after is yours to skip). Any skip button
-(also "Skip 1:30") shows for 5 seconds when it comes up, then only while
-the controls are up (move the mouse). The opening and
+of the ending only; what comes after is yours to skip). "Skip OP" and
+"Skip 1:30" show for 5 seconds when they come up, then only while the
+controls are up (move the mouse); "Skip ED" and "Next episode" show only
+while the controls are up. The opening and
 ending come from Jellyfin's intro / outro segments when your Jellyfin has
 them (needs a segment plugin, e.g. Intro Skipper), else from chapter names
 (OP, Opening, Intro / ED, Ending, Credits, Outro). Without an opening or
@@ -311,9 +312,9 @@ Watching:
 
 Episodes: the ⏮ / ⏭ buttons next to the controls (or `<` / `>`,
 Shift+P / Shift+N) put up the previous or next episode for everyone. From
-the ending, when it is known (see Skipping above), a "Next episode"
-button floats in the corner; when it is not, nothing shows before the
-end. When an
+the ending (when it is known, see Skipping above; else in the last two
+minutes) a "Next episode" button floats in the corner while the controls
+are up. When an
 episode ends, a card shows what is next with Play next; with "Play the
 next episode automatically" (Settings, on by default) it counts down 10 s
 first, and Cancel stops it on your screen (seeking back stops it for

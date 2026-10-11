@@ -321,9 +321,9 @@ void main() {
       expect(media.jellyfin!.subtitle, 'Black Summoner · S1E7');
     });
 
-    test('no floating prompt without a known ending', () {
-      expect(nextPromptStart(null, const Duration(minutes: 24)), isNull);
-      expect(nextPromptStart(null, const Duration(seconds: 90)), isNull);
+    test('the floating prompt starts two minutes before the end', () {
+      expect(nextPromptStart(null, const Duration(minutes: 24)), const Duration(minutes: 22));
+      expect(nextPromptStart(null, const Duration(seconds: 90)), Duration.zero);
     });
 
     test('one auto-advance swapper: the lowest id among members with their own account', () {

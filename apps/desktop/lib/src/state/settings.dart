@@ -70,8 +70,8 @@ class AppSettings {
   /// A 2 px progress line at the bottom of the video while the controls
   /// are hidden (both designs). Applies live.
   final progressLine = signal(true);
-  /// Chat message toasts. Applies live.
-  final chatPopups = signal(ChatPopups.all);
+  /// Chat message toasts (default: only when paused). Applies live.
+  final chatPopups = signal(ChatPopups.paused);
   /// App sounds (`sfx/`): 0..1, 0 = silent.
   final soundVolume = signal(1.0);
   /// `SfxKind` names switched off one by one.
@@ -130,7 +130,7 @@ class AppSettings {
       final line = box.get(_keyProgressLine);
       if (line is bool) progressLine.value = line;
       final popups = box.get(_keyChatPopups);
-      chatPopups.value = ChatPopups.values.where((m) => m.name == popups).firstOrNull ?? ChatPopups.all;
+      chatPopups.value = ChatPopups.values.where((m) => m.name == popups).firstOrNull ?? ChatPopups.paused;
       final vol = box.get(_keySoundVolume);
       if (vol is num) soundVolume.value = vol.toDouble().clamp(0, 1);
       final off = box.get(_keySoundsOff);

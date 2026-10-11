@@ -36,9 +36,8 @@ class EpisodeSkipButton extends StatelessWidget {
   }
 }
 
-/// Floating "Next episode ›" from the ED (or the last two minutes):
-/// faint at rest, lit on hover. Lives outside the auto-hiding controls, so
-/// it shows in fullscreen and with the controls hidden.
+/// Floating "Next episode ›" from the ED (or the last two minutes), while
+/// the controls are up (`PillGate`): faint at rest, lit on hover.
 class NextEpisodePill extends StatelessWidget {
   final EpisodeLink episode;
   final VoidCallback onPressed;

@@ -200,8 +200,9 @@ class SessionCoordinator {
   /// Neighbouring episodes this viewer can put up (own account only).
   final previousEpisode = signal<EpisodeLink?>(null);
   final nextEpisode = signal<EpisodeLink?>(null);
-  /// The floating "Next episode" pill from a known ending (Outro segment
-  /// or ED chapter, [nextPromptStart]) on.
+  /// The "Next episode" pill's window ([nextPromptStart]: the known ending,
+  /// else the last two minutes); the pill shows in it only while the
+  /// controls are up.
   final nextPromptVisible = signal(false);
   /// End-of-episode countdown; null when none runs here.
   final autoAdvance = signal<AutoAdvance?>(null);
@@ -1690,7 +1691,7 @@ class SessionCoordinator {
       final item = (jellyfinPlan.peek() as OwnPlay?)?.item;
       final at = nextPromptStart(item, Duration(milliseconds: (duration * 1000).round()),
           endingStart: playback.ending.peek()?.start);
-      show = at != null && snap.position * 1000 >= at.inMilliseconds;
+      show = snap.position * 1000 >= at.inMilliseconds;
     }
     nextPromptVisible.value = show;
   }

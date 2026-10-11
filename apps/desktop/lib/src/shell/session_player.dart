@@ -668,8 +668,8 @@ class _SessionPlayerState extends State<SessionPlayer> {
 
   /// Jellyfin: the blocked card, the end-of-episode card (countdown) and
   /// the "Next episode" pill; for any media the skip pill (Skip OP / ED /
-  /// 1:30) above it ([SkipPillGate]). Outside the auto-hiding controls, so
-  /// they stay up.
+  /// 1:30) above it. Outside the auto-hiding controls; the cards stay up,
+  /// the pills show only with the controls ([PillGate]).
   Widget _jellyfinOverlay() {
     final coord = _coord;
     return Positioned.fill(
@@ -712,13 +712,21 @@ class _SessionPlayerState extends State<SessionPlayer> {
                     spacing: 10,
                     children: [
                       if (skip != null)
-                        SkipPillGate(
+                        PillGate(
                           key: const ValueKey('skip-gate'),
-                          offer: skip,
+                          kind: skip.kind,
+                          // Skip ED: no announcing, only with the controls.
+                          announce: skip.kind != SkipKind.ending,
                           controlsShown: _controlsShown,
                           child: SkipPill(offer: skip, onPressed: () => coord.skip(skip)),
                         ),
-                      if (showNext) NextEpisodePill(episode: next, onPressed: coord.playNextEpisode),
+                      if (showNext)
+                        PillGate(
+                          key: const ValueKey('next-gate'),
+                          kind: next,
+                          controlsShown: _controlsShown,
+                          child: NextEpisodePill(episode: next, onPressed: coord.playNextEpisode),
+                        ),
                     ],
                   ),
                 ),
@@ -900,22 +908,30 @@ class _SessionPlayerState extends State<SessionPlayer> {
   }
 }
 
-/// The skip pill's visibility: up for [firstShown] after an offer
-/// appears (a new kind: OP, ED, 1:30), then only while the controls are
-/// up or the mouse is on it; gone with the offer (the parent drops it).
-class SkipPillGate extends StatefulWidget {
+/// A floating pill's visibility: only while the controls are up (the
+/// mouse moved) or the mouse is on it. With [announce] it is also up for
+/// [firstShown] whenever [kind] changes (a new offer: Skip OP, Skip 1:30).
+/// Gone with the offer (the parent drops it).
+class PillGate extends StatefulWidget {
   static const firstShown = Duration(seconds: 5);
-  final SkipOffer offer;
+  final Object kind;
+  final bool announce;
   final ValueListenable<bool> controlsShown;
   final Widget child;
-  const SkipPillGate({super.key, required this.offer, required this.controlsShown, required this.child});
+  const PillGate({
+    super.key,
+    required this.kind,
+    this.announce = false,
+    required this.controlsShown,
+    required this.child,
+  });
 
   @override
-  State<SkipPillGate> createState() => _SkipPillGateState();
+  State<PillGate> createState() => _PillGateState();
 }
 
-class _SkipPillGateState extends State<SkipPillGate> {
-  SkipKind? _kind;
+class _PillGateState extends State<PillGate> {
+  Object? _kind;
   bool _fresh = false;
   bool _hover = false;
   Timer? _timer;
@@ -927,9 +943,9 @@ class _SkipPillGateState extends State<SkipPillGate> {
   }
 
   @override
-  void didUpdateWidget(SkipPillGate old) {
+  void didUpdateWidget(PillGate old) {
     super.didUpdateWidget(old);
-    if (widget.offer.kind != _kind) _arm();
+    if (widget.kind != _kind) _arm();
   }
 
   @override
@@ -939,10 +955,11 @@ class _SkipPillGateState extends State<SkipPillGate> {
   }
 
   void _arm() {
-    _kind = widget.offer.kind;
-    _fresh = true;
+    _kind = widget.kind;
     _timer?.cancel();
-    _timer = Timer(SkipPillGate.firstShown, () {
+    _fresh = widget.announce;
+    if (!_fresh) return;
+    _timer = Timer(PillGate.firstShown, () {
       if (mounted) setState(() => _fresh = false);
     });
   }

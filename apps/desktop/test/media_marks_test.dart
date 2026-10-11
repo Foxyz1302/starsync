@@ -154,14 +154,14 @@ void main() {
   });
 
   group('next episode prompt', () {
-    test('at the ED start when known, else none (never a guessed time)', () {
+    test('at the ED start when known, else the last two minutes', () {
       expect(nextPromptStart(null, m(24), endingStart: m(20)), m(20));
-      expect(nextPromptStart(null, m(24)), isNull);
-      expect(nextPromptStart(null, m(24), endingStart: null), isNull);
-      // Nonsense ending starts count as unknown.
-      expect(nextPromptStart(null, m(24), endingStart: m(25)), isNull);
-      expect(nextPromptStart(null, m(24), endingStart: Duration.zero), isNull);
-      expect(nextPromptStart(null, s(90)), isNull);
+      expect(nextPromptStart(null, m(24)), m(22));
+      expect(nextPromptStart(null, m(24), endingStart: null), m(22));
+      // Nonsense ending starts fall back.
+      expect(nextPromptStart(null, m(24), endingStart: m(25)), m(22));
+      expect(nextPromptStart(null, m(24), endingStart: Duration.zero), m(22));
+      expect(nextPromptStart(null, s(90)), Duration.zero);
     });
   });
 

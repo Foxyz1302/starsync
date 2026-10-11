@@ -42,4 +42,25 @@ void main() {
         const NowPlaying(title: 'Show', episode: 'S1 E2 · The Pilot', posterHash: 'aaaa', bannerHash: 'bbbb'));
     expect(nowPlayingOf({'name': 'Show - 12.mkv'}), const NowPlaying(title: 'Show', episode: 'E12'));
   });
+
+  test('web videos: name as is and wide from the start, before the thumbnail', () {
+    const title = 'Frieren - 05 | reaction';
+    // Everyone opens it, passed on by a member, fetched by the server.
+    for (final media in [
+      {'name': title, 'url': 'https://www.youtube.com/watch?v=x'},
+      {'name': title, 'relay': {'source': 'm2', 'live': true}},
+      {'name': title, 'relay': {'fetch': true}},
+    ]) {
+      expect(nowPlayingOf(media), const NowPlaying(title: title, thumbnail: true));
+      expect(nowPlayingOf({...media, 'art': {'poster': 'aa', 'banner': 'aa'}}),
+          const NowPlaying(title: title, posterHash: 'aa', bannerHash: 'aa', thumbnail: true));
+    }
+    // Files (a link to one, a relayed one) and Jellyfin keep their parsing.
+    expect(nowPlayingOf({'name': 'Show - 12.mkv', 'url': 'https://cdn.example/Show%20-%2012.mkv'}),
+        const NowPlaying(title: 'Show', episode: 'E12'));
+    expect(nowPlayingOf({'name': 'Show - 12.mkv', 'relay': {'source': 'm2'}}),
+        const NowPlaying(title: 'Show', episode: 'E12'));
+    expect(nowPlayingOf({'name': 'Show - 12', 'relay': {}, 'art': {'poster': 'p', 'banner': 'b'}}),
+        const NowPlaying(title: 'Show', episode: 'E12', posterHash: 'p', bannerHash: 'b'));
+  });
 }

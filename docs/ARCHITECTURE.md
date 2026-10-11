@@ -744,9 +744,9 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   `/Shows/{id}/Episodes` call; `episodeBefore` / `episodeAfter`) gives the
   previous and next episode. The controls show previous / next buttons
   (also `<` `>`, Shift+P / Shift+N); from `nextPromptStart` (the ending's
-  start, see "Skip rules") a floating "Next episode" pill shows outside
-  the auto-hiding controls. Without a known ending there is no pill (never
-  a guessed time); the end card at `finished` is the only prompt. Auto-advance still waits for `finished`. Any
+  start when one is known, see "Skip rules", else the last 2 min of the
+  runtime) a floating "Next episode" pill shows while the controls are up
+  (see "Session controls"). Auto-advance still waits for `finished`. Any
   of them swaps to that episode's ref with the clicker's account. Guests
   (relay, blocked) see none of it.
 - **Auto-advance** (Settings, on by default): at `finished` with a known
@@ -984,7 +984,7 @@ always scrolls the page). Space never presses a focused button
   slides in, stays 5 s, then slides out and collapses its gap. A click on
   a chat toast opens the chat; the others let clicks through. Chat toasts
   follow `AppSettings.chatPopups` (Settings → Notifications: All, Only
-  when paused, Off); the message is in the chat either way.
+  when paused (default), Off); the message is in the chat either way.
 
 Settings persist in two Hive boxes: `connect_form` (last form, recent
 servers and links, the profile picture and colour; saved even when a join
@@ -1056,10 +1056,11 @@ keeps its row at the top). A drag sends no hover events, so the bar keeps
 the controls up through a guarded dynamic `onHover()` on media_kit's
 private controls state (`keepVideoControlsAwake`). Pills (Skip OP / ED /
 1:30, Next episode) and cards live outside the auto-hiding controls. The
-Next episode pill and the cards stay up; the skip pill (`SkipPillGate`)
-shows for 5 s when an offer of a new kind appears, then only while the
-controls are up (`ControlsHoverProbe` for this design, `UoscControls.shown`
-for uosc) or the mouse is on it. Volume (`controls/volume.dart`, both
+cards stay up; a pill (`PillGate`) shows only while the controls are up
+(`ControlsHoverProbe` for this design, `UoscControls.shown` for uosc) or
+the mouse is on it, and Skip OP / Skip 1:30 also for 5 s when an offer of
+a new kind appears (Skip ED and Next episode never without the controls).
+Volume (`controls/volume.dart`, both
 designs): mpv's `volume-max` is pinned to `PlaybackController.maxVolume`
 (150) per player; `VolumeBar` runs 0..150 with a tick at 100 and the part
 above in amber; the wheel and ↑ / ↓ step 5 %, clamped.
@@ -1193,6 +1194,11 @@ testers land back on stable. `0.0.0-dev` (a dev run) checks nothing.
   poster cap when larger; else an AniList title search on the parsed
   release name) and sends `art`, so guests without Jellyfin get covers too.
   `coordinator.nowPlaying` derives title, episode line and art hashes from
-  `state.media` (`now_playing_info.dart`); poster and banner of one hash
-  mark a thumbnail (`NowPlaying.thumbnail`): the media name as is, no
-  episode line, a 16:9 cover in the controls and none on the start card.
+  `state.media` (`now_playing_info.dart`). A web video
+  (`NowPlaying.thumbnail`) shows the media name as is, no episode line, a
+  16:9 cover in the controls (a neutral placeholder until the art is up)
+  and none on the start card. Art up: poster and banner of one hash mark
+  it. Before the art: `isWebVideo` tells it from the media itself (an
+  http(s) `url` without a media file extension, or a relayed, non-Jellyfin
+  media whose name has no file extension: a page's title), so the layout
+  never switches when the thumbnail lands.

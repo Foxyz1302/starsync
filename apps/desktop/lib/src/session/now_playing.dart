@@ -9,11 +9,11 @@ class NowPlaying {
   /// Portrait cover (2:3) and wide banner; '' when none.
   final String posterHash;
   final String bannerHash;
-  const NowPlaying({required this.title, this.episode, this.posterHash = '', this.bannerHash = ''});
-
-  /// The art is a web video's thumbnail (the same picture as cover and
-  /// banner): shown wide, under the video's own name.
-  bool get thumbnail => posterHash.isNotEmpty && posterHash == bannerHash;
+  /// A web video: its art is its thumbnail (the same picture as cover and
+  /// banner, or none yet), shown wide, under the video's own name.
+  final bool thumbnail;
+  const NowPlaying(
+      {required this.title, this.episode, this.posterHash = '', this.bannerHash = '', this.thumbnail = false});
 
   @override
   bool operator ==(Object other) =>
@@ -21,8 +21,9 @@ class NowPlaying {
       other.title == title &&
       other.episode == episode &&
       other.posterHash == posterHash &&
-      other.bannerHash == bannerHash;
+      other.bannerHash == bannerHash &&
+      other.thumbnail == thumbnail;
 
   @override
-  int get hashCode => Object.hash(title, episode, posterHash, bannerHash);
+  int get hashCode => Object.hash(title, episode, posterHash, bannerHash, thumbnail);
 }

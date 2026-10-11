@@ -526,8 +526,8 @@ class SkipForwardButton extends StatelessWidget {
 }
 
 /// Floating pill over the video (Next episode, Skip OP / ED / 1:30):
-/// faint at rest, lit on hover. Lives outside the auto-hiding controls, so
-/// it shows in fullscreen and with the controls hidden.
+/// faint at rest, lit on hover. Lives outside the auto-hiding controls
+/// (also in fullscreen); `PillGate` shows it with them.
 class FloatingPill extends StatefulWidget {
   final String label;
   final String tooltip;
