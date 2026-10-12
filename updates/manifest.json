@@ -1,10 +1,10 @@
 {
-  "version": "1.1.2",
-  "protocol": 11,
-  "url": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.1.2/watch-together-1.1.2-linux-x64.tar.gz",
-  "notes": "- Roadmap: drop the link-token item (what a user pastes is theirs)",
+  "version": "1.2.0",
+  "protocol": 15,
+  "url": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.2.0/watch-together-1.2.0-linux-x64.tar.gz",
+  "notes": "- release.sh: notes via git log -n (head broke the pipe under pipefail past 20 commits)",
   "assets": {
-    "linux-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.1.2/watch-together-1.1.2-linux-x64.tar.gz",
-    "windows-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.1.2/watch-together-1.1.2-windows-x64.zip"
+    "linux-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.2.0/watch-together-1.2.0-linux-x64.tar.gz",
+    "windows-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.2.0/watch-together-1.2.0-windows-x64.zip"
   }
 }
