@@ -43,6 +43,9 @@ jobs:
   # The updater's Windows apply path (running exe parked as .old) only
   # means something on real NTFS. Runner notes: see release.yml.
   updater-windows:
+    # Not for a "Release v…" commit: release.yml builds it on the same
+    # (only) Windows runner, which this job would hold up.
+    if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
     runs-on: windows-latest
     steps:
       - name: Checkout
