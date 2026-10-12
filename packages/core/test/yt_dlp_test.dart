@@ -119,6 +119,8 @@ void main() {
     expect(playErrorText('[BiliBili] BV1x: Unable to download webpage: HTTP Error 412: Precondition Failed'),
         needsCookiesText);
     expect(playErrorText('Sign in to confirm your age'), needsCookiesText);
+    expect(playErrorText('ERROR: [BiliBili] 1Zzpp6WEda: No video formats found!; please report this issue on https://github.com/yt-dlp/yt-dlp/issues'),
+        noFormatsText);
     expect(playErrorText('the video server answered HTTP error 403 Forbidden'), notAllowedText);
     expect(playErrorText('HTTP Error 404: Not Found'), notFoundText);
     expect(playErrorText('Unsupported URL: https://example.com/login/403'), unsupportedUrlText);

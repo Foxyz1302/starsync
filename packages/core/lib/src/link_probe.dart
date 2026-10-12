@@ -78,6 +78,9 @@ const noRelayFormatText = "This page has no video a relay can read. Choose 'Ever
 
 /// The plain-words texts of [playErrorText].
 const needsCookiesText = 'This site needs cookies — Settings → Player → yt-dlp → Cookies';
+/// yt-dlp read the page but got no video, typically a site that hides it
+/// from signed-out visitors (Bilibili does for some videos).
+const noFormatsText = 'No video found: it may need signing in (cookies: Settings → Player → yt-dlp)';
 const notAllowedText = 'Not allowed (403)';
 const notFoundText = 'Not found (404)';
 const unsupportedUrlText = 'Not a video page yt-dlp knows';
@@ -100,6 +103,7 @@ String playErrorText(String raw) {
   // First: its message quotes the URL, which may say anything.
   if (s.toLowerCase().contains('unsupported url')) return unsupportedUrlText;
   if (_cookiesHint.hasMatch(s)) return needsCookiesText;
+  if (s.toLowerCase().contains('no video formats found')) return noFormatsText;
   if (_forbidden.hasMatch(s)) return notAllowedText;
   if (_notFound.hasMatch(s)) return notFoundText;
   if (_unreachable.hasMatch(s)) return unreachableText;
