@@ -64,8 +64,8 @@ void main() {
   });
 
   group('core welcome + proto', () {
-    test('proto 14: avatars by hash, profile intent', () {
-      expect(RelayConstants.protoVersion, 14);
+    test('proto 15: avatars by hash, profile intent', () {
+      expect(RelayConstants.protoVersion, 15);
       const v = MemberView(id: 'm1', name: 'a', ready: false, inSet: false, buffered: 0, stale: false);
       expect(v.toJson().containsKey('avatarHash'), isFalse);
       expect(v.toJson().containsKey('avatar'), isFalse);

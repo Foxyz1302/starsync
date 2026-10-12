@@ -236,7 +236,7 @@ then everyone (you included) uses Join.
 | `--[no-]yt-dlp` | on | read web pages (YouTube, X, …) with yt-dlp when the server fetches a link |
 | `--yt-dlp-dir` | next to the binary | writable folder for the server's yt-dlp (systemd: the unit's `StateDirectory`) |
 | `--yt-dlp-cookies` | none | cookies.txt or cookie-extension JSON export for that yt-dlp (sites that refuse guests); copied into the yt-dlp folder at start, removed from it when not given. **An account login**: keep it private, use a throwaway account for YouTube |
-| `--log-dir` | `logs` next to `--config`, else next to the binary (systemd: the unit's `StateDirectory`) | folder for the log files (`server-YYYY-MM-DD.log`, kept 7 days; passwords, tokens and cookies left out) |
+| `--log-dir` | `logs` next to `--config`, else next to the binary (systemd: the unit's `StateDirectory`) | folder for the log files (`server-YYYY-MM-DD.log` and the session log `session-YYYY-MM-DD.log`, kept 7 days; passwords, tokens and cookies left out) |
 | `--config` | none | YAML or JSON file with the same settings (`port`, `secret`, `name`, `mediaPath`, `advertiseHost`, `ytDlp`, `ytDlpDir`, `ytDlpCookies`); replaces the flags |
 | `--upgrade` | | update the install folder to the latest release ([Install and update](#install-and-update)), then exit |
 | `--check-update` | | print whether a newer release exists, then exit |
@@ -250,6 +250,19 @@ To run it as a service, unpack the tarball to `/opt/watch-together` and use
 Something not playing? Settings → About → **Copy diagnostics** puts the
 app's recent log (passwords, tokens and cookies left out) on the
 clipboard: paste it to whoever helps you, from both sides if you can.
+
+While you are in a server, the app also sends its log to that server, which
+merges everyone's lines and its own into one session log
+(`session-YYYY-MM-DD.log` next to the server's logs; the hosting app keeps
+it in its own logs folder), so a problem can be read afterwards from every
+side. Chat is never logged anywhere, nor passwords, tokens and cookies.
+When something goes wrong, press **Mark a problem** (Ctrl+Shift+B, also in
+the player's ⚙ and Settings → About) and add a few words if you like: a
+marker with your name goes in the session log at that moment. In a server,
+Copy diagnostics can add the session log of the last 6 hours (any member
+may read it). Don't want to share? Settings → About → **Share diagnostics
+with the server** off: your log stays on your machine (the server only
+notes that you don't share; a problem you mark still goes in).
 
 ## Join
 
@@ -281,7 +294,8 @@ overrides it); in the player also the subtitle and audio track. Every
 change applies right away.
 
 Anywhere in a server (unless you are typing): Space = ready / unready,
-Tab = chat & activity (Tab never moves between buttons). Keys while the
+Tab = chat & activity (Tab never moves between buttons). Anywhere:
+Ctrl+Shift+B = mark a problem in the session log. Keys while the
 player fills the window: Left/Right = seek 10 s, Up/Down = volume, Shift+Right = skip 1:30,
 PgUp/PgDn = previous / next chapter (as in mpv), F = fullscreen, Esc =
 close the chat, then fullscreen, then shrink the player to mini; from the

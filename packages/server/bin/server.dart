@@ -31,7 +31,8 @@ Future<void> main(List<String> args) async {
             'An account login: keep it private. Copied into --yt-dlp-dir at start.')
     ..addOption('config', help: 'YAML or JSON config file (keys as in AppConfig); overrides the other flags.')
     ..addOption('log-dir',
-        help: 'Folder for the rotating log files (server-YYYY-MM-DD.log, kept 7 days). '
+        help: 'Folder for the rotating log files (server-YYYY-MM-DD.log, and session-YYYY-MM-DD.log with '
+            'every member\'s shared diagnostics merged in; kept 7 days). '
             'Default: logs next to --config, else logs next to this binary (systemd: \$STATE_DIRECTORY/logs).')
     ..addFlag('upgrade',
         negatable: false,
@@ -117,7 +118,9 @@ Future<void> main(List<String> args) async {
   }
 
   final events = ReceivePort('server events');
-  final done = serve(config.toMap(), events: events.sendPort);
+  // The session log (every member's diagnostics and the server's records
+  // merged) goes next to the server's own.
+  final done = serve({...config.toMap(), if (files != null) 'logDir': files.dir}, events: events.sendPort);
   final signals = <StreamSubscription<ProcessSignal>>[];
   await for (final msg in events) {
     if (msg is! Map) continue;

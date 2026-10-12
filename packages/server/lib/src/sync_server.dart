@@ -11,6 +11,7 @@ import 'media_endpoint.dart';
 import 'relay_routes.dart';
 import 'server_hub.dart';
 import 'session.dart';
+import 'session_log.dart';
 
 /// [configured], else systemd's `$STATE_DIRECTORY/yt-dlp`, else `yt-dlp`
 /// next to the server binary when that is writable (not under `dart run`),
@@ -56,8 +57,16 @@ class SyncServer {
   /// IPv4 interface.
   final bool loopbackOnly;
 
+  /// The folder of the session log (`session-YYYY-MM-DD.log`, every
+  /// member's diagnostics and the server's records merged); null: none.
+  final String? logDir;
+  SessionLog? _sessionLog;
+
+  /// The session log while running with a [logDir].
+  SessionLog? get sessionLog => _sessionLog;
+
   /// [ytDlp] replaces the server's own (tests).
-  SyncServer(this.config, {YtDlp? ytDlp, this.loopbackOnly = false}) {
+  SyncServer(this.config, {YtDlp? ytDlp, this.loopbackOnly = false, this.logDir}) {
     hub = ServerHub(sessions, config.secret,
         hostKey: config.hostKey,
         jellyfin: config.jellyfin,
@@ -103,6 +112,7 @@ class SyncServer {
     mountRelayRoutes(_app, sessions, relayAt: hub.relayAt, sourceOf: hub.sourceOf, onLog: logRequest);
     mountAvatarRoute(_app, hub);
     mountArtRoute(_app, hub);
+    mountSessionLogRoutes(_app, hub, () => _sessionLog);
     mountJellyfinRelayRoute(
         _app, sessions, () => hub.jellyfin, () => _relayClient ??= HttpClient(),
         next: () => hub.nextJellyfinRef, onLog: logRequest);
@@ -139,6 +149,14 @@ class SyncServer {
     if (config.secret.isEmpty) {
       _log.warning('no password set: open server, anyone who can reach it can join');
     }
+    final dir = logDir;
+    if (dir != null && _sessionLog == null) {
+      try {
+        _sessionLog = SessionLog(dir)..captureOwn();
+      } catch (e) {
+        _log.warning('no session log: cannot write $dir ($e)');
+      }
+    }
     await _resolveJellyfinServerId();
     _mountRoutes();
     _server = await _app.serve(
@@ -158,6 +176,7 @@ class SyncServer {
       hub.sampleRates();
       hub.broadcastState();
       hub.broadcastFeed();
+      _sessionLog?.flush();
     });
     _log.info('server "${config.name}" listening on $boundPort');
   }
@@ -193,5 +212,7 @@ class SyncServer {
     await _app.close();
     _server = null;
     _log.info('server "${config.name}" stopped');
+    await _sessionLog?.close();
+    _sessionLog = null;
   }
 }

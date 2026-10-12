@@ -33,10 +33,12 @@ class ServerIsolate {
 
   /// Spawns the server and waits until it listens. Throws a
   /// [StateError] with the server's message if it cannot start.
-  /// [loopbackOnly]: 127.0.0.1 only (the solo session).
+  /// [loopbackOnly]: 127.0.0.1 only (the solo session). [logDir]: where
+  /// the server writes its session log (none when null).
   static Future<ServerIsolate> start(
     AppConfig config, {
     bool loopbackOnly = false,
+    String? logDir,
     required void Function(String line) onLog,
     required void Function(String error) onCrash,
     Duration timeout = const Duration(seconds: 15),
@@ -85,7 +87,7 @@ class ServerIsolate {
     final Isolate isolate;
     try {
       isolate = await Isolate.spawn(
-          _serverMain, ({...config.toMap(), if (loopbackOnly) 'loopbackOnly': true}, events.sendPort),
+          _serverMain, ({...config.toMap(), if (loopbackOnly) 'loopbackOnly': true, 'logDir': ?logDir}, events.sendPort),
           errorsAreFatal: false,
           onError: errors.sendPort,
           onExit: exit.sendPort,

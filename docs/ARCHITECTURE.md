@@ -1517,9 +1517,14 @@ dedicated server (`package:logging` loggers named by area: `relay`,
   `--config`, else `logs` next to the binary (systemd:
   `$STATE_DIRECTORY/logs`), else `~/.cache/watch-together/logs`; it
   prints the folder at start. Both also print every line to stdout.
+  The session log (below) sits next to them: the hosting app's server
+  writes it in the app's logs folder (not for a solo session), the
+  dedicated one in its log folder.
 - **Files** (`LogFiles`): one per day, the next `.1.log`, `.2.log` once a
   file passes 10 MiB; files older than 7 days, then the oldest beyond
-  100 MiB in all, are deleted whenever one is opened. A line is
+  100 MiB in all (the app's or server's files and the session log's
+  together, the oldest of either first, never the other writer's file of
+  today), are deleted whenever one is opened. A line is
   `2026-10-12 18:44:27.202 LEVEL logger: message`, the error and stack
   trace on the lines below. Writes are synchronous appends (nothing lost
   in a crash). Lines from before the folder is known (the app finds it
@@ -1527,7 +1532,7 @@ dedicated server (`package:logging` loggers named by area: `relay`,
 - **Redaction** (`redactLog`): every line, in one place
   (`formatLogLine`), before console or file: URL query strings cut to
   their parameter names (signed CDN links, Jellyfin `api_key`),
-  `user:pass@` in URLs, member tokens in `/r /m /j /a /i` paths, and the
+  `user:pass@` in URLs, member tokens in `/r /m /j /a /i /l` paths, and the
   values of passwords, secrets, tokens, API keys, cookies,
   `Authorization` / `X-Emby-*` headers (`name=value`, `"name":"value"`,
   `Name="value"`, `Name: value`) and `Bearer` credentials. Code logs
@@ -1554,12 +1559,51 @@ dedicated server (`package:logging` loggers named by area: `relay`,
   source (media opened and how long it took, channel up and down,
   reconnects, upstream refusals with the header names sent, re-resolves
   of expired format URLs).
+- **Never logged**: chat text (the server relays it without a log line,
+  the app does not log it), and no user-typed free text other than a
+  problem mark's note. Names, media titles and links (query cut) are.
+- **The session log** (`packages/server/lib/src/session_log.dart`,
+  `packages/core/lib/src/diag_share.dart`): one shared log per server so
+  a problem can be read afterwards from every side. While in a session
+  the app (`DiagUploader`, owned by the coordinator) keeps its own
+  records (not its hosted server's `server.*`, which the server logs
+  itself), redacted, and sends them every 10 s from the session's 1 s
+  ticker and when it leaves (before its token goes, at most 1.5 s), as
+  gzip batches to `POST /l/<sid>/<token>` (PROTOCOL
+  "Diagnostics"), timestamps moved to the server's clock with the ping
+  offset (`ClockSync`), the app version in every batch. Until it can
+  send (reconnecting, no clock sample yet) it keeps up to 2 MiB, the
+  oldest dropped and counted. The server (`SessionLog`) takes every
+  member's lines and its own records, holds them 15 s and writes them in
+  server-time order to `session-YYYY-MM-DD.log` (day and time on the
+  server's clock; a line later than that, a reconnect's backlog, goes in
+  with its own time, a little out of order). A line is
+  `HH:MM:SS.mmm [who] logger: message` (`LEVEL logger` from WARNING up),
+  `who` = `name (id)` or `server`, continuation lines indented; every
+  line is redacted again on the server. The server notes once per member
+  `Bob (m2) shares diagnostics (<version>)` or `Bob (m2) doesn't share
+  diagnostics`, and `N lines dropped` when the app's buffer overflowed.
+  Limits and rate caps: PROTOCOL "Diagnostics"; a refused batch stays in
+  the app's buffer for the next try.
+- **Opting out**: Settings → About → "Share diagnostics with the server"
+  (default on). Off: no lines are kept or sent; one batch per connection
+  says so (`share:false`). The local log is unchanged.
+- **Mark a problem**: Ctrl+Shift+B (`AppKeys`), the player's ⚙ card and
+  Settings → About open a small card with an optional note (200
+  characters, one line); the mark goes at once with the lines waiting,
+  opted out or not, and the server writes `[who] === PROBLEM marked by
+  <name>: <note> ===` at its time. The app's own log gets
+  `=== PROBLEM marked: <note> ===` (logger `problem`, never sent). Out
+  of a session only the app's log gets it. The toast says which.
 - **Getting it**: Settings → About → "Copy diagnostics" puts the app and
   OS versions, mpv/ffmpeg and yt-dlp versions, whether yt-dlp has
   cookies, and the last 6 hours of the log (up to 4 MiB) on the
   clipboard, already redacted, and saves the same text as
   `diagnostics-<time>.txt` in the logs folder (kept 7 days); "Open logs
-  folder" opens it.
+  folder" opens it. In a session it first asks whether to add the
+  server's session log of the same 6 hours (`GET /l/...`). Any member
+  may read the session log, not only the host: friends trust each other,
+  and it is redacted and holds no chat.
 
 ## Health reporting
 

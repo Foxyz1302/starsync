@@ -1,4 +1,4 @@
-# Protocol (proto = 14)
+# Protocol (proto = 15)
 
 Wire format only. Behavior (gate, clock, timeouts) is in
 [ARCHITECTURE.md](ARCHITECTURE.md). Source of truth:
@@ -26,12 +26,14 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
   "Jellyfin media" below). `/r/<sid>/<token>/...` is the relay of a
   member's media (see "Relay" below). `GET /a/<sid>/<token>/<hash>` serves
   a member's picture (see "Avatars" below), `GET /i/<sid>/<token>/<hash>`
-  the current media's art (see "Media art" below).
+  the current media's art (see "Media art" below). `POST` and `GET
+  /l/<sid>/<token>` send and read the session log (see "Diagnostics"
+  below).
 
 ## Client to server
 
 ```
-{"t":"hello","proto":14,"secret":"","user":{"name":"","avatar":""},
+{"t":"hello","proto":15,"secret":"","user":{"name":"","avatar":""},
  "media":{"name":"","size":0,"duration":0,"url":null},"hostKey":"...",
  "resume":"<token>"}
 {"t":"ready","ready":true,"source":"manual"}      source: manual | auto
@@ -467,3 +469,41 @@ state  "queue":[<item>,...], "queuePlay":"q3"
 - `state.queue` (omitted when empty) and `state.queuePlay` (omitted when
   none) ride in every state, `welcome.state` included. The first item's
   `media.relay` shows its warm relay (see "Relay").
+
+## Diagnostics (proto 15)
+
+Each app sends its log lines to the server, which merges them with its
+own into the session log (behavior, file and format: ARCHITECTURE.md,
+"Logging").
+
+```
+POST /l/<sid>/<token>   content-type application/gzip, body = gzip of:
+  {"v":"Starsync 1.4.0 on linux","share":false,
+   "lines":[{"t":1767225600123,"l":"WARNING","n":"mpv","m":"..."}],
+   "dropped":12,"marks":[{"t":1767225600500,"note":"..."}]}
+GET  /l/<sid>/<token>?hours=6
+```
+
+- `POST`: one batch. Every field is optional. `v`: the app and version,
+  noted once per member (and when it changes). `share:false` (omitted
+  when true): the member does not share; the server notes it once and
+  drops any `lines`. `lines[]`: `t` epoch ms on the server's clock (the
+  client converts with its `pong` offset), `l` level name, `n` logger
+  (`[A-Za-z0-9_.-]`, up to 40, else `app`), `m` the message, already
+  redacted, an error and stack trace on the lines below (cut to 8192
+  characters). `dropped`: lines the client dropped since its last batch
+  (its buffer was full). `marks[]`: "Mark a problem" at `t` with an
+  optional `note` (one line, cut to 200 characters); it goes in even
+  with `share:false`.
+- Limits: a body of at most 256 KiB, unpacking to at most 1 MiB (else
+  413); not gzip of a JSON object: 400. Per member and minute at most 30
+  posts and 4 MiB of lines, else 429 with `retry-after`: the client keeps
+  the batch and sends it later. Unknown token: 401. Success: 204, also
+  on a server that keeps no session log (the batch is dropped).
+- `GET`: the session log of the last `hours` (1 to 168, default 6; at
+  most 8 MiB, the newest kept), lines the server still holds for
+  ordering included, as gzip of UTF-8 text (`application/gzip`). Any
+  member may read it (it is redacted and holds no chat). 401 for an
+  unknown token, 404 on a server that keeps no session log.
+- Clients send every 10 s and when they leave; each batch carries at
+  most 256 KiB of lines.

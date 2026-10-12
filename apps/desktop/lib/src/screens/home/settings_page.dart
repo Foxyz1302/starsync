@@ -23,6 +23,7 @@ const sessionShortcuts = [
   ('Ctrl+1…6', 'Shaders: Anime4K mode A, B, C, A+A, B+B, C+A'),
   ('Ctrl+0', 'Shaders off'),
   ('Esc', 'Close the panel or fullscreen, shrink the player, then ask to leave'),
+  ('Ctrl+Shift+B', 'Mark a problem in the session log (anywhere)'),
 ];
 
 /// One titled card of the Settings tab (rounded Material, so list tiles

@@ -1,6 +1,7 @@
 export 'src/constants.dart';
 export 'src/errors.dart';
 export 'src/logging.dart';
+export 'src/diag_share.dart';
 export 'src/clock_sync.dart';
 export 'src/config.dart';
 export 'src/protocol.dart';

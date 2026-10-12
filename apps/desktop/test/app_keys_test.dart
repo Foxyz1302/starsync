@@ -65,4 +65,24 @@ void main() {
     expect(readies, 1);
     expect(panel, findsNothing, reason: 'Space pressed a focused chat button');
   });
+
+  testWidgets('Ctrl+Shift+B opens Mark a problem; Esc closes it unmarked', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      shortcuts: appShortcuts,
+      home: const AppKeys(child: Scaffold(body: SizedBox())),
+    ));
+    final card = find.byKey(const ValueKey('mark-problem-card'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+    expect(card, findsOneWidget);
+    expect(textInputFocused(), isTrue, reason: 'the note field takes the keys');
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(card, findsNothing);
+  });
 }

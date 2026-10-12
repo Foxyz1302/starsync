@@ -17,6 +17,7 @@ import '../playback/playback_controller.dart';
 import '../platform/attention.dart';
 import '../playback/yt_dlp_app.dart';
 import '../schedule/anilist.dart';
+import '../screens/home/ui.dart' show appName, displayVersion;
 import '../screens/home/picked_media.dart';
 import '../sfx/sfx.dart';
 import '../state/settings.dart';
@@ -174,6 +175,32 @@ class SessionCoordinator {
   /// The app's yt-dlp and link probes (tests pass their own).
   final AppYtDlp ytDlp;
   final SyncClient sync = SyncClient();
+  /// This app's log lines to the server's session log (Settings: "Share
+  /// diagnostics with the server"), and "Mark a problem".
+  late final DiagUploader diag = DiagUploader(
+      target: _diagTarget, version: '$appName ${displayVersion()} on ${Platform.operatingSystem}');
+
+  DiagTarget? _diagTarget() {
+    final uri = sync.wsUri;
+    if (sync.token.isEmpty || uri == null || !sync.clockSync.hasSample) return null;
+    return (base: DiagUploader.baseOf(uri), token: sync.token, offsetMs: sync.clockSync.offsetMs);
+  }
+
+  /// "Mark a problem": a marker with [note] in the server's session log
+  /// (and this app's log). False when not in a session: then only this
+  /// app's log has it.
+  Future<bool> markProblem(String note) async {
+    if (!diag.running) {
+      createLogger(DiagUploader.markLogger).warning('=== PROBLEM marked${note.trim().isEmpty ? '' : ': ${note.trim()}'} ===');
+      return false;
+    }
+    await diag.markProblem(note);
+    return true;
+  }
+
+  /// The server's session log of the last [hours], null when not in a
+  /// session or the server has none.
+  Future<String?> sessionLog({int hours = 6}) => diag.fetchSessionLog(hours: hours);
   /// Up next: the server's queue, adding to it, and putting items up.
   late final QueueController queue = QueueController(this);
   /// The server has a password (it fetches links only then).
@@ -498,6 +525,9 @@ class SessionCoordinator {
     }
     markInput();
     _subscribe();
+    diag
+      ..share = AppSettings.instance.shareDiagnostics.peek()
+      ..start();
     feedLog.value = [];
     toasts.value = [];
     await initPlayer();
@@ -1201,6 +1231,9 @@ class SessionCoordinator {
         toasts.peek().where((t) => now.difference(t.at).inSeconds < 4).toList();
     final r = serverState.peek();
     if (sync.token.isNotEmpty) sync.sendPing();
+    diag
+      ..share = AppSettings.instance.shareDiagnostics.peek()
+      ..tick();
     if (sync.token.isNotEmpty && r != null && _playerReady) {
       _sendReport(r);
       if (!_lastOut) {
@@ -2235,6 +2268,8 @@ class SessionCoordinator {
     try {
       await playback.dispose();
     } catch (_) {}
+    // The last lines go before the token does.
+    await diag.stop();
     try {
       await sync.disconnect();
     } catch (_) {}

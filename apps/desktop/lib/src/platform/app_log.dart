@@ -44,8 +44,10 @@ Future<void> startAppLogging() async {
 }
 
 /// The text "Copy diagnostics" gives: versions, then the last [since] of
-/// the app log (its hosted server's records included), already redacted.
-Future<String> diagnosticsText({Duration since = const Duration(hours: 6)}) async {
+/// the app log (its hosted server's records included), already redacted;
+/// with [sessionLog], the server's session log of the same hours after it
+/// (every member's shared lines and the server's, merged).
+Future<String> diagnosticsText({Duration since = const Duration(hours: 6), bool sessionLog = false}) async {
   final b = StringBuffer()
     ..writeln('$appName ${displayVersion()}')
     ..writeln('OS: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}')
@@ -68,6 +70,13 @@ Future<String> diagnosticsText({Duration since = const Duration(hours: 6)}) asyn
   b.writeln('Log: ${files?.currentPath ?? 'none (console only)'}');
   b.writeln('--- last ${since.inHours} h of the log ---');
   b.write(files?.recent(since) ?? '');
+  if (sessionLog) {
+    final server = await SessionState.instance.coordinator.sessionLog(hours: since.inHours);
+    b
+      ..writeln()
+      ..writeln("--- last ${since.inHours} h of the server's session log ---")
+      ..write(server ?? "(none: the server keeps no session log, or it couldn't be reached)");
+  }
   return redactLog(b.toString());
 }
 

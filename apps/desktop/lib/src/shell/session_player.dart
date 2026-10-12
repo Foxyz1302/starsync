@@ -29,6 +29,7 @@ import '../widgets/app_keys.dart';
 import '../widgets/text_focus.dart';
 import '../widgets/window_buttons.dart';
 import 'avatar.dart';
+import 'mark_problem.dart';
 import 'motion.dart';
 import 'now_playing_title.dart';
 import 'player_status.dart';
@@ -627,6 +628,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
             (title: 'Change video', hint: null, run: widget.onChangeVideo),
             (title: 'Chat & activity', hint: 'Tab', run: _toggleChat),
             (title: 'Reload video', hint: 'Ctrl+R', run: _reloadVideo),
+            (title: 'Mark a problem', hint: 'Ctrl+Shift+B', run: () => showMarkProblem(context)),
             (title: 'Mark everyone ready', hint: null, run: coord.forcePlayAll),
             (title: 'Fullscreen', hint: 'F', run: widget.onToggleFullscreen),
             (title: 'Leave server', hint: 'Esc', run: widget.onLeave),

@@ -10,6 +10,7 @@ import '../jellyfin/accounts.dart';
 import '../jellyfin/session_media.dart';
 import '../screens/home/health_probe.dart';
 import '../screens/home/picked_media.dart';
+import '../platform/app_log.dart' show appLogDir;
 import '../playback/yt_dlp_app.dart';
 import '../sfx/sfx.dart';
 import '../sfx/sound_bank.dart';
@@ -379,6 +380,9 @@ class SessionState {
             ytDlpDir: await _sharedYtDlpDir(),
           ),
           loopbackOnly: soloSession,
+          // Its session log (every member's shared diagnostics and its own
+          // records) goes next to the app's; not for a solo session.
+          logDir: soloSession ? null : appLogDir,
           // Its records join the app's log as `server.<logger>`.
           onLog: (line) => relogLine('server', line),
           onCrash: (cause) => _onServerCrash(server, cause),

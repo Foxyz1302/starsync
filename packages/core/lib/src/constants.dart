@@ -1,5 +1,5 @@
 abstract class RelayConstants {
-  static const int protoVersion = 14;
+  static const int protoVersion = 15;
 
   // Relay (`/r/...`): a member's bytes through the server's buffer.
   static const int relaySliceBytes = 1 << 20;
@@ -70,4 +70,20 @@ abstract class RelayConstants {
   static const int maxQueueItems = 100;
   static const int maxQueueTextLength = 200;
   static const int queuePlayTimeoutSecs = 30;
+
+  /// Diagnostics sharing (`/l/...`, ARCHITECTURE "Logging"): a member's
+  /// batch carries at most [diagBatchBytes] of lines (gzip on the wire, at
+  /// most [diagBatchBytes] compressed and [diagDecodedBytes] unpacked); it
+  /// keeps up to [diagBufferBytes] while it cannot send (oldest dropped)
+  /// and sends every [diagIntervalSecs]. The server takes at most
+  /// [diagPostsPerMin] posts and [diagBytesPerMin] unpacked bytes per member
+  /// and minute (429 beyond). A "Mark a problem" note is cut to
+  /// [maxProblemNoteLength] characters.
+  static const int diagBatchBytes = 256 * 1024;
+  static const int diagDecodedBytes = 1 << 20;
+  static const int diagBufferBytes = 2 << 20;
+  static const int diagIntervalSecs = 10;
+  static const int diagPostsPerMin = 30;
+  static const int diagBytesPerMin = 4 << 20;
+  static const int maxProblemNoteLength = 200;
 }

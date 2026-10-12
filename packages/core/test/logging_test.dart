@@ -19,6 +19,7 @@ void main() {
       expect(redactLog('open http://1.2.3.4:8080/r/default/$tok/2/0/name'), 'open http://1.2.3.4:8080/r/default/***/2/0/name');
       expect(redactLog('ws://h:1/r/default/$tok/source?q=7'), 'ws://h:1/r/default/***/source?q=…');
       expect(redactLog('/m/default/$tok/file.mkv range=bytes=0-'), '/m/default/***/file.mkv range=bytes=0-');
+      expect(redactLog('POST /l/default/$tok'), 'POST /l/default/***');
       expect(redactLog('edl://!no_clip;%160%http://h/r/default/$tok/2/0/n;!new_stream;!no_clip;%160%http://h/r/default/$tok/2/1/n'),
           isNot(contains(tok)));
     });
@@ -84,6 +85,17 @@ void main() {
       final small = LogFiles(dir.path, maxFileBytes: 100, maxTotalBytes: 150, now: () => now)..open();
       expect(small.files().map((x) => x.uri.pathSegments.last), ['app-2026-10-12.1.log', 'app-2026-10-13.log']);
       small.close();
+    });
+
+    test('the session log shares the total budget, never touching another writer\'s today', () {
+      final now = DateTime(2026, 10, 12, 10);
+      File('${dir.path}/session-2026-10-10.log').writeAsStringSync('s' * 100);
+      File('${dir.path}/session-2026-10-12.log').writeAsStringSync('s' * 100);
+      File('${dir.path}/app-2026-10-11.log').writeAsStringSync('a' * 100);
+      final f = LogFiles(dir.path, maxTotalBytes: 150, shareWith: const ['session'], now: () => now)..open();
+      final left = dir.listSync().map((e) => e.uri.pathSegments.last).toSet();
+      expect(left, {'session-2026-10-12.log', 'app-2026-10-12.log'});
+      f.close();
     });
   });
 }

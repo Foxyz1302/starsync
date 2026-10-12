@@ -8,6 +8,7 @@ import '../jellyfin/track_prefs.dart' show MpvTrack;
 import '../playback/playback_controller.dart' show PlaybackController, RenderMode;
 import '../shaders/shader_presets.dart';
 import '../state/session_state.dart';
+import '../shell/mark_problem.dart';
 import '../shell/motion.dart';
 import '../state/settings.dart';
 import '../widgets/app_menu.dart';
@@ -332,9 +333,16 @@ class PlayerSettingsCard extends StatelessWidget {
                 const TrackSetting(type: JellyfinStreamType.audio),
               ],
               const SizedBox(height: 4),
-              Text(
-                'Custom shader files: Settings → Player',
-                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Custom shader files: Settings → Player',
+                      style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
+                    ),
+                  ),
+                  const MarkProblemButton(),
+                ],
               ),
             ],
           ),

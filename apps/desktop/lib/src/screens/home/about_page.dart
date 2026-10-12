@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:signals/signals_flutter.dart';
 
 import '../../platform/app_log.dart';
+import '../../shell/mark_problem.dart';
+import '../../state/session_state.dart';
+import '../../state/settings.dart';
 import '../../update/update_controller.dart';
+import '../../widgets/app_menu.dart';
 import '../../widgets/copy_open.dart';
 import 'settings_page.dart';
 import 'ui.dart';
@@ -45,18 +50,24 @@ class AboutPanel extends StatelessWidget {
               ),
               const SizedBox(height: kGap),
               Text('Something went wrong? Copy diagnostics and send them to whoever helps you: '
-                  'versions and the last hours of the log, passwords, tokens and cookies left out.',
+                  'versions and the last hours of the log, passwords, tokens and cookies left out. '
+                  'In a session it can add the server\'s session log, everyone\'s lines merged. '
+                  'Mark a problem (Ctrl+Shift+B) when it happens so the spot is easy to find.',
                   style: t.bodySmall?.copyWith(color: Colors.grey)),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  FilledButton.tonalIcon(
-                    onPressed: _copyDiagnostics,
-                    icon: const Icon(Icons.bug_report_outlined, size: 18),
-                    label: const Text('Copy diagnostics'),
+                  Builder(
+                    builder: (context) => FilledButton.tonalIcon(
+                      key: const ValueKey('copy-diagnostics'),
+                      onPressed: () => _copyDiagnostics(context),
+                      icon: const Icon(Icons.bug_report_outlined, size: 18),
+                      label: const Text('Copy diagnostics'),
+                    ),
                   ),
+                  const MarkProblemButton(outlined: true),
                   OutlinedButton.icon(
                     onPressed: appLogDir == null ? null : () => _openLogs(),
                     icon: const Icon(Icons.folder_open, size: 18),
@@ -64,13 +75,36 @@ class AboutPanel extends StatelessWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 8),
+              SignalBuilder(
+                builder: (context) => SwitchListTile(
+                  key: const ValueKey('share-diagnostics'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Share diagnostics with the server'),
+                  subtitle: const Text('In a session, this app\'s log goes to the server\'s session log, '
+                      'merged with everyone\'s, so a problem can be read afterwards. Never chat; '
+                      'passwords and tokens left out. Off: only a problem you mark is sent.'),
+                  value: AppSettings.instance.shareDiagnostics.value,
+                  onChanged: AppSettings.instance.setShareDiagnostics,
+                ),
+              ),
             ],
           ),
         );
   }
 
-  static Future<void> _copyDiagnostics() async {
-    final text = await diagnosticsText();
+  /// In a session it asks whether to add the server's session log.
+  static Future<void> _copyDiagnostics(BuildContext context) async {
+    var withServer = false;
+    if (SessionState.instance.route.peek() == AppRoute.session) {
+      final pick = await showAppMenu<bool>(context, items: const [
+        AppMenuItem(value: false, label: "This app's log"),
+        AppMenuItem(value: true, label: "This app's and the server's session log"),
+      ]);
+      if (pick == null) return;
+      withServer = pick;
+    }
+    final text = await diagnosticsText(sessionLog: withServer);
     final saved = await saveDiagnostics(text);
     await copyToClipboard(text,
         done: saved == null ? 'Diagnostics copied' : 'Diagnostics copied (also saved in the logs folder)');

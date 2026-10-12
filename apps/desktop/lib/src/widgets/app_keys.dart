@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../shell/mark_problem.dart';
 import '../state/session_state.dart';
 import 'text_focus.dart';
 
@@ -15,11 +16,12 @@ Map<ShortcutActivator, Intent> get appShortcuts => {
       const SingleActivator(LogicalKeyboardKey.space): const DoNothingIntent(),
     };
 
-/// The window's two app-wide keys, ahead of whatever has focus: while in a
+/// The window's app-wide keys, ahead of whatever has focus: while in a
 /// server, Space is ready / not ready and Tab opens or closes the chat,
 /// on every tab and in every player mode. Not while a text field has
 /// focus (the chat field handles Tab and Esc itself) nor while a dialog or
-/// menu is in front of [child].
+/// menu is in front of [child]. Ctrl+Shift+B ([markProblemKey]) marks a
+/// problem anywhere, a text field focused or not.
 class AppKeys extends StatefulWidget {
   /// Who toggles the chat, latest first: the strip while it is shown, the
   /// full player in fullscreen (both hold the shell's toggle).
@@ -53,6 +55,11 @@ class _AppKeysState extends State<AppKeys> {
   bool _key(KeyEvent event) {
     if (event is! KeyDownEvent || !mounted) return false;
     final key = event.logicalKey;
+    if (markProblemKey.accepts(event, HardwareKeyboard.instance)) {
+      if (ModalRoute.of(context)?.isCurrent == false) return false;
+      showMarkProblem(context);
+      return true;
+    }
     if (key != LogicalKeyboardKey.space && key != LogicalKeyboardKey.tab) return false;
     if (SessionState.instance.route.peek() != AppRoute.session) return false;
     if (ModalRoute.of(context)?.isCurrent == false) return false;

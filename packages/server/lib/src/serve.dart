@@ -19,7 +19,8 @@ import 'sync_server.dart';
 /// swap; a following `swap` with its name and size puts it up) and answers
 /// `{'ok':true,'name':n,'size':s}` or `{'ok':false}`. Without [events] a
 /// start failure throws. `'loopbackOnly': true` in [config] (next to the
-/// [AppConfig] keys) binds 127.0.0.1 only: the app's solo session.
+/// [AppConfig] keys) binds 127.0.0.1 only: the app's solo session;
+/// `'logDir'` is the folder of the session log ([SyncServer.logDir]).
 Future<void> serve(Map<String, Object?> config, {SendPort? events}) async {
   StreamSubscription<pkg_logging.LogRecord>? logs;
   if (events != null) {
@@ -34,7 +35,9 @@ Future<void> serve(Map<String, Object?> config, {SendPort? events}) async {
   }
   final SyncServer server;
   try {
-    server = SyncServer(AppConfig.fromMap(config), loopbackOnly: config['loopbackOnly'] == true);
+    final logDir = config['logDir'];
+    server = SyncServer(AppConfig.fromMap(config),
+        loopbackOnly: config['loopbackOnly'] == true, logDir: logDir is String && logDir.isNotEmpty ? logDir : null);
     await server.start();
   } catch (e) {
     await logs?.cancel();

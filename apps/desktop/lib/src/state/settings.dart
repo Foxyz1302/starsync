@@ -28,6 +28,7 @@ const _keySoundPresetFor = 'soundPresetFor';
 const _keyUnreadyOnSwap = 'unreadyOnSwap';
 const _keyIdleSitsOut = 'idleSitsOut';
 const _keyChatPopups = 'chatPopups';
+const _keyShareDiagnostics = 'shareDiagnostics';
 
 enum HwdecMode { auto, off, custom }
 
@@ -70,6 +71,9 @@ class AppSettings {
   /// A 2 px progress line at the bottom of the video while the controls
   /// are hidden (both designs). Applies live.
   final progressLine = signal(true);
+  /// Send this app's log lines to the server's session log while in a
+  /// session (never chat). Off: nothing is sent but a note that it is off.
+  final shareDiagnostics = signal(true);
   /// Chat message toasts (default: only when paused). Applies live.
   final chatPopups = signal(ChatPopups.paused);
   /// App sounds (`sfx/`): 0..1, 0 = silent.
@@ -129,6 +133,8 @@ class AppSettings {
       if (hideRe is bool) hideReReleases.value = hideRe;
       final line = box.get(_keyProgressLine);
       if (line is bool) progressLine.value = line;
+      final share = box.get(_keyShareDiagnostics);
+      if (share is bool) shareDiagnostics.value = share;
       final popups = box.get(_keyChatPopups);
       chatPopups.value = ChatPopups.values.where((m) => m.name == popups).firstOrNull ?? ChatPopups.paused;
       final vol = box.get(_keySoundVolume);
@@ -201,6 +207,11 @@ class AppSettings {
   void setProgressLine(bool on) {
     progressLine.value = on;
     _put(_keyProgressLine, on);
+  }
+
+  void setShareDiagnostics(bool on) {
+    shareDiagnostics.value = on;
+    _put(_keyShareDiagnostics, on);
   }
 
   void setChatPopups(ChatPopups mode) {

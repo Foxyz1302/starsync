@@ -10,6 +10,10 @@ import 'package:logging/logging.dart';
 
 Logger createLogger(String name) => Logger(name);
 
+/// The server's combined log of every member and itself
+/// (`session-YYYY-MM-DD.log`, ARCHITECTURE "Logging").
+const sessionLogPrefix = 'session';
+
 var _listening = false;
 var _console = true;
 LogFiles? _files;
@@ -35,12 +39,13 @@ void initLogging({Level level = Level.INFO, bool console = true}) {
 
 /// Writes the files in [dir] from now on: `<prefix>-YYYY-MM-DD.log`,
 /// rotated by day and [LogFiles.maxFileBytes], pruned by age and total
-/// size. Lines logged before go in first. A folder that cannot be written
-/// leaves logging on the console only (and says so there).
+/// size (shared with the session log, [sessionLogPrefix], in the same
+/// folder). Lines logged before go in first. A folder that cannot be
+/// written leaves logging on the console only (and says so there).
 LogFiles? startLogFiles(String dir, {String prefix = 'app'}) {
   if (_files != null) return _files;
   try {
-    final f = LogFiles(dir, prefix: prefix)..open();
+    final f = LogFiles(dir, prefix: prefix, shareWith: const [sessionLogPrefix])..open();
     _files = f;
     for (final l in _early) {
       f.write(l);
@@ -123,13 +128,13 @@ final _headerSecret = RegExp(
 final _pairSecret = RegExp('\\b($_secretNames)\\s*=\\s*[^&\\s"\',;)}\\]]+', caseSensitive: false);
 final _bearer = RegExp(r'\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}', caseSensitive: false);
 final _url = RegExp(r'''\b(?:https?|wss?)://[^\s"'<>]+''', caseSensitive: false);
-// A member token in a server path: /r/<sid>/<token>/..., /m, /j, /a, /i.
-final _pathToken = RegExp(r'(/[rmjai]/[^/\s?#]+/)[0-9a-fA-F]{32}\b');
+// A member token in a server path: /r/<sid>/<token>/..., /m, /j, /a, /i, /l.
+final _pathToken = RegExp(r'(/[rmjail]/[^/\s?#]+/)[0-9a-fA-F]{32}\b');
 final _userInfo = RegExp(r'^([a-z]+://)[^/@\s]+@', caseSensitive: false);
 
 /// [s] with nothing secret left: every URL's query string down to its
 /// parameter names (signed CDN links, `api_key`), user:password@ in URLs,
-/// member tokens in `/r/ /m/ /j/ /a/ /i/` paths, and the values of
+/// member tokens in `/r/ /m/ /j/ /a/ /i/ /l/` paths, and the values of
 /// passwords, tokens, API keys, cookies and auth headers. Applied to
 /// every log line ([formatLogLine]).
 String redactLog(String s) {
@@ -203,16 +208,21 @@ class LogThrottle {
 /// Rotating log files in [dir]: `<prefix>-YYYY-MM-DD.log` (then `.1.log`,
 /// `.2.log` ... once one passes [maxFileBytes]); files older than
 /// [keepDays] and the oldest beyond [maxTotalBytes] are deleted whenever a
-/// file is opened.
+/// file is opened. [shareWith]: other prefixes in [dir] that count toward
+/// the same [maxTotalBytes] (the app's or server's log and the session
+/// log); the oldest of all of them go first, never another prefix's file
+/// of today (its writer may have it open).
 class LogFiles {
   final String dir;
   final String prefix;
+  final List<String> shareWith;
   final int maxFileBytes;
   final int maxTotalBytes;
   final int keepDays;
   final DateTime Function() _now;
   LogFiles(this.dir,
       {this.prefix = 'app',
+      this.shareWith = const [],
       this.maxFileBytes = 10 * 1024 * 1024,
       this.maxTotalBytes = 100 * 1024 * 1024,
       this.keepDays = 7,
@@ -229,7 +239,10 @@ class LogFiles {
 
   String _dayOf(DateTime t) => '${t.year}-${_two(t.month)}-${_two(t.day)}';
 
-  String _dayOfFile(File f) => f.uri.pathSegments.last.substring(prefix.length + 1, prefix.length + 11);
+  String _dayOfFile(File f) => _fileDay(prefix, f);
+
+  static String _fileDay(String prefix, File f) =>
+      f.uri.pathSegments.last.substring(prefix.length + 1, prefix.length + 11);
 
   /// Opens today's file (creating [dir]); throws when it cannot.
   void open() {
@@ -256,9 +269,10 @@ class LogFiles {
   }
 
   /// Appends [line]; a new day or a full file moves on to the next file.
-  void write(String line) {
+  /// [at]: the line's own time picks the day's file (else now).
+  void write(String line, {DateTime? at}) {
     try {
-      final day = _dayOf(_now());
+      final day = _dayOf(at ?? _now());
       if (_out == null || day != _day || _size >= maxFileBytes) _roll(day);
       final bytes = utf8.encode('$line\n');
       _out!.writeFromSync(bytes);
@@ -269,7 +283,10 @@ class LogFiles {
   }
 
   /// This prefix's files, oldest first.
-  List<File> files() {
+  List<File> files() => filesOf(prefix);
+
+  /// The files of [prefix] in [dir], oldest first.
+  List<File> filesOf(String prefix) {
     final d = Directory(dir);
     if (!d.existsSync()) return const [];
     final name = RegExp('^${RegExp.escape(prefix)}-(\\d{4}-\\d{2}-\\d{2})(?:\\.(\\d+))?\\.log\$');
@@ -295,10 +312,18 @@ class LogFiles {
         kept.add(f);
       }
     }
-    var total = kept.fold<int>(0, (a, f) => a + _len(f));
-    for (final f in kept) {
+    final today = _dayOf(_now());
+    // Every file under the budget, oldest day first: (day, prefix, file).
+    final all = [
+      for (final f in kept) (_dayOfFile(f), true, f),
+      for (final p in shareWith)
+        if (p != prefix)
+          for (final f in filesOf(p)) (_fileDay(p, f), false, f),
+    ]..sort((a, b) => a.$1.compareTo(b.$1));
+    var total = all.fold<int>(0, (a, f) => a + _len(f.$3));
+    for (final (day, own, f) in all) {
       if (total <= maxTotalBytes) break;
-      if (f.path == _path) continue;
+      if (f.path == _path || (!own && day == today)) continue;
       total -= _len(f);
       _delete(f);
     }

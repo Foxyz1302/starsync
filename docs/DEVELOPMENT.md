@@ -145,7 +145,20 @@ on Linux (on Windows under `%APPDATA%`; Settings → About → "Open logs
 folder" finds it anywhere), with the hosted server's lines
 in the same file; a dedicated server prints its folder at start
 (`--log-dir`). Users send theirs with Settings → About → "Copy
-diagnostics". For a "can't play" report, grep both sides around the
+diagnostics".
+
+Start with the session log when there is one: `session-YYYY-MM-DD.log`
+in the server's folder (the hosting app's logs folder, or the dedicated
+server's `--log-dir`), every member's lines and the server's merged in
+server-clock order, each tagged `[name (id)]` or `[server]`. Any member
+gets it with "Copy diagnostics" in a session. Find
+`=== PROBLEM marked by` first (a member pressed Ctrl+Shift+B), then read
+the lines around it from every side; `grep '\[Bob (m2)\]'` follows one
+member. `[server] diag:` lines say who shares (with their app version)
+and who doesn't, so a missing side is explained. Times are the server's
+clock; a member's local log (`app-*.log`) is on its own clock.
+
+For a "can't play" report, grep both sides around the
 time: `swap by` (what went up and how), `relay channel` (when the
 source dialled in), `media:` (each viewer's requests: status and time to
 headers), `mpv:` (`cannot open the media` and ffmpeg's lines), `yt-dlp:`
