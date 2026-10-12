@@ -2,19 +2,25 @@
 # Build a Linux test build here and publish it to the `dev` prerelease on
 # Gitea, where dev builds update from (see Updater in docs/ARCHITECTURE.md).
 # No tag push, no CI, no commit: the working tree is built as it is.
-# Usage: tool/dev_release.sh [--no-publish]
-# Version: the next patch after the pubspec's, `-dev.N`, N one past the
-# published dev build of that patch (1.1.2 -> 1.1.3-dev.1, -dev.2, ...).
+# Usage: tool/dev_release.sh [--minor|--major] [--no-publish]
+# Version: `<next>-dev.N`, N one past the published dev build of that
+# version. <next> is the next patch after the pubspec's (1.1.2 -> 1.1.3),
+# or with --minor / --major the next minor / major (1.2.0 / 2.0.0); once a
+# dev line is published past the pubspec's next patch, later runs keep
+# following it (1.2.0-dev.2, ...) until the release moves the pubspec.
 # Token: RELEASE_TOKEN, else the file ~/.config/watch-together-release-token
 # (a Gitea access token with repository read/write; keep the file 0600).
 # Prints the one-time command that moves a stable install onto test builds.
 set -euo pipefail
 
 PUBLISH=1
+BUMP=patch
 for arg in "$@"; do
   case "$arg" in
     --no-publish) PUBLISH=0 ;;
-    *) echo "usage: $0 [--no-publish]" >&2; exit 1 ;;
+    --minor) BUMP=minor ;;
+    --major) BUMP=major ;;
+    *) echo "usage: $0 [--minor|--major] [--no-publish]" >&2; exit 1 ;;
   esac
 done
 TOKEN_FILE="$HOME/.config/watch-together-release-token"
@@ -30,9 +36,19 @@ BASE_URL="https://git.example.org/Foxyz/sync_replay_project/releases/download/de
 
 PUB="$(sed -n 's/^version: \([0-9.]*\).*/\1/p' "$ROOT/apps/desktop/pubspec.yaml")"
 IFS=. read -r MA MI PA <<<"$PUB"
-NEXT="$MA.$MI.$((PA + 1))"
+case "$BUMP" in
+  patch) NEXT="$MA.$MI.$((PA + 1))" ;;
+  minor) NEXT="$MA.$((MI + 1)).0" ;;
+  major) NEXT="$((MA + 1)).0.0" ;;
+esac
 LAST="$(curl -fsSL "$BASE_URL/manifest.json" 2>/dev/null |
   python3 -I -c 'import json,sys; print(json.load(sys.stdin)["version"])' 2>/dev/null || true)"
+# A published dev line past <next> (started with --minor/--major) wins.
+LAST_BASE="${LAST%%-dev.*}"
+if [[ -n "$LAST" && "$LAST_BASE" != "$NEXT" &&
+      "$(printf '%s\n%s\n' "$NEXT" "$LAST_BASE" | sort -V | tail -1)" == "$LAST_BASE" ]]; then
+  NEXT="$LAST_BASE"
+fi
 N=1
 if [[ "$LAST" == "$NEXT-dev."* ]]; then N=$(( ${LAST##*-dev.} + 1 )); fi
 export VERSION="$NEXT-dev.$N"

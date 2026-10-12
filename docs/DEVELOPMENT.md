@@ -107,10 +107,13 @@ User pushes tags; CI does the rest.
    release if the other job hasn't yet and uploads (or replaces) its asset.
    By hand: package, then the same `dart tool/release_publish.dart` line.
 
-Test builds (Linux, no tag, no CI): `tool/dev_release.sh [--no-publish]`
-(token: `RELEASE_TOKEN` or `~/.config/watch-together-release-token`, a
-Gitea access token with repository read/write) builds the working tree here as the next patch's
-`-dev.N` (N one past the published one) and replaces the assets of the
+Test builds (Linux, no tag, no CI): `tool/dev_release.sh [--minor|--major]
+[--no-publish]` (token: `RELEASE_TOKEN` or
+`~/.config/watch-together-release-token`, a Gitea access token with
+repository read/write) builds the working tree here as `<next>-dev.N` (N
+one past the published one; `<next>` the pubspec's next patch, or next
+minor / major when asked, and once such a line is published later runs
+follow it until a release moves the pubspec) and replaces the assets of the
 `dev` prerelease with the tarball and its `manifest.json`. Dev builds
 update from it ([Updater](ARCHITECTURE.md#updater)). A stable install
 moves onto it once with the command the script prints (run with the app
