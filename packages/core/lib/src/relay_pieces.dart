@@ -343,6 +343,7 @@ Future<UpstreamPieces> fetchHlsPlaylist(HttpClient client, Uri url, Map<String, 
   final res = await req.close().timeout(const Duration(seconds: 20));
   if (res.statusCode != 200) {
     await res.drain<void>().catchError((_) {});
+    logUpstreamRefusal(res.statusCode, url, 'the playlist', headers.keys);
     throw UpstreamHttpException(res.statusCode, url);
   }
   final text = await res.transform(utf8.decoder).join().timeout(const Duration(seconds: 30));
@@ -361,6 +362,7 @@ Stream<List<int>> readPiece(HttpClient client, PieceSource s, Map<String, String
   final res = await req.close().timeout(const Duration(seconds: 20));
   if (res.statusCode != 200 && res.statusCode != 206) {
     await res.drain<void>().catchError((_) {});
+    logUpstreamRefusal(res.statusCode, s.url, 'a piece', headers.keys);
     throw UpstreamHttpException(res.statusCode, s.url);
   }
   if (len == null) {

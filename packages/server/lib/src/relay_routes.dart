@@ -203,7 +203,9 @@ class ActiveRelay {
     final r = ActiveRelay._(mediaId, name, null, onLiveChanged, fetch: true, queueId: queueId, warm: queueId != null)
       ..onFail = onFail;
     final media = r._media = LinkRelayMedia(url, ytDlp: ytDlp);
+    _log.info('relay fetch of "$name"${queueId == null ? '' : ' (warm, Up next $queueId)'}: ${logUrl(url)}');
     unawaited(() async {
+      final sw = Stopwatch()..start();
       try {
         final tracks = await media.open();
         final infos = <_TrackInfo>[
@@ -213,12 +215,14 @@ class ActiveRelay {
                 : (kind: t.kind, size: await t.bytes!.size(), pieces: null),
         ];
         if (r._disposed) return;
+        _log.info('relay fetch of "$name" ready in ${sw.elapsedMilliseconds} ms: '
+            '${infos.map((t) => t.size != null ? '${t.kind.isEmpty ? 'file' : t.kind} ${t.size} bytes' : '${t.kind} ${t.pieces!.length} pieces').join(' + ')}');
         r._setTracks(relayTrackSpecs(tracks));
         r._local = [for (var i = 0; i < tracks.length; i++) LocalRelayFeed(tracks[i], r.buffers[i])];
         r._attachAll(r._local, infos);
         onLiveChanged();
       } catch (e) {
-        _log.warning('relay fetch: cannot read the link: $e');
+        _log.warning('relay fetch of "$name": cannot read the link after ${sw.elapsedMilliseconds} ms: $e');
         if (!r._disposed) {
           r.failed = true;
           r.onFail?.call('$e');
@@ -370,9 +374,12 @@ void mountRelayRoutes(
     return WebSocketUpgrade((final ws) async {
       final r = found;
       if (r == null) {
+        _log.warning('relay channel refused: not the source of ${queueId == null ? 'the current media' : 'Up next item $queueId'}');
         await _closeNotSource(ws);
         return;
       }
+      final opened = DateTime.now();
+      String? closed;
       ws.pingInterval = Duration(seconds: RelayConstants.pingIntervalSecs);
       var attached = false;
       try {
@@ -397,7 +404,7 @@ void mountRelayRoutes(
                   return;
                 }
                 attached = true;
-                _log.info('relay channel up (${r.name}, '
+                _log.info('relay channel up (${r.name}${r.warm ? ', warm' : ''}, from ${r.sourceId}, '
                     '${infos.map((t) => t.size != null ? '${t.size} bytes' : '${t.pieces!.length} pieces').join(' + ')})');
                 r._attachChannel(ws, infos);
               case 'end':
@@ -413,6 +420,8 @@ void mountRelayRoutes(
                   }
                 }
             }
+          } else if (e is CloseReceived) {
+            closed = '${e.code ?? '-'} ${e.reason}'.trim();
           } else if (e is BinaryDataReceived && attached) {
             try {
               // Pull ids are unique across tracks: only the owner takes it.
@@ -423,11 +432,13 @@ void mountRelayRoutes(
             } catch (_) {}
           }
         }
-      } catch (_) {
-        // channel broke
+      } catch (e) {
+        _log.warning('relay channel broke (${r.name}): $e');
       } finally {
         r._detachChannel(ws);
-        _log.info('relay channel down (${r.name})');
+        _log.info('relay channel down (${r.name}, from ${r.sourceId}) after '
+            '${DateTime.now().difference(opened).inSeconds} s, ${closed == null ? 'no close frame' : 'closed $closed'}'
+            '${r._disposed ? ', relay dropped' : ''}');
       }
     });
   });
@@ -438,83 +449,97 @@ void mountRelayRoutes(
     final token = req.pathParameters.raw[#token] ?? '';
     final key = req.pathParameters.raw[#mediaId] ?? '';
     final track = tracked ? int.tryParse(req.pathParameters.raw[#seg] ?? '') ?? -1 : null;
-    final session = sessions.get(sid);
-    if (session == null) return _plain(410);
-    switch (session.gate(token)) {
-      case MediaGate.ok:
-        break;
-      default:
-        return _plain(401);
-    }
-    // A player still on an older media must not get the new one's bytes.
-    final r = relayAt(key);
-    if (r == null) return _plain(404);
-    final notConnected = Response(503,
-        body: Body.fromString('relay source not connected'),
-        headers: Headers.build((h) => h['retry-after'] = ['2']));
-    if (!await r.whenKnown()) return notConnected;
-    final buffer = r.bufferAt(track);
-    if (buffer == null || (piece && buffer is! PieceBuffer)) return _plain(404);
-    if (!await buffer.ready()) return notConnected;
+    final pieceIndex = piece ? req.pathParameters.raw[#piece] ?? '' : null;
     final typed = req.headers.range;
     String? rangeHeader;
     if (typed != null && typed.ranges.isNotEmpty) {
       final x = typed.ranges.first;
       rangeHeader = '${typed.unit}=${x.start?.toString() ?? ''}-${x.end?.toString() ?? ''}';
     }
+    // Every outcome goes to the log (throttled per member there); a 503
+    // after a long wait is a source that never came up.
+    Response logged(Response res, {int bytes = 0}) {
+      onLog?.call(
+          token,
+          MediaLog(
+            method: req.method.name,
+            path: '/r/$sid/$key/${track == null ? '' : '$track/'}${pieceIndex == null ? '' : 'p/$pieceIndex'}',
+            rangeHeader: rangeHeader,
+            status: res.statusCode,
+            bytesWritten: bytes,
+            durationMs: stopwatch.elapsedMilliseconds,
+          ));
+      return res;
+    }
+
+    final session = sessions.get(sid);
+    if (session == null) return logged(_plain(410));
+    switch (session.gate(token)) {
+      case MediaGate.ok:
+        break;
+      default:
+        return logged(_plain(401));
+    }
+    // A player still on an older media must not get the new one's bytes.
+    final r = relayAt(key);
+    if (r == null) return logged(_plain(404));
+    Response notConnected() => logged(Response(503,
+        body: Body.fromString('relay source not connected'),
+        headers: Headers.build((h) => h['retry-after'] = ['2'])));
+    if (!await r.whenKnown()) return notConnected();
+    final buffer = r.bufferAt(track);
+    if (buffer == null || (piece && buffer is! PieceBuffer)) return logged(_plain(404));
+    if (!await buffer.ready()) return notConnected();
     if (buffer is PieceBuffer) {
       if (!piece) {
         buffer.opened(token);
-        return Response(200,
+        return logged(Response(200,
             body: Body.fromString(buffer.playlist ?? '', mimeType: MimeType('application', 'vnd.apple.mpegurl')),
-            headers: Headers.build((h) => h['cache-control'] = ['no-store']));
+            headers: Headers.build((h) => h['cache-control'] = ['no-store'])));
       }
-      final index = int.tryParse(req.pathParameters.raw[#piece] ?? '');
-      if (index == null || index < 0 || index >= buffer.list!.length) return _plain(404);
+      final index = int.tryParse(pieceIndex ?? '');
+      if (index == null || index < 0 || index >= buffer.list!.length) return logged(_plain(404));
       final data = await buffer.piece(token, index);
-      if (data == null) return notConnected;
+      if (data == null) return notConnected();
       final res = resolveMediaRequest(rangeHeader: rangeHeader, size: data.length, filename: 'piece');
       final headers = Headers.build((h) => res.headers.forEach((k, v) => h[k] = [v]));
       if (res.status != 200 && res.status != 206) {
-        return Response(res.status, body: Body.fromString('status ${res.status}'), headers: headers);
+        return logged(Response(res.status, body: Body.fromString('status ${res.status}'), headers: headers));
       }
       final end = res.end ?? data.length - 1;
       final n = end - res.start + 1;
       buffer.bytesToViewers += n;
       session.addBytes(token, n);
-      return Response(res.status,
-          body: Body.fromData(Uint8List.sublistView(data, res.start, end + 1), mimeType: MimeType.octetStream),
-          headers: headers);
+      return logged(
+          Response(res.status,
+              body: Body.fromData(Uint8List.sublistView(data, res.start, end + 1), mimeType: MimeType.octetStream),
+              headers: headers),
+          bytes: n);
     }
     final size = (buffer as RelayBuffer).size;
     final res = resolveMediaRequest(rangeHeader: rangeHeader, size: size, filename: r.name);
     final headers = Headers.build((h) => res.headers.forEach((k, v) => h[k] = [v]));
     if (res.status != 200 && res.status != 206) {
-      return Response(res.status, body: Body.fromString('status ${res.status}'), headers: headers);
+      return logged(Response(res.status, body: Body.fromString('status ${res.status}'), headers: headers));
     }
     final end = res.end ?? size - 1;
-    final shortToken = token.length > 4 ? '…${token.substring(token.length - 4)}' : token;
-    onLog?.call(
-        token,
-        MediaLog(
-          method: req.method.name,
-          path: '/r/$sid/$shortToken/$key/${track == null ? '' : '$track/'}${r.name}',
-          rangeHeader: rangeHeader,
-          status: res.status,
-          bytesWritten: end - res.start + 1,
-          durationMs: stopwatch.elapsedMilliseconds,
-        ));
-    final Stream<Uint8List> body =
-        buffer.read(token, res.start, end, onSent: (n) => session.addBytes(token, n));
+    final Stream<Uint8List> body = buffer
+        .read(token, res.start, end, onSent: (n) => session.addBytes(token, n))
+        .transform(StreamTransformer.fromHandlers(handleError: (e, st, sink) {
+      _readFails(token, '${r.name} track ${track ?? 0} from ${res.start}: $e');
+      sink.addError(e, st);
+    }));
     MimeType mime;
     try {
       mime = MimeType.parse(res.headers['content-type'] ?? '');
     } catch (_) {
       mime = MimeType.octetStream;
     }
-    return Response(res.status,
-        body: Body.fromDataStream(body, mimeType: mime, contentLength: end - res.start + 1),
-        headers: headers);
+    return logged(
+        Response(res.status,
+            body: Body.fromDataStream(body, mimeType: mime, contentLength: end - res.start + 1),
+            headers: headers),
+        bytes: end - res.start + 1);
     }
 
   // `:seg` is the name of a single file, the track of several (the router
@@ -525,3 +550,11 @@ void mountRelayRoutes(
 }
 
 Response _plain(int status) => Response(status, body: Body.fromString('status $status'));
+
+final _readFailThrottle = LogThrottle(burst: 3);
+
+/// A viewer's read of a relay broke (the source never sent the bytes).
+void _readFails(String token, String what) {
+  final pass = _readFailThrottle.allow(token);
+  if (pass != null) _log.warning('${pass}relay read for a viewer broke: $what');
+}

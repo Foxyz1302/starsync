@@ -8,7 +8,7 @@ import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:signals/signals_flutter.dart';
-import 'package:sync_relay_core/core.dart' show JellyfinStreamType;
+import 'package:sync_relay_core/core.dart' show JellyfinStreamType, LogThrottle, createLogger;
 
 import '../jellyfin/track_prefs.dart' show MpvTrack;
 import '../shaders/shader_assets.dart';
@@ -361,6 +361,7 @@ class PlaybackController {
   // an error there while shaders are on is a shader that failed to load
   // or compile (mpv then renders without it).
   void _onLog(PlayerLog log) {
+    _toAppLog(log);
     if (log.prefix == 'ytdl_hook' && (log.level == 'error' || log.level == 'fatal')) {
       final text = log.text.trim().replaceFirst(RegExp(r'^ERROR:\s*'), '');
       if (text.isNotEmpty) {
@@ -380,6 +381,8 @@ class PlaybackController {
     if (!_loadErrorSent && _loadFailed(log, duration.peek())) {
       _loadErrorSent = true;
       final http = _httpError;
+      _mpvLog.warning('cannot open the media: [${log.prefix}] ${log.text.trim()}'
+          '${http == null ? ' (no HTTP error logged; a request that timed out after 5 s looks like this)' : ' ($http)'}');
       onLoadError?.call(http == null ? 'the video stream could not be opened' : 'the video server answered $http');
       return;
     }
@@ -400,6 +403,23 @@ class PlaybackController {
         _turnShadersOff('Shaders failed in mpv (${log.text}) — turned off');
       });
     }
+  }
+
+  // mpv's warnings and errors (the session player's; ffmpeg's through
+  // whichever player logs them) go to the app log, a few per kind at a
+  // time: a refused request makes ffmpeg retry and warn on every try.
+  static final _mpvLog = createLogger('mpv');
+  static final _mpvThrottle = LogThrottle(burst: 5);
+
+  static void _toAppLog(PlayerLog log, {String player = ''}) {
+    final level = log.level;
+    if (level != 'warn' && level != 'error' && level != 'fatal') return;
+    final text = log.text.trim();
+    if (text.isEmpty) return;
+    final pass = _mpvThrottle.allow('$player${log.prefix} $level ${text.length > 40 ? text.substring(0, 40) : text}');
+    if (pass == null) return;
+    final line = '$pass$player[${log.prefix}] $text';
+    level == 'warn' ? _mpvLog.info(line) : _mpvLog.warning(line);
   }
 
   /// [log] says the media could not be opened: before a [duration] is
@@ -435,6 +455,19 @@ class PlaybackController {
     debugPrint('video output: software rendering (no GL init logged)');
     if (_shaders.isNotEmpty) {
       _notice('Shaders have no effect: video uses software rendering');
+    }
+  }
+
+  /// `mpv-version` and `ffmpeg-version` of the session player, for
+  /// diagnostics; null when there is no player.
+  Future<String?> mpvVersion() async {
+    final p = _player;
+    if (p == null) return null;
+    try {
+      final dynamic platform = p.platform;
+      return '${await platform?.getProperty('mpv-version')}, ffmpeg ${await platform?.getProperty('ffmpeg-version')}';
+    } catch (_) {
+      return null;
     }
   }
 
@@ -708,6 +741,7 @@ class PlaybackController {
       // that is gone (a promotion disposes it) the next one created, which
       // can be this preload. Its HTTP errors still name the session's.
       if (log.prefix == 'ffmpeg') return _onLog(log);
+      _toAppLog(log, player: 'preload ');
       if (_loadFailed(log, p.state.duration)) pre.fail();
     });
     try {

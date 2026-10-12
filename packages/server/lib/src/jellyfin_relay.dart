@@ -80,15 +80,16 @@ void mountJellyfinRelayRoute(
       upRes = await upReq.close().timeout(timeout);
     } catch (e) {
       _relayLog.warning('upstream ${ref.itemId}: $e');
+      onLog?.call(token, MediaLog(method: req.method.name, path: '/j/$sid/$itemId', rangeHeader: range,
+          status: 502, bytesWritten: 0, durationMs: stopwatch.elapsedMilliseconds));
       return _plain(502);
     }
 
-    final shortToken = token.length > 4 ? '…${token.substring(token.length - 4)}' : token;
     void log(int status, int bytes) => onLog?.call(
         token,
         MediaLog(
           method: req.method.name,
-          path: '/j/$sid/$shortToken/$itemId',
+          path: '/j/$sid/$itemId',
           rangeHeader: range,
           status: status,
           bytesWritten: bytes,

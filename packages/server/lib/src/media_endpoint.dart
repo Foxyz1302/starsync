@@ -27,6 +27,24 @@ class MediaLog {
       '$method $path range=${rangeHeader ?? '-'} -> $status bytes=$bytesWritten ${durationMs}ms';
 }
 
+final _requestLog = createLogger('media');
+
+/// Each member's media requests (`/m`, `/r`, `/j`) for the log: a few per
+/// member, route and outcome every 30 s (mpv reads in many ranges), every
+/// failure kind at least once per window.
+class MediaRequestLog {
+  final _throttle = LogThrottle(burst: 4, window: const Duration(seconds: 30));
+
+  void call(String who, MediaLog log) {
+    final bad = log.status >= 400;
+    final route = log.path.split('/').where((s) => s.isNotEmpty).firstOrNull ?? '';
+    final pass = _throttle.allow('$who $route ${bad ? log.status : 'ok'}');
+    if (pass == null) return;
+    final line = '$pass$who: $log';
+    bad ? _requestLog.warning(line) : _requestLog.info(line);
+  }
+}
+
 class MediaResolution {
   final int status;
   final Map<String, String> headers;
@@ -187,14 +205,20 @@ void mountSessionMediaRoute(
     }
     final res = resolveMediaRequest(rangeHeader: rangeHeader, size: size, filename: media.name);
     if (res.status != 200 && res.status != 206) {
+      onLog?.call(token, MediaLog(
+          method: req.method.name,
+          path: '/m/$sid/${media.name}',
+          rangeHeader: rangeHeader,
+          status: res.status,
+          bytesWritten: 0,
+          durationMs: stopwatch.elapsedMilliseconds));
       return _gatedResponse(res);
     }
     final end = res.end ?? size - 1;
     final byteCount = end - res.start + 1;
-    final shortToken = token.length > 4 ? '…${token.substring(token.length - 4)}' : token;
     onLog?.call(token, MediaLog(
       method: req.method.name,
-      path: '/m/$sid/$shortToken/${media.name}',
+      path: '/m/$sid/${media.name}',
       rangeHeader: rangeHeader,
       status: res.status,
       bytesWritten: byteCount,

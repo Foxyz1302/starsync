@@ -33,8 +33,8 @@ size (`ServerIsolate.setFile`): the host's in-session File swap then sends a
 
 - **Hosting from the app**: `SessionState.host()` spawns an isolate running
   `serve` (`ServerIsolate`), waits for `ready`, then joins it over
-  `127.0.0.1` like any other client. Server logs go to the app's log with a
-  `[server]` prefix. The isolate runs with `errorsAreFatal: false`: an
+  `127.0.0.1` like any other client. Its log records go to the app's log
+  as `server.<logger>` (see "Logging"). The isolate runs with `errorsAreFatal: false`: an
   uncaught async error is logged and the server keeps going. If the isolate
   dies anyway, the session shows "server crashed: ..." and leaves; the
   shell says so in a dialog (during setup the host attempt fails with it).
@@ -61,6 +61,7 @@ size (`ServerIsolate.setFile`): the host's in-session File swap then sends a
   and shipped next to the app as `watch-together-server`. It parses flags
   (`--port`, `--secret`, `--name`, `--media`, `--advertise-host`,
   `--jellyfin <file>`, `--[no-]yt-dlp`, `--yt-dlp-dir`, `--yt-dlp-cookies`, `--config`; default port 8080) into the same map and calls `serve`
+  (`--log-dir` only picks where its log files go, see "Logging")
   (`--upgrade` / `--check-update` run the [updater](#updater) instead);
   SIGINT and SIGTERM stop it. A Flutter binary cannot run without a
   display, which is why the server is its own build.
@@ -621,6 +622,16 @@ How bytes move:
   with none. A manual swap to something else keeps it (the item is
   still first). A failed warm fetch is not promoted: the swap fetches
   again and reports the reason.
+- Before the source's channel is first up, a viewer request gets no
+  answer (the server cannot send headers before it knows the size), and
+  media_kit's mpv gives up on a silent request after 5 s
+  (`network-timeout`) with "could not be opened". So viewers open a
+  member relay's `/r/` URL only once `relay.live` is set, as for a
+  server fetch (`_waitForSource`; "waiting for <name> to pass the video
+  on…" meanwhile), unless the source already left (then they open what
+  the server has); Up next preloads wait the same way. The putter starts
+  its source before opening its own player, and the source reads its
+  tracks' sizes at once.
 - Source away: viewers keep playing from the buffer; a request waits up
   to 60 s for missing bytes. The source reconnects with backoff (same
   token after a resume); a different size (or piece count and roles)
@@ -784,8 +795,7 @@ all three link modes. Nothing is bundled or installed by hand.
   cannot); when the server cannot read it, the putter gets an `err` with
   the reason. Viewers open a fetched
   link's `/r/` URL only once `relay.live` is set ("the server is getting
-  the video…" until then): resolving takes seconds and media_kit's mpv
-  gives up on a silent request after 5 s (`network-timeout`).
+  the video…" until then; see "Relay" for why).
 
 ## Jellyfin in a session
 
@@ -1491,6 +1501,65 @@ the same in both sets.
 Window chrome is frameless (`window_manager`): the party strip is the drag
 area and holds the min/max/close buttons (`widgets/window_buttons.dart`);
 fullscreen has no drag area and shows the buttons in the player's top bar.
+
+## Logging
+
+`packages/core/lib/src/logging.dart`, one setup for the app and the
+dedicated server (`package:logging` loggers named by area: `relay`,
+`yt-dlp`, `link`, `server_hub`, `media`, `queue`, `session`, `mpv`,
+`app`).
+
+- **Where**: the app writes `<app support>/logs/app-YYYY-MM-DD.log`
+  (Linux `~/.local/share/moe.senkochan.watch_together/logs`); its hosted
+  server's records arrive over the isolate's `events` port and go in the
+  same file as `server.<logger>` (`relogLine`). The dedicated server
+  writes `server-YYYY-MM-DD.log` in `--log-dir`, else `logs` next to
+  `--config`, else `logs` next to the binary (systemd:
+  `$STATE_DIRECTORY/logs`), else `~/.cache/watch-together/logs`; it
+  prints the folder at start. Both also print every line to stdout.
+- **Files** (`LogFiles`): one per day, the next `.1.log`, `.2.log` once a
+  file passes 10 MiB; files older than 7 days, then the oldest beyond
+  100 MiB in all, are deleted whenever one is opened. A line is
+  `2026-10-12 18:44:27.202 LEVEL logger: message`, the error and stack
+  trace on the lines below. Writes are synchronous appends (nothing lost
+  in a crash). Lines from before the folder is known (the app finds it
+  once Flutter is up) are kept and written first.
+- **Redaction** (`redactLog`): every line, in one place
+  (`formatLogLine`), before console or file: URL query strings cut to
+  their parameter names (signed CDN links, Jellyfin `api_key`),
+  `user:pass@` in URLs, member tokens in `/r /m /j /a /i` paths, and the
+  values of passwords, secrets, tokens, API keys, cookies,
+  `Authorization` / `X-Emby-*` headers (`name=value`, `"name":"value"`,
+  `Name="value"`, `Name: value`) and `Bearer` credentials. Code logs
+  members as `name (id)`, never their token, headers by name only, and
+  yt-dlp's cookie source as `--cookies <file>`.
+- **Floods** (`LogThrottle`): a few lines per key per 30 s, the next one
+  says how many were dropped: mpv's warnings and errors, upstream
+  refusals per host and status, each member's media requests per route
+  and outcome.
+- **What is logged**: the server: joins and leaves, every swap (who, how
+  it plays, a link with its query cut), relay channels up and down (who,
+  tracks and sizes, how long, the close frame), relay live changes, warm
+  relays created, promoted and dropped, server fetches (start, tracks,
+  time, failure reason), each member's `/r /m /j` requests (status,
+  range, bytes, time to headers: a 503 after 60 s is a source that never
+  came up), broken viewer reads, a member's `report.error` as it changes,
+  queue ops, and relay stats every 30 s (source rate, need, buffered,
+  each reader's rate). The app: `debugPrint` (routed into the log at
+  start), uncaught errors, each media opened (relay, the host's file,
+  Jellyfin, a link fetched here), mpv's warnings and errors (`mpv`; why a
+  media could not be opened, and whether ffmpeg logged an HTTP status),
+  probes, yt-dlp runs (arguments, time, exit code, the tail of stderr,
+  the picked formats with protocol, host and header names), the relay
+  source (media opened and how long it took, channel up and down,
+  reconnects, upstream refusals with the header names sent, re-resolves
+  of expired format URLs).
+- **Getting it**: Settings → About → "Copy diagnostics" puts the app and
+  OS versions, mpv/ffmpeg and yt-dlp versions, whether yt-dlp has
+  cookies, and the last 6 hours of the log (up to 4 MiB) on the
+  clipboard, already redacted, and saves the same text as
+  `diagnostics-<time>.txt` in the logs folder (kept 7 days); "Open logs
+  folder" opens it.
 
 ## Health reporting
 

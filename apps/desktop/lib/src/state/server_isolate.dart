@@ -57,9 +57,9 @@ class ServerIsolate {
       if (msg is! Map) return;
       switch (msg['t']) {
         case 'log':
-          final err = msg['error'];
+          final err = msg['error'], stack = msg['stack'];
           onLog('${msg['level']} ${msg['logger']}: ${msg['message']}'
-              '${err == null ? '' : ' ($err)'}');
+              '${err == null ? '' : ' ($err)'}${stack == null ? '' : '\n$stack'}');
         case 'ready':
           if (!startup.isCompleted) {
             startup.complete((msg['port'] as int, msg['stop'] as SendPort));

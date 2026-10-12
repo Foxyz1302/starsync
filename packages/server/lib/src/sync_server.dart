@@ -15,15 +15,19 @@ import 'session.dart';
 /// [configured], else systemd's `$STATE_DIRECTORY/yt-dlp`, else `yt-dlp`
 /// next to the server binary when that is writable (not under `dart run`),
 /// else `~/.cache/watch-together/yt-dlp`.
-String serverYtDlpDir(String configured) {
-  if (configured.isNotEmpty) return configured;
+String serverYtDlpDir(String configured) => configured.isNotEmpty ? configured : serverDataDir('yt-dlp');
+
+/// A writable folder [name] for the dedicated server's own files:
+/// `$STATE_DIRECTORY/<name>` (systemd), else next to the binary if
+/// writable, else `~/.cache/watch-together/<name>`.
+String serverDataDir(String name) {
   final sep = Platform.pathSeparator;
   final state = (Platform.environment['STATE_DIRECTORY'] ?? '').split(':').first;
-  if (state.isNotEmpty) return '$state${sep}yt-dlp';
+  if (state.isNotEmpty) return '$state$sep$name';
   final exe = File(Platform.resolvedExecutable);
-  final name = exe.uri.pathSegments.last.toLowerCase();
-  if (name != 'dart' && name != 'dart.exe' && name != 'dartaotruntime') {
-    final dir = Directory('${exe.parent.path}${sep}yt-dlp');
+  final exeName = exe.uri.pathSegments.last.toLowerCase();
+  if (exeName != 'dart' && exeName != 'dart.exe' && exeName != 'dartaotruntime') {
+    final dir = Directory('${exe.parent.path}$sep$name');
     try {
       dir.createSync(recursive: true);
       final probe = File('${dir.path}$sep.writable')..writeAsStringSync('');
@@ -32,7 +36,7 @@ String serverYtDlpDir(String configured) {
     } catch (_) {}
   }
   final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
-  return '$home$sep.cache${sep}watch-together${sep}yt-dlp';
+  return '$home$sep.cache${sep}watch-together$sep$name';
 }
 
 class SyncServer {
@@ -93,12 +97,15 @@ class SyncServer {
         })),
       );
     });
-    mountSessionMediaRoute(_app, sessions);
-    mountRelayRoutes(_app, sessions, relayAt: hub.relayAt, sourceOf: hub.sourceOf);
+    final requests = MediaRequestLog();
+    void logRequest(String token, MediaLog log) => requests(hub.who(token), log);
+    mountSessionMediaRoute(_app, sessions, onLog: logRequest);
+    mountRelayRoutes(_app, sessions, relayAt: hub.relayAt, sourceOf: hub.sourceOf, onLog: logRequest);
     mountAvatarRoute(_app, hub);
     mountArtRoute(_app, hub);
     mountJellyfinRelayRoute(
-        _app, sessions, () => hub.jellyfin, () => _relayClient ??= HttpClient(), next: () => hub.nextJellyfinRef);
+        _app, sessions, () => hub.jellyfin, () => _relayClient ??= HttpClient(),
+        next: () => hub.nextJellyfinRef, onLog: logRequest);
     // advertiseHost is only an explicit override; otherwise echo what the client dialled.
     String authority(String dialledHost) => config.advertiseHost.isNotEmpty
         ? '${config.advertiseHost}:$boundPort'

@@ -33,6 +33,8 @@ import 'now_playing.dart';
 import 'now_playing_info.dart';
 import 'switch_trace.dart';
 
+final _log = createLogger('session');
+
 /// Thrown when a connect is superseded by cancel/leave before it finished.
 class ConnectCancelled implements Exception {
   const ConnectCancelled();
@@ -387,7 +389,7 @@ class SessionCoordinator {
   }
 
   void _setPlayerError(String raw) {
-    debugPrint('player cannot open media $_mediaId: $raw');
+    _log.warning('player cannot open media $_mediaId: $raw');
     _playerErrorFor = _mediaId;
     _playerErrorDuration = playback.duration.peek();
     playerError.value = playErrorText(raw);
@@ -563,6 +565,8 @@ class SessionCoordinator {
   /// the player held before (a reconnect) keeps it.
   Future<bool> _openMedia(String url, {Map<String, String>? headers}) async {
     if (url == _openUrl) return true;
+    _log.info('media $_mediaId: open ${_urlKind(url, headers)}: ${logUrl(url)}'
+        '${headers == null || headers.isEmpty ? '' : ' (headers: ${headers.keys.join(', ')})'}');
     final keepPlayer = _playerMediaId == _openedFor;
     _openedFor = _playerMediaId;
     _openUrl = url;
@@ -610,6 +614,23 @@ class SessionCoordinator {
     _sendReport(r);
   }
 
+  /// What [url] is, for the log.
+  String _urlKind(String url, Map<String, String>? headers) {
+    if (url.startsWith('edl://')) return 'relay (tracks)';
+    final u = Uri.tryParse(url);
+    if (u == null || !(u.isScheme('http') || u.isScheme('https'))) return 'local file';
+    if (u.host == _wsHost && u.port == _wsPort && u.pathSegments.isNotEmpty) {
+      return switch (u.pathSegments.first) {
+        'r' => 'relay',
+        'm' => "the host's file",
+        'j' => "Jellyfin through the server's login",
+        _ => 'server URL',
+      };
+    }
+    if (headers != null && headers.isNotEmpty) return 'Jellyfin, own sign-in';
+    return 'link, fetched here';
+  }
+
   /// A web link (not this server's): mpv's yt-dlp hook gets the app's
   /// managed yt-dlp, downloaded first if needed; a media file name does
   /// not wait for that.
@@ -655,6 +676,12 @@ class SessionCoordinator {
 
   /// The server-fetched media this viewer opens once it is live.
   int _awaitLiveFor = -1;
+
+  /// A relay nobody feeds yet: the server's fetch before it is read, or a
+  /// member's before its channel is up while that member is still here
+  /// (once it left, the server's buffer is all there is: open that).
+  bool _waitForSource(StateBroadcast r, MediaRelay relay) =>
+      !relay.live && (relay.fetch || r.members.any((m) => m.id == relay.source));
 
   /// Relayed through a member whose channel is down: say who everyone is
   /// waiting for (the buffer still plays what it has).
@@ -881,21 +908,27 @@ class SessionCoordinator {
               memberRelayUrl:
                   relay != null && !mine ? _relayMediaUrlFor(name, r.mediaId, const [], relay.queueId) : null);
         } else if (origin is _FileOrigin) {
-          await _openMedia(origin.path);
+          // The source first: viewers wait on it, not on this player.
           _startRelaySource(r.mediaId, RelayMedia.single(FileRelayBytes(File(origin.path))),
               announce: true, queueId: relay?.queueId ?? '');
+          await _openMedia(origin.path);
         } else if (origin is _LinkOrigin) {
-          await _openMedia(origin.url);
           _startRelaySource(
               r.mediaId, LinkRelayMedia(Uri.parse(origin.url), ytDlp: origin.ytDlp, probe: origin.probe),
               announce: true, queueId: relay?.queueId ?? '');
+          await _openMedia(origin.url);
         } else if (relay != null && !mine) {
-          if (relay.fetch && !relay.live) {
-            // The server is still getting it (yt-dlp takes seconds; mpv
-            // gives up on a silent request after 5): open once it is live.
+          if (_waitForSource(r, relay)) {
+            // The server is still getting it (yt-dlp takes seconds), or the
+            // member passing it on has not dialled in yet (its app opens the
+            // link first): mpv gives up on a silent request after 5 s, so
+            // open once it is live.
             _openUrl = null;
             _awaitLiveFor = r.mediaId;
-            health.value = const HealthStatus(HealthSeverity.info, 'the server is getting the video…');
+            final who = r.members.where((m) => m.id == relay.source).firstOrNull?.name;
+            _log.info('media ${r.mediaId}: waiting for ${relay.fetch ? 'the server' : who} before opening the relay');
+            health.value = HealthStatus(HealthSeverity.info,
+                relay.fetch ? 'the server is getting the video…' : 'waiting for $who to pass the video on…');
           } else {
             await _openMedia(_relayMediaUrlFor(name, r.mediaId, relay.tracks, relay.queueId));
           }
@@ -915,7 +948,7 @@ class SessionCoordinator {
       _seekGate.reset();
       _clearPendingSeek();
       if (_mediaId == r.mediaId) settledMediaId.value = r.mediaId;
-    } else if (_awaitLiveFor == r.mediaId && (stateMediaRelay(r)?.live ?? false)) {
+    } else if (_awaitLiveFor == r.mediaId && stateMediaRelay(r) != null && !_waitForSource(r, stateMediaRelay(r)!)) {
       _awaitLiveFor = -1;
       final relay = stateMediaRelay(r)!;
       await _openMedia(

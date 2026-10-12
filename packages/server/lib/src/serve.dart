@@ -12,7 +12,7 @@ import 'sync_server.dart';
 ///
 /// On [events] it reports `{'t':'ready','port':p,'stop':SendPort}` or
 /// `{'t':'error','message':m}`, and forwards log records as
-/// `{'t':'log','level','logger','message'[,'error']}`. Sending
+/// `{'t':'log','level','logger','message'[,'error'][,'stack']}`. Sending
 /// `{'t':'stop'}` to the `stop` port stops the server; the returned future
 /// completes once it is down. `{'t':'file','path':p,'reply':SendPort}` makes
 /// a file on this machine the hosted file (the hosting app's in-session file
@@ -29,6 +29,7 @@ Future<void> serve(Map<String, Object?> config, {SendPort? events}) async {
           'logger': r.loggerName,
           'message': r.message,
           if (r.error != null) 'error': '${r.error}',
+          if (r.stackTrace != null) 'stack': '${r.stackTrace}',
         }));
   }
   final SyncServer server;

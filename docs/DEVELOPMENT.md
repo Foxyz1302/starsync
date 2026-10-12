@@ -127,14 +127,31 @@ updater skips the check when absent. Workflows live in `.gitea/workflows`
 When hosting, the server runs on its own isolate (`ServerIsolate`,
 `apps/desktop/lib/src/state/server_isolate.dart`), in the same process.
 Breakpoints in `packages/server` work under `flutter run`: the debugger
-attaches to spawned isolates too (it shows as `server`). Its log lines are
-printed with a `[server]` prefix. Hot reload reloads the server isolate's
+attaches to spawned isolates too (it shows as `server`). Its log lines
+carry `server.<logger>` (e.g. `server.relay`). Hot reload reloads the server isolate's
 code too, but its state (members, clock, sockets) survives until hosting
 restarts; changes to startup code (`SyncServer.start`, routes) need a new
 Host. Hot restart kills the server isolate (flutter_tools kills every
 non-UI isolate first), so a `[server] server crashed: the server stopped
 unexpectedly` line just before it is expected. Without the app:
 `dart run packages/server/bin/server.dart`.
+
+## Logs
+
+After a session, read the log files rather than reproducing
+("Logging" in [ARCHITECTURE.md](ARCHITECTURE.md) has what goes in them):
+the app's are `~/.local/share/moe.senkochan.watch_together/logs/app-*.log`
+on Linux (on Windows under `%APPDATA%`; Settings → About → "Open logs
+folder" finds it anywhere), with the hosted server's lines
+in the same file; a dedicated server prints its folder at start
+(`--log-dir`). Users send theirs with Settings → About → "Copy
+diagnostics". For a "can't play" report, grep both sides around the
+time: `swap by` (what went up and how), `relay channel` (when the
+source dialled in), `media:` (each viewer's requests: status and time to
+headers), `mpv:` (`cannot open the media` and ffmpeg's lines), `yt-dlp:`
+(the resolve and its picked formats) and `upstream` (CDN refusals with
+the headers sent). A viewer that got no bytes while the source was
+slow to come up shows mpv's error with "no HTTP error logged".
 
 ## Gotchas
 

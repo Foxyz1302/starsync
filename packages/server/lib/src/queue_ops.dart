@@ -6,6 +6,8 @@ import 'server_hub.dart';
 // `queue` messages (Up next, see PROTOCOL.md "Queue"): what an added item
 // may carry, and the ops applied to the engine's queue.
 
+final _log = createLogger('queue');
+
 final _key = RegExp(r'^[A-Za-z0-9_-]{8,64}$');
 
 bool _httpUrl(String? url) {
@@ -76,9 +78,11 @@ void handleQueueIntent(ServerHub hub, String token, RelicWebSocket ws, Map<Strin
       final error = engine.applyQueueAdd(token, cleaned.item,
           next: intent.next, privateUrl: cleaned.privateUrl, thumb: thumb);
       if (error != null) {
+        _log.info('${hub.who(token)}: add "${cleaned.item.title}" (${cleaned.item.how.name}) refused: $error');
         wsErr(ws, error);
         return;
       }
+      _log.info('${hub.who(token)}: add "${cleaned.item.title}" (${cleaned.item.how.name}${intent.next ? ', next' : ''})');
       changed = true;
     case 'move':
       changed = engine.applyQueueMove(token, intent.id, intent.to);
@@ -88,6 +92,10 @@ void handleQueueIntent(ServerHub hub, String token, RelicWebSocket ws, Map<Strin
       changed = engine.applyQueuePlay(token, intent.id);
     case 'skip':
       changed = engine.applyQueuePlay(token, '');
+  }
+  if (intent.op != 'add') {
+    _log.info('${hub.who(token)}: ${intent.op}${intent.id.isEmpty ? '' : ' ${intent.id}'}'
+        '${intent.op == 'move' ? ' to ${intent.to}' : ''}${changed ? '' : ' (no change)'}');
   }
   if (changed) hub.changed();
 }

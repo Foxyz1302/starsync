@@ -30,6 +30,9 @@ Future<void> main(List<String> args) async {
         help: 'cookies.txt or browser-extension JSON export to log that yt-dlp in (sites that refuse guests). '
             'An account login: keep it private. Copied into --yt-dlp-dir at start.')
     ..addOption('config', help: 'YAML or JSON config file (keys as in AppConfig); overrides the other flags.')
+    ..addOption('log-dir',
+        help: 'Folder for the rotating log files (server-YYYY-MM-DD.log, kept 7 days). '
+            'Default: logs next to --config, else logs next to this binary (systemd: \$STATE_DIRECTORY/logs).')
     ..addFlag('upgrade',
         negatable: false,
         help: 'Update this install (the whole folder, app included) to the latest release, then exit. '
@@ -58,8 +61,14 @@ Future<void> main(List<String> args) async {
   }
 
   initLogging(level: pkg_logging.Level.INFO);
-  AppConfig config;
   final configPath = parsed['config'] as String?;
+  final logDir = (parsed['log-dir'] as String?) ??
+      (configPath != null ? '${File(configPath).absolute.parent.path}${Platform.pathSeparator}logs' : serverDataDir('logs'));
+  final files = startLogFiles(logDir, prefix: 'server');
+  if (files != null) stdout.writeln('logs: ${files.dir}');
+  pkg_logging.Logger('server').info('watch-together-server $appVersion (proto ${RelayConstants.protoVersion}) '
+      'on ${Platform.operatingSystem} ${Platform.operatingSystemVersion}, pid $pid');
+  AppConfig config;
   try {
     if (configPath != null) {
       config = await AppConfig.loadFile(configPath);
@@ -114,6 +123,7 @@ Future<void> main(List<String> args) async {
     if (msg is! Map) continue;
     if (msg['t'] == 'error') {
       stderr.writeln('server failed to start: ${msg['message']}');
+      pkg_logging.Logger('server').severe('failed to start: ${msg['message']}');
       exitCode = 1;
       break;
     }

@@ -35,6 +35,8 @@ import 'relay_pieces.dart';
 // the tracks; a cancelled pull's unacked bytes are written off.
 
 final _log = createLogger('relay');
+final _upstreamThrottle = LogThrottle(burst: 3);
+final _readThrottle = LogThrottle(burst: 3);
 
 /// The `<name>` segment of a `/r/` URL: the media name URL-encoded, its
 /// slashes made `_` first (a page title can hold a URL, and an encoded
@@ -104,6 +106,15 @@ class UpstreamHttpException extends HttpException {
   UpstreamHttpException(this.status, Uri url) : super('upstream HTTP $status', uri: url);
 }
 
+/// Logs an upstream answer that is not the media (status, what was
+/// asked, the names of the headers sent), a few per host and status at a
+/// time.
+void logUpstreamRefusal(int status, Uri url, String what, Iterable<String> headerNames) {
+  final pass = _upstreamThrottle.allow('${url.host} $status');
+  if (pass == null) return;
+  _log.warning('${pass}upstream $status for $what of ${logUrl(url)} (sent headers: ${headerNames.join(', ')})');
+}
+
 /// An HTTP(S) resource with Range support, e.g. a link or a Jellyfin
 /// stream; [headers] (auth) never leave this machine. A read is one GET
 /// per [chunkSize] bytes, back to back (see
@@ -127,6 +138,7 @@ class HttpRelayBytes implements RelayBytes {
     final res = await req.close().timeout(const Duration(seconds: 20));
     if (res.statusCode != 200 && res.statusCode != 206) {
       await res.drain<void>().catchError((_) {});
+      logUpstreamRefusal(res.statusCode, url, range, headers.keys);
       throw UpstreamHttpException(res.statusCode, url);
     }
     return res;
@@ -144,6 +156,7 @@ class HttpRelayBytes implements RelayBytes {
     final total = res.headers.value(HttpHeaders.contentRangeHeader)?.split('/').last;
     final n = int.tryParse(total ?? '') ?? (res.statusCode == 200 ? res.contentLength : -1);
     if (n <= 0) throw HttpException('upstream size unknown', uri: url);
+    _log.info('upstream ${logUrl(url)}: ${res.statusCode} $type, $n bytes (headers: ${headers.keys.join(', ')})');
     return _size = n;
   }
 
@@ -354,8 +367,19 @@ class RelaySource {
   /// Opens the media (a page is resolved) and starts serving; throws
   /// when it cannot be read.
   Future<void> start() async {
-    final tracks = await media.open();
-    final infos = [for (final t in tracks) await relayTrackInfo(t)];
+    final sw = Stopwatch()..start();
+    final List<RelayTrack> tracks;
+    final List<Map<String, Object?>> infos;
+    try {
+      tracks = await media.open();
+      // The tracks' first upstream reads at once: viewers wait on them.
+      infos = await Future.wait([for (final t in tracks) relayTrackInfo(t)]);
+    } catch (e) {
+      _log.warning('relay source ${logUrl(url)}: cannot open the media after ${sw.elapsedMilliseconds} ms: $e');
+      rethrow;
+    }
+    _log.info('relay source ${logUrl(url)}: media opened in ${sw.elapsedMilliseconds} ms '
+        '(${infos.map((i) => i['size'] != null ? '${i['kind'] == '' ? 'file' : i['kind']} ${i['size']} bytes' : '${i['kind']} ${(i['pieces'] as List?)?.length} pieces').join(' + ')})');
     _tracks = tracks;
     unawaited(_loop({
       't': 'info',
@@ -365,6 +389,7 @@ class RelaySource {
 
   Future<void> _loop(Map<String, Object?> info) async {
     var attempt = 0;
+    final where = logUrl(url);
     while (!_closed) {
       try {
         final ws = await WebSocket.connect(url.toString()).timeout(const Duration(seconds: 15));
@@ -373,17 +398,21 @@ class RelaySource {
           break;
         }
         _ws = ws;
+        _log.info('relay channel up: $where${attempt > 0 ? ' (after $attempt retries)' : ''}');
         attempt = 0;
         ws.add(jsonEncode(info));
         await for (final m in ws) {
           if (m is String) _onText(ws, m);
         }
         if (ws.closeCode == relayCloseNotSource) {
-          _log.info('relay channel: not the source any more, stopping');
+          _log.info('relay channel: not the source any more, stopping ($where, sent $bytesSent bytes)');
           _closed = true;
+        } else if (!_closed) {
+          _log.warning('relay channel down: $where, code ${ws.closeCode} ${ws.closeReason ?? ''}; reconnecting');
         }
       } catch (e) {
-        _log.fine('relay channel: $e');
+        final pass = attempt < 3 || attempt % 10 == 0 ? '' : null;
+        if (pass != null) _log.warning('relay channel: cannot reach $where (attempt ${attempt + 1}): $e');
       }
       _ws = null;
       _abandonAll();
@@ -477,7 +506,8 @@ class RelaySource {
       if (!p.cancelled) ws.add(jsonEncode({'t': 'end', 'id': p.id}));
     } catch (e) {
       if (!p.cancelled) {
-        _log.warning('relay read ${p.id} failed: $e');
+        final pass = _readThrottle.allow('$e');
+        if (pass != null) _log.warning('${pass}relay read ${p.id} failed: $e');
         try {
           ws.add(jsonEncode({'t': 'fail', 'id': p.id, 'reason': '$e'}));
         } catch (_) {}

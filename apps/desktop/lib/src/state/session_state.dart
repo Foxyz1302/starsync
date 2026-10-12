@@ -379,7 +379,8 @@ class SessionState {
             ytDlpDir: await _sharedYtDlpDir(),
           ),
           loopbackOnly: soloSession,
-          onLog: (line) => debugPrint('[server] $line'),
+          // Its records join the app's log as `server.<logger>`.
+          onLog: (line) => relogLine('server', line),
           onCrash: (cause) => _onServerCrash(server, cause),
         );
       } catch (e, st) {

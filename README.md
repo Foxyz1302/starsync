@@ -236,6 +236,7 @@ then everyone (you included) uses Join.
 | `--[no-]yt-dlp` | on | read web pages (YouTube, X, …) with yt-dlp when the server fetches a link |
 | `--yt-dlp-dir` | next to the binary | writable folder for the server's yt-dlp (systemd: the unit's `StateDirectory`) |
 | `--yt-dlp-cookies` | none | cookies.txt or cookie-extension JSON export for that yt-dlp (sites that refuse guests); copied into the yt-dlp folder at start, removed from it when not given. **An account login**: keep it private, use a throwaway account for YouTube |
+| `--log-dir` | `logs` next to `--config`, else next to the binary (systemd: the unit's `StateDirectory`) | folder for the log files (`server-YYYY-MM-DD.log`, kept 7 days; passwords, tokens and cookies left out) |
 | `--config` | none | YAML or JSON file with the same settings (`port`, `secret`, `name`, `mediaPath`, `advertiseHost`, `ytDlp`, `ytDlpDir`, `ytDlpCookies`); replaces the flags |
 | `--upgrade` | | update the install folder to the latest release ([Install and update](#install-and-update)), then exit |
 | `--check-update` | | print whether a newer release exists, then exit |
@@ -245,6 +246,10 @@ Ctrl+C or SIGTERM. A dedicated server has no host.
 To run it as a service, unpack the tarball to `/opt/watch-together` and use
 [deploy/watch-together.service](deploy/watch-together.service) (copy it to
 `/etc/systemd/system/`, edit the flags, `systemctl enable --now watch-together`).
+
+Something not playing? Settings → About → **Copy diagnostics** puts the
+app's recent log (passwords, tokens and cookies left out) on the
+clipboard: paste it to whoever helps you, from both sides if you can.
 
 ## Join
 

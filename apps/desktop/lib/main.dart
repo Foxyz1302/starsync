@@ -9,6 +9,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
 import 'src/playback/yt_dlp_app.dart';
+import 'src/platform/app_log.dart';
 import 'src/platform/desktop_entry.dart';
 import 'src/platform/window_memory.dart';
 import 'src/screens/home/ui.dart';
@@ -41,6 +42,7 @@ Future<void> main(List<String> args) async {
         ),
       );
   WidgetsFlutterBinding.ensureInitialized();
+  await startAppLogging();
   await Hive.initFlutter();
   await AppSettings.instance.ensureLoaded();
   await windowManager.ensureInitialized();

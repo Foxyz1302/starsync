@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -166,6 +167,46 @@ void main() {
       await page.close(force: true);
     } finally {
       await origin.close(force: true);
+    }
+  });
+
+  test('a source that dials in after mpv would have given up (5 s): viewers wait for it, then play',
+      timeout: const Timeout(Duration(minutes: 2)), () async {
+    final file = await _media();
+    final alice = await member('alice');
+    // Bob is a bare client: he puts a file up and starts passing it on
+    // only 7 s later (a slow first upstream read, a slow own player).
+    final ws = await WebSocket.connect('ws://127.0.0.1:${server.boundPort}/sync');
+    final welcome = Completer<Map>();
+    ws.listen((f) {
+      final j = jsonDecode('$f') as Map;
+      if (j['t'] == 'welcome' && !welcome.isCompleted) welcome.complete(j);
+    }, onError: (_) {});
+    ws.add(jsonEncode(const HelloMessage(
+            proto: RelayConstants.protoVersion,
+            secret: 'pw',
+            user: HelloUser(name: 'bob'),
+            media: HelloMedia(name: '', size: 0, duration: 0))
+        .toJson()));
+    final token = (await welcome.future.timeout(const Duration(seconds: 5)))['token'] as String;
+    final size = await File(file).length();
+    ws.add(jsonEncode({
+      't': 'swap',
+      'media': {'name': 'late.mkv', 'size': size, 'duration': 0, 'relay': <String, Object?>{}},
+    }));
+    await _poll(() => stateMediaRelay(alice.serverState.peek()!)?.source.isNotEmpty ?? false, 'relay state');
+    await Future.delayed(const Duration(seconds: 7));
+    expect(alice.playerError.peek(), isEmpty, reason: 'no "could not be opened" while the source is on its way');
+    expect(alice.health.peek().message, contains('waiting for bob'));
+    final src = RelaySource(Uri.parse('ws://127.0.0.1:${server.boundPort}/r/default/$token/source'),
+        RelayMedia.single(FileRelayBytes(File(file))));
+    await src.start();
+    try {
+      await _poll(() => alice.playback.durationSecs > 19, 'alice opened it once the source was up');
+      expect(alice.playerError.peek(), isEmpty);
+    } finally {
+      await src.close();
+      await ws.close();
     }
   });
 

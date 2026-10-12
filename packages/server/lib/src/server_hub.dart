@@ -70,9 +70,16 @@ class ServerHub {
   /// Replaces the relay (null: the new media is not relayed). The old
   /// buffer is dropped with it.
   void setRelay(ActiveRelay? next) {
-    if (!identical(relay, next)) relay?.dispose();
+    if (!identical(relay, next)) {
+      final old = relay;
+      if (old != null) _hubLog.info('relay of "${old.name}" dropped (sent ${_sent(old)})');
+      old?.dispose();
+    }
     relay = next;
   }
+
+  static String _sent(ActiveRelay r) =>
+      '${(r.buffers.fold<int>(0, (a, b) => a + b.bytesFromFeed) / 1048576).toStringAsFixed(1)} MiB in';
 
   /// The warm relay: Up next's first item relayed before it goes up, so
   /// every viewer preloads it (see ARCHITECTURE "Getting ready"); null
@@ -80,7 +87,15 @@ class ServerHub {
   ActiveRelay? warm;
 
   void _setWarm(ActiveRelay? next) {
-    if (!identical(warm, next)) warm?.dispose();
+    if (!identical(warm, next)) {
+      final old = warm;
+      if (old != null) _hubLog.info('warm relay of Up next ${old.queueId} ("${old.name}") dropped (${_sent(old)})');
+      old?.dispose();
+      if (next != null) {
+        _hubLog.info('warm relay of Up next ${next.queueId} ("${next.name}"): '
+            '${next.fetch ? 'the server fetches it' : next.sourceId.isEmpty ? 'from the first member with an account' : 'from ${next.sourceId}'}');
+      }
+    }
     warm = next;
   }
 
@@ -214,9 +229,11 @@ class ServerHub {
         ? w.fetch && !w.failed
         : !w.fetch && w.sourceToken == token && (!w.known || _sameTracks(w.tracks, tracks));
     if (ok) {
+      _hubLog.info('warm relay of Up next $queueId promoted (${_sent(w)}, live ${w.live})');
       w.ensureTracks(tracks);
       return w;
     }
+    _hubLog.info('warm relay of Up next $queueId not promoted (${w.failed ? 'its fetch failed' : 'another kind or source'})');
     w.dispose();
     return null;
   }
@@ -246,11 +263,15 @@ class ServerHub {
     if (!identical(relay, r) || m?.relay == null) return;
     final was = m!.relay!;
     if (was.live == r.live && was.tracks.join(',') == r.tracks.join(',')) return;
+    if (was.live != r.live) _hubLog.info('relay of "${r.name}" ${r.live ? 'live' : 'not live (source away)'}');
     engine.media = m.copyWith(relay: was.copyWith(live: r.live, tracks: r.tracks));
     changed();
   }
 
   final _readRates = ReadRates();
+  var _statTicks = 0;
+
+  static String _kbs(int bytesPerSec) => '${(bytesPerSec / 1024).round()} KiB/s';
 
   /// Once a second: each member's read rate (`members[].rate`) and the
   /// relay's source rate and bitrate (`media.relay.rate` / `need`). Goes
@@ -268,12 +289,26 @@ class ServerHub {
     if (r == null || m == null || was == null || r.mediaId != engine.mediaId) return;
     r.sampleRate();
     final rate = r.rate, need = r.need(m.duration);
+    if (++_statTicks % 30 == 0 && r.live) {
+      final readers = engine.members.values.where((x) => x.rate > 0).map((x) => '${x.name} ${_kbs(x.rate)}');
+      _hubLog.info('relay stats "${r.name}": source ${_kbs(rate)}, needs ${_kbs(need)}, '
+          'buffered ${(r.cachedBytes / 1048576).toStringAsFixed(1)} MiB, ${_sent(r)}'
+          '${readers.isEmpty ? '' : '; reading: ${readers.join(', ')}'}');
+    }
     if (rate != was.rate || need != was.need) {
       engine.media = m.copyWith(relay: was.copyWith(rate: rate, need: need));
     }
   }
 
   bool isHostKey(String key) => hostKey.isNotEmpty && key == hostKey;
+
+  /// A member for the log: `name (id)`, never its token.
+  String who(String token) {
+    final m = engine.members[token];
+    if (m != null) return '${m.name} (${m.id})';
+    final v = session.tokens[token];
+    return v != null ? '${v.name} (no member)' : 'unknown member';
+  }
 
   /// The member a reconnecting client may take over with its old token:
   /// still known.
@@ -365,6 +400,7 @@ class ServerHub {
   }
 
   void forgetSocket(String token) {
+    if (engine.members.containsKey(token)) _hubLog.info('leave ${who(token)}');
     engine.applyLeave(token);
     session.tokens.remove(token);
     sockets.remove(token);
@@ -381,6 +417,17 @@ class ServerHub {
     if (!viewer.takeNudge(engine.now)) return;
     sockets[target.token]?.trySendText(jsonEncode(NudgeNotice(from: from.id, name: from.name).toJson()));
   }
+}
+
+/// How a swap's media plays, for the log (a link's query cut to names).
+String _swapKind(HelloMedia m) {
+  final relay = m.relay;
+  final url = (m.url ?? '').isEmpty ? '' : ' ${logUrl(m.url)}';
+  if (m.jellyfin != null) return 'Jellyfin item ${m.jellyfin!.itemId}${relay == null ? '' : ', relayed from the swapper'}';
+  if (relay == null) return url.isEmpty ? 'hosted file' : 'link, everyone fetches it:$url';
+  if (relay.fetch) return 'link, the server fetches it:$url';
+  final tracks = relay.tracks.isEmpty ? 'one file' : relay.tracks.map((t) => t.toJson().values.join('/')).join(' + ');
+  return 'through the swapper ($tracks, ${m.size} bytes)';
 }
 
 /// `GET /a/<sid>/<token>/<hash>`: a current member's picture by its
@@ -519,6 +566,8 @@ void mountSyncRoute(
               final swap = SwapIntent.fromJson(decoded);
               var parsed = swap.media;
               final queueId = swap.queueId;
+              _hubLog.info('swap by ${hub.who(token)}: "${parsed.name}" ${_swapKind(parsed)}'
+                  '${queueId == null ? '' : ' (Up next $queueId)'}');
               if (queueId != null) {
                 // Already put up by someone else: nothing to do.
                 if (!hub.engine.queue.has(queueId)) return;
@@ -682,6 +731,12 @@ void mountSyncRoute(
             case 'report':
               if (token == null) return;
               final report = ReportMessage.fromJson(decoded);
+              final before = hub.engine.members[token]?.error ?? '';
+              if (report.error != before && report.mediaId == hub.engine.mediaId) {
+                _hubLog.warning(report.error.isEmpty
+                    ? '${hub.who(token)}: player error cleared'
+                    : '${hub.who(token)}: cannot play media ${report.mediaId}: ${report.error}');
+              }
               hub.engine.applyReport(
                   token, report.position, report.buffered, report.eventId,
                   duration: report.duration, mediaId: report.mediaId, jf: report.jf, error: report.error);
@@ -708,8 +763,10 @@ void mountSyncRoute(
               handleQueueIntent(hub, token, ws, decoded);
           }
         } on ProtocolException catch (e) {
+          _hubLog.info('${token == null ? 'a socket' : hub.who(token)}: bad $type message: ${e.message}');
           wsErr(ws, 'bad message: ${e.message}');
-        } catch (_) {
+        } catch (e, st) {
+          _hubLog.warning('${token == null ? 'a socket' : hub.who(token)}: $type message failed: $e', e, st);
           return;
         }
       }

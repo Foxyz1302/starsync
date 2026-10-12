@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'constants.dart';
+import 'logging.dart';
 import 'relay.dart';
 import 'relay_pieces.dart';
 import 'yt_dlp.dart';
@@ -170,6 +171,8 @@ class LinkProbe {
                   : null;
 }
 
+final _log = createLogger('link');
+
 const _probeLimit = 512 * 1024;
 
 /// Finds out what [url] is: a `Range: bytes=0-0` GET; a media file is
@@ -177,6 +180,17 @@ const _probeLimit = 512 * 1024;
 /// yt-dlp cannot read it, the page's own title. Throws
 /// [LinkProbeException] when the link cannot be reached at all.
 Future<LinkProbe> probeLink(Uri url, {YtDlp? ytDlp, HttpClient? client}) async {
+  final p = await _probeLink(url, ytDlp: ytDlp, client: client);
+  _log.info('probe ${logUrl(url)}: ${p.isPage ? 'page' : 'file of ${p.size} bytes'}'
+      '${p.status == 0 ? '' : ', HTTP ${p.status}'}'
+      '${p.info == null ? '' : ', yt-dlp read it'}'
+      '${p.ytDlpError == null ? '' : ', yt-dlp: ${p.ytDlpError}'}'
+      '${p.problem == null ? '' : '; problem: ${p.problem}'}'
+      '${p.relayProblem == null ? '' : '; relay: ${p.relayProblem}'}');
+  return p;
+}
+
+Future<LinkProbe> _probeLink(Uri url, {YtDlp? ytDlp, HttpClient? client}) async {
   final c = client ?? (HttpClient()..connectionTimeout = const Duration(seconds: 10));
   try {
     String? body;
@@ -210,6 +224,7 @@ Future<LinkProbe> probeLink(Uri url, {YtDlp? ytDlp, HttpClient? client}) async {
       }
     }
     if (getError != null) {
+      _log.warning('probe ${logUrl(url)}: cannot open it: $getError${ytErr == null ? '' : ' (yt-dlp: $ytErr)'}');
       throw LinkProbeException('cannot open the link: $getError${ytErr == null ? '' : ' (yt-dlp: $ytErr)'}');
     }
     // A server honouring the Range sent one byte of the page: get it all.
@@ -300,6 +315,7 @@ class PageRelayMedia implements RelayMedia {
   Future<void> _refresh(int gen) {
     if (gen != _gen) return Future.value();
     return _refreshing ??= () async {
+      _log.info('relay of ${logUrl(page)}: a format URL expired (403/410), resolving the page again');
       try {
         const changed = LinkProbeException('the video changed on the page');
         final info = await _info();

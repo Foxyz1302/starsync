@@ -51,6 +51,11 @@ class YtDlpFormat {
       this.protocol = 'https',
       this.fragments});
 
+  /// For the log: no URL query, header names only.
+  String describe() => '$id $protocol $ext${height == null ? '' : ' ${height}p'} @${url.host}'
+      ' headers=[${headers.keys.join(',')}]${chunkSize == null ? '' : ' chunk=$chunkSize'}'
+      '${fragments == null ? '' : ' fragments=${fragments!.length}'}';
+
   /// Relayed as pieces (see relay_pieces.dart), not as a byte stream.
   bool get isPieces => _piecesProtocols.contains(protocol);
 
@@ -127,6 +132,17 @@ class YtDlpInfo {
     this.tracks = const [],
     this.formats = const {},
   });
+
+  /// One line for the log: extractor, duration, live, and each picked
+  /// track's format (id, protocol, container, height, CDN host, the names
+  /// of the headers it is fetched with).
+  String describe() {
+    final t = tracks.isEmpty
+        ? 'nothing a relay can read'
+        : tracks.map((t) => '${t.kind.isEmpty ? 'file' : t.kind} ${t.format.describe()}').join(' + ');
+    return '$extractor${isLive ? ' live' : ''}, ${duration?.toStringAsFixed(0) ?? '?'} s, '
+        '${formats.length} relayable formats; tracks: $t';
+  }
 
   /// Parses `yt-dlp -J` output; a playlist answer uses its first entry.
   static YtDlpInfo parse(Map<String, Object?> j) {
@@ -568,7 +584,10 @@ class YtDlp {
   Future<YtDlpInfo> resolve(String url, {Duration timeout = const Duration(seconds: 25)}) async {
     final exe = await ensure();
     if (exe == null) throw YtDlpException(lastError ?? 'yt-dlp is not available');
-    final proc = await Process.start(exe, resolveArgs(url));
+    final args = resolveArgs(url);
+    final sw = Stopwatch()..start();
+    _log.info('resolve ${logUrl(url)} (yt-dlp $version, ${_argsForLog(args)})');
+    final proc = await Process.start(exe, args);
     final out = proc.stdout.transform(utf8.decoder).join();
     final err = proc.stderr.transform(utf8.decoder).join();
     final int code;
@@ -576,16 +595,48 @@ class YtDlp {
       code = await proc.exitCode.timeout(timeout);
     } on TimeoutException {
       proc.kill();
+      _log.warning('resolve ${logUrl(url)}: no answer in ${timeout.inSeconds} s, killed');
       throw YtDlpException('yt-dlp took longer than ${timeout.inSeconds} s');
     }
-    if (code != 0) throw YtDlpException(ytDlpErrorText(await err));
+    if (code != 0) {
+      final e = await err;
+      _log.warning('resolve ${logUrl(url)}: exit $code after ${sw.elapsedMilliseconds} ms; stderr tail:\n'
+          '${_tail(e)}');
+      throw YtDlpException(ytDlpErrorText(e));
+    }
     try {
       final j = jsonDecode(await out);
       if (j is! Map) throw const FormatException('not an object');
-      return YtDlpInfo.parse(Map<String, Object?>.from(j));
+      final info = YtDlpInfo.parse(Map<String, Object?>.from(j));
+      _log.info('resolved ${logUrl(url)} in ${sw.elapsedMilliseconds} ms: ${info.describe()}');
+      return info;
     } on FormatException catch (e) {
+      _log.warning('resolve ${logUrl(url)}: unreadable output (${e.message})');
       throw YtDlpException('unreadable yt-dlp output: ${e.message}');
     }
+  }
+
+  /// [args] for the log: the cookie source named, not its path or spec.
+  static String _argsForLog(List<String> args) {
+    final out = <String>[];
+    for (var i = 0; i < args.length; i++) {
+      final a = args[i];
+      if ((a == '--cookies' || a == '--cookies-from-browser') && i + 1 < args.length) {
+        out.add(a == '--cookies' ? '--cookies <file>' : '--cookies-from-browser <browser>');
+        i++;
+      } else if (a == '--') {
+        break;
+      } else {
+        out.add(a);
+      }
+    }
+    return out.join(' ');
+  }
+
+  /// The last lines of yt-dlp's stderr, indented.
+  static String _tail(String stderr, {int lines = 8}) {
+    final all = const LineSplitter().convert(stderr).where((l) => l.trim().isNotEmpty).toList();
+    return all.skip(all.length > lines ? all.length - lines : 0).map((l) => '    $l').join('\n');
   }
 
   /// The command line [resolve] runs.
