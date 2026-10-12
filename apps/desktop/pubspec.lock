@@ -345,9 +345,11 @@ packages:
   leaf_widgets:
     dependency: "direct main"
     description:
-      path: "../../../leaf_widgets"
-      relative: true
-    source: path
+      path: "."
+      ref: "v0.1.0"
+      resolved-ref: c0ab4a828beab620ac228693a018659d82dec196
+      url: "https://git.example.org/Foxyz/leaf_widgets.git"
+    source: git
     version: "0.0.1"
   leak_tracker:
     dependency: transitive

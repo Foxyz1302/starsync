@@ -1029,7 +1029,8 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   it stays while the mouse is on either, holds the controls up
   (`ControlsHold`) while shown, and a click on it opens the queue. Its
   title opens the queue as a
-  `LeafPopover` (package `leaf_widgets`, an overlay rather than a route)
+  `LeafPopover` (package `leaf_widgets`, a git dependency like `fox_utils`;
+  an overlay rather than a route)
   hanging under it, right edges aligned: the app's glass (`AppGlass`),
   the menus' paddings and row hover, 64 px rows with an 80 px 16:9
   picture, title, second line, "length · added by (avatar) name · how", a drag handle

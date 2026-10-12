@@ -37,10 +37,7 @@ off by deleting it in the same commit as the code. Wire changes also edit
    filter on the Schedule from the user's AniList lists. This is the
    Schedule's personal tracking; AnimeFlow has no per-user follow.
 
-5. **Ops**: `leaf_widgets` (the Up next popover's `LeafPopover`) is a
-   local path dependency: make it a git dependency like `fox_utils`
-   before the next release (CI cannot see the path), or go back to the
-   app's popover route. Check shaders on Windows; the relay e2e "source drops
+5. **Ops**: Check shaders on Windows; the relay e2e "source drops
    uncleanly and resumes" fails about half the time under the full suite.
 
 6. **Windows: first real use.** CI builds and publishes

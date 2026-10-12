@@ -31,11 +31,11 @@ dependencies:
     git:
       url: https://git.example.org/Foxyz/fox_utils.git
       ref: v0.1.9
-  # LeafPopover (the Up next popover). A local experiment: it must become a
-  # git dependency (like fox_utils) before a CI release, which cannot see
-  # this path.
+  # LeafPopover (the Up next popover).
   leaf_widgets:
-    path: ../../../leaf_widgets
+    git:
+      url: https://git.example.org/Foxyz/leaf_widgets.git
+      ref: v0.1.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
