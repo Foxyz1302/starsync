@@ -210,7 +210,8 @@ marked with what the Jellyfin server has of it when AnimeFlow is
 connected (Settings, Jellyfin & integrations): **on Jellyfin** (Put it
 up, right-click to queue), **downloading**, **waiting for release**
 (aired in Japan, AnimeFlow downloads it by itself once a release
-appears), **failed**, **not monitored** (Request asks AnimeFlow for it),
+appears; with when AnimeFlow last searched, or **release rejected** when
+it found releases it won't take, the reason on hover), **failed**, **not monitored** (Request asks AnimeFlow for it),
 or the time left until it airs. A show AnimeFlow does not follow can be asked for with **Request
 series**. Episodes you already watched on Jellyfin carry a check on the
 cover; one you started shows how far you got.

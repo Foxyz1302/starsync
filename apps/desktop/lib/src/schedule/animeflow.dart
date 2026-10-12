@@ -210,8 +210,11 @@ class AnimeFlowEpisode {
   final EpisodeStatus status;
   /// 0..1, only while downloading.
   final double? progress;
-  /// Only when failed.
+  /// Why it failed; for a missing one with rejected releases, a
+  /// ready-to-show sentence ("2 release(s) found, rejected: …").
   final String? reason;
+  /// Last search for a monitored, not yet downloaded episode.
+  final DateTime? lastSearchedAt;
 
   const AnimeFlowEpisode({
     required this.season,
@@ -224,6 +227,7 @@ class AnimeFlowEpisode {
     required this.status,
     this.progress,
     this.reason,
+    this.lastSearchedAt,
   });
 
   static AnimeFlowEpisode fromJson(Map j) => AnimeFlowEpisode(
@@ -239,6 +243,7 @@ class AnimeFlowEpisode {
         status: EpisodeStatus.parse(j['status']),
         progress: (j['progress'] as num?)?.toDouble(),
         reason: _str(j['reason']),
+        lastSearchedAt: _time(j['last_searched_at']),
       );
 }
 

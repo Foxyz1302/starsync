@@ -42,9 +42,21 @@ bool _waiting(ScheduleEntry e, DateTime now) =>
 
 const waitingHint = 'Aired in Japan; downloads automatically when a release appears';
 
+String _ago(DateTime t, DateTime now) {
+  final m = now.difference(t).inMinutes;
+  return m < 1 ? 'just now' : m < 60 ? '$m min ago' : '${m ~/ 60} h ago';
+}
+
 /// Status line: text, colour, icon.
 (String, Color, IconData) statusBadge(ScheduleEntry e, DateTime now) => _waiting(e, now)
-    ? ('waiting for release', Colors.amber.shade200, Icons.hourglass_top)
+    ? e.reason != null
+        // Releases exist but AnimeFlow rejected them (the hint says why).
+        ? ('release rejected', Colors.orangeAccent, Icons.block)
+        : (
+            e.lastSearchedAt == null ? 'waiting for release' : 'waiting · searched ${_ago(e.lastSearchedAt!, now)}',
+            Colors.amber.shade200,
+            Icons.hourglass_top,
+          )
     : switch (e.status) {
         ScheduleStatus.available => ('on Jellyfin', Colors.greenAccent, Icons.check_circle),
         ScheduleStatus.downloading => (
@@ -67,7 +79,11 @@ const waitingHint = 'Aired in Japan; downloads automatically when a release appe
       };
 
 /// What the status line means, when its text alone does not say.
-String? statusHint(ScheduleEntry e, DateTime now) => _waiting(e, now) ? waitingHint : null;
+String? statusHint(ScheduleEntry e, DateTime now) => !_waiting(e, now)
+    ? null
+    : e.reason != null
+        ? '${e.reason}${e.lastSearchedAt == null ? '' : ' · searched ${_ago(e.lastSearchedAt!, now)}'}'
+        : waitingHint;
 
 class DayColumn extends StatelessWidget {
   final DateTime day;

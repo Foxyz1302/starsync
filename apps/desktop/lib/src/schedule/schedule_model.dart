@@ -48,8 +48,10 @@ class ScheduleEntry {
   final ScheduleStatus status;
   /// 0..1 while downloading.
   final double? progress;
-  /// Why it failed.
+  /// Why it failed, or (missing) why the releases found were rejected.
   final String? reason;
+  /// AnimeFlow's last search for it (missing).
+  final DateTime? lastSearchedAt;
   /// AnimeFlow tracks the series.
   final bool tracked;
   /// AnimeFlow's series id (requests).
@@ -74,6 +76,7 @@ class ScheduleEntry {
     required this.status,
     this.progress,
     this.reason,
+    this.lastSearchedAt,
     this.tracked = false,
     this.seriesId,
     this.season,
@@ -87,6 +90,7 @@ class ScheduleEntry {
         status: status ?? this.status,
         progress: progress,
         reason: reason,
+        lastSearchedAt: lastSearchedAt,
         tracked: tracked,
         seriesId: seriesId,
         season: season,
@@ -231,7 +235,8 @@ List<ScheduleEntry> matchSchedule(
             airing: a,
             status: ScheduleStatus.of(e.status),
             progress: e.status == EpisodeStatus.downloading ? e.progress : null,
-            reason: e.status == EpisodeStatus.failed ? e.reason : null,
+            reason: e.status == EpisodeStatus.failed || e.status == EpisodeStatus.missing ? e.reason : null,
+            lastSearchedAt: e.lastSearchedAt,
             tracked: true,
             seriesId: it.seriesId,
             season: e.season,

@@ -1188,7 +1188,10 @@ panel) and chat messages (Copy message, and a link in it).
   episode (`schedule_model.dart`). AnimeFlow's `missing` (aired,
   monitored, no release grabbed yet; AnimeFlow grabs it by itself once
   one appears), and its `upcoming` past the AniList air time, read
-  "waiting for release"; Request is offered only for an `unmonitored`
+  "waiting for release" (with "searched N min ago" from the episode's
+  `last_searched_at`, or "release rejected" with AnimeFlow's `reason`
+  sentence on hover when it found releases it won't take); Request is
+  offered only for an `unmonitored`
   episode (and "Request series" for a show AnimeFlow does not track).
   Air dates (AnimeFlow's `air_date`, midnight Japan time; Jellyfin's
   premiere date)
