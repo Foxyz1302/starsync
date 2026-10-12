@@ -834,9 +834,10 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   union of the watched stretches is the coverage (rewatching counts once),
   alongside the plain watched time, first / last / furthest position and
   start / end time. At a stop: played before this opening -> keep played;
-  coverage >= 80 % of the runtime, or the ending reached (furthest position
-  past the Outro / ED start, else the real end) with coverage >= 50 % ->
-  played; coverage under max(2 min, 5 %) (at most a quarter of a short
+  coverage >= 70 % of the runtime, or the ending reached (furthest position
+  past the Outro / ED start or into the last 15 %, at most 4 min, whichever
+  is earlier) with coverage >= 40 % -> played (someone who watched that
+  far and stops is done with it); coverage under max(2 min, 5 %) (at most a quarter of a short
   item) -> a peek; else part way, resuming at the last position. An
   unknown runtime never makes it played. Jellyfin decides played from
   positions alone (10.11): Playing sets a resumable item unplayed, a
@@ -847,8 +848,10 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   - played (before, or by the rule at an earlier stop of this opening):
     `UserPlayedItems` right after Playing, Progress without
     `PositionTicks` (leaves the saved position and played state), Stopped
-    without `PositionTicks` (Jellyfin marks it played, position 0), then
-    `UserPlayedItems` again;
+    without `PositionTicks` (Jellyfin marks it played), then
+    `UserPlayedItems` again and the resume point cleared
+    (`/UserItems/{id}/UserData` `PlaybackPositionTicks: 0`): a position an
+    earlier Progress left would otherwise keep it in Continue;
   - peek: Stopped with the resume point from before the opening (0 when
     none), so the item is as it was;
   - part way: Stopped at the last position, held under 85 % of the

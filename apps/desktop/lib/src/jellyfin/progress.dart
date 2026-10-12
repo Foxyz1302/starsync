@@ -182,7 +182,12 @@ class JellyfinProgressReporter {
     final report = JellyfinPlaybackReport(
         itemId: itemId, mediaSourceId: source.id, playSessionId: playSessionId, positionTicks: ticks);
     _send('Stopped', () => client.reportPlaybackStopped(report));
-    if (ticks == null) _send('played', () => client.markPlayed(itemId));
+    if (ticks == null) {
+      _send('played', () => client.markPlayed(itemId));
+      // Marking played keeps a resume point Progress left (Continue would
+      // still list it, "3 min left"): clear it.
+      _send('resume cleared', () => client.clearResumePosition(itemId));
+    }
     return _chain = _chain.then((_) => onStopped?.call());
   }
 

@@ -41,7 +41,7 @@ void main() {
     expect(w.watched, closeTo(400, 1));
   });
 
-  test('played: 80 % covered, or the ending reached after 50 %', () {
+  test('played: 70 % covered, or the ending (or the last 15 %) reached after 40 %', () {
     final full = WatchSession();
     play(full, 0, 0, 1200); // 83 %
     expect(full.verdict(runtime: ep, endingStart: ed).outcome, WatchOutcome.played);
@@ -50,8 +50,14 @@ void main() {
     final t = play(skipped, 0, 0, 800); // 56 %, then skipped to the ED
     play(skipped, t, ed, ed + 5);
     expect(skipped.verdict(runtime: ep, endingStart: ed).outcome, WatchOutcome.played);
-    // Without a known ending only the real end counts.
-    expect(skipped.verdict(runtime: ep).outcome, WatchOutcome.partial);
+    // Without a known ending the last 15 % (at most 4 min) counts.
+    expect(skipped.verdict(runtime: ep).outcome, WatchOutcome.played);
+
+    // Watched with the opening skipped, stopped 3 min before the end.
+    final early = WatchSession();
+    final u = play(early, 0, 0, 90);
+    play(early, u, 180, ep - 180);
+    expect(early.verdict(runtime: ep).outcome, WatchOutcome.played);
 
     final jumped = WatchSession();
     play(jumped, 0, 0, 400); // 28 %, then jumped to the end

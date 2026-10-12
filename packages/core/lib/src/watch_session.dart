@@ -110,8 +110,10 @@ class WatchSession {
   /// The rule, for an item [runtime] seconds long whose ending starts at
   /// [endingStart] (an Outro segment or ED chapter; null = the real end):
   /// - played before: [WatchOutcome.keepPlayed];
-  /// - [covered] >= 80 % of the runtime, or the ending was reached
-  ///   ([furthest]) with [covered] >= 50 %: [WatchOutcome.played];
+  /// - [covered] >= 70 % of the runtime, or the ending was reached
+  ///   ([furthest]) with [covered] >= 40 %: [WatchOutcome.played]. The
+  ///   ending is the earlier of [endingStart] and the last 15 % (at most
+  ///   4 min): someone who watched that far and stops is done with it;
   /// - [covered] under max(2 min, 5 %) (at most a quarter of a short
   ///   item): [WatchOutcome.peek];
   /// - else [WatchOutcome.partial] at [lastPosition].
@@ -120,8 +122,9 @@ class WatchSession {
     if (playedBefore) return const WatchVerdict(WatchOutcome.keepPlayed);
     final c = covered;
     if (runtime > 0) {
-      final end = endingStart != null && endingStart > 0 && endingStart < runtime ? endingStart : runtime - 2;
-      if (c >= 0.8 * runtime || (furthest >= end && c >= 0.5 * runtime)) {
+      final tail = runtime - math.min(240.0, 0.15 * runtime);
+      final end = endingStart != null && endingStart > 0 && endingStart < tail ? endingStart : tail;
+      if (c >= 0.7 * runtime || (furthest >= end && c >= 0.4 * runtime)) {
         return const WatchVerdict(WatchOutcome.played);
       }
     }

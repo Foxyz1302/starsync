@@ -45,6 +45,10 @@ FakeJellyfin playbackFake() {
     reports.add((path: '/UserPlayedItems', body: const {}));
     return const JellyfinHttpResponse(200, '{"Played":true}');
   });
+  fake.on('POST', '/UserItems/$episodeId/UserData', (_, body) {
+    reports.add((path: '/UserData', body: jsonDecode(body!) as Map<String, dynamic>));
+    return const JellyfinHttpResponse(200, '{}');
+  });
   return fake;
 }
 
@@ -277,9 +281,10 @@ void main() {
         reporter.update(PlayerSnapshot(position: i.toDouble(), paused: false));
       }
       await reporter.stop(const PlayerSnapshot(position: 1420, paused: true));
-      expect(reports.map((r) => r.path.split('/').last).toList().sublist(reports.length - 2),
-          ['Stopped', 'UserPlayedItems']);
-      expect(reports[reports.length - 2].body.containsKey('PositionTicks'), isFalse);
+      expect(reports.map((r) => r.path.split('/').last).toList().sublist(reports.length - 3),
+          ['Stopped', 'UserPlayedItems', 'UserData']);
+      expect(reports[reports.length - 3].body.containsKey('PositionTicks'), isFalse);
+      expect(reports.last.body, {'PlaybackPositionTicks': 0}, reason: 'the resume point Progress left is cleared');
       final nearEnd = [for (final r in reports) if (r.path.endsWith('Progress')) r.body]
           .where((b) => b.containsKey('PositionTicks') && b['PositionTicks'] >= 1207 * jellyfinTicksPerSecond);
       expect(nearEnd, isEmpty, reason: 'near the end Progress carries no position: Jellyfin must not decide');
@@ -299,7 +304,7 @@ void main() {
       r.update(const PlayerSnapshot(position: 701, paused: true));
       await r.stop(const PlayerSnapshot(position: 701, paused: true));
       expect(reports.map((r) => r.path.split('/').last),
-          ['Playing', 'UserPlayedItems', 'Progress', 'Stopped', 'UserPlayedItems']);
+          ['Playing', 'UserPlayedItems', 'Progress', 'Stopped', 'UserPlayedItems', 'UserData']);
       expect(reports[2].body.containsKey('PositionTicks'), isFalse);
       expect(reports[3].body.containsKey('PositionTicks'), isFalse);
     });
