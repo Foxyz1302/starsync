@@ -102,11 +102,43 @@ void main() {
       );
       expect(matched.map((e) => e.jellyfinEpisode), [13, 14, 3]);
       final out = confirmOnJellyfin(matched, {
-        'jfJ': {(6, 12), (6, 13), (1, 14)},
+        'jfJ': const [
+          JellyfinEpisodeRef(6, 12),
+          JellyfinEpisodeRef(6, 13, watch: EpisodeWatch(progress: 0.4)),
+          JellyfinEpisodeRef(1, 14),
+        ],
       });
       expect(out.map((e) => e.status),
           [ScheduleStatus.inLibrary, ScheduleStatus.notOnJellyfin, ScheduleStatus.aired]);
       expect(out[1].jellyfinSeriesId, 'jfJ');
+      expect(out.map((e) => e.watch), [const EpisodeWatch(progress: 0.4), null, null]);
+    });
+
+    test("confirmOnJellyfin: AnimeFlow's available episodes get this user's watched state", () {
+      final matched = matchSchedule(
+        [
+          airing(100, 3, DateTime(2026, 10, 1, 18)), // S1E3 by number
+          airing(100, 4, DateTime.utc(2026, 10, 7, 14)), // numbering misses: premiere day
+          airing(200, 1, DateTime(2026, 10, 1, 18)), // series not looked up
+        ],
+        schedule: [
+          item(100, 3, EpisodeStatus.available),
+          item(100, 40, EpisodeStatus.available, absolute: 4),
+          item(200, 1, EpisodeStatus.available),
+        ],
+        now: now,
+      );
+      expect(matched.map((e) => e.jellyfinEpisode), [3, 40, 1]);
+      final out = confirmOnJellyfin(matched, {
+        'jf7': [
+          const JellyfinEpisodeRef(1, 3, watch: EpisodeWatch(played: true)),
+          // Midnight JST of Oct 7.
+          JellyfinEpisodeRef(1, 4, premiere: DateTime.utc(2026, 10, 6, 15), watch: const EpisodeWatch(progress: 0.5)),
+        ],
+      });
+      expect(out.map((e) => e.status), everyElement(ScheduleStatus.available));
+      expect(out.map((e) => e.watch),
+          [const EpisodeWatch(played: true), const EpisodeWatch(progress: 0.5), null]);
     });
 
     test("AnimeFlow's anilist_episode wins over TVDB numbering (split cour)", () {
@@ -170,15 +202,22 @@ void main() {
       expect(out.single.tracked, isFalse);
     });
 
-    test('absolute number, then same local air day', () {
+    test('absolute number, then the same Japan air day', () {
       final out = matchSchedule(
         [
           airing(300, 1100, DateTime(2026, 10, 5, 9)), // AniList counts absolute
-          airing(400, 13, DateTime(2026, 10, 6, 23, 30)), // numbering differs
+          // Numbering differs; Oct 6 23:30 JST, the evening before in
+          // Europe and America.
+          airing(400, 13, DateTime.utc(2026, 10, 6, 14, 30)),
+          // Oct 8 01:30 JST, a late-night slot listed on Oct 7.
+          airing(401, 13, DateTime.utc(2026, 10, 7, 16, 30)),
         ],
         schedule: [
           item(300, 5, EpisodeStatus.available, season: 22, absolute: 1100),
-          item(400, 1, EpisodeStatus.failed, season: 2, air: DateTime(2026, 10, 6, 0, 15), reason: 'No release'),
+          // Air dates are midnight JST (Oct 6, 15:00 UTC the day before)...
+          item(400, 1, EpisodeStatus.failed, season: 2, air: DateTime.utc(2026, 10, 5, 15), reason: 'No release'),
+          // ... or midnight UTC from older servers.
+          item(401, 1, EpisodeStatus.available, air: DateTime.utc(2026, 10, 7)),
         ],
         now: now,
       );
@@ -186,12 +225,14 @@ void main() {
       expect(out[0].season, 22);
       expect(out[1].status, ScheduleStatus.failed);
       expect(out[1].reason, 'No release');
+      expect(out[2].status, ScheduleStatus.available);
     });
 
-    test('a different local day does not match', () {
+    test('a different Japan day does not match', () {
       final out = matchSchedule(
-        [airing(400, 13, DateTime(2026, 10, 7, 0, 30))],
-        schedule: [item(400, 1, EpisodeStatus.available, air: DateTime(2026, 10, 6, 23, 50))],
+        // Oct 7 20:00 JST; the air date is Oct 6 (midnight JST).
+        [airing(400, 13, DateTime.utc(2026, 10, 7, 11))],
+        schedule: [item(400, 1, EpisodeStatus.available, air: DateTime.utc(2026, 10, 5, 15))],
         now: now,
       );
       // Tracked (the id is in the schedule) but unmatched and aired.

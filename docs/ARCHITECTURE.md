@@ -1185,17 +1185,31 @@ panel) and chat messages (Copy message, and a link in it).
   against AnimeFlow (`animeflow.dart`, app API with the Jellyfin token;
   `/library` marks shows on Jellyfin it doesn't track, through every AniList
   entry of a season (`anilist_map`: a season AniList splits has several)) into a status per
-  episode (`schedule_model.dart`). An aired episode of such a show reads
-  "on Jellyfin" only when Jellyfin has it: the season plus AniList
-  episode + the run's offset, checked against the series' episodes seen
-  by the linked account (`jellyfinEpisodeNumbers`, one request per series
-  memoised 3 min; `confirmOnJellyfin` is the pure step); absent reads
-  "aired · not on Jellyfin yet", unknown (no linked account, lookup
-  failed) "aired", neither with Put it up. Put it up resolves the Jellyfin
-  episode (`resolveJellyfinEpisode`: AnimeFlow's numbering, else the
-  season and offset, else the air day) and goes through the shell's
-  put-up; right-click queues it the same way. Requests and the owner's inbox are in
-  `requests_sheet.dart`. It refreshes every minute; mouse drag and
+  episode (`schedule_model.dart`). AnimeFlow's `missing` (aired,
+  monitored, no release grabbed yet; AnimeFlow grabs it by itself once
+  one appears), and its `upcoming` past the AniList air time, read
+  "waiting for release"; Request is offered only for an `unmonitored`
+  episode (and "Request series" for a show AnimeFlow does not track).
+  Air dates (AnimeFlow's `air_date`, midnight Japan time; Jellyfin's
+  premiere date)
+  are date-only and matched as Japan calendar days (`sameAirDay`; a slot
+  before 05:00 JST also matches the day before), never as local days. An
+  aired episode of an untracked show on Jellyfin reads "on Jellyfin" only
+  when Jellyfin has it: the season plus AniList episode + the run's
+  offset, checked against the series' episodes seen by the linked
+  account (`jellyfinScheduleEpisodes`, one request per series memoised
+  3 min; `confirmOnJellyfin` is the pure step); absent reads "aired · not
+  on Jellyfin yet", unknown (no linked account, lookup failed) "aired",
+  neither with Put it up. The same lookup covers AnimeFlow's available
+  episodes (AnimeFlow's season and episode, else the one premiered that
+  day) and gives every episode found this user's `UserData`: a watched
+  one has the library cards' green check on a slightly dimmed cover, a
+  started one a thin bar to its resume point. A stop report
+  (`JellyfinAccounts.watched`) drops the memo and reloads the page. Put
+  it up resolves the Jellyfin episode (`resolveJellyfinEpisode`:
+  AnimeFlow's numbering, else the season and offset, else the air day)
+  and goes through the shell's put-up; right-click queues it the same
+  way. Requests and the owner's inbox are in `requests_sheet.dart`. It refreshes every minute; mouse drag and
   Shift+wheel scroll the board sideways, the plain wheel scrolls a column.
   Settings (`settings_tab.dart`) has a left nav with icons
   (icon chips under 760 px) over pages of rounded Material cards

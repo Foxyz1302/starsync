@@ -198,6 +198,8 @@ class AnimeFlowEpisode {
   final int episode;
   final int? absolute;
   final String? title;
+  /// Date-only: midnight Japan time of the broadcast day. Compare it as a
+  /// Japan day (`sameAirDay` in schedule_model.dart), never a local one.
   final DateTime? airDate;
   /// The AniList entry of this episode's season (one AnimeFlow series may
   /// span several AniList entries).

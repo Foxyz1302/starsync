@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import '../schedule_model.dart';
 
 // One day of the Schedule board and its airing cards: cover poster on the
-// left (air time on it, download progress under it), title, episode and
-// status on the right, one full-width action below. Compact mode is a
-// slim row.
+// left (air time on it, download progress or this user's watch progress
+// under it, a check once watched), title, episode and status on the
+// right, one full-width action below. Compact mode is a slim row.
 
 /// What a card's action does, decided by the page.
 enum CardAction {
@@ -35,23 +35,39 @@ String countdownText(DateTime at, DateTime now) {
   return 'in ${d.inMinutes}m';
 }
 
+/// Aired, tracked, no release yet: AnimeFlow downloads it by itself.
+bool _waiting(ScheduleEntry e, DateTime now) =>
+    e.status == ScheduleStatus.missing ||
+    (e.status == ScheduleStatus.upcoming && e.tracked && !e.airing.airingAt.isAfter(now));
+
+const waitingHint = 'Aired in Japan; downloads automatically when a release appears';
+
 /// Status line: text, colour, icon.
-(String, Color, IconData) statusBadge(ScheduleEntry e, DateTime now) => switch (e.status) {
-  ScheduleStatus.available => ('on Jellyfin', Colors.greenAccent, Icons.check_circle),
-  ScheduleStatus.downloading => (
-    e.progress == null ? 'downloading' : 'downloading ${(e.progress! * 100).round()}%',
-    Colors.lightBlueAccent,
-    Icons.downloading,
-  ),
-  ScheduleStatus.upcoming => (countdownText(e.airing.airingAt, now), Colors.amber, Icons.schedule),
-  ScheduleStatus.missing => ('missing', Colors.orangeAccent, Icons.report_gmailerrorred),
-  ScheduleStatus.failed => ('failed${e.reason == null ? '' : ' · ${e.reason}'}', Colors.redAccent, Icons.error_outline),
-  ScheduleStatus.unmonitored => ('not monitored', Colors.grey, Icons.visibility_off_outlined),
-  ScheduleStatus.notTracked => ('not in AnimeFlow', Colors.grey, Icons.public),
-  ScheduleStatus.inLibrary => ('on Jellyfin', Colors.greenAccent, Icons.video_library_outlined),
-  ScheduleStatus.notOnJellyfin => ('aired · not on Jellyfin yet', Colors.grey, Icons.hourglass_empty),
-  ScheduleStatus.aired => ('aired', Colors.grey, Icons.done),
-};
+(String, Color, IconData) statusBadge(ScheduleEntry e, DateTime now) => _waiting(e, now)
+    ? ('waiting for release', Colors.amber.shade200, Icons.hourglass_top)
+    : switch (e.status) {
+        ScheduleStatus.available => ('on Jellyfin', Colors.greenAccent, Icons.check_circle),
+        ScheduleStatus.downloading => (
+          e.progress == null ? 'downloading' : 'downloading ${(e.progress! * 100).round()}%',
+          Colors.lightBlueAccent,
+          Icons.downloading,
+        ),
+        ScheduleStatus.upcoming => (countdownText(e.airing.airingAt, now), Colors.amber, Icons.schedule),
+        ScheduleStatus.missing => ('waiting for release', Colors.amber.shade200, Icons.hourglass_top),
+        ScheduleStatus.failed => (
+          'failed${e.reason == null ? '' : ' · ${e.reason}'}',
+          Colors.redAccent,
+          Icons.error_outline,
+        ),
+        ScheduleStatus.unmonitored => ('not monitored', Colors.grey, Icons.visibility_off_outlined),
+        ScheduleStatus.notTracked => ('not in AnimeFlow', Colors.grey, Icons.public),
+        ScheduleStatus.inLibrary => ('on Jellyfin', Colors.greenAccent, Icons.video_library_outlined),
+        ScheduleStatus.notOnJellyfin => ('aired · not on Jellyfin yet', Colors.grey, Icons.hourglass_empty),
+        ScheduleStatus.aired => ('aired', Colors.grey, Icons.done),
+      };
+
+/// What the status line means, when its text alone does not say.
+String? statusHint(ScheduleEntry e, DateTime now) => _waiting(e, now) ? waitingHint : null;
 
 class DayColumn extends StatelessWidget {
   final DateTime day;
@@ -157,6 +173,56 @@ class AiringCard extends StatelessWidget {
   Widget _image(String? url, Widget fallback) =>
       url == null ? fallback : Image.network(url, fit: BoxFit.cover, errorBuilder: (_, _, _) => fallback);
 
+  static Widget _hinted(String? hint, Widget child) => hint == null ? child : Tooltip(message: hint, child: child);
+
+  bool get _played => entry.watch?.played ?? false;
+
+  /// A watched episode's cover is a little dimmer.
+  Widget _dimmed(Widget cover) => _played ? Opacity(opacity: 0.6, child: cover) : cover;
+
+  /// This user's state of the episode on Jellyfin: the library cards'
+  /// green check once watched, else a thin bar to the resume point.
+  List<Widget> _watchMarks({bool small = false}) {
+    final w = entry.watch;
+    if (w == null) return const [];
+    if (w.played) {
+      final size = small ? 16.0 : 22.0;
+      return [
+        Positioned(
+          top: small ? 2 : 4,
+          right: small ? 2 : 4,
+          child: Tooltip(
+            message: 'Watched',
+            child: Container(
+              key: ValueKey('watched-$_id'),
+              constraints: BoxConstraints(minWidth: size, minHeight: size),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: const Color(0xCC1B5E20), borderRadius: BorderRadius.circular(size / 2)),
+              child: Icon(Icons.check, size: small ? 11 : 14, color: Colors.white),
+            ),
+          ),
+        ),
+      ];
+    }
+    if (w.progress <= 0) return const [];
+    return [
+      Positioned(
+        left: 0,
+        right: 0,
+        bottom: 0,
+        child: Tooltip(
+          message: '${(w.progress * 100).round()}% watched',
+          child: LinearProgressIndicator(
+            key: ValueKey('watch-progress-$_id'),
+            value: w.progress,
+            minHeight: small ? 2 : 3,
+            backgroundColor: Colors.black54,
+          ),
+        ),
+      ),
+    ];
+  }
+
   Widget? _button(BuildContext context) {
     final enabled = disabledHint == null && !busy;
     final spinner = const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2));
@@ -184,6 +250,7 @@ class AiringCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final a = entry.airing;
     final (label, color, icon) = statusBadge(entry, now);
+    final hint = statusHint(entry, now);
     final time = clockText(a.airingAt);
     final tintColor = a.color ?? Colors.blueGrey;
     final tint = DecoratedBox(
@@ -195,7 +262,9 @@ class AiringCard extends StatelessWidget {
         ),
       ),
     );
-    final tap = (action == CardAction.putUp || action == CardAction.play) && disabledHint == null && !busy ? onAction : null;
+    final tap = (action == CardAction.putUp || action == CardAction.play) && disabledHint == null && !busy
+        ? onAction
+        : null;
     final onMenu = this.onMenu;
     final menu = onMenu == null || busy ? null : () => onMenu(context);
     if (compact) {
@@ -214,7 +283,14 @@ class AiringCard extends StatelessWidget {
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(6),
-                  child: SizedBox(width: 34, height: 48, child: _image(a.cover, tint)),
+                  child: SizedBox(
+                    width: 34,
+                    height: 48,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [_dimmed(_image(a.cover, tint)), ..._watchMarks(small: true)],
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -244,7 +320,7 @@ class AiringCard extends StatelessWidget {
                   )
                 else
                   Tooltip(
-                    message: label,
+                    message: hint == null ? label : '$label: $hint',
                     child: Icon(icon, size: 16, color: color),
                   ),
               ],
@@ -279,7 +355,7 @@ class AiringCard extends StatelessWidget {
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          _image(a.cover, tint),
+                          _dimmed(_image(a.cover, tint)),
                           Positioned(
                             left: 4,
                             top: 4,
@@ -295,6 +371,7 @@ class AiringCard extends StatelessWidget {
                               ),
                             ),
                           ),
+                          ..._watchMarks(),
                           if (entry.status == ScheduleStatus.downloading)
                             Positioned(
                               left: 0,
@@ -331,19 +408,22 @@ class AiringCard extends StatelessWidget {
                             style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
                           ),
                           const Spacer(),
-                          Row(
-                            children: [
-                              Icon(icon, size: 14, color: color),
-                              const SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  label,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(color: color, fontSize: 12),
+                          _hinted(
+                            hint,
+                            Row(
+                              children: [
+                                Icon(icon, size: 14, color: color),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    label,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(color: color, fontSize: 12),
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ],
                       ),

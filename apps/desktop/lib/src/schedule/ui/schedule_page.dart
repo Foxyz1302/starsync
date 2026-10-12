@@ -18,7 +18,8 @@ import 'schedule_card.dart';
 // weeks out (AniList), each airing with what AnimeFlow has of it, and the
 // one thing to do about it (put it up, request it; right-click an
 // available one to queue it). Refreshes every minute while visible; ETags
-// keep that cheap.
+// keep that cheap. Episodes on Jellyfin show this user's watched state,
+// reloaded after a playback stops (JellyfinAccounts.watched).
 
 enum ScheduleFilter { jellyfin, all }
 
@@ -70,6 +71,7 @@ class _SchedulePageState extends State<SchedulePage> {
   bool _refreshing = false;
   int _gen = 0;
   Timer? _timer;
+  StreamSubscription<String>? _watchedSub;
   final _scroll = ScrollController();
   bool _jumped = false;
 
@@ -80,7 +82,6 @@ class _SchedulePageState extends State<SchedulePage> {
 
   /// The sheet stays built while it slides out.
   bool _sheetBuilt = false;
-
 
   /// Requested in this run: "anilistId#episode" or "series:anilistId".
   final _requested = <String>{};
@@ -106,6 +107,11 @@ class _SchedulePageState extends State<SchedulePage> {
     _timer = Timer.periodic(SchedulePage.refreshEvery, (_) {
       if (mounted && !_refreshing && TickerMode.valuesOf(context).enabled) _load();
     });
+    // Back from watching: the cards' watched marks follow (the stop report
+    // already dropped the cached episode lists).
+    _watchedSub = _accounts.watched.listen((_) {
+      if (mounted) _load();
+    });
   }
 
   ScheduleRepository _ownRepo() {
@@ -113,13 +119,14 @@ class _SchedulePageState extends State<SchedulePage> {
     return ScheduleRepository(
       aniList: AniListClient(),
       animeFlow: flow,
-      jellyfinEpisodes: (id) => jellyfinEpisodeNumbers(_accounts, flow, id),
+      jellyfinEpisodes: (id) => jellyfinScheduleEpisodes(_accounts, flow, id),
     );
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _watchedSub?.cancel();
     _scroll.dispose();
     if (_ownsRepo) {
       _repo.aniList.close();
@@ -228,9 +235,10 @@ class _SchedulePageState extends State<SchedulePage> {
     final me = _me;
     final CardAction kind;
     if (e.tracked) {
-      kind = e.status == ScheduleStatus.missing || e.status == ScheduleStatus.failed
-          ? CardAction.request
-          : CardAction.none;
+      // Only an unmonitored episode is worth asking for: AnimeFlow grabs
+      // a missing one (no release yet) by itself once a release appears,
+      // and retries a failed one.
+      kind = e.status == ScheduleStatus.unmonitored ? CardAction.request : CardAction.none;
     } else {
       // On Jellyfin already (owner added it by hand): nothing to request.
       kind = me != null && !e.onJellyfin ? CardAction.requestSeries : CardAction.none;

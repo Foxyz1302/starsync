@@ -1,7 +1,7 @@
 import 'package:sync_relay_core/core.dart';
 
 import '../../jellyfin/accounts.dart';
-import '../../jellyfin/format.dart' show pickFor;
+import '../../jellyfin/format.dart' show pickFor, progressOf;
 import '../../screens/home/picked_media.dart';
 import '../anilist.dart';
 import '../animeflow.dart';
@@ -47,14 +47,9 @@ String friendlyError(Object e) => switch (e) {
   _ => '$e',
 };
 
-bool _sameDay(DateTime a, DateTime b) {
-  final x = a.toLocal(), y = b.toLocal();
-  return x.year == y.year && x.month == y.month && x.day == y.day;
-}
-
 /// AnimeFlow's episode for [e] (its season and numbering), from the
 /// series detail: same AniList id and episode, else absolute number, else
-/// the same air day. Null when the entry is not tracked or nothing fits.
+/// the same air day ([sameAirDay]). Null when the entry is not tracked or nothing fits.
 Future<AnimeFlowEpisode?> flowEpisodeFor(AnimeFlowClient client, ScheduleEntry e) async {
   final id = e.seriesId;
   if (id == null) return null;
@@ -63,7 +58,7 @@ Future<AnimeFlowEpisode?> flowEpisodeFor(AnimeFlowClient client, ScheduleEntry e
   final mine = eps.where((x) => x.anilistId == null || x.anilistId == a.anilistId).toList();
   return mine.where((x) => x.anilistId == a.anilistId && x.episode == a.episode).firstOrNull ??
       mine.where((x) => x.absolute == a.episode).firstOrNull ??
-      mine.where((x) => x.airDate != null && _sameDay(x.airDate!, a.airingAt)).firstOrNull;
+      mine.where((x) => x.airDate != null && sameAirDay(x.airDate!, a.airingAt)).firstOrNull;
 }
 
 /// The (season, episode) AnimeFlow uses for [e]; falls back to the
@@ -112,11 +107,13 @@ JellyfinAccount? jellyfinAccountFor(JellyfinAccounts accounts, AnimeFlowClient? 
   return accounts.defaultAccount;
 }
 
-/// The (season, episode) numbers of the episodes Jellyfin has of
-/// [jellyfinSeriesId], seen by the account AnimeFlow's ids belong to
-/// ([jellyfinAccountFor]); null without a linked account. One request per
-/// series, memoised a few minutes ([JellyfinAccounts.cached]).
-Future<Set<(int, int)>?> jellyfinEpisodeNumbers(
+/// The episodes Jellyfin has of [jellyfinSeriesId] (numbers, premiere
+/// date, this user's watched state), seen by the account AnimeFlow's ids
+/// belong to ([jellyfinAccountFor]): the user's own; null without a
+/// linked account. One request per series, memoised a few minutes
+/// ([JellyfinAccounts.cached]; a stop report drops it,
+/// [JellyfinAccounts.watched]).
+Future<List<JellyfinEpisodeRef>?> jellyfinScheduleEpisodes(
   JellyfinAccounts accounts,
   AnimeFlowClient? flow,
   String jellyfinSeriesId,
@@ -125,10 +122,20 @@ Future<Set<(int, int)>?> jellyfinEpisodeNumbers(
   final account = jellyfinAccountFor(accounts, flow);
   final client = account == null ? null : accounts.clientFor(account.serverId);
   if (account == null || client == null) return null;
-  return accounts.cached(account.serverId, 'schedule-episodes:$jellyfinSeriesId', () async => {
-    for (final x in await client.episodes(jellyfinSeriesId))
-      if (x.parentIndexNumber != null && x.indexNumber != null) (x.parentIndexNumber!, x.indexNumber!),
-  });
+  return accounts.cached(
+    account.serverId,
+    'schedule-episodes:$jellyfinSeriesId',
+    () async => [
+      for (final x in await client.episodes(jellyfinSeriesId))
+        if (x.parentIndexNumber != null && x.indexNumber != null)
+          JellyfinEpisodeRef(
+            x.parentIndexNumber!,
+            x.indexNumber!,
+            premiere: x.premiereDate,
+            watch: EpisodeWatch(played: x.userData.played, progress: x.userData.played ? 0 : progressOf(x)),
+          ),
+    ],
+  );
 }
 
 /// The Jellyfin episode of an available [e] as a media pick. Throws
@@ -153,7 +160,7 @@ Future<JellyfinMedia> resolveJellyfinEpisode(JellyfinAccounts accounts, AnimeFlo
   final a = e.airing;
   final item =
       eps.where((x) => x.parentIndexNumber == n.season && x.indexNumber == n.episode).firstOrNull ??
-      eps.where((x) => x.premiereDate != null && _sameDay(x.premiereDate!, a.airingAt)).singleOrNull ??
+      eps.where((x) => x.premiereDate != null && sameAirDay(x.premiereDate!, a.airingAt)).singleOrNull ??
       eps.where((x) => x.indexNumber == a.episode).singleOrNull;
   if (item == null) {
     throw ScheduleActionException('Episode ${a.episode} of ${a.title} is not on Jellyfin yet');

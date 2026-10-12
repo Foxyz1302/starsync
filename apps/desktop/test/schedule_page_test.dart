@@ -50,6 +50,7 @@ class FakeJf implements JellyfinHttp {
               'SeriesName': 'Avail Show',
               'IndexNumber': 2,
               'ParentIndexNumber': 1,
+              'UserData': {'Played': true},
             },
             {
               'Id': 'ep3',
@@ -58,6 +59,8 @@ class FakeJf implements JellyfinHttp {
               'SeriesName': 'Avail Show',
               'IndexNumber': 3,
               'ParentIndexNumber': 1,
+              'RunTimeTicks': 1000,
+              'UserData': {'PlaybackPositionTicks': 250},
             },
           ],
           'TotalRecordCount': 2,
@@ -91,6 +94,7 @@ List<ScheduleEntry> entries() => [
     seriesId: 7,
     season: 1,
     jellyfinSeriesId: 'jf7',
+    watch: const EpisodeWatch(played: true),
   ),
   ScheduleEntry(
     airing: airing(222, 'Missing Show', 5, day(0, 10)),
@@ -99,9 +103,8 @@ List<ScheduleEntry> entries() => [
     seriesId: 8,
   ),
   ScheduleEntry(
-    airing: airing(333, 'Failed Show', 2, day(0, 11)),
-    status: ScheduleStatus.failed,
-    reason: 'no seeders',
+    airing: airing(333, 'Unmonitored Show', 2, day(0, 11)),
+    status: ScheduleStatus.unmonitored,
     tracked: true,
     seriesId: 9,
     season: 1,
@@ -283,8 +286,13 @@ void main() {
     expect(find.byKey(ValueKey('day-${w.year}-${w.month}-${w.day}')), findsNothing);
     expect(card(111, 3), findsOneWidget);
     expect(find.text('on Jellyfin'), findsOneWidget);
-    expect(find.text('missing'), findsOneWidget);
-    expect(find.text('failed · no seeders'), findsOneWidget);
+    // AnimeFlow's "missing": waiting for a release, nothing to request;
+    // only the unmonitored one has Request.
+    expect(find.text('waiting for release'), findsOneWidget);
+    expect(action(222, 5), findsNothing);
+    expect(action(333, 2), findsOneWidget);
+    expect(find.byKey(const ValueKey('watched-111-3')), findsOneWidget);
+    expect(find.text('not monitored'), findsOneWidget);
     expect(find.text('downloading 42%'), findsOneWidget);
     expect(find.text('Put it up'), findsOneWidget);
     // On Jellyfin: untracked entries are hidden.
@@ -316,7 +324,14 @@ void main() {
   });
 
   testWidgets('request on a tracked episode sends AnimeFlow numbering', (tester) async {
-    await pumpPage(tester);
+    await pumpPage(
+      tester,
+      snap: () => snapshot(
+        list: [
+          for (final e in entries()) e.airing.anilistId == 222 ? e.copyWith(status: ScheduleStatus.unmonitored) : e,
+        ],
+      ),
+    );
     await tester.tap(action(222, 5));
     await io(tester);
     final post = server.seen.where((r) => r.method == 'POST' && r.uri.path.endsWith('/requests')).single;
@@ -384,7 +399,7 @@ void main() {
 
   testWidgets('without the request scope the button is disabled with a hint', (tester) async {
     await pumpPage(tester, snap: () => snapshot(me: viewer));
-    final b = widgetOf<OutlinedButton>(tester, action(222, 5));
+    final b = widgetOf<OutlinedButton>(tester, action(333, 2));
     expect(b.onPressed, isNull);
     expect(find.byWidgetPredicate((w) => w is Tooltip && (w.message ?? '').contains('owner')), findsWidgets);
     expect(find.text('My requests'), findsOneWidget);
@@ -437,12 +452,13 @@ void main() {
       httpFactory: () => jf,
       deviceName: 'Test',
     );
-    final eps = await tester.runAsync(() => jellyfinEpisodeNumbers(accounts, flow, 'jf7'));
-    expect(eps, {(1, 2), (1, 3)});
-    await tester.runAsync(() => jellyfinEpisodeNumbers(accounts, flow, 'jf7'));
+    final eps = await tester.runAsync(() => jellyfinScheduleEpisodes(accounts, flow, 'jf7'));
+    expect(eps!.map((e) => (e.season, e.episode)), [(1, 2), (1, 3)]);
+    expect(eps.map((e) => e.watch), [const EpisodeWatch(played: true), const EpisodeWatch(progress: 0.25)]);
+    await tester.runAsync(() => jellyfinScheduleEpisodes(accounts, flow, 'jf7'));
     expect(jf.seen.where((u) => u.path.endsWith('/Episodes')), hasLength(1), reason: 'memoised');
     final none = JellyfinAccounts(store: MemoryJellyfinStore(), deviceName: 'Test');
-    expect(await tester.runAsync(() => jellyfinEpisodeNumbers(none, flow, 'jf7')), isNull);
+    expect(await tester.runAsync(() => jellyfinScheduleEpisodes(none, flow, 'jf7')), isNull);
 
     await pumpPage(
       tester,

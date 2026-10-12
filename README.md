@@ -203,6 +203,18 @@ Foxyz left"). A Jellyfin item needs someone with an account on that
 server. Up next is kept by the server while it runs; restarting the
 server empties it.
 
+## Schedule
+
+The week's airing anime, one column per day (AniList), each episode
+marked with what the Jellyfin server has of it when AnimeFlow is
+connected (Settings, Jellyfin & integrations): **on Jellyfin** (Put it
+up, right-click to queue), **downloading**, **waiting for release**
+(aired in Japan, AnimeFlow downloads it by itself once a release
+appears), **failed**, **not monitored** (Request asks AnimeFlow for it),
+or the time left until it airs. A show AnimeFlow does not follow can be asked for with **Request
+series**. Episodes you already watched on Jellyfin carry a check on the
+cover; one you started shows how far you got.
+
 ## Dedicated server
 
 For an always-on box (no display needed): the release tarball also contains
