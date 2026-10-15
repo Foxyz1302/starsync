@@ -86,33 +86,72 @@ the automatic continuation and countdown, relay state), the device
 settings, notification prefs, what this app is sourcing) and the
 integrations (Jellyfin played/resume, AniList list).
 0. Safety net and seams, no visible change. Left: Connection extracted
-   from the coordinator. (Done: tests audited and tagged per step, P27
-   fixed, AppEvent + Notifier seam, platform ports, protocol 16 planned.)
-1. Connection + Identity + Presence, proto 16 in full (one bump, with a
-   min/max version range and a stable refusal frame so later changes are
-   additive): a lasting client id; a socket close no longer removes the
-   member (explicit `bye`); presence joining/in/away/gone with grace;
-   `PresencePolicy` in core used by server and app alike; bounded D2
-   hold; relay `sourceGone` and source resume; queue `by` lasting;
-   `members[].app`. Fixes P1 P3 P4 P6, server half of P2; D1 D2 D5 D6.
-2. Status (one computed level) + Notifier (pure policy over events:
-   toasts above the controls, SoundEngine, system notifications, activity
-   log). Fixes P8 P11 P12 P21 P33, visible half of P2; D4, D1, D9 alone
-   policy ("alone" = no other connected member, In or Away).
-3. Your server: one hub, listeners attached (loopback; LAN on Invite),
-   nothing restarts; Invite as a value (link/deep link, filtered
-   addresses, version gate). Fixes P22 P23 P24; D9.
-4. Library + Media identity: L1 local grouping (pure Dart, offline: kinds
-   episode/movie/extra, folder hints, gaps, merge across folders) and L2
-   match (AniList/TVDB ids, art, names, manual pin, cache); one `MediaRef`
-   carried in swap/queue media. Fixes P34 and Files' next episode.
-5. What's next (decides which/when, never opens; continuation and
-   countdown as server state, shared cancel) + Watch tracking (time In,
-   device history, Jellyfin now, AniList later). Fixes P7 P9; D3.
-6. Media pipeline + player host port: plan → resolve → open → ready,
-   commands queued during a switch, source-drop recovery, resolver and
-   source chosen by capability. Fixes P2 (client) P15 P17 P18 P28 P29;
-   P30 P31 P32 as a player-host sub-step; D6 client half, D11.
+   from the coordinator (one sealed connection state, hello built by a
+   factory, reconnect delay and silence threshold as parameters); a
+   `noticeFor` table test; a flaky-link test harness (pure-Dart TCP proxy:
+   pass, blackhole, delay, reset, late frame); grace and silence through
+   the engine clock; an env override for client id and data folder (two
+   instances on one machine); the scenario list in DEVELOPMENT "Tests".
+   (Done: tests audited and tagged, P27, AppEvent + Notifier, ports,
+   protocol 16 planned.)
+R. Rename (before step 1, so dev builds install side by side with 1.2.x):
+   app id `dev.foxyz.starsync`, binary, Windows company `foxyz`; Hive out
+   of `~/Documents` into the app's support folder, copied not moved;
+   a settings schema version with ordered migrations; an `AppDirs` port;
+   the 1.3.0 archive still contains `watch_together(.exe)` so 1.2.x's
+   self-update restart works; the old `.desktop` entry removed; the
+   manifest kept at the old URL; VPS `ExecStart`/`update.sh` paths.
+1. Connection + Identity + Presence; proto 16 opened (version ranges on
+   both sides, refusal frame, identity, grace, presence, relay resume,
+   ids in the feed); later steps add fields, it is frozen at the 1.3.0
+   release. A drop is not the end of the session: keep the last state
+   (marked stale), the player, media and relay source; the UI reads the
+   connection state (no update band over a running video, no emptied
+   queue, no reopen); reconnect with backoff and jitter; silence 8–10 s
+   with "connection unstable" from ~3 s; lost/back sounds only after a
+   few seconds of drop. New feed actions mapped one-to-one onto today's
+   notices, matched by member id, not name. Presence shown in the strip
+   and party UI (joining, away, gone = dimmed "reconnecting"). The relay
+   source re-dials on return (client half of D6). Auto sit-out with a
+   `ShellPort.watchActivity` (focused/unfocused/minimised/hidden): never
+   when alone; while playing only minimised-for-a-while counts; the
+   client re-sends its intent after a non-resumed welcome. A joiner holds
+   only while not playing, at most ~15 s; while playing never (D2). The
+   app close sends `bye` and flushes it; update-and-restart does not.
+   `Profile` moves to identity. Fixes P1 P3 P4 P6, server half of P2;
+   D1 D2 D5 D6 (source).
+2. Status (one computed level, incl. the server's hold reason) + Notifier
+   (`noticeFor(event, context)`: self presence, alone, window activity,
+   playing, prefs, replayed; owns its toast timer; system notifications
+   port; library snack bars moved in). Fixes P8 P11 P12 P21 P33, "source
+   left"; D4, D1 notifications, D9 alone policy ("alone" defined once in
+   core next to `PresencePolicy`).
+3. Your server: one hub, listeners attached and detached without members
+   reconnecting (old isolate path kept until that's proven); Invite as a
+   value (filtered addresses, version gate from `/health.version`, an `fp`
+   field reserved for pinned certificates later); `SessionState` is
+   deleted here. Fixes P22 P23 P24; D9.
+4. Library + Media identity: L1 local grouping (kinds, folder hints,
+   gaps, merge across folders) and L2 match (AniList/TVDB, art, names,
+   manual pin, cache); `MediaRef` in swap/queue media. Fixes P34.
+5. Media pipeline + player host port: plan → resolve → open → ready,
+   commands queued during a switch, viewer-side recovery when a source
+   drops (no mpv seek loops, play what's buffered), resolver and source
+   chosen by capability; a Windows CI smoke job (start, open, close
+   within N s, no orphan process). Fixes P2 P15 P17 P18 P28 P29, P30–P32;
+   D11.
+6. What's next (decides which/when, asks the pipeline to prepare;
+   continuation and countdown as server state, shared cancel) + Watch
+   tracking (time In from the presence history, device history, Jellyfin
+   now, AniList later). Fixes P7 P9; D3.
+7. Release 1.3.0: publish the manifest (protocol 16 makes it a required
+   update for 1.2.x) and update the VPS dedicated server in the same
+   window; check a 1.2.x app gets a clear "update the app" message.
+Composition root: an `AppGraph` built in `main.dart` only constructs and
+disposes systems (no logic, no signals); systems get dependencies through
+constructors, widgets through one `AppScope`; a test fails if the count
+of `.instance` singletons grows (today: SessionState 94, AppSettings 51,
+JellyfinAccounts 10, Profile 7).
 Not in the restructure: P25 (ops).
 
 
@@ -238,6 +277,37 @@ Media identity:
 Transport: paths unchanged. A server with TLS serves the same endpoints
 over `wss://`/`https://` (`/health.tls`); apps use `wss://` when offered,
 `ws://` stays allowed.
+
+**Protocol 16 additions (second review):**
+- Client range too: `hello.protoMin`/`proto`; the server picks the
+  highest common version; read `proto` before strict hello parsing; 16
+  apps still send `hello.media:{}` so a 15 server answers "proto
+  mismatch"; a 16 app shows a 15 refusal as "the host runs an older
+  Starsync".
+- Ordered takeover: `hello.seq` (monotonic per client), older hellos get
+  `err stale`; `replaced` is terminal on the client ("opened in another
+  window"); `welcome.instance` per server boot (grace expired vs server
+  restarted).
+- Error codes `stale`, `forbidden`, `rate`, `full`, plus `err.for`; close
+  codes listed in one place. `/health.version` (no member names).
+- Silence: no frame for ~15 s closes the socket (member `gone`); the
+  `gone` feed line only after ~10 s gone (a quick return emits nothing);
+  `presence.reason` manual/idle/minimised/bye; away → in while playing
+  goes through `joining`; `joining` ends on a report error or timeout; a
+  second `/source` socket for the same token replaces the first.
+- Feed: `actorId`/`targetId`; `feed.seq` with `hello.feedAfter` and a
+  bounded replay in `welcome` (marked `replayed`: logged, not toasted).
+- `state.hold {reason ready|buffer|joining|source|start, members, until}`;
+  `members[].caps`.
+- Relay: `sourceGoneSince`; "same info" = size, duration, tracks, name.
+- Queue: `auto` items carry `for: <mediaId>`, added only by the current
+  swapper (or first in); `advance` holds while its performer or source is
+  gone; `cancel` drops the `auto` item too.
+- `MediaRef` gains `absolute`; `season` may be null.
+- `client` is redacted from every log; optionally derived per server
+  (HMAC of an install secret and the dialled host:port).
+- wss: only with a CA-valid certificate in 1.3.0; pinned self-signed via
+  the Invite `fp` later.
 
 ## Backlog
 
