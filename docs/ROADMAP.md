@@ -127,14 +127,18 @@ Transport: `wss://` preferred when a server offers it, `ws://` still
 allowed (a cleartext exception on Android); it only carries sync.
 Tests: many pin behaviour the restructure drops; step 0 audits them
 (delete what no longer fits, keep a few scenario tests for the core
-flows). Open questions below are decided during the restructure. Auto
+flows). Open questions below are decided during the restructure.
+How: incremental on `main` (one system extracted per step, every dev
+build usable), `signals` plus constructor wiring through one composition
+root (no new framework), dev builds `1.3.0-dev.N`, everyone moves to
+proto 16 together at the 1.3.0 release. Rooms are out (no room id).
+Windows dev builds (P35) come in step 0, before proto 16 lands.
+Rename to Starsync everywhere (repo, app id, data folder, updater URL
+migration) is its own step; proposed app id `ru.foxyz.starsync`. Auto
 sit-out: idle or minimised for a while sets you Away, activity sets you
 In; it replaces the 10-minute auto-unready.
 
 **Open decisions:**
-- Rooms: one server's users form several watch groups. Not built yet,
-  but proto 16 carries a room id: identity per server; presence, queue,
-  relay and chat per room.
 - Starting together: today someone has to stay unready so others can
   join first. Ideas: a short "starting in 30 s, ready up" countdown;
   waiting for everyone from the last session.
