@@ -8,35 +8,6 @@ import 'player_controls.dart' show FloatingPill;
 // Jellyfin pieces of the session player. Plain widgets fed by the
 // coordinator's signals, so tests can pump them without the player.
 
-/// Previous / next episode in the video controls. Nothing when there is
-/// no such episode or this viewer cannot put it up (no account).
-class EpisodeSkipButton extends StatelessWidget {
-  final EpisodeLink? episode;
-  final bool next;
-  final VoidCallback onPressed;
-  final FocusNode? focusNode;
-  const EpisodeSkipButton(
-      {super.key, required this.episode, required this.next, required this.onPressed, this.focusNode});
-
-  @override
-  Widget build(BuildContext context) {
-    final e = episode;
-    if (e == null) return const SizedBox.shrink();
-    return Tooltip(
-      message: '${next ? 'Next' : 'Previous'}: ${e.label}  (${next ? '> or Shift+N' : '< or Shift+P'})',
-      child: IconButton(
-        key: ValueKey(next ? 'episode-next' : 'episode-previous'),
-        focusNode: focusNode,
-        color: Colors.white,
-        iconSize: 22,
-        visualDensity: VisualDensity.compact,
-        icon: Icon(next ? Icons.skip_next_rounded : Icons.skip_previous_rounded),
-        onPressed: onPressed,
-      ),
-    );
-  }
-}
-
 /// Floating "Next episode ›" from the ED (or the last two minutes), while
 /// the controls are up (`PillGate`): faint at rest, lit on hover.
 class NextEpisodePill extends StatelessWidget {

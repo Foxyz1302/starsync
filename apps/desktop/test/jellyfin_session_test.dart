@@ -501,18 +501,6 @@ void main() {
         const JellyfinMedia(
             serverId: fixtureServerId, baseUrl: 'b', itemId: nextEpisodeId, title: 'Battle with the Heroes'));
 
-    testWidgets('next / previous buttons: tooltip, hidden without an episode', (tester) async {
-      var pressed = 0;
-      await tester.pumpWidget(app(Row(children: [
-        EpisodeSkipButton(episode: null, next: false, onPressed: () {}),
-        EpisodeSkipButton(episode: next, next: true, onPressed: () => pressed++),
-      ])));
-      expect(find.byKey(const ValueKey('episode-previous')), findsNothing);
-      expect(find.byTooltip('Next: S1E7 Battle with the Heroes  (> or Shift+N)'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('episode-next')));
-      expect(pressed, 1);
-    });
-
     testWidgets('end card: Next prompt, countdown with Cancel', (tester) async {
       var play = 0, cancel = 0;
       await tester.pumpWidget(app(EndOfEpisodeCard(

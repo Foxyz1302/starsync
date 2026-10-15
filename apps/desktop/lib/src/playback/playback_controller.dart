@@ -149,6 +149,9 @@ class PlaybackController {
   /// `demuxer-cache-time`, media_kit's `buffer`), in 250 ms steps.
   final buffered = signal(Duration.zero);
 
+  /// The player's volume, 0..[maxVolume] (media_kit's `volume`).
+  final volume = signal(100.0);
+
   /// The opening ([openingRange]: Intro segment, else an OP-titled
   /// chapter) and the ending ([endingRange]: Outro, else ED-titled).
   late final Computed<SkipRange?> opening =
@@ -504,9 +507,11 @@ class PlaybackController {
     }
   }
 
-  // Position / duration from media_kit's streams; chapter-list and
+  // Position, duration and volume from media_kit's streams; chapter-list and
   // track-list observed in mpv (read back as JSON).
   void _watchMarks(SyncPlayer p) {
+    volume.value = p.state.volume;
+    _timeSubs.add(p.stream.volume.listen((v) => volume.value = v));
     _timeSubs.add(p.stream.position.listen((d) {
       // At the end the bar shows full: mpv's last position is the last
       // frame's start (and the 250 ms steps round down), short of duration.

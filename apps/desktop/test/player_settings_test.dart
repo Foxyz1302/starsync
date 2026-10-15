@@ -1,13 +1,12 @@
 import 'dart:io';
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/controls/controls_probe.dart';
+import 'package:watch_together/src/controls/frame.dart';
+import 'package:watch_together/src/controls/model/controls_prefs.dart';
 import 'package:watch_together/src/controls/player_settings.dart';
-import 'package:watch_together/src/controls/uosc/controls.dart';
 import 'package:watch_together/src/jellyfin/track_prefs.dart';
 import 'package:watch_together/src/schedule/animeflow.dart';
 import 'package:watch_together/src/shaders/shader_presets.dart';
@@ -18,7 +17,7 @@ import 'package:watch_together/src/state/session_state.dart';
 import 'package:watch_together/src/state/settings.dart';
 import 'package:watch_together/src/update/update_controller.dart';
 
-// The player's ⚙ card (both designs, never a media_kit `Video`), the
+// The player settings card (both skins, never a media_kit `Video`), the
 // Settings pages, the host flag in the party UI and invite addresses.
 
 Widget app(Widget child) => MaterialApp(theme: ThemeData.dark(), home: Scaffold(body: child));
@@ -41,7 +40,11 @@ void main() {
   final coord = SessionState.instance.coordinator;
 
   tearDown(() {
-    s.mpvControls.value = false;
+    s.controlsSkin.value = ControlsSkin.standard;
+    s.timeDisplay.value = TimeDisplay.elapsed;
+    s.controlsSize.value = ControlsSize.normal;
+    s.controlsHideSecs.value = defaultControlsHideSecs;
+    s.hiddenControls.value = const {};
     s.progressLine.value = true;
     s.shaderPreset.value = ShaderPreset.off;
     s.shaderQuality.value = ShaderQuality.hq;
@@ -53,15 +56,23 @@ void main() {
     SessionState.instance.recents.value = const [];
   });
 
-  group('⚙ player settings', () {
-    testWidgets('standard controls: the gear opens every player setting, changes apply live', (tester) async {
+  Widget opener() => Builder(
+        builder: (context) => TextButton(
+          key: const ValueKey('open-settings'),
+          onPressed: () => showPlayerSettings(context),
+          child: const Text('settings'),
+        ),
+      );
+
+  group('player settings card', () {
+    testWidgets('lists every player setting, changes apply live', (tester) async {
       bigWindow(tester);
       coord.playback.tracks.value = const [
         MpvTrack(id: 1, type: JellyfinStreamType.audio, language: 'jpn', codec: 'eac3', channels: 2, selected: true),
         MpvTrack(id: 1, type: JellyfinStreamType.subtitle, language: 'eng', codec: 'ass', title: 'Full'),
       ];
-      await tester.pumpWidget(app(const Align(alignment: Alignment.bottomRight, child: PlayerSettingsButton())));
-      await tester.tap(find.byKey(const ValueKey('player-settings')));
+      await tester.pumpWidget(app(Align(alignment: Alignment.bottomRight, child: opener())));
+      await tester.tap(find.byKey(const ValueKey('open-settings')));
       await tester.pumpAndSettle();
       final card = find.byKey(const ValueKey('player-settings-card'));
       expect(card, findsOneWidget);
@@ -81,8 +92,8 @@ void main() {
       expect(find.descendant(of: find.byKey(const ValueKey('audio-track')), matching: find.textContaining('Japanese')),
           findsOneWidget);
 
-      await pick(tester, 'player-design', 'uosc');
-      expect(s.mpvControls.value, isTrue);
+      await pick(tester, 'player-design', 'Minimal');
+      expect(s.controlsSkin.value, ControlsSkin.minimal);
       await tester.tap(find.byKey(const ValueKey('progress-line')));
       await tester.pump();
       expect(s.progressLine.value, isFalse);
@@ -98,19 +109,17 @@ void main() {
       expect(card, findsNothing);
     });
 
-    testWidgets('uosc controls: the gear opens the card and keeps the controls up', (tester) async {
+    testWidgets('keeps the controls up while open', (tester) async {
       bigWindow(tester);
-      s.mpvControls.value = true;
-      await tester.pumpWidget(app(UoscControls(
+      await tester.pumpWidget(app(ControlsFrame(
         hideAfter: const Duration(seconds: 1),
-        timeline: (context, expanded) => const SizedBox(height: 30),
-        right: const [UoscPlayerSettingsButton()],
+        builder: (context, visible) => Align(alignment: Alignment.bottomRight, child: opener()),
       )));
-      final controls = tester.state<UoscControlsState>(find.byType(UoscControls));
-      await tester.tap(find.byKey(const ValueKey('uosc-player-settings')));
+      final controls = tester.state<ControlsFrameState>(find.byType(ControlsFrame));
+      await tester.tap(find.byKey(const ValueKey('open-settings')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('player-settings-card')), findsOneWidget);
-      expect(find.text('uosc'), findsOneWidget, reason: 'the current design');
+      expect(find.text('Standard'), findsOneWidget, reason: 'the current skin');
       await tester.pump(const Duration(seconds: 3));
       expect(controls.visible, isTrue, reason: 'held while the card is open');
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -118,49 +127,6 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
       expect(controls.visible, isFalse);
     });
-
-    testWidgets('uosc: hidden controls keep the line unless the setting is off', (tester) async {
-      await tester.pumpWidget(app(UoscControls(
-        hideAfter: const Duration(milliseconds: 100),
-        timeline: (context, expanded) => const SizedBox(height: 2),
-      )));
-      double opacity() =>
-          tester.widget<AnimatedOpacity>(find.byKey(const ValueKey('uosc-timeline-wrap'))).opacity;
-      await tester.pump(const Duration(milliseconds: 200));
-      expect(opacity(), 1, reason: 'hidden, line on');
-      s.setProgressLine(false);
-      await tester.pump();
-      expect(opacity(), 0, reason: 'hidden, line off');
-      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await mouse.addPointer(location: const Offset(400, 300));
-      addTearDown(mouse.removePointer);
-      await mouse.moveTo(const Offset(410, 300));
-      await tester.pump();
-      expect(opacity(), 1, reason: 'controls up: the full timeline');
-      await tester.pump(const Duration(milliseconds: 200));
-    });
-  });
-
-  testWidgets('standard controls: the probe follows media_kit\'s show / hide rule', (tester) async {
-    final shown = ValueNotifier(false);
-    addTearDown(shown.dispose);
-    await tester.pumpWidget(app(ControlsHoverProbe(
-      shown: shown,
-      hideAfter: const Duration(seconds: 3),
-      child: const SizedBox.expand(),
-    )));
-    await tester.pump();
-    expect(shown.value, isTrue, reason: 'up on mount');
-    await tester.pump(const Duration(seconds: 3));
-    expect(shown.value, isFalse, reason: 'down 3 s later');
-    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await mouse.addPointer(location: const Offset(400, 300));
-    addTearDown(mouse.removePointer);
-    await mouse.moveTo(const Offset(420, 300));
-    await tester.pump();
-    expect(shown.value, isTrue, reason: 'mouse movement');
-    await tester.pump(const Duration(seconds: 3));
-    expect(shown.value, isFalse);
   });
 
   group('Settings pages', () {
@@ -195,16 +161,37 @@ void main() {
       expect(find.byIcon(Icons.hub_outlined), findsOneWidget);
     });
 
-    testWidgets('Player: the same rows as the ⚙, plus a pointer to it', (tester) async {
-      await pumpSettings(tester, SettingsSection.player);
-      expect(find.textContaining("also in the player's ⚙"), findsOneWidget);
-      for (final key in ['player-design', 'progress-line', 'shader-preset', 'hwdec']) {
+    testWidgets('Player: the card\'s rows, a pointer to it, and the controls\' choices', (tester) async {
+      await pumpSettings(tester, SettingsSection.player, size: const Size(1280, 2400));
+      expect(find.textContaining('also in the player: ⚙ → Player settings'), findsOneWidget);
+      for (final key in [
+        'player-design',
+        'progress-line',
+        'shader-preset',
+        'hwdec',
+        'time-display',
+        'controls-size',
+        'controls-hide',
+        for (final c in OptionalControl.values) 'bar-${c.name}',
+      ]) {
         expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
       }
       expect(find.byKey(const ValueKey('audio-track')), findsNothing, reason: 'tracks only in the player');
       expect(find.text('Standard'), findsOneWidget);
-      await pick(tester, 'player-design', 'uosc');
-      expect(s.mpvControls.value, isTrue);
+      await pick(tester, 'player-design', 'Minimal');
+      expect(s.controlsSkin.value, ControlsSkin.minimal);
+      await pick(tester, 'time-display', 'Remaining');
+      expect(s.timeDisplay.value, TimeDisplay.remaining);
+      await pick(tester, 'controls-size', 'Large');
+      expect(s.controlsSize.value, ControlsSize.large);
+      await pick(tester, 'controls-hide', '5 s');
+      expect(s.controlsHideSecs.value, 5);
+      await tester.tap(find.byKey(const ValueKey('bar-chat')));
+      await tester.pump();
+      expect(s.hiddenControls.value, {OptionalControl.chat});
+      await tester.tap(find.byKey(const ValueKey('bar-chat')));
+      await tester.pump();
+      expect(s.hiddenControls.value, isEmpty);
     });
 
     testWidgets('Party & network: host defaults and recent servers with remove', (tester) async {

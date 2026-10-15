@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:signals/signals_flutter.dart';
 
+import '../controls/model/controls_prefs.dart';
 import '../shaders/shader_presets.dart';
 
 // App preferences (Settings page), one Hive box. Signals start at their
@@ -17,7 +18,14 @@ const _keyShaderPreset = 'shaderPreset';
 const _keyShaderQuality = 'shaderQuality';
 const _keyCustomShaders = 'customShaders';
 const _keyAutoAdvance = 'autoAdvance';
+/// Legacy: true was the uosc design (now [ControlsSkin.minimal]); read
+/// once when [_keyControlsSkin] is missing.
 const _keyMpvControls = 'mpvControls';
+const _keyControlsSkin = 'controlsSkin';
+const _keyTimeDisplay = 'timeDisplay';
+const _keyControlsSize = 'controlsSize';
+const _keyControlsHideSecs = 'controlsHideSecs';
+const _keyHiddenControls = 'hiddenControls';
 const _keyHideReReleases = 'hideReReleases';
 const _keyProgressLine = 'progressLine';
 const _keySoundVolume = 'soundVolume';
@@ -62,14 +70,20 @@ class AppSettings {
   final unreadyOnSwap = signal(false);
   /// Session: the idle auto-unready sits this member out instead.
   final idleSitsOut = signal(false);
-  /// Player design: the uosc controls (`controls/uosc/`) instead of the
-  /// standard ones (media_kit's with our bars). Applies live.
-  final mpvControls = signal(false);
+  /// The player controls' skin (`controls/`). Applies live.
+  final controlsSkin = signal(ControlsSkin.standard);
+  /// The bar's clock: elapsed / total or the time left.
+  final timeDisplay = signal(TimeDisplay.elapsed);
+  final controlsSize = signal(ControlsSize.normal);
+  /// Seconds without mouse movement before the controls hide.
+  final controlsHideSecs = signal(defaultControlsHideSecs);
+  /// Optional bar buttons switched off (they stay in ⚙).
+  final hiddenControls = signal<Set<OptionalControl>>(const {});
   /// Library: leave out of "Latest in X" what was added long after it
   /// first aired (re-uploads, old seasons added late).
   final hideReReleases = signal(true);
   /// A 2 px progress line at the bottom of the video while the controls
-  /// are hidden (both designs). Applies live.
+  /// are hidden (both skins). Applies live.
   final progressLine = signal(true);
   /// Send this app's log lines to the server's session log while in a
   /// session (never chat). Off: nothing is sent but a note that it is off.
@@ -127,8 +141,18 @@ class AppSettings {
       if (unready is bool) unreadyOnSwap.value = unready;
       final idleOut = box.get(_keyIdleSitsOut);
       if (idleOut is bool) idleSitsOut.value = idleOut;
-      final mpv = box.get(_keyMpvControls);
-      if (mpv is bool) mpvControls.value = mpv;
+      controlsSkin.value =
+          ControlsSkin.fromStored(box.get(_keyControlsSkin), legacyMpvControls: box.get(_keyMpvControls));
+      final time = box.get(_keyTimeDisplay);
+      timeDisplay.value = TimeDisplay.values.where((t) => t.name == time).firstOrNull ?? TimeDisplay.elapsed;
+      final size = box.get(_keyControlsSize);
+      controlsSize.value = ControlsSize.values.where((t) => t.name == size).firstOrNull ?? ControlsSize.normal;
+      final hide = box.get(_keyControlsHideSecs);
+      if (hide is int && controlsHideChoices.contains(hide)) controlsHideSecs.value = hide;
+      final hidden = box.get(_keyHiddenControls);
+      if (hidden is List) {
+        hiddenControls.value = Set.unmodifiable(OptionalControl.values.where((c) => hidden.contains(c.name)));
+      }
       final hideRe = box.get(_keyHideReReleases);
       if (hideRe is bool) hideReReleases.value = hideRe;
       final line = box.get(_keyProgressLine);
@@ -199,9 +223,31 @@ class AppSettings {
     _put(_keyIdleSitsOut, on);
   }
 
-  void setMpvControls(bool on) {
-    mpvControls.value = on;
-    _put(_keyMpvControls, on);
+  void setControlsSkin(ControlsSkin skin) {
+    controlsSkin.value = skin;
+    _put(_keyControlsSkin, skin.name);
+  }
+
+  void setTimeDisplay(TimeDisplay t) {
+    timeDisplay.value = t;
+    _put(_keyTimeDisplay, t.name);
+  }
+
+  void setControlsSize(ControlsSize size) {
+    controlsSize.value = size;
+    _put(_keyControlsSize, size.name);
+  }
+
+  void setControlsHideSecs(int secs) {
+    controlsHideSecs.value = secs;
+    _put(_keyControlsHideSecs, secs);
+  }
+
+  void setControlShown(OptionalControl c, bool on) {
+    final next = {...hiddenControls.value};
+    on ? next.remove(c) : next.add(c);
+    hiddenControls.value = Set.unmodifiable(next);
+    _put(_keyHiddenControls, [for (final c in next) c.name]);
   }
 
   void setProgressLine(bool on) {

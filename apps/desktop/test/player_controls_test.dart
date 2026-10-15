@@ -2,11 +2,15 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart' show JellyfinStreamType;
+import 'package:watch_together/src/controls/control_menus.dart';
+import 'package:watch_together/src/controls/standard/seek_bar.dart';
 import 'package:watch_together/src/jellyfin/track_prefs.dart';
 import 'package:watch_together/src/playback/media_marks.dart';
 import 'package:watch_together/src/screens/session/player_controls.dart';
 
-// The control-bar pieces alone (never the session screen or a `Video`).
+// The control-bar pieces alone (never the session screen or a `Video`):
+// the Standard seek bar, the skip pill and the shared track / chapter
+// lists.
 
 Duration m(int min, [int sec = 0]) => Duration(minutes: min, seconds: sec);
 
@@ -17,9 +21,6 @@ final chapters = chaptersFromStarts([
   ('ED', m(20)),
   ('Part B', m(21, 30)),
 ], m(24));
-
-Finder item<T>(String text) =>
-    find.ancestor(of: find.text(text), matching: find.byType(CheckedPopupMenuItem<T>));
 
 Widget host(Widget child, {double width = 960}) => MaterialApp(
       home: Scaffold(
@@ -143,56 +144,30 @@ void main() {
       MpvTrack(id: 1, type: JellyfinStreamType.subtitle, language: 'eng', codec: 'ass', title: 'Full'),
     ];
 
-    testWidgets('audio menu: count badge, labels, current checked, pick', (tester) async {
-      TrackPick? got;
-      await tester.pumpWidget(host(Row(children: [
-        TrackMenuButton(type: JellyfinStreamType.audio, tracks: tracks, onPick: (p) => got = p),
-        TrackMenuButton(type: JellyfinStreamType.subtitle, tracks: tracks, onPick: (p) => got = p),
-      ])));
-      expect(find.descendant(of: find.byKey(const ValueKey('audio-button')), matching: find.text('2')),
-          findsOneWidget);
-      expect(find.descendant(of: find.byKey(const ValueKey('subtitles-button')), matching: find.text('1')),
-          findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('audio-button')));
-      await tester.pumpAndSettle();
-      final items = tester.widgetList<CheckedPopupMenuItem<TrackPick>>(find.byType(CheckedPopupMenuItem<TrackPick>));
+    test('audio list: counts, labels, mpv\'s selection checked', () {
+      expect(trackCount(tracks, JellyfinStreamType.audio), 2);
+      expect(trackCount(tracks, JellyfinStreamType.subtitle), 1);
+      final items = trackMenuItems(JellyfinStreamType.audio, tracks);
+      expect(items.map((i) => i.label), ['Japanese · E-AC3 2.0', 'English · AAC 5.1 · Dub']);
       expect(items.map((i) => i.checked), [true, false]);
-      expect(find.text('Japanese · E-AC3 2.0'), findsOneWidget);
-      await tester.tap(item<TrackPick>('English · AAC 5.1 · Dub'));
-      await tester.pumpAndSettle();
-      expect(got, (aid: 2, sid: null, subtitlesOff: false));
+      expect(items[1].value, (aid: 2, sid: null, subtitlesOff: false));
+      expect(trackMenuItems(JellyfinStreamType.audio, const []).single.enabled, isFalse, reason: 'None');
     });
 
-    testWidgets('subtitle menu has Off, checked when none is selected', (tester) async {
-      TrackPick? got;
-      await tester.pumpWidget(host(TrackMenuButton(
-          type: JellyfinStreamType.subtitle, tracks: tracks, onPick: (p) => got = p)));
-      await tester.tap(find.byKey(const ValueKey('subtitles-button')));
-      await tester.pumpAndSettle();
-      final items = tester.widgetList<CheckedPopupMenuItem<TrackPick>>(find.byType(CheckedPopupMenuItem<TrackPick>));
+    test('subtitle list starts with Off, checked when none is selected', () {
+      final items = trackMenuItems(JellyfinStreamType.subtitle, tracks);
+      expect(items.map((i) => i.label), ['Off', 'English · ASS · Full']);
       expect(items.map((i) => i.checked), [true, false]);
-      await tester.tap(item<TrackPick>('Off'));
-      await tester.pumpAndSettle();
-      expect(got, (aid: null, sid: null, subtitlesOff: true));
+      expect(items.first.value, (aid: null, sid: null, subtitlesOff: true));
+      expect(items.last.value, (aid: null, sid: 1, subtitlesOff: false));
     });
 
-    testWidgets('chapter menu: current checked, a pick seeks to its start', (tester) async {
-      MediaChapter? got;
-      await tester.pumpWidget(host(ChaptersControlButton(chapters: chapters, current: 2, onPick: (c) => got = c)));
-      await tester.tap(find.byKey(const ValueKey('chapters-button')));
-      await tester.pumpAndSettle();
-      final items = tester.widgetList<CheckedPopupMenuItem<MediaChapter>>(
-          find.byType(CheckedPopupMenuItem<MediaChapter>));
+    test('chapter list: start times, the current one checked', () {
+      final items = chapterMenuItems(chapters, 2);
       expect(items.map((i) => i.checked), [false, false, true, false, false]);
-      expect(find.text('20:00'), findsOneWidget);
-      await tester.tap(item<MediaChapter>('ED'));
-      await tester.pumpAndSettle();
-      expect(got!.start, m(20));
-    });
-
-    testWidgets('no chapters, no chapter button', (tester) async {
-      await tester.pumpWidget(host(ChaptersControlButton(chapters: const [], current: null, onPick: (_) {})));
-      expect(find.byKey(const ValueKey('chapters-button')), findsNothing);
+      expect(items[3].label, 'ED');
+      expect(items[3].hint, '20:00');
+      expect(items[3].value.start, m(20));
     });
   });
 }

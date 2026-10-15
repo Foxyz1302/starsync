@@ -9,9 +9,7 @@ import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
 import '../controls/controls_probe.dart' show ControlsHold;
-import '../controls/uosc/buttons.dart' show UoscButton;
-import '../controls/uosc/controls.dart' show UoscControls;
-import '../controls/uosc/style.dart';
+import '../controls/minimal/style.dart';
 import '../files/scanner.dart' show FileKind, kindOf;
 import '../jellyfin/images.dart';
 import '../jellyfin/session_media.dart' show EpisodeLink;
@@ -28,16 +26,16 @@ import '../widgets/text_focus.dart' show KeyboardClaim;
 import 'queue_controller.dart';
 import 'queue_logic.dart';
 
-// Up next in the player: its control in the top bar (with chat and
-// fullscreen), the popover it opens (the queue, the continuation, a field
+// Up next in the player: its control in the top bar (with the window
+// controls), the popover it opens (the queue, the continuation, a field
 // and a drop zone to add), and the end-of-media card for the first item.
 
 
 // ---------------------------------------------------------------- button
 
-/// Which controls design the Up next control sits in: it takes the look
+/// Which controls skin the Up next control sits in: it takes the look
 /// of that bar's buttons.
-enum UpNextLook { standard, uosc }
+enum UpNextLook { standard, minimal }
 
 /// The next item's picture, "UP NEXT" over its title, a +n count and ⏭
 /// (play it now) in the player's top bar, one flat control among its
@@ -66,7 +64,7 @@ class _UpNextButtonState extends State<UpNextButton> {
   bool _hoverTitle = false;
 
   QueueController get _q => widget.queue;
-  bool get _uosc => widget.look == UpNextLook.uosc;
+  bool get _minimal => widget.look == UpNextLook.minimal;
 
   @override
   void didUpdateWidget(UpNextButton oldWidget) {
@@ -135,16 +133,16 @@ class _UpNextButtonState extends State<UpNextButton> {
 
   @override
   Widget build(BuildContext context) {
-    // The bar's own metrics: uosc's flat 40 px boxes, or media_kit's
-    // round 44 px icon buttons.
-    final height = _uosc ? UoscControls.buttonRowHeight : 44.0;
-    final radius = _uosc ? UoscStyle.radius : height / 2;
-    final hover = _uosc ? UoscStyle.hover : Colors.white10;
-    final fontSize = _uosc ? UoscStyle.fontSize : 14.0;
-    final dim = _uosc ? UoscStyle.dim : Colors.white70;
+    // The bar's own metrics: the Minimal skin's rounded squares, or the
+    // Standard skin's round 44 px icon buttons.
+    final height = _minimal ? MinimalStyle.button + 2 * MinimalStyle.capsulePad : 44.0;
+    final radius = _minimal ? MinimalStyle.radius + MinimalStyle.capsulePad : height / 2;
+    final hover = _minimal ? MinimalStyle.hover : Colors.white10;
+    final fontSize = _minimal ? MinimalStyle.fontSize : 14.0;
+    final dim = _minimal ? MinimalStyle.dim : Colors.white70;
     // The picture fills the button's height but for a 7 px margin.
     final thumbWidth = (height - 14) * 16 / 9;
-    final thumbRadius = _uosc ? UoscStyle.radius : 6.0;
+    final thumbRadius = _minimal ? MinimalStyle.radius - 4 : 6.0;
     return SignalBuilder(builder: (context) {
       final items = _q.items.value;
       final cont = _q.shownContinuation.value;
@@ -197,7 +195,7 @@ class _UpNextButtonState extends State<UpNextButton> {
             duration: const Duration(milliseconds: 150),
             height: height,
             // The picture clears a round button's curve.
-            padding: EdgeInsets.only(left: _uosc ? 7 : 12, right: 6),
+            padding: EdgeInsets.only(left: _minimal ? 7 : 12, right: 6),
             decoration: BoxDecoration(
               color: _hoverTitle || open ? hover : Colors.transparent,
               borderRadius: BorderRadius.circular(radius),
@@ -234,7 +232,7 @@ class _UpNextButtonState extends State<UpNextButton> {
                   const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                    decoration: BoxDecoration(color: UoscStyle.hover, borderRadius: BorderRadius.circular(999)),
+                    decoration: BoxDecoration(color: MinimalStyle.hover, borderRadius: BorderRadius.circular(999)),
                     child: Text('+$more', style: TextStyle(color: dim, fontSize: 11)),
                   ),
                 ],
@@ -254,8 +252,8 @@ class _UpNextButtonState extends State<UpNextButton> {
           ? 'Play ${item!.title} now  ($playNextKeys)'
           : 'Play ${episode == null ? '' : episode.label} now  ($playNextKeys)';
       final VoidCallback? play = queued ? _q.skip : (episode != null ? widget.onPlayNextEpisode : null);
-      final playButton = _uosc
-          ? UoscButton(key: const ValueKey('up-next-play'), icon: Icons.skip_next_rounded, tooltip: playTip, onPressed: play)
+      final playButton = _minimal
+          ? MinimalButton(key: const ValueKey('up-next-play'), icon: Icons.skip_next_rounded, tooltip: playTip, onPressed: play)
           : Tooltip(
               message: playTip,
               waitDuration: const Duration(milliseconds: 500),

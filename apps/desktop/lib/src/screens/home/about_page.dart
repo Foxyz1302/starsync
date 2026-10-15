@@ -12,6 +12,10 @@ import 'settings_page.dart';
 import 'ui.dart';
 import 'update_indicator.dart';
 
+/// The Minimal player skin's credit (README says the same).
+const uoscCredit = 'Player timeline and controls inspired by uosc by tomasklaen, LGPL-2.1 '
+    '(github.com/tomasklaen/uosc).';
+
 /// Name, version, update state, the source link and the logs (Settings →
 /// About).
 class AboutPanel extends StatelessWidget {
@@ -48,6 +52,8 @@ class AboutPanel extends StatelessWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 4),
+              Text(uoscCredit, key: const ValueKey('uosc-credit'), style: t.bodySmall?.copyWith(color: Colors.grey)),
               const SizedBox(height: kGap),
               Text('Something went wrong? Copy diagnostics and send them to whoever helps you: '
                   'versions and the last hours of the log, passwords, tokens and cookies left out. '

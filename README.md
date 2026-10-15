@@ -182,7 +182,7 @@ everyone has its start before it goes up; whoever added it keeps the
 app open for that. Everyone shares one Up next and anyone can change it; what
 you added stays when you leave.
 
-In the player, Up next sits in the top bar next to the chat button: the
+In the player, Up next sits in the top bar, right of the title: the
 next item's picture and title (or the next episode's). Rest the mouse on
 it for a larger preview (who added it, its length, whether it is ready
 to start); ⏭ plays it now, a click opens the queue: drag rows to reorder, hover a
@@ -282,16 +282,21 @@ integrations (linked Jellyfin servers, below, the AnimeFlow connection:
 "connected as <name>" with what you may do, or why not, and playing the
 next episode automatically); Notifications & sounds (what pops up; the sound
 volume and sound set, and every sound with a preview, its own set and a switch); Updates; Keyboard shortcuts (read-only); About
-(the version; resting the mouse on the Settings tab shows it too).
+(the version; resting the mouse on the Settings tab shows it too; and the
+credits, e.g. that the Minimal player design is inspired by uosc).
 
-Player settings live in the player: ⚙ at the right end of its controls
-(both designs) opens them, and Settings → Player has the same ones (plus
-the custom shader files). Player design: Standard or uosc (below);
-progress line when hidden (on by default: a 2 px line at the bottom of
-the video while the controls are hidden); upscaling shader (see below);
-hardware decoding (auto, off or custom; the env var `SYNC_RELAY_HWDEC`
-overrides it); in the player also the subtitle and audio track. Every
-change applies right away.
+Player settings live in the player too: ⚙ → Player settings, at the
+right of its controls, and Settings → Player has the same ones (plus the
+controls' layout and the custom shader files). Player design: Standard or
+Minimal (below); progress line when hidden (on by default: a thin line at
+the bottom of the video while the controls are hidden); upscaling shader
+(see below); hardware decoding (auto, off or custom; the env var
+`SYNC_RELAY_HWDEC` overrides it); in the player also the subtitle and
+audio track. Settings → Player → Controls: time display (elapsed / total
+or remaining), controls size (normal or large), hide the controls after
+2, 3 or 5 s, and which optional buttons sit in the bar (chapter buttons,
+subtitles, audio, chat; hidden ones are still in ⚙). Every change
+applies right away.
 
 Anywhere in a server (unless you are typing): Space = ready / unready,
 Tab = chat & activity (Tab never moves between buttons). Anywhere:
@@ -304,28 +309,37 @@ mini it asks to leave, Ctrl+R = reload video,
 Ctrl+1..6 = Anime4K mode A, B, C, A+A, B+B, C+A, Ctrl+0 = shaders off.
 Every seek, skip and chapter jump moves everyone.
 
-Controls: the seek bar marks chapter starts with a diamond; hovering it
-shows the time and the chapter title. The chapters button lists them
-(current one checked; click to jump). "1:30" skips ahead 1:30. Audio and
-Subtitles buttons (with the track count) list tracks as "Japanese · E-AC3
-2.0 · title"; subtitles have Off. Volume (scroll anywhere on the video,
-hover the speaker, or Up/Down) goes to 150 % like mpv: past the tick at
-100 % the bar turns amber and mpv amplifies; a scroll or key shows the
-volume for a moment. Lists and menus under the mouse scroll as usual.
+Controls: both designs have the same buttons in the same places, only
+the look differs. Bottom left: play / pause first (it is your ready, like
+Space: ✓ while you are ready and the others are not), previous / next
+episode (when there is one; next plays Up next first), previous / next
+chapter (when the video has chapters), volume and the time (click it to
+switch between elapsed / total and the time left). Bottom right:
+Subtitles and Audio (with the track count; tracks listed as "Japanese ·
+E-AC3 2.0 · title", subtitles with Off), ⚙, chat and fullscreen last.
+Everything else is in ⚙: chapters (current one checked; click to jump),
+Skip 1:30, upscaling shader, change video, copy link, reload video,
+mark everyone ready, mark a problem, player settings and leave. The top
+bar has the title, Up next and back to the library (in fullscreen: exit
+fullscreen and the window buttons). Volume (scroll anywhere on the
+video, hover the speaker, or Up/Down) goes to 150 % like mpv: past the
+tick at 100 % the bar turns amber and mpv amplifies; a scroll or key
+shows the volume for a moment. Lists and menus under the mouse scroll
+as usual.
 
-The uosc player design (⚙ → Player design, Standard by default,
-switches right away): video controls modeled on mpv's uosc theme. A
-translucent timeline across the bottom marks the position with a thin
-line, hatches the part not downloaded yet, shows chapter starts as
-diamonds (click one to jump), the elapsed time left, the time remaining
-right and, while less than a minute is buffered, the buffered seconds
-next to the position; hovering it shows the time there and the chapter
-title. With the controls hidden it stays as a thin line (unless
-"Progress line when hidden" is off). Above it flat buttons: ≡ menu, Subtitles and Audio (with the
-track count), the shader badge (the active Anime4K mode, e.g. "A HQ"),
-ready, chapters, 1:30, previous / next episode, change video, volume, ⚙
-and fullscreen; the title top left, Up next, chat and back-to-library top right. Keys and skip buttons work
-the same.
+Standard (the default): a seek bar that marks chapter starts with a
+diamond (hovering it shows the time and the chapter title) over a row
+of round buttons. Minimal (⚙ → Player settings → Player design, switches
+right away): a translucent timeline across the bottom tints what has
+played, stripes the part not downloaded yet, marks chapter starts with
+dots (click one to jump), shows the elapsed time left and the total or
+the time left right (click it to switch) and, while less than a minute
+is buffered, the buffered seconds next to the position; hovering it shows
+the time there and the chapter title. With the controls hidden it stays
+as a thin line (unless "Progress line when hidden" is off). Its buttons
+sit in two glass capsules above it. Minimal's timeline and controls are
+inspired by [uosc](https://github.com/tomasklaen/uosc) by tomasklaen
+(LGPL-2.1).
 
 Skipping: during the opening a "Skip OP" button shows bottom right, just
 above the controls (it
@@ -395,7 +409,7 @@ Watching:
   "No Jellyfin account here for ..." with a button to link one; it plays as
   soon as you are signed in.
 
-Episodes: the ⏮ / ⏭ buttons next to the controls (or `<` / `>`,
+Episodes: the ⏮ / ⏭ buttons next to play (or `<` / `>`,
 Shift+P / Shift+N) put up the previous or next episode for everyone. From
 the ending (when it is known, see Skipping above; else in the last two
 minutes) a "Next episode" button floats in the corner while the controls
@@ -411,7 +425,7 @@ Your choice is remembered per series (and as a default) and the closest
 match (language, then title, then codec and channels) is selected on the
 next episode. This is per person; nobody else is affected.
 
-"Change video" in the player's controls opens the Library tab (the player
+⚙ → Change video in the player opens the Library tab (the player
 goes mini): the library starts on the series you are watching with the
 current season, else where you left it.
 
@@ -467,9 +481,9 @@ affected. The app ships [Anime4K](https://github.com/bloc97/Anime4K) v4.0.1
 C (480p), A+A, B+B, C+A, each as HQ (strong GPUs, GTX 1080 and up) or Fast
 (the guide's low-end set). "Custom shaders" runs your own `.glsl` files.
 
-Pick one with the ✨ button in the player's control bar (also in
+Pick one with ⚙ → Upscaling shader in the player (also in
 fullscreen) or Ctrl+0..6; the change applies live and is saved, so the next
-session starts with it. The player's ⚙ and Settings → Player set it too,
+session starts with it. ⚙ → Player settings and Settings → Player set it too,
 with HQ or Fast (used by Ctrl+1..6); Settings → Player holds the custom
 files. Shaders cost GPU time
 every frame and need hardware video rendering: on media_kit's software

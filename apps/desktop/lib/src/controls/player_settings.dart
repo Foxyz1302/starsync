@@ -12,11 +12,11 @@ import '../shell/mark_problem.dart';
 import '../shell/motion.dart';
 import '../state/settings.dart';
 import '../widgets/app_menu.dart';
-import 'uosc/buttons.dart';
-import 'uosc/controls.dart';
+import 'frame.dart';
+import 'model/controls_prefs.dart';
 
-// Everything about the player, defined once: the rows of the ⚙ card in
-// both control designs and of Settings → Player. Each row reads and
+// Everything about the player, defined once: the rows of the player
+// settings card (⚙ → Player settings, both skins) and of Settings → Player. Each row reads and
 // writes [AppSettings] and applies to a running player right away.
 
 /// One setting: a label, one line of help under it, the control at the
@@ -67,7 +67,7 @@ AppSelect<T> _dropdown<T>({
 }) =>
     AppSelect<T>(key: key, value: value, items: items, onChanged: onChanged, expanded: expanded);
 
-/// Standard (our bars over media_kit's controls) or uosc. Live.
+/// The controls' skin: Standard or Minimal. Live.
 class PlayerDesignSetting extends StatelessWidget {
   const PlayerDesignSetting({super.key});
 
@@ -77,12 +77,100 @@ class PlayerDesignSetting extends StatelessWidget {
     return SignalBuilder(
       builder: (context) => SettingRow(
         label: 'Player design',
-        help: 'uosc is modeled on mpv: a thick timeline with chapters and what is cached',
-        control: _dropdown<bool>(
+        help: 'Minimal has a thick timeline with chapters and what is downloaded yet',
+        control: _dropdown<ControlsSkin>(
           key: const ValueKey('player-design'),
-          value: s.mpvControls.value,
-          items: const [(false, 'Standard'), (true, 'uosc')],
-          onChanged: s.setMpvControls,
+          value: s.controlsSkin.value,
+          items: [for (final k in ControlsSkin.values) (k, k.label)],
+          onChanged: s.setControlsSkin,
+        ),
+      ),
+    );
+  }
+}
+
+/// The bar's clock: elapsed / total or the time left. Live.
+class TimeDisplaySetting extends StatelessWidget {
+  const TimeDisplaySetting({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppSettings.instance;
+    return SignalBuilder(
+      builder: (context) => SettingRow(
+        label: 'Time display',
+        help: 'Also switched by a click on the time',
+        control: _dropdown<TimeDisplay>(
+          key: const ValueKey('time-display'),
+          value: s.timeDisplay.value,
+          items: [for (final t in TimeDisplay.values) (t, t.label)],
+          onChanged: s.setTimeDisplay,
+        ),
+      ),
+    );
+  }
+}
+
+/// Normal or large bar and buttons. Live.
+class ControlsSizeSetting extends StatelessWidget {
+  const ControlsSizeSetting({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppSettings.instance;
+    return SignalBuilder(
+      builder: (context) => SettingRow(
+        label: 'Controls size',
+        help: 'Large makes the bar and its buttons a quarter bigger',
+        control: _dropdown<ControlsSize>(
+          key: const ValueKey('controls-size'),
+          value: s.controlsSize.value,
+          items: [for (final z in ControlsSize.values) (z, z.label)],
+          onChanged: s.setControlsSize,
+        ),
+      ),
+    );
+  }
+}
+
+/// How long the controls stay up without mouse movement. Live.
+class HideDelaySetting extends StatelessWidget {
+  const HideDelaySetting({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppSettings.instance;
+    return SignalBuilder(
+      builder: (context) => SettingRow(
+        label: 'Hide the controls after',
+        help: 'Without mouse movement over the video',
+        control: _dropdown<int>(
+          key: const ValueKey('controls-hide'),
+          value: s.controlsHideSecs.value,
+          items: [for (final secs in controlsHideChoices) (secs, '$secs s')],
+          onChanged: s.setControlsHideSecs,
+        ),
+      ),
+    );
+  }
+}
+
+/// One optional bar button on or off (off: it is still in ⚙). Live.
+class BarButtonSetting extends StatelessWidget {
+  final OptionalControl control;
+  const BarButtonSetting({super.key, required this.control});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppSettings.instance;
+    return SignalBuilder(
+      builder: (context) => SettingRow(
+        label: control.label,
+        help: control.help,
+        control: Switch(
+          key: ValueKey('bar-${control.name}'),
+          value: !s.hiddenControls.value.contains(control),
+          onChanged: (on) => s.setControlShown(control, on),
         ),
       ),
     );
@@ -296,7 +384,20 @@ class TrackSetting extends StatelessWidget {
   }
 }
 
-/// The player rows of Settings → Player and the ⚙ card, in order.
+/// The controls' own choices (Settings → Player → Controls).
+List<Widget> controlsSettingRows() => [
+  const TimeDisplaySetting(),
+  const ControlsSizeSetting(),
+  const HideDelaySetting(),
+  const Padding(
+    padding: EdgeInsets.only(top: 10, bottom: 2),
+    child: Text('Buttons in the bar (hidden ones stay in ⚙)', style: TextStyle(fontWeight: FontWeight.w600)),
+  ),
+  for (final c in OptionalControl.values) BarButtonSetting(control: c),
+];
+
+/// The player rows of Settings → Player and the player settings card, in
+/// order.
 List<Widget> playerSettingRows({ReadonlySignal<RenderMode>? renderMode}) => [
       const PlayerDesignSetting(),
       const ProgressLineSetting(),
@@ -304,7 +405,8 @@ List<Widget> playerSettingRows({ReadonlySignal<RenderMode>? renderMode}) => [
       const HwdecSetting(),
     ];
 
-/// The ⚙ card: every player setting, plus the running player's tracks.
+/// The player settings card: every player setting, plus the running
+/// player's tracks.
 class PlayerSettingsCard extends StatelessWidget {
   final ReadonlySignal<RenderMode>? renderMode;
   /// Show the audio / subtitle pickers (a player is running).
@@ -337,7 +439,7 @@ class PlayerSettingsCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      'Custom shader files: Settings → Player',
+                      'Controls layout and custom shaders: Settings → Player',
                       style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
                     ),
                   ),
@@ -352,51 +454,14 @@ class PlayerSettingsCard extends StatelessWidget {
   }
 }
 
-/// Opens the ⚙ card over the player, near the controls' right end. The
-/// uosc controls stay up while it is open.
-Future<void> showPlayerSettings(BuildContext context, {ReadonlySignal<RenderMode>? renderMode}) {
-  Future<void> open() => showPopover<void>(
+/// Opens the player settings card over the player, near the controls'
+/// right end; the controls stay up while it is open.
+Future<void> showPlayerSettings(BuildContext context, {ReadonlySignal<RenderMode>? renderMode}) =>
+    ControlsFrame.holdWhile(
+      context,
+      () => showPopover<void>(
         context,
         at: const Alignment(0.96, 0.5),
         child: PlayerSettingsCard(renderMode: renderMode),
-      );
-  final controls = UoscControls.maybeOf(context);
-  return controls == null ? open() : controls.holdDuring(open);
-}
-
-/// ⚙ in the standard controls' bottom bar.
-class PlayerSettingsButton extends StatelessWidget {
-  final FocusNode? focusNode;
-  final ReadonlySignal<RenderMode>? renderMode;
-  const PlayerSettingsButton({super.key, this.focusNode, this.renderMode});
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      key: const ValueKey('player-settings'),
-      focusNode: focusNode,
-      tooltip: 'Player settings',
-      color: Colors.white,
-      iconSize: 20,
-      visualDensity: VisualDensity.compact,
-      icon: const Icon(Icons.tune),
-      onPressed: () => showPlayerSettings(context, renderMode: renderMode),
+      ),
     );
-  }
-}
-
-/// ⚙ in the uosc controls' button row.
-class UoscPlayerSettingsButton extends StatelessWidget {
-  final ReadonlySignal<RenderMode>? renderMode;
-  const UoscPlayerSettingsButton({super.key, this.renderMode});
-
-  @override
-  Widget build(BuildContext context) {
-    return UoscButton(
-      key: const ValueKey('uosc-player-settings'),
-      icon: Icons.tune_rounded,
-      tooltip: 'Player settings',
-      onPressed: () => showPlayerSettings(context, renderMode: renderMode),
-    );
-  }
-}

@@ -7,6 +7,7 @@ import 'package:fox_utils/fox_utils.dart' show ClipboardX, DesktopDropX, DropTar
 import 'package:signals/signals_flutter.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../controls/frame.dart' show DoubleClickListener;
 import '../files/folder_store.dart';
 import '../files/ui/files_page.dart' show showFilesFolder;
 import '../jellyfin/accounts.dart';

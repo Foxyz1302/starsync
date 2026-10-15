@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:media_kit/media_kit.dart';
 
 import '../playback/playback_controller.dart' show PlaybackController;
 import '../widgets/app_menu.dart' show AppGlass;
@@ -90,7 +89,7 @@ class VolumeFlash extends StatefulWidget {
   final WidgetBuilder builder;
   const VolumeFlash({super.key, required this.trigger, required this.builder});
 
-  /// uosc's `flash_duration`.
+  /// How long the readout stays after the last step.
   static const hold = Duration(seconds: 1);
 
   @override
@@ -142,7 +141,7 @@ class _VolumeFlashState extends State<VolumeFlash> {
   );
 }
 
-/// The standard design's volume readout for [VolumeFlash]: a glass pill
+/// The volume readout for [VolumeFlash] (both skins): a glass pill
 /// (the player's pill look) with the icon, a [VolumeBar] and the
 /// percentage.
 class VolumeReadout extends StatelessWidget {
@@ -159,11 +158,7 @@ class VolumeReadout extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              v <= 0 ? Icons.volume_off : (v < 50 ? Icons.volume_down : Icons.volume_up),
-              size: 20,
-              color: v > 100 ? boostColor : Colors.white,
-            ),
+            Icon(volumeIcon(v), size: 20, color: v > 100 ? boostColor : Colors.white),
             const SizedBox(width: 8),
             VolumeBar(volume: v, onChanged: (_) {}, width: 96),
             const SizedBox(width: 10),
@@ -246,72 +241,88 @@ class _VolumePainter extends CustomPainter {
   bool shouldRepaint(_VolumePainter old) => old.volume != volume || old.color != color || old.trackColor != trackColor;
 }
 
-/// Volume for the standard bar (instead of media_kit's, which stops at
-/// 100): the icon mutes / unmutes, hovering shows a [VolumeBar], the
-/// wheel steps [volumeStep].
-class VolumeButton extends StatefulWidget {
-  final Player player;
-  final FocusNode? focusNode;
-  const VolumeButton({super.key, required this.player, this.focusNode});
+/// The speaker icon for [volume].
+IconData volumeIcon(double volume) =>
+    volume <= 0 ? Icons.volume_off_rounded : (volume < 50 ? Icons.volume_down_rounded : Icons.volume_up_rounded);
+
+/// Builds a skin's button for the [VolumeControl].
+typedef VolumeButtonBuilder = Widget Function(
+  BuildContext context,
+  IconData icon,
+  Color? color,
+  String tooltip,
+  VoidCallback onPressed,
+);
+
+/// The bar's volume, in both skins: the skin's speaker button (click
+/// mutes / unmutes), a [VolumeBar] sliding out on hover, the wheel on it
+/// stepping [volumeStep] (claimed, so the player's wheel skips it).
+class VolumeControl extends StatefulWidget {
+  /// 0..[maxVolume].
+  final double volume;
+  final ValueChanged<double> onChanged;
+  final VoidCallback onToggleMute;
+  final VolumeButtonBuilder button;
+  final Color sliderColor;
+  final Color trackColor;
+  final double sliderWidth;
+  const VolumeControl({
+    super.key,
+    required this.volume,
+    required this.onChanged,
+    required this.onToggleMute,
+    required this.button,
+    this.sliderColor = Colors.white,
+    this.trackColor = Colors.white30,
+    this.sliderWidth = 72,
+  });
 
   @override
-  State<VolumeButton> createState() => _VolumeButtonState();
+  State<VolumeControl> createState() => _VolumeControlState();
 }
 
-class _VolumeButtonState extends State<VolumeButton> {
+class _VolumeControlState extends State<VolumeControl> {
   final _steps = WheelSteps();
   bool _hover = false;
-  double _beforeMute = 100;
 
   @override
   Widget build(BuildContext context) {
-    final player = widget.player;
-    return StreamBuilder<double>(
-      stream: player.stream.volume,
-      initialData: player.state.volume,
-      builder: (context, snap) {
-        final v = snap.data ?? 100;
-        return MouseRegion(
-          onEnter: (_) => setState(() => _hover = true),
-          onExit: (_) => setState(() => _hover = false),
-          child: Listener(
-            // Claimed here, so the player's own wheel handler skips it.
-            onPointerSignal: (e) =>
-                _steps.handle(e, (step) => player.setVolume(stepVolume(player.state.volume, step * volumeStep))),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(width: 4),
-                IconButton(
-                  key: const ValueKey('volume-button'),
-                  focusNode: widget.focusNode,
-                  tooltip: 'Volume ${v.round()} %',
-                  iconSize: 22,
-                  color: Colors.white,
-                  onPressed: () {
-                    if (v > 0) {
-                      _beforeMute = v;
-                      player.setVolume(0);
-                    } else {
-                      player.setVolume(_beforeMute <= 0 ? 100 : _beforeMute);
-                    }
-                  },
-                  icon: Icon(v <= 0 ? Icons.volume_off : (v < 50 ? Icons.volume_down : Icons.volume_up)),
-                ),
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 150),
-                  child: _hover
-                      ? Padding(
-                          padding: const EdgeInsets.only(left: 4, right: 12),
-                          child: VolumeBar(volume: v, onChanged: player.setVolume),
-                        )
-                      : const SizedBox.shrink(),
-                ),
-              ],
+    final v = widget.volume;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: Listener(
+        onPointerSignal: (e) => _steps.handle(e, (step) => widget.onChanged(stepVolume(v, step * volumeStep))),
+        child: Row(
+          key: const ValueKey('volume-control'),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            widget.button(
+              context,
+              volumeIcon(v),
+              v > 100 ? boostColor : null,
+              'Volume ${v.round()} %  (scroll, ↑ / ↓)',
+              widget.onToggleMute,
             ),
-          ),
-        );
-      },
+            AnimatedSize(
+              duration: const Duration(milliseconds: 150),
+              child: _hover
+                  ? Padding(
+                      padding: const EdgeInsets.only(left: 4, right: 8),
+                      child: VolumeBar(
+                        key: const ValueKey('volume-bar'),
+                        volume: v,
+                        onChanged: widget.onChanged,
+                        width: widget.sliderWidth,
+                        color: widget.sliderColor,
+                        trackColor: widget.trackColor,
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

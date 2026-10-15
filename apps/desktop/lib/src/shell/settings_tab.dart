@@ -121,11 +121,15 @@ class SettingsTab extends StatelessWidget {
         return [
           const SettingsHintCard(
             icon: Icons.tune,
-            text: "Player settings are also in the player's ⚙, at the right end of its controls.",
+            text: "Player settings are also in the player: ⚙ → Player settings, at the right of its controls.",
           ),
           SettingsPanel(
             title: 'Player',
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: playerSettingRows()),
+          ),
+          SettingsPanel(
+            title: 'Controls',
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: controlsSettingRows()),
           ),
           const SettingsPanel(title: 'Custom shaders', child: CustomShaderFiles()),
           const SettingsPanel(title: 'yt-dlp', child: YtDlpSettings()),

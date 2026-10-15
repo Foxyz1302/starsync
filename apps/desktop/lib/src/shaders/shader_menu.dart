@@ -8,50 +8,6 @@ import 'shader_presets.dart';
 /// A shader pick from the menu; a null quality keeps the saved one.
 typedef ShaderPick = (ShaderPreset, ShaderQuality?);
 
-/// Compact shader button for the video controls bar (normal and
-/// fullscreen). Opens a small menu: Off, the six Anime4K modes with
-/// HQ / Fast, Custom. The menu is a route, so it outlives the controls
-/// bar hiding under it; [onPick] runs on the caller's side.
-class ShaderControlButton extends StatelessWidget {
-  final FocusNode focusNode;
-  final ReadonlySignal<RenderMode> renderMode;
-  final void Function(ShaderPreset preset, ShaderQuality? quality) onPick;
-  final ValueChanged<bool>? onMenuOpen;
-  const ShaderControlButton({
-    super.key,
-    required this.focusNode,
-    required this.renderMode,
-    required this.onPick,
-    this.onMenuOpen,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final s = AppSettings.instance;
-    return SignalBuilder(builder: (context) {
-      final preset = s.shaderPreset.value;
-      final quality = s.shaderQuality.value;
-      final short = shaderShortLabel(preset, quality) ?? 'Shaders';
-      return Tooltip(
-        message: 'Video shaders (Ctrl+1..6, Ctrl+0 off)',
-        child: TextButton.icon(
-          focusNode: focusNode,
-          style: TextButton.styleFrom(
-            foregroundColor:
-                preset == ShaderPreset.off ? Colors.white : Colors.amberAccent,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
-          onPressed: () => showShaderMenu(context,
-              renderMode: renderMode, onPick: onPick, onMenuOpen: onMenuOpen),
-          icon: const Icon(Icons.auto_awesome, size: 16),
-          label: Text(short, style: const TextStyle(fontSize: 12)),
-        ),
-      );
-    });
-  }
-}
-
 /// "A HQ", "C+A Fast", "Custom"; null when shaders are off.
 String? shaderShortLabel(ShaderPreset preset, ShaderQuality quality) =>
     switch (preset) {
@@ -61,7 +17,8 @@ String? shaderShortLabel(ShaderPreset preset, ShaderQuality quality) =>
     };
 
 /// The shader menu, anchored on [context]'s box (the button that opens
-/// it): Off, the six Anime4K modes with HQ / Fast, Custom.
+/// it; the controls' ⚙): Off, the six Anime4K modes with HQ / Fast,
+/// Custom. A route, so it outlives the controls hiding under it.
 Future<void> showShaderMenu(
   BuildContext context, {
   required ReadonlySignal<RenderMode> renderMode,

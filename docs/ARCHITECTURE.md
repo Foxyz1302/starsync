@@ -311,7 +311,7 @@ through the same dynamic `setProperty` and read back
 (`:` joined, `;` on Windows). One saved choice in `AppSettings`
 (`shaderPreset`, `shaderQuality`, `customShaders`): applied on every player
 creation (join, new media, Reload video) and live when changed from the session (the
-control bar's shader menu, Ctrl+0..6, both also save it). The Anime4K
+controls' ⚙ → Upscaling shader menu, Ctrl+0..6, both also save it). The Anime4K
 v4.0.1 files live in `apps/desktop/assets/shaders/anime4k/` (only the 14
 the presets use, plus its MIT LICENSE); mpv needs real paths, so
 `extractAnime4k` copies them once per version to
@@ -400,7 +400,7 @@ Skip rules (pure, `media_marks.dart`):
   decides). Without any opening, without chapters (a chaptered file
   without an OP chapter has none on purpose) and with media over 20 min,
   "Skip 1:30" during the first 6 min.
-- +1:30 (`skipForward`: the pill, the controls' "1:30" button,
+- +1:30 (`skipForward`: the pill, ⚙ → Skip 1:30,
   Shift+Right) is a `nudge`, so repeated presses add up.
 - Chapter steps (PgUp / PgDn, `chapterStepTarget`): forward to the next
   start; back to the current start, or the previous one within 5 s of it
@@ -863,10 +863,11 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
 - **Episodes**: with `OwnPlay` on an episode, `adjacentEpisodes` (one
   `/Shows/{id}/Episodes` call; `episodeBefore` / `episodeAfter`) gives the
   previous and next episode. The controls show previous / next buttons
-  (also `<` `>`, Shift+P / Shift+N); from `nextPromptStart` (the ending's
+  (also `<` `>`, Shift+P / Shift+N; next is Up next's first item when
+  there is one); from `nextPromptStart` (the ending's
   start when one is known, see "Skip rules", else the last 2 min of the
   runtime) a floating "Next episode" pill shows while the controls are up
-  (see "Session controls"). Auto-advance still waits for `finished`. Any
+  (see "Player controls"). Auto-advance still waits for `finished`. Any
   of them swaps to that episode's ref with the clicker's account. Guests
   (relay, blocked) see none of it.
 - **Auto-advance** (Settings, on by default): at `finished` with a known
@@ -881,15 +882,15 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   and with it every countdown. Only while Up next is empty and its
   continuation was not cleared (see "Up next"); a queued item replaces
   a countdown already running.
-- **Tracks**: the controls' Audio and Subtitles buttons list
-  `PlaybackController.tracks`. A pick is applied, reported, and saved as a `TrackChoice`
+- **Tracks**: the controls' Audio and Subtitles buttons (or ⚙ when
+  hidden from the bar) list `PlaybackController.tracks`. A pick is applied, reported, and saved as a `TrackChoice`
   (language, title, codec, channels, forced/HI: from the Jellyfin streams
   with `OwnPlay`, else from mpv's track list) per series and as the global
   fallback in the `track_prefs` Hive box. On the next Jellyfin item it is
   matched with `matchTrack` against the source's streams (mapped to mpv ids
   with `mpvTrackId`) or mpv's track list, and selected locally. Nothing goes
   on the wire.
-- **Change video**: the player's "Change video" opens the Library tab;
+- **Change video**: the player's ⚙ → Change video opens the Library tab;
   Link goes through `mediaForLink`, a Jellyfin pick as a ref, a file
   through `ServerIsolate.setFile` (host) or the relay (`swapFile`).
 
@@ -1015,8 +1016,8 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   "+" adds one. "Clear" hides them for the media playing and keeps its
   next-episode countdown from starting.
 - **UI**: `UpNextButton` is one of the player's top-bar controls, before
-  chat (see "Player overlay" under Desktop UI), in the look of the
-  design's buttons (`UpNextLook`); it shows and hides with the controls,
+  the window controls (see "Player overlay" under Desktop UI), in the look
+  of the skin's buttons (`UpNextLook`); it shows and hides with the controls,
   which an open popover holds up: the first item's picture (`QueueThumb`,
   the rows' faint box and icon until it arrives), "UP NEXT" over its
   title, a +n count, ⏭ plays it now; without Up next the continuation
@@ -1085,9 +1086,9 @@ Enter picks, Esc or a click outside closes, and being a route it keeps
 the player's keys off (fullscreen too). `AppSelect` is the value picker
 on it (the current label and a chevron on a soft rounded surface; every
 setting that picks one of a few values), `AppMenuButton` the ⋮ action
-menu. Material's own menus (the standard controls' track, chapter and
-shader menus, the Jellyfin sort and server switch) get the same surface
-from `AppMenuStyle.theme`; the uosc controls keep their own flat menus.
+menu; the player controls' track, chapter and ⚙ menus are on it too.
+Material's own menus (the shader menu, the Jellyfin sort and server
+switch) get the same surface from `AppMenuStyle.theme`.
 Reusing what the app shows (`widgets/copy_open.dart`): one wording
 (`ReuseText`: Copy link, Copy title, Copy message, Open in browser, Open
 in Jellyfin) in every right-click menu that offers it, and a toast
@@ -1232,7 +1233,8 @@ panel) and chat messages (Copy message, and a link in it).
   (icon chips under 760 px) over pages of rounded Material cards
   (`SettingsPanel`), one help line under every setting: profile, party &
   network (Host card port and password in the connect form, recent
-  servers), player (the shared rows below, custom shader files),
+  servers), player (the shared rows below, the controls' choices, custom
+  shader files),
   Jellyfin & integrations (linked servers, AnimeFlow's `/me` via
   `AnimeFlowClient.fromAccounts`, auto-advance), notifications & sounds
   (what pops up; no switches), updates, shortcuts, about.
@@ -1289,7 +1291,7 @@ panel) and chat messages (Copy message, and a link in it).
   fullscreen). The app's shortcuts map Tab / Shift+Tab to nothing, so focus
   never lands on a button Space would press. Something coming up while the player
   is closed opens it: full right after joining or after putting it up
-  here, else mini. Both control designs show `NowPlayingTitle` top left
+  here, else mini. Both control skins show `NowPlayingTitle` top left
   (`now_playing_title.dart`: 2:3 cover, title, episode line from
   `coordinator.nowPlaying`, art through `artBytes`; it fades through when
   the media changes); the mini shows title and episode without the cover.
@@ -1313,28 +1315,29 @@ panel) and chat messages (Copy message, and a link in it).
   once (the pill is hidden while playing); avatars carry a red error mark
   and the members card says "can't play this: ...". 34 px avatars, a main line
   and a muted detail line. The pill glass, colour only for problems; it fades through
-  between kinds. The mini shows its short line in its hover bar. ⚙ in both
-  control designs opens the player settings card (`controls/
+  between kinds. The mini shows its short line in its hover bar. ⚙ →
+  Player settings (both skins) opens the player settings card (`controls/
   player_settings.dart`, `showPopover`, on `AppGlass`): player design, progress line
   when hidden, upscaling shader, hardware decoding (set live on mpv's
   `hwdec`), subtitle and audio track. The rows (`playerSettingRows`) are
-  the same widgets Settings → Player shows; all apply live. The progress
-  line (2 px, `AppSettings.progressLine`) is the collapsed uosc timeline;
-  for the standard design `ControlsHoverProbe` mirrors media_kit's
-  visibility rule (up on mount and mouse movement, down 3 s later or on
-  exit), as media_kit does not expose it. Fullscreen adds the
+  the same widgets Settings → Player shows; all apply live. Settings →
+  Player also has the controls' own choices (`controlsSettingRows`, see
+  "Player controls"). The progress line (`AppSettings.progressLine`) is
+  what the bottom controls leave while hidden: Standard a 2 px line,
+  Minimal its collapsed timeline. Fullscreen adds the
   `WindowButtons` to the top bar while the controls are up (restore
   leaves fullscreen).
-- **Player overlay** (full player, both designs; `session_player.dart`):
+- **Player overlay** (full player, both skins; `session_player.dart`):
   everything over the picture has a fixed place on one grid (16 px from
   the sides, the bars' inset), so nothing floats on its own. The top
   bar (part of the controls): now-playing title left; right the Up next
-  button (`UpNextButton`), chat, back-to-library or exit fullscreen,
-  then the window buttons in fullscreen, all in that design's button
+  button (`UpNextButton`), back-to-library or exit fullscreen,
+  then the window buttons in fullscreen, all in that skin's button
   look. Under it at the right, in fullscreen while paused, the party's
   avatars; with the controls down and unread chat, the unread chip top
   right. The action area: one band just above the bottom controls
-  (`_actionArea`; their height per design, 16 px gap), sliding down to
+  (`_actionArea`; their height per skin and size, `controlsBottomHeight`,
+  16 px gap), sliding down to
   16 px from the bottom while they are hidden (`AnimatedPositioned`,
   the shell's `ease` / `easeTime`); in it the status pill centred
   (moved left only as far as it must to clear the right end, never
@@ -1349,17 +1352,15 @@ panel) and chat messages (Copy message, and a link in it).
   tall like the status pill without avatars). The mouse on any
   floating element counts as the mouse on the controls: a
   `ControlsHold` (`controls/controls_probe.dart`) held by
-  `ControlsHoldRegion`s (and by the open Up next popover or its preview) keeps either
-  design's controls up (`UoscControls.holdBy`; `ControlsHoverProbe.hold`,
-  which re-wakes media_kit's controls through their private hover
-  handler, the same guarded dynamic call as `keepVideoControlsAwake`),
-  and lets them hide on their usual countdown once released.
+  `ControlsHoldRegion`s (and by the open Up next popover or its preview) keeps the
+  controls up (`ControlsFrame.holdBy`), and lets them hide on their
+  usual countdown once released.
 - **Chat** (`chat_panel.dart`): a 340 px panel sliding in at the right
   (strip button or Tab): chat with avatars; the "Activity" chip (off by
   default, `showActivity`, kept for the app's run only) adds the other
   feed lines between them. Opening focuses the field; Tab or Esc in it
   close the panel and focus goes back where it was. Unread chat badges
-  the strip's and both player designs' chat buttons; in fullscreen with
+  the strip's and the player controls' chat buttons; in fullscreen with
   the controls down and the video not playing a glass chip
   (`PlayerGlass`) top right shows it (while it plays nothing sits on the
   picture).
@@ -1429,78 +1430,98 @@ Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
   video" opens the library on the series of the episode playing, its
   season selected and the episode highlighted.
 
-Session controls (the Standard player design): media_kit's
-`MaterialDesktopVideoControls` with our bars (`shell/session_player.dart`, pieces in
-`screens/session/player_controls.dart`); its own double-click and keys are
-off (its double-click pushes a fullscreen route with a second `Video`), the
-picture's double-click is a raw pointer observer (`DoubleClickListener`).
-The top bar holds the now-playing title, Up next, Change video, chat and back-to-library
-(fullscreen: exit, then the window buttons); the bottom bar ends with the
-shader button, ⚙ and fullscreen. Its seek bar is off; ours
-(`ChapterSeekBar`: chapter diamonds, hover time with the chapter title)
-sits in the bottom bar, which is taller by the bar's height (the top bar
-keeps its row at the top). A drag sends no hover events, so the bar keeps
-the controls up through a guarded dynamic `onHover()` on media_kit's
-private controls state (`keepVideoControlsAwake`). Pills (Skip OP / ED /
-1:30, Next episode) and cards live outside the auto-hiding controls, in
-the action area ("Player overlay"). The
-cards stay up; a pill (`PillGate`) shows only while the controls are up
-(`ControlsHoverProbe` for this design, `UoscControls.shown` for uosc) or
-the mouse is on it (which holds the controls up too), and Skip OP / Skip 1:30 also for 5 s when an offer of
-a new kind appears (Skip ED and Next episode never without the controls).
-Volume (`controls/volume.dart`, both
-designs): mpv's `volume-max` is pinned to `PlaybackController.maxVolume`
-(150) per player; `VolumeBar` runs 0..150 with a tick at 100 and the part
-above in amber; the wheel and ↑ / ↓ step 5 % (`volumeStep`), clamped.
-The wheel works anywhere on the full player (`VolumeWheel` around the
-player's stack): `WheelSteps` makes a mouse notch one step and adds up
-small smooth-scroll deltas, ignores mostly-horizontal scrolls, and claims
-the event through `pointerSignalResolver`, so anything under the mouse
-that scrolls (lists, menus, popovers in their own routes) or the volume
-buttons themselves take it first. A wheel or key step flashes the
-design's readout for 1 s (`VolumeFlash`): uosc's vertical volume slider
-at the right edge (`controls/uosc/volume_flash.dart`, after uosc's
-`Volume.lua`), else a pill under the top bar (`VolumeReadout`).
-
-The uosc player design (`controls/uosc/`, after mpv's uosc theme;
-"Player design" = `AppSettings.mpvControls`, default Standard): the `Video`'s
-controls builder wraps both sets in `SessionControlsSwitch`, which follows
-the setting live. `UoscControls` is our
-own frame (no media_kit controls state): mouse movement shows it, 3 s
-without any hides it and the cursor; `hold` keeps it up during a timeline
-drag and while a menu route is open, double-click toggles fullscreen.
-`UoscTimeline` ports uosc's `Timeline.lua` (style `line`, uosc's defaults
-at scale 1, `UoscTimelineSpec`) across the full width at the bottom: a
-40 px band (plus a 1 px top border) of black at 0.9; the position is a
-2 px white line, no filled part, and times map around it
-(`UoscTimelineGeometry`, uosc's `t2x` / `get_time_at_x`); the uncached
-part (from `buffered`, or the position when that is behind, to the end)
-carries uosc's stripe texture (white then black "/" stripes, 0.2 / 0.4
-strong); chapter diamonds sit on the top edge (white 0.8, 1 px black
-border, doubled and clickable to jump while the mouse is within twice
-their radius); elapsed time left and the time remaining ("-01:47:30")
-right in 20 px outlined text, inverted where it crosses the line; while
-less than 60 s is buffered ahead (and the cache does not reach the end)
-a small "12s" rides right of the line. Hover: a faint 1 px line and a
-black tooltip with the time (the chapter title, bold, above it). A press
-seeks, every drag move seeks, and after release the line stays at the
-target until the position catches up (at most 2 s). Hidden, it animates
-down (100 ms) to uosc's progress line: 2 px with a 20 px position
-marker, chapters as small diamonds (faded out when the progress line
-setting is off). We know only the end of mpv's cache, so a dropped back
-buffer is not hatched; uosc's pause while dragging, keyframe seeks for
-fast drags, thumbnails and the fullscreen scale (1.3) are left out. Above it a row of flat buttons: menu (≡:
-change video, chat & activity, reload, mark everyone ready, fullscreen,
-leave),
-subtitles and audio with track counts, a shader badge ("A HQ", opening the
-shared `showShaderMenu`), ready, mark everyone ready, reload; 1:30,
-chapters, previous / next episode, change video, volume, ⚙, fullscreen; the
-now-playing title top left (`UoscControls.topLeft`, with a top gradient), Up next, chat
-and back-to-library (fullscreen: exit) top right, centred on the title. Menus (`showUoscMenu`: a popup route above the button, the
-current row highlighted) list tracks and chapters with start times. All
-actions are the coordinator's (seeks through `player.seek`, the user path;
-`selectTrack`, `skipForward`, `seekTo`); keys and the floating pills are
-the same in both sets.
+Player controls (`lib/src/controls/`): one controls model, two skins.
+- **Model** (`model/`): `PlayerControlsModel` (built by `SessionPlayer`,
+  wired to the coordinator once) holds what the controls show, as
+  signals (`play`: `PlayState` playing / waiting (you are ready, the
+  others not) / paused / finished, from `state.transport` and your ready
+  flag; position, duration, buffered, chapters, current chapter, tracks,
+  volume, skip offer, render mode; the shell's fullscreen, chat open and
+  unread count) and what they do (`togglePlay` = ready, as Space;
+  `seek` through `player.seek`, the user path; `nudge`, `skipForward`,
+  `skip`, `stepChapter`, `pickChapter`; `next` = Up next's first item,
+  else the next episode, `previous`; volume set / step (flashes) / mute;
+  `pickTrack`, `pickShader`; time display; fullscreen, chat, change
+  video, collapse, leave, reload, mark everyone ready, link). The
+  player keys call the same actions. `ControlsSnapshot` (computed) is
+  what the layout depends on.
+- **Layout spec** (`model/controls_layout.dart`, pure): `ControlsLayout`
+  is the bar's order, left cluster play / pause, previous / next episode,
+  previous / next chapter, volume, time; right cluster subtitles, audio,
+  ⚙, chat, fullscreen. `barControls` drops what does not apply (no
+  episode, no chapters) or what the user hid (`OptionalControl`:
+  chapter buttons, subtitles, audio, chat); the rest keep their order, so
+  play is always first and fullscreen last. `menuActions` is the ⚙ menu
+  (`ControlAction`, fixed order): chapters, the hidden track lists,
+  Skip 1:30, upscaling shader, the hidden chat, change video, copy link
+  (when `currentLink` has one), reload, mark everyone ready (not solo),
+  mark a problem, player settings, leave. Icons, tooltips (with keys) and
+  the clock text (`clockText`) are defined there too, once.
+- **Shared pieces**: `ControlsFrame` (`frame.dart`): when the controls
+  are up (mouse movement shows them, `controlsHideSecs` without any or the
+  mouse leaving hides them and the cursor), holds (`hold` during a seek
+  drag, `holdDuring` / `holdWhile` around menus and popovers, `holdBy`
+  the session's `ControlsHold`), and the double-click on the picture
+  (`DoubleClickListener`, not on the bars) that toggles fullscreen; it
+  reports `shown` for the overlay. `control_menus.dart`: the track and
+  chapter lists and the ⚙ menu on `showAppMenu` (anchored on the button,
+  holding the controls), and `runControlAction`. `volume.dart`:
+  `VolumeControl` (the skin's speaker button, a `VolumeBar` sliding out
+  on hover, the wheel on it stepping), `VolumeReadout`. `SessionControls`
+  (`session_controls.dart`) puts the skin the settings pick into one
+  frame, live, and gives the overlay the bars' heights.
+- **Standard skin** (`standard/`): Material-style. A top gradient with the
+  top bar (72 px); at the bottom a gradient with `ChapterSeekBar` (played
+  and buffered track in the theme's primary, a diamond at each chapter
+  start, hover tip with the time and the chapter title, a press holds the
+  frame and every drag move seeks) over a 56 px row of round white icon
+  buttons in the layout's order (badges for track counts and unread
+  chat, the clock as a text button). Hidden, a 2 px progress line.
+- **Minimal skin** (`minimal/`, inspired by uosc, github.com/tomasklaen/uosc,
+  LGPL-2.1; the drawing and values are our own): the buttons sit in two
+  glass capsules (`MinimalCapsule`, the pills' tint and hairline;
+  `MinimalButton` rounded squares, the play button a filled accent
+  circle) above `MinimalTimeline`, a 36 px band across the bottom: the
+  played part tinted in the theme's primary, the position a white line,
+  the part not downloaded yet (from `buffered`, or the position when
+  that is behind, to the end) in thin stripes, chapter starts as dots on
+  the top edge with a dark cut through the band (a press within reach of
+  a dot jumps to it), elapsed time left and the total or the time left
+  right (the bar's clock lives here; a press on it switches), "12s" by
+  the position while under a minute is buffered ahead (and the cache does
+  not reach the end). Hover: a faint line and a glass tip with the time
+  (the chapter title above it). A press seeks, every drag move seeks,
+  after release the line stays at the target until the position catches
+  up (at most 2 s). Hidden, it shrinks (120 ms) to a 3 px progress line.
+  We know only the end of mpv's cache, so a dropped back buffer is not
+  shown.
+- **Settings** (`AppSettings`, `model/controls_prefs.dart`, all live):
+  `controlsSkin` (`ControlsSkin` standard / minimal; a stored
+  `mpvControls: true` from before becomes minimal), `timeDisplay`,
+  `controlsSize` (normal / large: the bottom bar ×1.25),
+  `controlsHideSecs` (2 / 3 / 5), `hiddenControls`, `progressLine`.
+  The player settings card has the skin and the progress line; Settings →
+  Player → Controls has the rest.
+- Pills (Skip OP / ED / 1:30, Next episode) and cards live outside the
+  controls, in the action area ("Player overlay"). The cards stay up; a
+  pill (`PillGate`) shows only while the controls are up (the frame's
+  `shown`) or the mouse is on it (which holds the controls up too), and
+  Skip OP / Skip 1:30 also for 5 s when an offer of a new kind appears
+  (Skip ED and Next episode never without the controls).
+- Volume: mpv's `volume-max` is pinned to `PlaybackController.maxVolume`
+  (150) per player; `VolumeBar` runs 0..150 with a tick at 100 and the
+  part above in amber; the wheel and ↑ / ↓ step 5 % (`volumeStep`),
+  clamped. The wheel works anywhere on the full player (`VolumeWheel`
+  around the player's stack): `WheelSteps` makes a mouse notch one step
+  and adds up small smooth-scroll deltas, ignores mostly-horizontal
+  scrolls, and claims the event through `pointerSignalResolver`, so
+  anything under the mouse that scrolls (lists, menus, popovers in their
+  own routes) or the volume control itself take it first. A wheel or key
+  step flashes `VolumeReadout` (a glass pill under the top bar) for 1 s
+  (`VolumeFlash`).
+- The `Video` gets the controls as its controls builder (with
+  `StartBanner` under them); media_kit's own controls are not used, so
+  its keys, double-click route and seek bar are out of the picture.
 
 Window chrome is frameless (`window_manager`): the party strip is the drag
 area and holds the min/max/close buttons (`widgets/window_buttons.dart`);

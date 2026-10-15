@@ -3,9 +3,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/controls/uosc/buttons.dart';
-import 'package:watch_together/src/controls/uosc/controls.dart';
-import 'package:watch_together/src/controls/uosc/timeline.dart';
+import 'package:watch_together/src/controls/frame.dart';
+import 'package:watch_together/src/controls/minimal/style.dart';
+import 'package:watch_together/src/controls/minimal/timeline.dart';
 import 'package:watch_together/src/session/health.dart';
 import 'package:watch_together/src/session/now_playing.dart';
 import 'package:watch_together/src/shell/now_playing_title.dart';
@@ -248,21 +248,37 @@ void main() {
         expect(find.textContaining('Waiting for Someone With A Long Name 0'), findsOneWidget);
       });
 
-      testWidgets('uosc top bar and start card: ${size.width.toInt()}', (tester) async {
+      testWidgets('minimal top bar and start card: ${size.width.toInt()}', (tester) async {
         debugArtBytes = (hash) => png;
         await sized(
           tester,
           size,
           Stack(fit: StackFit.expand, children: [
             StartCard(now: long),
-            UoscControls(
-              topLeft: NowPlayingBlock(now: long),
-              top: Row(mainAxisSize: MainAxisSize.min, children: [
-                for (final i in [Icons.chat_bubble_outline, Icons.fullscreen, Icons.close])
-                  UoscButton(icon: i, tooltip: '', onPressed: () {}),
+            ControlsFrame(
+              builder: (context, visible) => Stack(children: [
+                Positioned(
+                  left: 16,
+                  right: 10,
+                  top: 0,
+                  height: 72,
+                  child: Row(children: [
+                    Expanded(child: NowPlayingBlock(now: long)),
+                    for (final i in [Icons.fullscreen, Icons.close])
+                      MinimalButton(icon: i, tooltip: '', onPressed: () {}),
+                  ]),
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: MinimalTimeline(
+                      position: Duration.zero,
+                      duration: const Duration(minutes: 24),
+                      expanded: visible,
+                      onSeek: (_) {}),
+                ),
               ]),
-              timeline: (context, expanded) =>
-                  UoscTimeline(position: Duration.zero, duration: const Duration(minutes: 24), expanded: expanded, onSeek: (_) {}),
             ),
           ]),
         );

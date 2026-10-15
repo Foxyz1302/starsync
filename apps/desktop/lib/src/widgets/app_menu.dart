@@ -4,7 +4,7 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../controls/uosc/controls.dart';
+import '../controls/frame.dart';
 import '../shell/motion.dart';
 
 // The app's one menu: a frosted dark panel anchored under (or over) the
@@ -158,9 +158,8 @@ Future<int?> _openMenu(BuildContext context, List<AppMenuItem<Object?>> items, d
         minWidth: minWidth - shift,
         capturedThemes: InheritedTheme.capture(from: context, to: navigator.context),
       ));
-  // Over the uosc controls: keep them up while the menu is open.
-  final controls = UoscControls.maybeOf(context);
-  return controls == null ? open() : controls.holdDuring(open);
+  // Over the player's controls: keep them up while the menu is open.
+  return ControlsFrame.holdWhile(context, open);
 }
 
 class _AppMenuRoute extends PopupRoute<int> {
