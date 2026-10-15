@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/jellyfin/session_media.dart';
-import 'package:watch_together/src/jellyfin/track_prefs.dart';
-import 'package:watch_together/src/playback/media_marks.dart';
+import 'package:starsync/src/jellyfin/session_media.dart';
+import 'package:starsync/src/jellyfin/track_prefs.dart';
+import 'package:starsync/src/playback/media_marks.dart';
 
 Duration s(num secs) => Duration(milliseconds: (secs * 1000).round());
 Duration m(int min, [int sec = 0]) => Duration(minutes: min, seconds: sec);

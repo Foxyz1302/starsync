@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/sync/user_seek.dart';
+import 'package:starsync/src/sync/user_seek.dart';
 
 StateBroadcast _state({int eventId = 1, String? seekBy, int? seekSeq}) =>
     StateBroadcast(

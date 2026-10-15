@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
-import 'package:watch_together/src/sync/state_diff.dart';
-import 'package:watch_together/src/sync/sync_client.dart';
+import 'package:starsync/src/sync/state_diff.dart';
+import 'package:starsync/src/sync/sync_client.dart';
 
 Future<void> _poll(FutureOr<bool> Function() cond, String what) async {
   final end = DateTime.now().add(const Duration(seconds: 10));

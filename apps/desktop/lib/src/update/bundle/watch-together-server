@@ -1,0 +1,4 @@
+#!/bin/sh
+# The dedicated server's name up to 1.2.x: systemd units (ExecStart) and
+# old update.sh copies run it.
+exec "$(dirname "$(readlink -f "$0")")/starsync-server" "$@"

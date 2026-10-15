@@ -5,16 +5,16 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/controls/frame.dart';
-import 'package:watch_together/src/controls/minimal/style.dart';
-import 'package:watch_together/src/controls/minimal/timeline.dart';
-import 'package:watch_together/src/session/health.dart';
-import 'package:watch_together/src/session/now_playing.dart';
-import 'package:watch_together/src/shell/now_playing_title.dart';
-import 'package:watch_together/src/shell/player_status.dart';
-import 'package:watch_together/src/shell/session_player.dart';
-import 'package:watch_together/src/shell/start_banner.dart';
-import 'package:watch_together/src/state/session_state.dart';
+import 'package:starsync/src/controls/frame.dart';
+import 'package:starsync/src/controls/minimal/style.dart';
+import 'package:starsync/src/controls/minimal/timeline.dart';
+import 'package:starsync/src/session/health.dart';
+import 'package:starsync/src/session/now_playing.dart';
+import 'package:starsync/src/shell/now_playing_title.dart';
+import 'package:starsync/src/shell/player_status.dart';
+import 'package:starsync/src/shell/session_player.dart';
+import 'package:starsync/src/shell/start_banner.dart';
+import 'package:starsync/src/state/session_state.dart';
 
 // The player's title block, start card and status pill (never a media_kit
 // `Video`).

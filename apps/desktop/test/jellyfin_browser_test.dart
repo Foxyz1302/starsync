@@ -5,12 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/jellyfin/accounts.dart';
-import 'package:watch_together/src/jellyfin/accounts_panel.dart';
-import 'package:watch_together/src/jellyfin/browser.dart';
-import 'package:watch_together/src/jellyfin/browse_scope.dart';
-import 'package:watch_together/src/jellyfin/picker_source.dart';
-import 'package:watch_together/src/state/settings.dart';
+import 'package:starsync/src/jellyfin/accounts.dart';
+import 'package:starsync/src/jellyfin/accounts_panel.dart';
+import 'package:starsync/src/jellyfin/browser.dart';
+import 'package:starsync/src/jellyfin/browse_scope.dart';
+import 'package:starsync/src/jellyfin/picker_source.dart';
+import 'package:starsync/src/state/settings.dart';
 
 import 'jellyfin_accounts_test.dart'
     show FakeJellyfin, arifuretaId, fixtureServerId, linkedAccounts, season2Id;

@@ -21,7 +21,7 @@ cd apps/desktop && flutter pub get && flutter run -d linux
 cd apps/desktop && flutter build linux --release --dart-define=APP_VERSION=<x.y.z>
 tool/package_linux.sh [--skip-build] [--noupload]    # dist/*.tar.gz
 powershell -File tool/package_windows.ps1 [-SkipBuild]  # dist/*.zip (on Windows)
-cd packages/server && dart compile exe --define=APP_VERSION=<x.y.z> bin/server.dart -o watch-together-server
+cd packages/server && dart compile exe --define=APP_VERSION=<x.y.z> bin/server.dart -o starsync-server
 ```
 
 `APP_VERSION` defaults to `0.0.0-dev`; the packagers stamp it from the
@@ -30,7 +30,13 @@ also passes `GIT_COMMIT` (what the app shows: "Updater" in
 [ARCHITECTURE.md](ARCHITECTURE.md)). Setting `DISCORD_WEBHOOK_URL` makes the packager post the
 tarball to Discord (never commit it). The packager always compiles the
 dedicated server (with the Flutter SDK's `dart`) into the tarball as
-`watch-together-server`, also with `--skip-build`.
+`starsync-server`, also with `--skip-build`. The app binary is `starsync`
+(`BINARY_NAME`; Linux application id `dev.foxyz.starsync`), the archive
+`dist/starsync-<version>-linux-x64.tar.gz` / `-windows-x64.zip` with one
+top folder `starsync-<version>/`; it also carries the names up to 1.2.x
+(`watch_together`, `watch-together-server`: launchers on Linux, copies on
+Windows; "Updater" in [ARCHITECTURE.md](ARCHITECTURE.md)). The Dart
+package of the app is `starsync` (`package:starsync/...`).
 
 ## Dev loop
 
@@ -224,8 +230,8 @@ unexpectedly` line just before it is expected. Without the app:
 
 After a session, read the log files rather than reproducing
 ("Logging" in [ARCHITECTURE.md](ARCHITECTURE.md) has what goes in them):
-the app's are `~/.local/share/moe.senkochan.watch_together/logs/app-*.log`
-on Linux (on Windows under `%APPDATA%`; Settings → About → "Open logs
+the app's are `~/.local/share/dev.foxyz.starsync/logs/app-*.log`
+on Linux (on Windows `%APPDATA%\foxyz\Starsync\logs`; Settings → About → "Open logs
 folder" finds it anywhere), with the hosted server's lines
 in the same file; a dedicated server prints its folder at start
 (`--log-dir`). Users send theirs with Settings → About → "Copy
@@ -259,7 +265,7 @@ rasterizer: missing or blocked GPU drivers, `LIBGL_ALWAYS_SOFTWARE=1`);
 no usable EGL context: check `render env:` for an X11 session or a
 `GDK_BACKEND` / `FLUTTER_LINUX_RENDERER` override). Its reason is only on
 stderr: have the user start the app from a terminal
-(`watch-together 2>&1 | grep VideoOutput`). `hwdec-current=no` on the
+(`./starsync 2>&1 | grep VideoOutput`). `hwdec-current=no` on the
 first-frame line means software decoding (no hwdec for that codec, or it
 is off), not software rendering.
 

@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/sync/state_diff.dart';
+import 'package:starsync/src/sync/state_diff.dart';
 
 StateBroadcast _state({
   int eventId = 0,

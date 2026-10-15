@@ -2,9 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:watch_together/src/schedule/anilist.dart';
-import 'package:watch_together/src/schedule/animeflow.dart';
-import 'package:watch_together/src/schedule/schedule_model.dart';
+import 'package:starsync/src/schedule/anilist.dart';
+import 'package:starsync/src/schedule/animeflow.dart';
+import 'package:starsync/src/schedule/schedule_model.dart';
 
 import 'schedule_fake_server.dart';
 

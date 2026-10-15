@@ -7,9 +7,9 @@ import 'package:crypto/crypto.dart';
 import 'constants.dart';
 import 'logging.dart';
 
-// The one updater for both programs: the app (`watch_together --upgrade`
+// The one updater for both programs: the app (`starsync --upgrade`
 // and the in-app update card, via UpdateController) and the dedicated
-// server (`watch-together-server --upgrade`). Both ship in the same
+// server (`starsync-server --upgrade`). Both ship in the same
 // release archive, so either one swaps the whole install folder: fetch
 // manifest, download, verify sha256, apply over the live install.
 //
@@ -38,6 +38,41 @@ const appVersion = String.fromEnvironment('APP_VERSION',
 
 // Key into the manifest's `assets` map, e.g. linux-x64, windows-x64.
 final updatePlatform = '${Platform.operatingSystem}-x64';
+
+/// The app's binary in a release bundle (`.exe` on Windows).
+const appBinaryName = 'starsync';
+/// The dedicated server's binary next to it (`.exe` on Windows).
+const serverBinaryName = 'starsync-server';
+/// The names up to 1.2.x. The archive still carries launchers by these
+/// names (tool/package_linux.sh, package_windows.ps1): a 1.2.x updater
+/// checks that its own name is in the archive and restarts it, and VPS
+/// units and `update.sh` copies run the old server name.
+const legacyAppBinaryName = 'watch_together';
+const legacyServerBinaryName = 'watch-together-server';
+
+// For an old binary name, the new one (same extension); else null.
+String? _renamedBinary(String name) {
+  final exe = name.toLowerCase().endsWith('.exe');
+  final stem = exe ? name.substring(0, name.length - 4) : name;
+  final renamed = switch (stem) {
+    legacyAppBinaryName => appBinaryName,
+    legacyServerBinaryName => serverBinaryName,
+    _ => null,
+  };
+  return renamed == null ? null : '$renamed${exe ? name.substring(name.length - 4) : ''}';
+}
+
+/// The binary to start after an update replaced [executablePath]: the
+/// same one, except that an old name (a launcher, or on Windows a copy
+/// of the new binary) gives way to the new binary next to it.
+String relaunchExecutable(String executablePath) {
+  final norm = executablePath.replaceAll('\\', '/');
+  final cut = norm.lastIndexOf('/');
+  final renamed = _renamedBinary(norm.substring(cut + 1));
+  if (renamed == null) return executablePath;
+  final next = '${executablePath.substring(0, cut + 1)}$renamed';
+  return File(next).existsSync() ? next : executablePath;
+}
 
 const _stagingDir = '.update-staging';
 const _backupDir = '.update-backup';
@@ -303,7 +338,7 @@ List<String> _safeSegments(String name) {
 }
 
 // Release archives wrap the bundle in one top-level folder
-// (watch-together-<ver>/, see tool/package_linux.sh). Strip it; a flat
+// (starsync-<ver>/, see tool/package_linux.sh). Strip it; a flat
 // archive (data/, lib/ and the binary at the top) is used as is.
 int _wrapperDepth(List<List<String>> entries) {
   final tops = entries.where((s) => s.isNotEmpty).map((s) => s.first).toSet();
@@ -414,7 +449,7 @@ Future<void> applyUpdate(File archive, Directory root,
     await _extract(await archive.readAsBytes(), stage, !win);
     if (!_isBundle(stage.path, win) ||
         (executableName != null &&
-            !await File('${stage.path}/$executableName').exists())) {
+            !await _hasBinary(stage.path, executableName))) {
       throw const FormatException(
           'archive is not a release bundle (missing data/, lib/ or binary)');
     }
@@ -426,6 +461,14 @@ Future<void> applyUpdate(File archive, Directory root,
   } finally {
     await _deleteQuietly(stage.path);
   }
+}
+
+// The running binary's name, or for an old name its new one (an archive
+// without the old launchers still updates an install started by one).
+Future<bool> _hasBinary(String dir, String name) async {
+  if (await File('$dir/$name').exists()) return true;
+  final renamed = _renamedBinary(name);
+  return renamed != null && await File('$dir/$renamed').exists();
 }
 
 class _Moved {
@@ -565,7 +608,7 @@ Future<int> runUpgrade(
     HttpClient? http,
     String? executablePath,
     Directory? installRoot,
-    String program = 'watch-together',
+    String program = 'starsync',
     String Function(String version)? restartNote,
     bool checkOnly = false}) async {
   stdout.writeln('$program $currentVersion (proto ${RelayConstants.protoVersion})');

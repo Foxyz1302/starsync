@@ -9,11 +9,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/jellyfin/accounts.dart';
-import 'package:watch_together/src/screens/home/picked_media.dart';
-import 'package:watch_together/src/session/session_coordinator.dart';
-import 'package:watch_together/src/state/server_isolate.dart';
-import 'package:watch_together/src/state/session_state.dart';
+import 'package:starsync/src/jellyfin/accounts.dart';
+import 'package:starsync/src/screens/home/picked_media.dart';
+import 'package:starsync/src/session/session_coordinator.dart';
+import 'package:starsync/src/state/server_isolate.dart';
+import 'package:starsync/src/state/session_state.dart';
 
 Future<void> _poll(
   FutureOr<bool> Function() cond,

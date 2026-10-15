@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:watch_together/src/shell/handoff.dart';
+import 'package:starsync/src/shell/handoff.dart';
 
 // What a drop or a paste is: decided from paths and text alone (the file
 // system stands behind a fake).

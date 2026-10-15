@@ -8,7 +8,8 @@ import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
 
 /// Dedicated server: `dart compile exe` of this file is shipped as
-/// `watch-together-server`. Runs [serve] until SIGINT or SIGTERM.
+/// `starsync-server` (also started by the `watch-together-server`
+/// launcher). Runs [serve] until SIGINT or SIGTERM.
 Future<void> main(List<String> args) async {
   final parser = ArgParser()
     ..addOption('port', abbr: 'p', defaultsTo: '8080', help: 'TCP port to listen on (all IPv4 interfaces).')
@@ -50,12 +51,12 @@ Future<void> main(List<String> args) async {
   }
   if (parsed['help'] as bool) {
     // ignore: avoid_print
-    print('watch-together-server $appVersion (proto ${RelayConstants.protoVersion})\n\n${parser.usage}');
+    print('starsync-server $appVersion (proto ${RelayConstants.protoVersion})\n\n${parser.usage}');
     return;
   }
   if (parsed['upgrade'] as bool || parsed['check-update'] as bool) {
     exitCode = await runUpgrade(
-        program: 'watch-together-server',
+        program: 'starsync-server',
         checkOnly: !(parsed['upgrade'] as bool),
         restartNote: (v) => 'updated to $v — restart the server to run $v.');
     return;
@@ -67,7 +68,7 @@ Future<void> main(List<String> args) async {
       (configPath != null ? '${File(configPath).absolute.parent.path}${Platform.pathSeparator}logs' : serverDataDir('logs'));
   final files = startLogFiles(logDir, prefix: 'server');
   if (files != null) stdout.writeln('logs: ${files.dir}');
-  pkg_logging.Logger('server').info('watch-together-server $appVersion (proto ${RelayConstants.protoVersion}) '
+  pkg_logging.Logger('server').info('starsync-server $appVersion (proto ${RelayConstants.protoVersion}) '
       'on ${Platform.operatingSystem} ${Platform.operatingSystemVersion}, pid $pid');
   AppConfig config;
   try {

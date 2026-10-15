@@ -7,11 +7,11 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
-import 'package:watch_together/src/files/folder_store.dart';
-import 'package:watch_together/src/files/scanner.dart';
-import 'package:watch_together/src/files/thumbnails.dart';
-import 'package:watch_together/src/files/ui/file_tiles.dart';
-import 'package:watch_together/src/files/ui/files_page.dart';
+import 'package:starsync/src/files/folder_store.dart';
+import 'package:starsync/src/files/scanner.dart';
+import 'package:starsync/src/files/thumbnails.dart';
+import 'package:starsync/src/files/ui/file_tiles.dart';
+import 'package:starsync/src/files/ui/files_page.dart';
 
 // The Files page over a real (tiny) folder tree: the scan runs in-line
 // instead of in an isolate and thumbnails come from a fake loader, so

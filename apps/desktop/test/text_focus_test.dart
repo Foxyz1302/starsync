@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:watch_together/src/widgets/text_focus.dart';
+import 'package:starsync/src/widgets/text_focus.dart';
 
 void main() {
   // Regression: the old FocusNode-parent walk never met EditableText, so

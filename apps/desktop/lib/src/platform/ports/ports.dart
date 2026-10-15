@@ -4,6 +4,7 @@ import 'shell_port.dart';
 import 'system_notifications.dart';
 import 'url_opener.dart';
 
+export 'app_dirs.dart';
 export 'folder_access.dart';
 export 'link_resolver.dart';
 export 'shell_port.dart';

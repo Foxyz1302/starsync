@@ -1,5 +1,5 @@
-name: watch_together
-description: Watch-together desktop app (working title, repo sync_relay_project). One binary.
+name: starsync
+description: Starsync desktop app (repo sync_relay_project). One binary.
 publish_to: none
 version: 1.2.0
 environment:

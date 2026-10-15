@@ -2,10 +2,10 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/jellyfin/home_rows.dart';
-import 'package:watch_together/src/screens/home/media_picker.dart';
-import 'package:watch_together/src/shell/library_link.dart';
-import 'package:watch_together/src/shell/library_tab.dart';
+import 'package:starsync/src/jellyfin/home_rows.dart';
+import 'package:starsync/src/screens/home/media_picker.dart';
+import 'package:starsync/src/shell/library_link.dart';
+import 'package:starsync/src/shell/library_tab.dart';
 
 final now = DateTime.utc(2026, 10, 8, 12);
 DateTime daysAgo(num d) => now.subtract(Duration(minutes: (d * 24 * 60).round()));

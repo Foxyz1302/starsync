@@ -5,17 +5,17 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:watch_together/src/files/ui/files_page.dart';
-import 'package:watch_together/src/schedule/ui/schedule_page.dart';
+import 'package:starsync/src/files/ui/files_page.dart';
+import 'package:starsync/src/schedule/ui/schedule_page.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/screens/home/health_probe.dart';
-import 'package:watch_together/src/screens/home/media_picker.dart';
-import 'package:watch_together/src/screens/home/update_indicator.dart';
-import 'package:watch_together/src/shell/app_shell.dart';
-import 'package:watch_together/src/shell/library_link.dart' show soloPlayHint;
-import 'package:watch_together/src/state/session_state.dart';
-import 'package:watch_together/src/state/settings.dart';
-import 'package:watch_together/src/update/update_controller.dart';
+import 'package:starsync/src/screens/home/health_probe.dart';
+import 'package:starsync/src/screens/home/media_picker.dart';
+import 'package:starsync/src/screens/home/update_indicator.dart';
+import 'package:starsync/src/shell/app_shell.dart';
+import 'package:starsync/src/shell/library_link.dart' show soloPlayHint;
+import 'package:starsync/src/state/session_state.dart';
+import 'package:starsync/src/state/settings.dart';
+import 'package:starsync/src/update/update_controller.dart';
 
 RecentServer join(String host, String port, [String secret = '']) =>
     RecentServer(hosted: false, host: host, port: port, secret: secret);

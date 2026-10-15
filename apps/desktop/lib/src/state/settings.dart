@@ -6,6 +6,7 @@ import 'package:signals/signals_flutter.dart';
 
 import '../controls/model/controls_prefs.dart';
 import '../shaders/shader_presets.dart';
+import 'settings_schema.dart';
 
 // App preferences (Settings page), one Hive box. Signals start at their
 // defaults and take the stored values once [AppSettings.ensureLoaded]
@@ -134,6 +135,9 @@ class AppSettings {
   Future<void> _loadNow() async {
     try {
       final box = _box = await Hive.openBox(settingsBoxName);
+      for (final line in await migrateSettings(box)) {
+        debugPrint(line);
+      }
       final mode = box.get(_keyHwdecMode);
       hwdecMode.value = HwdecMode.values
               .where((m) => m.name == mode)

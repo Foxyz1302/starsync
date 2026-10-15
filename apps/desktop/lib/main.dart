@@ -7,9 +7,9 @@ import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
 
 import 'app.dart';
-import 'src/platform/app_dirs.dart';
 import 'src/platform/app_log.dart';
 import 'src/platform/app_shutdown.dart';
+import 'src/platform/desktop/desktop_app_dirs.dart';
 import 'src/platform/desktop_entry.dart';
 import 'src/screens/home/ui.dart';
 import 'src/session/app_events.dart' show UpdateAvailable;
@@ -42,10 +42,9 @@ Future<void> main(List<String> args) async {
         ),
       );
   WidgetsFlutterBinding.ensureInitialized();
-  final dirs = await AppDirs.resolve();
+  final dirs = await const DesktopAppDirs().resolve();
   await startAppLogging(dirs);
-  // An absolute subDir replaces the documents folder (package:path join).
-  await Hive.initFlutter(dirs.hive);
+  Hive.init(dirs.hive);
   await AppSettings.instance.ensureLoaded();
   // Close button / Alt+F4: the orderly close ([shutDownApp]), so others
   // see "left", a hosted server shuts down and no player outlives the

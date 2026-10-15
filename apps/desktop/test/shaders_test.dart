@@ -2,9 +2,9 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
-import 'package:watch_together/src/shaders/shader_assets.dart';
-import 'package:watch_together/src/shaders/shader_presets.dart';
-import 'package:watch_together/src/state/settings.dart';
+import 'package:starsync/src/shaders/shader_assets.dart';
+import 'package:starsync/src/shaders/shader_presets.dart';
+import 'package:starsync/src/state/settings.dart';
 
 final _tmp = Platform.environment['WT_TEST_TMP'] ?? Directory.systemTemp.path;
 

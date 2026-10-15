@@ -173,6 +173,8 @@ class UpdateController {
     _log.info('updated to ${m.version}, restarting');
     status.value =
         UpdateStatus(UpdatePhase.restarting, manifest: m, canInstall: true);
-    await restart(_exe, launchArgs);
+    // Started by an old name (1.2.x's restart, an old launcher): the new
+    // binary next to it.
+    await restart(relaunchExecutable(_exe), launchArgs);
   }
 }

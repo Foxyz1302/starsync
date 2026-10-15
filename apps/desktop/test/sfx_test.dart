@@ -1,9 +1,9 @@
 import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:watch_together/src/sfx/sfx.dart';
-import 'package:watch_together/src/sfx/sound_bank.dart';
-import 'package:watch_together/src/sfx/synth.dart';
+import 'package:starsync/src/sfx/sfx.dart';
+import 'package:starsync/src/sfx/sound_bank.dart';
+import 'package:starsync/src/sfx/synth.dart';
 
 double _pitch(List<double> x, int from) {
   final c = <double>[];

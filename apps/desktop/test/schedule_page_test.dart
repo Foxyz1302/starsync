@@ -6,13 +6,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/jellyfin/accounts.dart';
-import 'package:watch_together/src/schedule/anilist.dart';
-import 'package:watch_together/src/schedule/animeflow.dart';
-import 'package:watch_together/src/schedule/schedule_model.dart';
-import 'package:watch_together/src/schedule/ui/schedule_actions.dart';
-import 'package:watch_together/src/schedule/ui/schedule_page.dart';
-import 'package:watch_together/src/screens/home/picked_media.dart';
+import 'package:starsync/src/jellyfin/accounts.dart';
+import 'package:starsync/src/schedule/anilist.dart';
+import 'package:starsync/src/schedule/animeflow.dart';
+import 'package:starsync/src/schedule/schedule_model.dart';
+import 'package:starsync/src/schedule/ui/schedule_actions.dart';
+import 'package:starsync/src/schedule/ui/schedule_page.dart';
+import 'package:starsync/src/screens/home/picked_media.dart';
 
 import 'schedule_fake_server.dart';
 

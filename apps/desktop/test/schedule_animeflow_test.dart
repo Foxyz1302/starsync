@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:watch_together/src/jellyfin/accounts.dart';
-import 'package:watch_together/src/schedule/animeflow.dart';
+import 'package:starsync/src/jellyfin/accounts.dart';
+import 'package:starsync/src/schedule/animeflow.dart';
 
 import 'schedule_fake_server.dart';
 
@@ -83,7 +83,7 @@ void main() {
     final c = client();
     final me = await c.me();
     expect(server.seen.single.headers.value('x-emby-token'), token);
-    expect(server.seen.single.headers.value(HttpHeaders.userAgentHeader), startsWith('watch-together/'));
+    expect(server.seen.single.headers.value(HttpHeaders.userAgentHeader), startsWith('Starsync/'));
     expect(me.userId, 'u1');
     expect(me.name, 'Foxyz');
     expect(me.scopes, {AnimeFlowScope.view, AnimeFlowScope.request});

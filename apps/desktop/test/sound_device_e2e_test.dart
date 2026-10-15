@@ -3,10 +3,10 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_soloud/flutter_soloud.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:watch_together/src/platform/audio/sound_engine.dart';
-import 'package:watch_together/src/sfx/sfx.dart';
-import 'package:watch_together/src/sfx/sound_bank.dart';
-import 'package:watch_together/src/sfx/synth_sfx.dart';
+import 'package:starsync/src/platform/audio/sound_engine.dart';
+import 'package:starsync/src/sfx/sfx.dart';
+import 'package:starsync/src/sfx/sound_bank.dart';
+import 'package:starsync/src/sfx/synth_sfx.dart';
 
 // Needs a real audio output: opens the device through flutter_soloud and
 // plays every sound of every preset once, quietly (WT_SFX_VOLUME, default

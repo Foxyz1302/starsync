@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:signals/signals_flutter.dart';
-import 'package:watch_together/src/controls/controls_probe.dart';
-import 'package:watch_together/src/controls/model/controls_layout.dart';
-import 'package:watch_together/src/controls/model/controls_model.dart';
-import 'package:watch_together/src/controls/model/controls_prefs.dart';
-import 'package:watch_together/src/controls/session_controls.dart';
-import 'package:watch_together/src/playback/media_marks.dart';
-import 'package:watch_together/src/state/session_state.dart';
-import 'package:watch_together/src/state/settings.dart';
+import 'package:starsync/src/controls/controls_probe.dart';
+import 'package:starsync/src/controls/model/controls_layout.dart';
+import 'package:starsync/src/controls/model/controls_model.dart';
+import 'package:starsync/src/controls/model/controls_prefs.dart';
+import 'package:starsync/src/controls/session_controls.dart';
+import 'package:starsync/src/playback/media_marks.dart';
+import 'package:starsync/src/state/session_state.dart';
+import 'package:starsync/src/state/settings.dart';
 
 // The controls model and its layout spec: which controls the bar has, in
 // which order, what goes to ⚙; and both skins drawing the same order.

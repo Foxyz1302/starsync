@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:sync_relay_core/core.dart';
 
 import '../screens/home/ui.dart' show appName, displayVersion;
-import 'app_dirs.dart';
+import 'ports/app_dirs.dart';
 import '../state/session_state.dart';
 
 // The app's log on disk (<app support>/logs/app-YYYY-MM-DD.log; core's
@@ -39,6 +39,9 @@ Future<void> startAppLogging(AppDirs dirs) async {
   _appLog.info('$appName ${displayVersion()} on ${Platform.operatingSystem} '
       '${Platform.operatingSystemVersion}, pid $pid, Dart ${Platform.version.split(' ').first}'
       '${dirs.profile == null ? '' : ', profile ${dirs.profile}'}');
+  for (final line in dirs.migrated) {
+    _appLog.info(line);
+  }
   final bad = AppDirs.invalidProfile(Platform.environment);
   if (bad != null) _appLog.warning('$profileEnv="$bad" ignored: use letters, digits, - and _ (at most 32)');
 }

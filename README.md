@@ -11,9 +11,9 @@ everyone's play, pause and seek stay together.
 Why not Jellyfin SyncPlay: it runs in the browser and its sync is poor.
 This is a desktop app that drives mpv.
 
-Name: `watch-together` is a placeholder and the final name is undecided
-(`sync-relay` is the working name). It appears in file names and the
-update manifest until that is settled.
+Up to 1.2.x the app was called `watch_together` (its files
+`watch-together-*`); the repository and the update manifest keep their old
+addresses for now.
 
 - Desktop only (Linux and Windows), always mpv. No web clients.
 - No transcoding. Everyone plays the original file.
@@ -25,12 +25,24 @@ How it fits together: [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md).
 
 From the Releases page of this repo:
 
-- Linux: `watch-together-<version>-linux-x64.tar.gz`. Extract, run
-  `watch_together`. On start it adds itself to your app launcher (and its
+- Linux: `starsync-<version>-linux-x64.tar.gz`. Extract, run
+  `starsync`. On start it adds itself to your app launcher (and its
   icon), so the window shows its own icon on Wayland. Needs mpv's library installed (`mpv` or `libmpv2`).
-- Windows: `watch-together-<version>-windows-x64.zip`. Extract, run
-  `watch_together.exe`. mpv is bundled. New and not yet tried on a real
+- Windows: `starsync-<version>-windows-x64.zip`. Extract, run
+  `starsync.exe`. mpv is bundled. New and not yet tried on a real
   Windows desktop; reports welcome.
+
+The folder also holds `watch_together(.exe)` and
+`watch-together-server(.exe)`, the names up to 1.2.x: they start the new
+programs, so an update from 1.2.x restarts fine and old shortcuts and
+service files keep working.
+
+Your data (settings, sign-ins, folders, logs, yt-dlp and its cookies) lives
+in `~/.local/share/dev.foxyz.starsync` on Linux and
+`%APPDATA%\foxyz\Starsync` on Windows. The first start after 1.2.x copies
+it over from the old places (`~/.local/share/moe.senkochan.watch_together`
+or `%APPDATA%\com.example\watch_together`, and the app's files in your
+Documents folder) and leaves the originals where they were.
 
 Update from the app: the app looks for a new version at start and every
 few hours, and when one exists a band across the top of the window says so
@@ -38,8 +50,8 @@ few hours, and when one exists a band across the top of the window says so
 verifies, applies in place and restarts; "Later" hides it until the next
 check; the install folder must be writable by you. The version you run is
 under the Settings tab. Settings has Check now and an auto-check toggle. From a terminal:
-`./watch-together-server --upgrade` (no display needed, so it works on a
-server box too), `watch_together --upgrade`, or the shipped `update.sh` /
+`./starsync-server --upgrade` (no display needed, so it works on a
+server box too), `./starsync --upgrade`, or the shipped `update.sh` /
 `update.bat` (which run the first). Each updates the whole folder, app and
 server; restart whichever is running to use the new version. A
 release with a newer protocol is a required update: everyone on a server
@@ -221,11 +233,11 @@ cover; one you started shows how far you got.
 ## Dedicated server
 
 For an always-on box (no display needed): the release tarball also contains
-`watch-together-server`, a small standalone server without the app. Run it,
+`starsync-server`, a small standalone server without the app. Run it,
 then everyone (you included) uses Join.
 
 ```
-./watch-together-server --port 8080 --secret <password>
+./starsync-server --port 8080 --secret <password>
 ```
 
 | Flag | Default | Meaning |
@@ -245,9 +257,11 @@ then everyone (you included) uses Join.
 
 It prints `READY port=... name=...` once listening and stops cleanly on
 Ctrl+C or SIGTERM. A dedicated server has no host.
-To run it as a service, unpack the tarball to `/opt/watch-together` and use
-[deploy/watch-together.service](deploy/watch-together.service) (copy it to
-`/etc/systemd/system/`, edit the flags, `systemctl enable --now watch-together`).
+To run it as a service, unpack the tarball to `/opt/starsync` and use
+[deploy/starsync.service](deploy/starsync.service) (copy it to
+`/etc/systemd/system/`, edit the flags, `systemctl enable --now starsync`).
+A service set up before the rename (`/opt/watch-together`, running
+`watch-together-server`) keeps working as it is.
 
 Something not playing? Settings → About → **Copy diagnostics** puts the
 app's recent log (passwords, tokens and cookies left out) on the

@@ -474,7 +474,7 @@ class AnimeFlowClient {
         _ownsHttp = http == null,
         _delay = delay ?? Future<void>.delayed,
         _now = now ?? DateTime.now,
-        userAgent = userAgent ?? 'watch-together/$appVersion';
+        userAgent = userAgent ?? 'Starsync/$appVersion';
 
   /// Authenticated with the linked Jellyfin account on the same domain
   /// (see [tokenFor]), looked up on every call so a re-link applies.

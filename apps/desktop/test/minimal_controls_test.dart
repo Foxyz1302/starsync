@@ -1,16 +1,16 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:watch_together/src/controls/frame.dart';
-import 'package:watch_together/src/controls/minimal/style.dart';
-import 'package:watch_together/src/controls/minimal/timeline.dart';
-import 'package:watch_together/src/controls/model/controls_prefs.dart';
-import 'package:watch_together/src/controls/volume.dart';
-import 'package:watch_together/src/playback/media_marks.dart';
-import 'package:watch_together/src/shell/settings_tab.dart';
-import 'package:watch_together/src/state/settings.dart';
-import 'package:watch_together/src/update/update_controller.dart';
-import 'package:watch_together/src/widgets/app_menu.dart';
+import 'package:starsync/src/controls/frame.dart';
+import 'package:starsync/src/controls/minimal/style.dart';
+import 'package:starsync/src/controls/minimal/timeline.dart';
+import 'package:starsync/src/controls/model/controls_prefs.dart';
+import 'package:starsync/src/controls/volume.dart';
+import 'package:starsync/src/playback/media_marks.dart';
+import 'package:starsync/src/shell/settings_tab.dart';
+import 'package:starsync/src/state/settings.dart';
+import 'package:starsync/src/update/update_controller.dart';
+import 'package:starsync/src/widgets/app_menu.dart';
 
 // The Minimal skin's pieces and the shared controls frame (never the
 // session screen or a media_kit `Video`).

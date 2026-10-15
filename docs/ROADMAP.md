@@ -85,15 +85,6 @@ the automatic continuation and countdown, relay state), the device
 (client id, library and folders, match corrections, watch history,
 settings, notification prefs, what this app is sourcing) and the
 integrations (Jellyfin played/resume, AniList list).
-R. Rename (before step 1, so dev builds install side by side with 1.2.x):
-   app id `dev.foxyz.starsync`, binary, Windows company `foxyz`; Hive out
-   of `~/Documents` into the app's support folder, copied not moved;
-   a settings schema version with ordered migrations; `AppDirs` (today
-   Hive and logs, and `STARSYNC_PROFILE`) becomes a port and the default
-   moves next to the profiles;
-   the 1.3.0 archive still contains `watch_together(.exe)` so 1.2.x's
-   self-update restart works; the old `.desktop` entry removed; the
-   manifest kept at the old URL; VPS `ExecStart`/`update.sh` paths.
 1. Connection + Identity + Presence; proto 16 opened (version ranges on
    both sides, refusal frame, identity, grace, presence, relay resume,
    ids in the feed); later steps add fields, it is frozen at the 1.3.0
@@ -161,9 +152,14 @@ proto 16 together at the 1.3.0 release. Rooms are out (no room id).
 No Windows dev builds: restructure testing happens on Linux; Windows
 friends stay on 1.2.x until the 1.3.0 release (Windows-only fixes like
 P30 reach them then).
-Rename to Starsync everywhere (repo, app id, data folder, updater URL
-migration) is its own step; app id `dev.foxyz.starsync`, Windows
-company name `foxyz` (replacing Flutter's default `com.example`). Auto
+Left of the rename (app, binaries, archives and data folder are
+Starsync): the repository (`Foxyz/sync_replay_project`) and with it the
+manifest and asset URLs (a new manifest URL needs a release that reads
+both first); the dedicated server's fallback folder
+`~/.cache/watch-together`, the release token file
+`~/.config/watch-together-release-token`, Jellyfin's client name "Watch
+Together" (devices are listed under it) and `WatchTogetherApp`; dropping
+the 1.2.x launchers from the archive once nobody updates from 1.2.x. Auto
 sit-out: idle or minimised for a while sets you Away, activity sets you
 In; it replaces the 10-minute auto-unready.
 
@@ -338,8 +334,12 @@ over `wss://`/`https://` (`/health.tls`); apps use `wss://` when offered,
 5. **Ops**: Check shaders on Windows; the relay e2e "source drops
    uncleanly and resumes" fails about half the time under the full suite.
 
-6. **Windows: first real use.** CI builds and publishes
-   `watch-together-<ver>-windows-x64.zip` (libmpv bundled) and runs the
+6. **Windows: first real use.** Check the rename at 1.3.0: a 1.2.x
+   install updates and restarts (`watch_together.exe`, a copy of
+   `starsync.exe`), the data in `%APPDATA%\foxyz\Starsync` came over from
+   `%APPDATA%\com.example\watch_together` and Documents, the next update
+   restarts `starsync.exe`. CI builds and publishes
+   `starsync-<ver>-windows-x64.zip` (libmpv bundled) and runs the
    updater tests on NTFS; a friend has joined from it. Still unchecked:
    fullscreen controls, hosting (firewall prompt), in-app update from one
    release to the next. The rest of the desktop tests are not in CI.

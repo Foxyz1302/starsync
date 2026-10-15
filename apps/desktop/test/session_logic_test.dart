@@ -2,8 +2,8 @@
 // IdleTracker and unreadyForNewMedia give way to auto sit-out;
 // linkDisplayName stays.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:watch_together/src/session/idle.dart';
-import 'package:watch_together/src/session/session_coordinator.dart';
+import 'package:starsync/src/session/idle.dart';
+import 'package:starsync/src/session/session_coordinator.dart';
 
 void main() {
   group('IdleTracker', () {

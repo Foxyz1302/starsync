@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:watch_together/src/session/now_playing.dart';
-import 'package:watch_together/src/session/now_playing_info.dart';
+import 'package:starsync/src/session/now_playing.dart';
+import 'package:starsync/src/session/now_playing_info.dart';
 
 void main() {
   group('jellyfinTitle', () {

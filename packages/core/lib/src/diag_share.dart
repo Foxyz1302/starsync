@@ -142,7 +142,7 @@ typedef DiagTarget = ({Uri base, String token, double offsetMs});
 /// saying so per connection; problem marks ([markProblem]) go either way.
 class DiagUploader {
   final DiagTarget? Function() target;
-  /// The app and its version, e.g. `Watch Together 1.4.0 on linux`.
+  /// The app and its version, e.g. `Starsync 1.4.0 on linux`.
   final String version;
   final int bufferBytes;
   final int batchBytes;

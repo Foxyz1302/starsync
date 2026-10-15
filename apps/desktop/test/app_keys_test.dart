@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/shell/app_shell.dart';
-import 'package:watch_together/src/state/session_state.dart';
-import 'package:watch_together/src/update/update_controller.dart';
-import 'package:watch_together/src/widgets/app_keys.dart';
-import 'package:watch_together/src/widgets/text_focus.dart';
+import 'package:starsync/src/shell/app_shell.dart';
+import 'package:starsync/src/state/session_state.dart';
+import 'package:starsync/src/update/update_controller.dart';
+import 'package:starsync/src/widgets/app_keys.dart';
+import 'package:starsync/src/widgets/text_focus.dart';
 
 void main() {
   final session = SessionState.instance;

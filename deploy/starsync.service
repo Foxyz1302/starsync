@@ -1,7 +1,10 @@
-# Dedicated watch-together server (no display needed).
-# Install: unpack the release tarball to /opt/watch-together (the unit only
-# uses the watch-together-server binary in it), copy this file to
-# /etc/systemd/system/, then `systemctl enable --now watch-together`.
+# Dedicated Starsync server (no display needed).
+# Install: unpack the release tarball to /opt/starsync (the unit only uses
+# the starsync-server binary in it), copy this file to
+# /etc/systemd/system/, then `systemctl enable --now starsync`.
+# An install from before the rename (/opt/watch-together, unit
+# watch-together, ExecStart .../watch-together-server) keeps working
+# unchanged: the archive still ships watch-together-server as a launcher.
 # Flags: --port <n> (default 8080), --secret <password> (empty = open
 # server, anyone who can reach the port can join), --name, --media <file>,
 # --advertise-host <host>, --no-yt-dlp, --yt-dlp-dir <dir>, --config
@@ -11,15 +14,15 @@
 # process lists are readable by other users.
 
 [Unit]
-Description=watch-together dedicated server
+Description=Starsync dedicated server
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/opt/watch-together/watch-together-server --port 8080 --secret change-me
+ExecStart=/opt/starsync/starsync-server --port 8080 --secret change-me
 Restart=on-failure
 DynamicUser=true
-StateDirectory=watch-together
+StateDirectory=starsync
 NoNewPrivileges=true
 
 [Install]

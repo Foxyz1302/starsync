@@ -5,8 +5,8 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
-import 'package:watch_together/src/sync/avatar_cache.dart';
-import 'package:watch_together/src/sync/sync_client.dart';
+import 'package:starsync/src/sync/avatar_cache.dart';
+import 'package:starsync/src/sync/sync_client.dart';
 
 Future<void> _poll(FutureOr<bool> Function() cond, String what) async {
   final deadline = DateTime.now().add(const Duration(seconds: 10));

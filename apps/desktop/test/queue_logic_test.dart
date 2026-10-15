@@ -2,7 +2,7 @@
 // the janitor become server state.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/queue/queue_logic.dart';
+import 'package:starsync/src/queue/queue_logic.dart';
 
 MemberView member(String id,
         {bool stale = false, bool out = false, Map<String, bool> jf = const {}, String name = ''}) =>

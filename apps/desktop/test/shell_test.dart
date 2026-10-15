@@ -4,18 +4,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/screens/home/profile.dart';
-import 'package:watch_together/src/shell/app_shell.dart';
-import 'package:watch_together/src/shell/avatar.dart';
-import 'package:watch_together/src/shell/motion.dart';
-import 'package:watch_together/src/shell/party_strip.dart';
-import 'package:watch_together/src/shell/profile_card.dart';
-import 'package:watch_together/src/shell/session_player.dart';
-import 'package:watch_together/src/shell/settings_tab.dart' show SettingsTab;
-import 'package:watch_together/src/shell/toasts.dart';
-import 'package:watch_together/src/session/session_coordinator.dart' show ToastItem;
-import 'package:watch_together/src/state/session_state.dart';
-import 'package:watch_together/src/update/update_controller.dart';
+import 'package:starsync/src/screens/home/profile.dart';
+import 'package:starsync/src/shell/app_shell.dart';
+import 'package:starsync/src/shell/avatar.dart';
+import 'package:starsync/src/shell/motion.dart';
+import 'package:starsync/src/shell/party_strip.dart';
+import 'package:starsync/src/shell/profile_card.dart';
+import 'package:starsync/src/shell/session_player.dart';
+import 'package:starsync/src/shell/settings_tab.dart' show SettingsTab;
+import 'package:starsync/src/shell/toasts.dart';
+import 'package:starsync/src/session/session_coordinator.dart' show ToastItem;
+import 'package:starsync/src/state/session_state.dart';
+import 'package:starsync/src/update/update_controller.dart';
 
 /// Stands in for media_kit's `Video` (which hangs flutter_test) and
 /// counts how often one is created.

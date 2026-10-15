@@ -8,14 +8,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
-import 'package:watch_together/src/jellyfin/accounts.dart';
-import 'package:watch_together/src/jellyfin/session_media.dart';
-import 'package:watch_together/src/jellyfin/track_prefs.dart';
-import 'package:watch_together/src/playback/yt_dlp_app.dart';
-import 'package:watch_together/src/queue/queue_controller.dart' show WarmState;
-import 'package:watch_together/src/screens/home/picked_media.dart';
-import 'package:watch_together/src/session/session_coordinator.dart';
-import 'package:watch_together/src/session/switch_trace.dart';
+import 'package:starsync/src/jellyfin/accounts.dart';
+import 'package:starsync/src/jellyfin/session_media.dart';
+import 'package:starsync/src/jellyfin/track_prefs.dart';
+import 'package:starsync/src/playback/yt_dlp_app.dart';
+import 'package:starsync/src/queue/queue_controller.dart' show WarmState;
+import 'package:starsync/src/screens/home/picked_media.dart';
+import 'package:starsync/src/session/session_coordinator.dart';
+import 'package:starsync/src/session/switch_trace.dart';
 
 // How long an Up next switch takes, end to end, over real mpv and a real
 // sync server: two Jellyfin account holders and a guest (through the

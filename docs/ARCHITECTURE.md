@@ -9,7 +9,7 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 |---|---|---|
 | `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client, updater, watched rule (`WatchSession`); `testing.dart` (test support for all three packages, not in `core.dart`: `FlakyProxy`) | pure Dart, no Flutter |
 | `packages/server` | Relic HTTP + WebSocket server (`SyncServer`, `ServerHub`, `Session`, media endpoint, relay buffer, Jellyfin relay), the `serve()` entrypoint, `bin/server.dart` (dedicated server) | pure Dart, no Flutter |
-| `apps/desktop` | Flutter app: UI, `SyncClient`, `Connection`, `SessionCoordinator`, `PlaybackController` (media_kit/mpv), `ServerIsolate`, update UI (`UpdateController`) | ships with `watch-together-server` |
+| `apps/desktop` | Flutter app: UI, `SyncClient`, `Connection`, `SessionCoordinator`, `PlaybackController` (media_kit/mpv), `ServerIsolate`, update UI (`UpdateController`) | ships with `starsync-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
 | `deploy` | systemd unit for the dedicated server | |
 
@@ -58,7 +58,7 @@ size (`ServerIsolate.setFile`): the host's in-session File swap then sends a
   cancelled, solo starts again with the same media. Stop leaves without
   asking.
 - **Dedicated server**: `bin/server.dart` compiled with `dart compile exe`
-  and shipped next to the app as `watch-together-server`. It parses flags
+  and shipped next to the app as `starsync-server`. It parses flags
   (`--port`, `--secret`, `--name`, `--media`, `--advertise-host`,
   `--jellyfin <file>`, `--[no-]yt-dlp`, `--yt-dlp-dir`, `--yt-dlp-cookies`, `--config`; default port 8080) into the same map and calls `serve`
   (`--log-dir` only picks where its log files go, see "Logging")
@@ -1174,6 +1174,10 @@ handed on from there (the coordinator gets its `Notifier`, `Connection` and
   options, warm-up.
 - `SystemNotifications`: an interface only; desktop shows none
   (`NoSystemNotifications`).
+- `AppDirsPort` (`DesktopAppDirs`): where Hive and the logs live
+  (`AppDirs`, "Desktop UI"), and the copy of the data from before the
+  rename; resolved in `main` before the composition root exists, so not a
+  `Ports` field.
 Still direct: the player (`PlaybackController`, media_kit, and its
 `AppYtDlp.instance.mpvRawOptions`), the updater's restart
 (`Process.start`), the session's own file reads for what it plays or
@@ -1503,11 +1507,38 @@ Settings persist in two Hive boxes: `connect_form` (last form, recent
 servers and links, the profile picture and colour; saved even when a join
 fails) and
 `settings`. Where Hive and the logs live is `AppDirs`
-(`platform/app_dirs.dart`, resolved once in `main`): Hive's default folder
-(the documents folder) and `<app support>/logs`; with `STARSYNC_PROFILE`
-(DEVELOPMENT "Dev loop") `<app support>/profiles/<name>/hive` and `logs`,
-and the window title gets ` [<name>]`. yt-dlp, shaders and caches stay
-shared. Link media names are a web page's title (see "yt-dlp"), else
+(`platform/ports/app_dirs.dart`, resolved once in `main` by the
+`AppDirsPort`, `DesktopAppDirs` on the desktop): `<app support>/hive` and
+`<app support>/logs`; with `STARSYNC_PROFILE` (DEVELOPMENT "Dev loop")
+`<app support>/profiles/<name>/hive` and `logs`, and the window title gets
+` [<name>]`. yt-dlp, shaders and caches stay shared. The app support
+folder is path_provider's: Linux `~/.local/share/dev.foxyz.starsync` (the
+application id), Windows `%APPDATA%\foxyz\Starsync` (the exe's company and
+product name).
+
+**Data from before the rename** (`platform/data_migration.dart`, run by
+`DesktopAppDirs.resolve` before Hive opens and the log starts; its lines
+are logged once the log is open): once per support folder (the marker
+`<app support>/migration.json`: `migratedFrom`, `hiveFrom`, `boxes`,
+`files`), the first existing old support folder (Linux
+`moe.senkochan.watch_together`, then `watch_together`, next to the new one;
+Windows `%APPDATA%\com.example\watch_together`) is copied in whole
+(profiles, logs, shaders, yt-dlp; modes kept, so `cookies.txt` stays 0600;
+symlinks as links), and the app's own Hive boxes (`appHiveBoxes`:
+`settings`, `connect_form`, `files`, `jellyfin`, `track_prefs`, `.hive`
+and `.lock`, by name only, never other apps' boxes there) from the
+documents folder, where `Hive.initFlutter()` kept them up to 1.2.x, into
+`<app support>/hive`. Copied, never moved (1.2.x keeps working), never
+over a file already there. Lines name paths and counts, never contents.
+The caches folder (thumbnails, the AniList schedule) is not copied: it
+refills.
+
+**Settings schema** (`state/settings_schema.dart`): the `settings` box
+stores `schemaVersion`; `migrateSettings` (run when `AppSettings` loads)
+applies the ordered `settingsMigrations` steps past the stored version up
+to `settingsSchemaVersion`, stamping the version after each. 1 is the
+layout of 1.2.x (a box without a version is at 1, no steps yet); a box
+from a newer build is left alone. Link media names are a web page's title (see "yt-dlp"), else
 derived from the URL path, never containing a query string.
 
 Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
@@ -1697,7 +1728,7 @@ dedicated server (`package:logging` loggers named by area: `relay`,
 `app`).
 
 - **Where**: the app writes `<app support>/logs/app-YYYY-MM-DD.log`
-  (Linux `~/.local/share/moe.senkochan.watch_together/logs`; with a
+  (Linux `~/.local/share/dev.foxyz.starsync/logs`; with a
   profile `<app support>/profiles/<name>/logs`, see `AppDirs` under
   "Desktop UI"); its hosted server's records arrive over the isolate's
   `events` port and go in the same file as `server.<logger>` (`relogLine`). The dedicated server
@@ -1809,13 +1840,19 @@ status.
 
 `assets/icon/icon.svg` is the source; `icon_<size>.png` and the Windows
 `app_icon.ico` are rendered from it (rsvg-convert, magick). The GTK
-application id is `moe.senkochan.watch_together`, which Wayland uses as the
-window's `app_id`; compositors take the icon from the `.desktop` file of
-that id. A tarball install has none, so on start a Linux release build
-(`platform/desktop_entry.dart`, skipped in debug) writes
-`~/.local/share/applications/moe.senkochan.watch_together.desktop` (Exec =
-the running binary) and the icons into the hicolor theme, only when they
-changed. The runner also sets the window icon from the bundle (X11).
+application id is `dev.foxyz.starsync` (also the X11 `WM_CLASS`, from
+`g_set_prgname`), which Wayland uses as the window's `app_id`; compositors
+take the icon from the `.desktop` file of that id. A tarball install has
+none, so on start a Linux release build (`platform/desktop_entry.dart`,
+skipped in debug) writes
+`~/.local/share/applications/dev.foxyz.starsync.desktop` (Exec = the
+running binary, `StartupWMClass` and `Icon` = the id) and the icons into
+the hicolor theme, only when they changed, and deletes the entry and
+icons 1.2.x wrote under its id `moe.senkochan.watch_together` (those exact
+files only). The runner also sets the window icon from the bundle (X11).
+Windows: the exe's version resource (`windows/runner/Runner.rc`) says
+company `foxyz`, product `Starsync`; the window class is
+`STARSYNC_WINDOW`.
 
 ## Updater
 
@@ -1829,8 +1866,23 @@ folder (same filesystem, so moves are renames; the folder must be
 user-writable). Each top-level entry is moved aside and the new one moved in,
 with rollback on failure (writing the running executable fails with ETXTBSY;
 rename works). A packaged install is detected by `data/` and `lib/` next to
-the binary (app or server, same folder); anything else exits with "update
-manually". A manifest whose
+the binary (app or server, same folder; Windows: `data/` and
+`flutter_windows.dll`), whatever the binary is called; anything else exits
+with "update manually". The archive must contain the running binary's name;
+an old name (`watch_together`, `watch-together-server`, `.exe` on
+Windows) is also satisfied by the new one (`starsync`, `starsync-server`).
+**Names before the rename**: the archive (`starsync-<ver>-<platform>`,
+top folder `starsync-<ver>/`) also carries those old names, because a
+1.2.x updater checks that its own name is in the archive and then restarts
+it, and VPS units and old `update.sh` copies run `watch-together-server`.
+Linux: shell launchers (`lib/src/update/bundle/watch_together`,
+`watch-together-server`, `exec` the new binary next to the resolved
+script); Windows: copies of `starsync.exe` and `starsync-server.exe` (same
+version resource, so the same data folder). After an update the app
+restarts `relaunchExecutable(...)`: the running binary, or for an old name
+the new one next to it, so a copy started by 1.2.x moves to `starsync.exe`
+on its first own update. `update.sh` / `update.bat` run `starsync-server`,
+else the old name. A manifest whose
 protocol is newer than the local one is a required update. Windows apply
 renames in-use files to `*.old` (swept on next start); CI tests it against a
 running exe on NTFS. The manifest's `assets` maps `linux-x64` /
@@ -1842,9 +1894,9 @@ About and the tooltip of the strip's Settings tab): a release's version,
 a test build's with its commit (`GIT_COMMIT`, short hash, `-dirty` with
 uncommitted changes, passed by `tool/package_linux.sh`), and for a dev
 run the pubspec's version (`FLUTTER_BUILD_NAME`, which the Flutter tool
-defines for every build and run) with "dev run". CLI: `watch-together-server --upgrade` (no display needed;
+defines for every build and run) with "dev run". CLI: `starsync-server --upgrade` (no display needed;
 the shipped `update.sh` / `update.bat` run it), `--check-update` prints only;
-it ends with "restart the server to run <version>". `watch_together --upgrade`
+it ends with "restart the server to run <version>". `starsync --upgrade`
 does the same from the app binary. In the app, `UpdateController`
 (`apps/desktop/lib/src/update/`) runs the same code for the update bar
 (`UpdateBar`, `screens/home/update_indicator.dart`): a band across the

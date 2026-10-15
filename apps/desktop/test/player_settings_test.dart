@@ -6,18 +6,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/controls/frame.dart';
-import 'package:watch_together/src/controls/model/controls_prefs.dart';
-import 'package:watch_together/src/controls/player_settings.dart';
-import 'package:watch_together/src/jellyfin/track_prefs.dart';
-import 'package:watch_together/src/schedule/animeflow.dart';
-import 'package:watch_together/src/shaders/shader_presets.dart';
-import 'package:watch_together/src/shell/avatar.dart';
-import 'package:watch_together/src/shell/party_strip.dart';
-import 'package:watch_together/src/shell/settings_tab.dart';
-import 'package:watch_together/src/state/session_state.dart';
-import 'package:watch_together/src/state/settings.dart';
-import 'package:watch_together/src/update/update_controller.dart';
+import 'package:starsync/src/controls/frame.dart';
+import 'package:starsync/src/controls/model/controls_prefs.dart';
+import 'package:starsync/src/controls/player_settings.dart';
+import 'package:starsync/src/jellyfin/track_prefs.dart';
+import 'package:starsync/src/schedule/animeflow.dart';
+import 'package:starsync/src/shaders/shader_presets.dart';
+import 'package:starsync/src/shell/avatar.dart';
+import 'package:starsync/src/shell/party_strip.dart';
+import 'package:starsync/src/shell/settings_tab.dart';
+import 'package:starsync/src/state/session_state.dart';
+import 'package:starsync/src/state/settings.dart';
+import 'package:starsync/src/update/update_controller.dart';
 
 // The player settings card (both skins, never a media_kit `Video`), the
 // Settings pages, the host flag in the party UI and invite addresses.

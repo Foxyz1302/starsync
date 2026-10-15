@@ -3,8 +3,8 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:watch_together/src/files/name_parser.dart';
-import 'package:watch_together/src/files/scanner.dart';
+import 'package:starsync/src/files/name_parser.dart';
+import 'package:starsync/src/files/scanner.dart';
 
 late Directory _root;
 

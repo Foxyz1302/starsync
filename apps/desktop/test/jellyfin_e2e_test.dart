@@ -8,12 +8,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
-import 'package:watch_together/src/jellyfin/accounts.dart';
-import 'package:watch_together/src/jellyfin/session_media.dart';
-import 'package:watch_together/src/jellyfin/track_prefs.dart';
-import 'package:watch_together/src/playback/media_marks.dart';
-import 'package:watch_together/src/screens/home/picked_media.dart';
-import 'package:watch_together/src/session/session_coordinator.dart';
+import 'package:starsync/src/jellyfin/accounts.dart';
+import 'package:starsync/src/jellyfin/session_media.dart';
+import 'package:starsync/src/jellyfin/track_prefs.dart';
+import 'package:starsync/src/playback/media_marks.dart';
+import 'package:starsync/src/screens/home/picked_media.dart';
+import 'package:starsync/src/session/session_coordinator.dart';
 
 // Two account holders and a guest watch Jellyfin episodes together over a
 // real sync server, real mpv and a local fake Jellyfin (never a real one):

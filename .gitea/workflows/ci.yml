@@ -35,9 +35,9 @@ jobs:
       - run: dart test
         working-directory: packages/server
       # Compiling the dedicated server proves it stays Flutter-free.
-      - run: mkdir -p build && dart compile exe bin/server.dart -o build/watch-together-server
+      - run: mkdir -p build && dart compile exe bin/server.dart -o build/starsync-server
         working-directory: packages/server
-      - run: build/watch-together-server --help
+      - run: build/starsync-server --help
         working-directory: packages/server
 
   # The updater's Windows apply path (running exe parked as .old) only

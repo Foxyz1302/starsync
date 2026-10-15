@@ -6,8 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
-import 'package:watch_together/src/session/session_coordinator.dart';
-import 'package:watch_together/src/sync/state_diff.dart';
+import 'package:starsync/src/session/session_coordinator.dart';
+import 'package:starsync/src/sync/state_diff.dart';
 
 const _mediaPath = '/home/foxyz/Videos/chiyo.mp4';
 

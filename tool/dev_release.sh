@@ -55,7 +55,7 @@ export VERSION="$NEXT-dev.$N"
 echo "building $VERSION (last published: ${LAST:-none})"
 
 "$ROOT/tool/package_linux.sh" --no-upload
-TARBALL="$ROOT/dist/watch-together-$VERSION-linux-x64.tar.gz"
+TARBALL="$ROOT/dist/starsync-$VERSION-linux-x64.tar.gz"
 [[ -f "$TARBALL" ]] || { echo "error: $TARBALL missing" >&2; exit 1; }
 
 NOTES="$(git -C "$ROOT" log -1 --format=%s)"
@@ -90,5 +90,5 @@ cat <<EOF
 
 Published $VERSION. Dev builds pick it up with their next update check.
 A stable install moves onto test builds once: with the app open, run (bash)
-  p=\$(pgrep -xo watch_together) && d=\$(dirname "\$(readlink /proc/\$p/exe)") && t=\$(mktemp -d) && curl -fsSL $BASE_URL/$(basename "$TARBALL") | tar -xz -C "\$t" --strip-components=1 && cp -rf --remove-destination "\$t"/. "\$d"/ && rm -rf "\$t" && echo "Done: restart the app." || echo "Failed: is the app open?"
+  p=\$(pgrep -xo 'starsync|watch_together') && d=\$(dirname "\$(readlink /proc/\$p/exe)") && t=\$(mktemp -d) && curl -fsSL $BASE_URL/$(basename "$TARBALL") | tar -xz -C "\$t" --strip-components=1 && cp -rf --remove-destination "\$t"/. "\$d"/ && rm -rf "\$t" && echo "Done: restart the app." || echo "Failed: is the app open?"
 EOF

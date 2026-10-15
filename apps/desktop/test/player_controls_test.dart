@@ -2,11 +2,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart' show JellyfinStreamType;
-import 'package:watch_together/src/controls/control_menus.dart';
-import 'package:watch_together/src/controls/standard/seek_bar.dart';
-import 'package:watch_together/src/jellyfin/track_prefs.dart';
-import 'package:watch_together/src/playback/media_marks.dart';
-import 'package:watch_together/src/screens/session/player_controls.dart';
+import 'package:starsync/src/controls/control_menus.dart';
+import 'package:starsync/src/controls/standard/seek_bar.dart';
+import 'package:starsync/src/jellyfin/track_prefs.dart';
+import 'package:starsync/src/playback/media_marks.dart';
+import 'package:starsync/src/screens/session/player_controls.dart';
 
 // The control-bar pieces alone (never the session screen or a `Video`):
 // the Standard seek bar, the skip pill and the shared track / chapter

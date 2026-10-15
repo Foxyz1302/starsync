@@ -1,11 +1,11 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:watch_together/src/platform/audio/sound_engine.dart';
-import 'package:watch_together/src/sfx/sfx.dart';
-import 'package:watch_together/src/sfx/sound_bank.dart';
-import 'package:watch_together/src/sfx/synth.dart';
-import 'package:watch_together/src/sfx/synth_sfx.dart';
+import 'package:starsync/src/platform/audio/sound_engine.dart';
+import 'package:starsync/src/sfx/sfx.dart';
+import 'package:starsync/src/sfx/sound_bank.dart';
+import 'package:starsync/src/sfx/synth.dart';
+import 'package:starsync/src/sfx/synth_sfx.dart';
 
 class _FakeBackend implements AudioBackend {
   final bool failInit;

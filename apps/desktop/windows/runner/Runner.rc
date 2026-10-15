@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "watch_together" "\0"
+            VALUE "CompanyName", "foxyz" "\0"
+            VALUE "FileDescription", "Starsync" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "watch_together" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "watch_together.exe" "\0"
-            VALUE "ProductName", "watch_together" "\0"
+            VALUE "InternalName", "Starsync" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 foxyz. All rights reserved." "\0"
+            VALUE "OriginalFilename", "starsync.exe" "\0"
+            VALUE "ProductName", "Starsync" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

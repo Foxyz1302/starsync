@@ -2,13 +2,16 @@
 # Package the Linux release bundle into a versioned tar.gz and optionally
 # upload it to Discord.
 # Usage: tool/package_linux.sh [--skip-build] [--noupload|--no-upload]
-# Output: dist/watch-together-<version>-linux-x64.tar.gz containing one
-# top-level folder with the executable, lib/ and data/ as built, plus
-# update.sh (runs watch-together-server --upgrade) and watch-together-server
-# (the dedicated server, `dart compile exe` of packages/server/bin/server.dart,
-# built every run, also with --skip-build; both binaries are stamped with
-# APP_VERSION from the app's pubspec). The updater strips
-# that top-level folder — keep the layout in sync with packages/core/test/updater_test.dart.
+# Output: dist/starsync-<version>-linux-x64.tar.gz containing one
+# top-level folder starsync-<version>/ with the executable `starsync`, lib/
+# and data/ as built, plus update.sh (runs starsync-server --upgrade) and
+# starsync-server (the dedicated server, `dart compile exe` of
+# packages/server/bin/server.dart, built every run, also with --skip-build;
+# both binaries are stamped with APP_VERSION from the app's pubspec), and
+# the launchers `watch_together` and `watch-together-server` (the names up
+# to 1.2.x: their updater restarts `watch_together`, VPS units run the old
+# server name). The updater strips that top-level folder — keep the layout
+# in sync with packages/core/test/updater_test.dart.
 # Upload: set DISCORD_WEBHOOK_URL in the environment (never commit it).
 # The tarball must stay under Discord's upload limit (25 MB free tier).
 # The upload posts a Components V2 card (flag 1<<15): version header,
@@ -28,7 +31,7 @@ done
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ROOT/apps/desktop"
-NAME="watch-together"
+NAME="starsync"
 ARCH="x64"
 
 # VERSION in the environment overrides it (tool/dev_release.sh).
@@ -56,7 +59,9 @@ TARBALL="$DIST/$FOLDER-linux-$ARCH.tar.gz"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/$FOLDER" "$DIST"
 cp -r "$BUNDLE/." "$STAGE/$FOLDER/"
-install -m 755 "$APP/lib/src/update/bundle/update.sh" "$STAGE/$FOLDER/update.sh"
+for f in update.sh watch_together watch-together-server; do
+  install -m 755 "$APP/lib/src/update/bundle/$f" "$STAGE/$FOLDER/$f"
+done
 # Prefer the dart bundled with the Flutter SDK that builds the app.
 DART="dart"
 if FLUTTER="$(command -v flutter)"; then
@@ -64,7 +69,7 @@ if FLUTTER="$(command -v flutter)"; then
   [[ -x "$CANDIDATE" ]] && DART="$CANDIDATE"
 fi
 (cd "$ROOT/packages/server" && "$DART" pub get >/dev/null &&
-  "$DART" compile exe --define=APP_VERSION="$VERSION" bin/server.dart -o "$STAGE/$FOLDER/watch-together-server")
+  "$DART" compile exe --define=APP_VERSION="$VERSION" bin/server.dart -o "$STAGE/$FOLDER/starsync-server")
 tar -czf "$TARBALL" -C "$STAGE" "$FOLDER"
 rm -rf "$STAGE"
 ls -la "$TARBALL"
@@ -119,7 +124,7 @@ payload = {
         'accent_color': 5793266,
         'components': [
             {'type': 10, 'content':
-             f'# 📦 watch-together `{ver}`\n'
+             f'# 📦 Starsync `{ver}`\n'
              f'-# linux · {arch} · release · {size_mb:.1f} MB'},
             {'type': 10, 'content': f'`{commit[:140]}`'},
             {'type': 10, 'content': block[:1500]},

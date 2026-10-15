@@ -3,8 +3,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:watch_together/src/schedule/anilist.dart';
-import 'package:watch_together/src/session/media_art.dart';
+import 'package:starsync/src/schedule/anilist.dart';
+import 'package:starsync/src/session/media_art.dart';
 
 import 'schedule_fake_server.dart';
 
@@ -45,7 +45,7 @@ void main() {
         cacheDir: () async => cache,
         delay: (d) async => delays.add(d),
         now: () => now,
-        userAgent: 'watch-together/test',
+        userAgent: 'Starsync/test',
       );
 
   setUp(() async {
@@ -73,7 +73,7 @@ void main() {
     expect(server.seen, hasLength(2));
     final first = jsonDecode(server.seen.first.body) as Map;
     expect(first['variables'], {'from': from.millisecondsSinceEpoch ~/ 1000 - 1, 'to': to.millisecondsSinceEpoch ~/ 1000, 'page': 1});
-    expect(server.seen.first.headers.value(HttpHeaders.userAgentHeader), 'watch-together/test');
+    expect(server.seen.first.headers.value(HttpHeaders.userAgentHeader), 'Starsync/test');
     expect(s.airings.map((a) => a.anilistId), [1, 4]);
     final a = s.airings.first;
     expect(a.title, 'Show');

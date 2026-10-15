@@ -55,11 +55,11 @@ PROTO="$(sed -n 's/.*protoVersion = \([0-9]*\).*/\1/p' "$ROOT/packages/core/lib/
 if [[ -n "$LATEST" && "$LATEST" != "v$VER" ]]; then
   NOTES="$(git -C "$ROOT" log -n 20 "$LATEST..HEAD" --format='- %s')"
 else
-  NOTES="Watch together $VER."
+  NOTES="Starsync $VER."
 fi
 export MANIFEST_FILE="$ROOT/updates/manifest.json" MANIFEST_VER="$VER" \
   MANIFEST_PROTO="$PROTO" MANIFEST_NOTES="$NOTES" \
-  MANIFEST_BASE="$SERVER/$REPO/releases/download/v$VER/watch-together-$VER"
+  MANIFEST_BASE="$SERVER/$REPO/releases/download/v$VER/starsync-$VER"
 python3 - <<'EOF'
 import json, os
 path = os.environ['MANIFEST_FILE']

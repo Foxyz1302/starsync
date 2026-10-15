@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:media_kit/media_kit.dart';
-import 'package:watch_together/src/files/thumbnails.dart';
+import 'package:starsync/src/files/thumbnails.dart';
 
 // Real libmpv: frames grabbed with vo=null + screenshot-to-file. The test
 // media comes from ffmpeg (this machine only; the app never needs it).

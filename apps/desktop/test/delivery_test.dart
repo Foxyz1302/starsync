@@ -3,8 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/session/delivery.dart';
-import 'package:watch_together/src/shell/delivery_line.dart';
+import 'package:starsync/src/session/delivery.dart';
+import 'package:starsync/src/shell/delivery_line.dart';
 
 MemberView _m(String id, String name, {double buffered = 30, bool host = false, int rate = 0}) =>
     MemberView(id: id, name: name, ready: true, inSet: true, buffered: buffered, stale: false, host: host, rate: rate);

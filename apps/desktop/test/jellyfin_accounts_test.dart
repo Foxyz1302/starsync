@@ -4,10 +4,10 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:watch_together/src/jellyfin/accounts.dart';
-import 'package:watch_together/src/jellyfin/format.dart';
-import 'package:watch_together/src/jellyfin/sign_in.dart';
-import 'package:watch_together/src/screens/home/media_picker.dart';
+import 'package:starsync/src/jellyfin/accounts.dart';
+import 'package:starsync/src/jellyfin/format.dart';
+import 'package:starsync/src/jellyfin/sign_in.dart';
+import 'package:starsync/src/screens/home/media_picker.dart';
 
 /// Captured Jellyfin 10.11 answers shared with packages/core's client tests.
 String jellyfinFixture(String name) =>

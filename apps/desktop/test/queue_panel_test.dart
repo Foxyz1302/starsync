@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:watch_together/src/queue/queue_ui.dart';
-import 'package:watch_together/src/session/session_coordinator.dart';
-import 'package:watch_together/src/shell/library_link.dart' show LinkPreview;
-import 'package:watch_together/src/widgets/text_focus.dart';
+import 'package:starsync/src/queue/queue_ui.dart';
+import 'package:starsync/src/session/session_coordinator.dart';
+import 'package:starsync/src/shell/library_link.dart' show LinkPreview;
+import 'package:starsync/src/widgets/text_focus.dart';
 
 void main() {
   testWidgets('Up next popover: holds the keys, Ctrl+V adds with a preview row, + Add link opens a field',

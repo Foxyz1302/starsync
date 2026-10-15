@@ -9,8 +9,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart' show FeedMessage;
-import 'package:watch_together/src/session/notifier.dart';
-import 'package:watch_together/src/sfx/sfx.dart';
+import 'package:starsync/src/session/notifier.dart';
+import 'package:starsync/src/sfx/sfx.dart';
 
 final _at = DateTime.utc(2026, 1, 1);
 

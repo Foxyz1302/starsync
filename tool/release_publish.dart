@@ -45,7 +45,7 @@ Future<void> main(List<String> args) async {
   final prev = _git(root, ['describe', '--tags', '--abbrev=0', '$tag^'],
       allowFail: true);
   final notes = prev.isEmpty
-      ? 'Watch together $ver.'
+      ? 'Starsync $ver.'
       : _git(root, [
           'log',
           '$prev..$tag',
@@ -63,7 +63,7 @@ Future<void> main(List<String> args) async {
       rel = await c.post('$api/releases', {
         'tag_name': tag,
         'name': tag,
-        'body': 'Watch together $ver\n\n$notes',
+        'body': 'Starsync $ver\n\n$notes',
         'draft': false,
         'prerelease': false,
       });

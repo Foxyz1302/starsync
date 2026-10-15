@@ -9,11 +9,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
-import 'package:watch_together/src/jellyfin/accounts.dart';
-import 'package:watch_together/src/jellyfin/track_prefs.dart';
-import 'package:watch_together/src/playback/yt_dlp_app.dart';
-import 'package:watch_together/src/screens/home/picked_media.dart';
-import 'package:watch_together/src/session/session_coordinator.dart';
+import 'package:starsync/src/jellyfin/accounts.dart';
+import 'package:starsync/src/jellyfin/track_prefs.dart';
+import 'package:starsync/src/playback/yt_dlp_app.dart';
+import 'package:starsync/src/screens/home/picked_media.dart';
+import 'package:starsync/src/session/session_coordinator.dart';
 
 // The relay with real coordinators, real mpv and a dedicated server that
 // has no file and no Jellyfin login of its own (the VPS setup): a guest's

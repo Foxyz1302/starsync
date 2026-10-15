@@ -42,7 +42,7 @@ A five-minute tour. Details: [ARCHITECTURE.md](ARCHITECTURE.md), wire format:
 
 - **Host from the app**: the app you click Host in also runs the server.
   Simplest. The server lives as long as that app.
-- **Dedicated server**: `watch-together-server`, a separate program in the
+- **Dedicated server**: `starsync-server`, a separate program in the
   release tarball, for an always-on box. See the README.
 
 Friends join either way with Join a friend in the strip at the top of the

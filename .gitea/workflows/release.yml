@@ -38,7 +38,7 @@ jobs:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           VER="${GITHUB_REF_NAME#v}"
-          dart tool/release_publish.dart "$GITHUB_REF_NAME" "dist/watch-together-$VER-linux-x64.tar.gz"
+          dart tool/release_publish.dart "$GITHUB_REF_NAME" "dist/starsync-$VER-linux-x64.tar.gz"
 
   windows:
     # yuuka-windows: host-mode runner (no containers), runs as SYSTEM, has
@@ -73,5 +73,5 @@ jobs:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           $Ver = $env:GITHUB_REF_NAME.TrimStart('v')
-          dart tool/release_publish.dart $env:GITHUB_REF_NAME "dist/watch-together-$Ver-windows-x64.zip"
+          dart tool/release_publish.dart $env:GITHUB_REF_NAME "dist/starsync-$Ver-windows-x64.zip"
           if ($LASTEXITCODE) { exit 1 }

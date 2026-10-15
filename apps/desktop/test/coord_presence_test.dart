@@ -8,10 +8,10 @@ import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
 import 'package:hive_ce/hive.dart';
-import 'package:watch_together/src/session/session_coordinator.dart';
-import 'package:watch_together/src/sfx/sfx.dart';
-import 'package:watch_together/src/state/session_state.dart';
-import 'package:watch_together/src/sync/sync_client.dart';
+import 'package:starsync/src/session/session_coordinator.dart';
+import 'package:starsync/src/sfx/sfx.dart';
+import 'package:starsync/src/state/session_state.dart';
+import 'package:starsync/src/sync/sync_client.dart';
 
 Future<void> _poll(
   FutureOr<bool> Function() cond,

@@ -158,7 +158,7 @@ class AniListClient {
         _cacheDir = cacheDir ?? _defaultCacheDir,
         _delay = delay ?? Future<void>.delayed,
         _now = now ?? DateTime.now,
-        userAgent = userAgent ?? 'watch-together/$appVersion';
+        userAgent = userAgent ?? 'Starsync/$appVersion';
 
   final Uri url;
   final Duration memoryTtl;

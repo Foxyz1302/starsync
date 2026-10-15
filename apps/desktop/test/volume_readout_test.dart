@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart' show VideoState;
-import 'package:watch_together/src/controls/model/controls_prefs.dart';
-import 'package:watch_together/src/controls/frame.dart';
-import 'package:watch_together/src/shell/session_player.dart';
-import 'package:watch_together/src/state/session_state.dart';
-import 'package:watch_together/src/state/settings.dart';
+import 'package:starsync/src/controls/model/controls_prefs.dart';
+import 'package:starsync/src/controls/frame.dart';
+import 'package:starsync/src/shell/session_player.dart';
+import 'package:starsync/src/state/session_state.dart';
+import 'package:starsync/src/state/settings.dart';
 
 // The wheel anywhere on the full player flashes the volume readout, in
 // both skins, windowed and fullscreen, with the controls up or hidden.
