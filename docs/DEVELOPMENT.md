@@ -6,7 +6,10 @@ Layout and rules: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Needs the Flutter SDK (beta channel, Dart 3.13+) and, for the Linux desktop
 build, the usual GTK toolchain (clang, cmake, ninja, pkg-config, libgtk-3-dev).
-mpv libraries come from `media_kit_libs_video`. `flutter_soloud` (the app's
+mpv libraries come from `media_kit_libs_video`. `media_kit_video` is the patched copy in
+`third_party/media_kit_video` (see its `starsync/README.md`); test video
+output changes under X11 (`GDK_BACKEND=x11`, ideally a real X11 session)
+and Wayland. `flutter_soloud` (the app's
 sounds) compiles SoLoud and miniaudio from source in its build hook with
 that C++ toolchain (MSVC on Windows); it needs no audio dev headers (miniaudio
 loads ALSA / PulseAudio / JACK at run time) and, with `no_xiph_libs` set in

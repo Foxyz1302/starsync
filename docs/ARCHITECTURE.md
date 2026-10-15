@@ -12,6 +12,7 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 | `apps/desktop` | Flutter app: UI, `AppGraph` (composition root), `SyncClient`, `Connection`, `SessionCoordinator`, `Navigation`, `YourServer` (`ServerIsolate`), `MediaPipeline` (opening media), `PlaybackController` (the session player's marks and commands), the player host (`PlayerHost`, `MediaKitHost`: the only media_kit user besides the `Video` widget glue), update UI (`UpdateController`) | ships with `starsync-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
 | `deploy` | systemd unit for the dedicated server | |
+| `third_party/media_kit_video` | upstream media_kit_video 2.0.1 with Starsync's patches (`starsync/README.md`: Flutter ≥ 3.38 EGL display on the platform thread, the X11 GLX step-aside) | vendored; re-apply patches on update |
 
 Guard: `packages/core/test/flutter_free_test.dart` fails if anything under
 `core/lib` imports Flutter, `dart:ui` or `signals_flutter`; CI runs
