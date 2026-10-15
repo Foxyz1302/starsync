@@ -180,6 +180,17 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
 
 ## Backlog
 
+0. **media_kit fork evaluation** (after the restructure): upstream
+   media-kit releases stalled at media_kit_video 2.0.1 (Dec 2025) though
+   main still gets fixes; `Predidit/media-kit` is active (138 ahead, 146
+   behind upstream) with native D3D11 on Windows (no ANGLE: may fix P30
+   and the dxva2-egl error), a bundled libmpv on Linux, triple-buffered
+   Linux rendering, patched FFmpeg. Check: Windows shaders, whether its
+   libmpv keeps Lua/ytdl_hook (link mode "everyone fetches it"), offline
+   CI builds (it downloads binaries in a build hook), and the upstream
+   fixes it lacks. Until then we vendor upstream 2.0.1 with the X11/EGL
+   patch in `third_party/media_kit_video`.
+
 1. **Auto-skip OP/ED** (undecided): who decides and how (shared for the
    server, personal, per show) is open. Constraint: a skip is a seek and
    seeks are shared, and only real ranges (segments, OP/ED chapters) should
