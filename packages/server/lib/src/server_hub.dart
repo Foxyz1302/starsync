@@ -487,6 +487,24 @@ class ServerHub {
     changed();
   }
 
+  /// The hosting app stopped sharing: every member but the host leaves
+  /// now (feed `leave`, reason `closed`), its socket closed with
+  /// [CloseCodes.closed] so its app does not reconnect. Returns how many
+  /// left.
+  int closeGuests() {
+    final guests = [
+      for (final m in engine.members.values)
+        if (!m.host) m.token,
+    ];
+    for (final token in guests) {
+      final ws = sockets.remove(token);
+      if (ws != null) unawaited(closeWith(ws, CloseCodes.closed, 'the server stopped sharing'));
+      engine.applyLeave(token, reason: 'closed');
+    }
+    if (guests.isNotEmpty) changed();
+    return guests.length;
+  }
+
   /// `bye`: [token]'s member leaves now.
   void bye(String token) {
     engine.applyLeave(token, reason: 'bye');
@@ -953,7 +971,9 @@ void mountSyncRoute(
         return;
       }
       final session = hub.session;
-      if (session.secret.isNotEmpty && hello.secret != session.secret) {
+      // The hosting app's own client (its host key) needs no password: the
+      // password may change while it is connected ([SyncServer.share]).
+      if (session.secret.isNotEmpty && hello.secret != session.secret && !hub.isHostKey(hello.hostKey)) {
         await refuse(const ErrorFrame(code: ErrCode.secret, message: 'wrong secret', forType: 'hello'),
             CloseCodes.secret, '${cleanMemberName(hello.user.name)}: wrong secret');
         return;

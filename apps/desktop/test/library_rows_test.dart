@@ -226,7 +226,7 @@ void main() {
       final refused = await previewLink('https://cdn.example/b.mp4',
           probe: (url) async => LinkProbe.page(Uri.parse(url), ytDlpError: 'odd', status: 403));
       expect((refused!.title, refused.problem), ('b.mp4', 'Not allowed (403)'));
-      expect(await previewLink('not a link'), isNull);
+      expect(await previewLink('not a link', probe: (url) async => throw StateError('no probe')), isNull);
     });
 
     test('ago text', () {

@@ -14,7 +14,11 @@ import 'package:starsync/src/session/now_playing.dart';
 import 'package:starsync/src/shell/now_playing_title.dart';
 import 'package:starsync/src/shell/session_player.dart';
 import 'package:starsync/src/shell/start_banner.dart';
-import 'package:starsync/src/state/session_state.dart';
+
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
 
 // The one computed status (each input → text and level), the player's
 // title block, start card and status pill (never a media_kit `Video`).
@@ -78,7 +82,7 @@ StatusLine? line(StateBroadcast? state, {MemberView? self, ConnState conn = cons
     st(state, self: self, conn: conn, playerError: playerError).line;
 
 void main() {
-  final coord = SessionState.instance.coordinator;
+  final coord = _graph.coordinator;
 
   tearDown(() {
     debugArtBytes = null;
@@ -265,7 +269,7 @@ void main() {
     const now = NowPlaying(title: 'Frieren', episode: 'S1 E4 · The Land Where Souls Rest', posterHash: 'p');
 
     testWidgets('title, episode and a placeholder cover without art', (tester) async {
-      await tester.pumpWidget(host(const NowPlayingBlock(now: now)));
+      await tester.pumpWidget(scoped(_graph, host(const NowPlayingBlock(now: now))));
       expect(find.text('Frieren'), findsOneWidget);
       expect(find.text('S1 E4 · The Land Where Souls Rest'), findsOneWidget);
       expect(find.byIcon(Icons.movie_outlined), findsOneWidget);
@@ -276,16 +280,16 @@ void main() {
 
     testWidgets('the cover image once its bytes are here', (tester) async {
       debugArtBytes = (hash) => hash == 'p' ? png : null;
-      await tester.pumpWidget(host(const NowPlayingBlock(now: now)));
+      await tester.pumpWidget(scoped(_graph, host(const NowPlayingBlock(now: now))));
       final image = tester.widget<Image>(find.byType(Image));
       expect((image.image as MemoryImage).bytes, png);
       expect(image.gaplessPlayback, isTrue);
     });
 
     testWidgets('no cover, no episode: just the title; long titles ellipsize', (tester) async {
-      await tester.pumpWidget(host(
+      await tester.pumpWidget(scoped(_graph, host(
           NowPlayingBlock(now: NowPlaying(title: 'A very long title ' * 10), cover: false, compact: true),
-          width: 200));
+          width: 200)));
       expect(find.byType(ArtCover), findsNothing);
       expect(find.byKey(const ValueKey('now-playing-episode')), findsNothing);
       expect(tester.takeException(), isNull);
@@ -293,7 +297,7 @@ void main() {
   });
 
   testWidgets('start banner: up before playback, fades on play, never back for that media', (tester) async {
-    await tester.pumpWidget(const MaterialApp(home: SizedBox(width: 1280, height: 720, child: StartBanner())));
+    await tester.pumpWidget(scoped(_graph, const MaterialApp(home: SizedBox(width: 1280, height: 720, child: StartBanner()))));
     final card = find.byKey(const ValueKey('start-card-title'));
     expect(card, findsNothing);
     coord.serverState.value = held([mv('a', 'Alex')]);
@@ -332,7 +336,7 @@ void main() {
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
-      await tester.pumpWidget(MaterialApp(theme: ThemeData.dark(), home: Scaffold(body: child)));
+      await tester.pumpWidget(scoped(_graph, MaterialApp(theme: ThemeData.dark(), home: Scaffold(body: child))));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
     }

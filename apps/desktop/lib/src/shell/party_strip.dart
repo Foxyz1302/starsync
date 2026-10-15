@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
@@ -7,7 +5,10 @@ import 'package:sync_relay_core/core.dart';
 import '../screens/home/ui.dart' show appName, displayVersion, shortVersion;
 import '../session/delivery.dart';
 import '../session/party.dart';
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
+import '../session/app_events.dart' show ActionFailed;
+import '../session/invite.dart';
+import '../session/navigation.dart' show Place;
 import '../widgets/app_keys.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/copy_open.dart';
@@ -36,9 +37,11 @@ const stripAvatarSize = 42.0;
 const stripCompactBelow = 1100.0;
 
 /// The 60 px strip over everything: your avatar (profile), the tabs, and
-/// the party: offline Join a friend / Host, solo a "Solo" chip, Invite
-/// friends and Stop, online the avatars (members card), server and
-/// readiness, chat and Leave. Empty space drags the window.
+/// the party. Alone on your own server it is a plain player's: Join a
+/// friend and Invite (a "Sharing" chip while your server is open to
+/// friends); with others there the avatars (members card), server and
+/// readiness, chat, and Invite (yours) or Leave (a friend's). Empty space
+/// drags the window.
 class PartyStrip extends StatelessWidget {
   final ShellTab tab;
   final ValueChanged<ShellTab> onTab;
@@ -46,11 +49,11 @@ class PartyStrip extends StatelessWidget {
   final int unread;
   final VoidCallback onChat;
   final VoidCallback onJoin;
-  final VoidCallback onHost;
   final VoidCallback onLeave;
   final VoidCallback onProfile;
-  /// Solo: host from here, keeping what plays.
-  final VoidCallback? onInvite;
+  /// Opens your server to friends (if it is not yet) and copies the
+  /// invite.
+  final VoidCallback onInvite;
 
   /// Online with something up but the player closed: brings it back.
   final VoidCallback? onShowPlayer;
@@ -65,10 +68,9 @@ class PartyStrip extends StatelessWidget {
     required this.unread,
     required this.onChat,
     required this.onJoin,
-    required this.onHost,
     required this.onLeave,
     required this.onProfile,
-    this.onInvite,
+    required this.onInvite,
     this.onShowPlayer,
     this.windowControls = true,
   });
@@ -79,11 +81,18 @@ class PartyStrip extends StatelessWidget {
     final compact = MediaQuery.sizeOf(context).width < stripCompactBelow;
     final row = SignalBuilder(
       builder: (context) {
-        final session = SessionState.instance;
-        final coord = session.coordinator;
-        final online = session.route.value == AppRoute.session;
-        final solo = online && (session.solo.value || session.switching.value);
-        final self = online ? coord.selfMember.value : null;
+        final graph = AppScope.of(context);
+        final coord = graph.coordinator;
+        final nav = graph.navigation;
+        final online = nav.online.value;
+        final home = nav.home.value;
+        final friend = nav.place.value == Place.friend;
+        // Others there (or a friend's server): the party; else a plain
+        // player (D9).
+        final social = friend || (online && !coord.alone.value);
+        final shared = graph.yourServer.shared.value;
+        final canInvite = graph.yourServer.port.value != null && !graph.yourServer.busy.value;
+        final self = social ? coord.selfMember.value : null;
         return Row(
           children: [
             const SizedBox(width: 16),
@@ -97,11 +106,11 @@ class PartyStrip extends StatelessWidget {
                 child: StatusAvatar(
                   info: selfAvatarInfo(
                     ready: self?.ready ?? false,
-                    host: online && !solo && coord.hostFile != null,
+                    host: social && home,
                     error: online ? coord.playerError.value : '',
                   ),
                   size: stripAvatarSize,
-                  ring: online,
+                  ring: social,
                 ),
               ),
             ),
@@ -140,29 +149,7 @@ class PartyStrip extends StatelessWidget {
                 onPressed: onShowPlayer,
                 icon: const Icon(Icons.smart_display_outlined, size: 20),
               ),
-            if (solo) ...[
-              _SoloChip(compact: compact, busy: session.switching.value),
-              const SizedBox(width: 10),
-              if (compact)
-                FilledButton(
-                  key: const ValueKey('strip-invite'),
-                  onPressed: session.switching.value ? null : onInvite,
-                  child: const Text('Invite'),
-                )
-              else
-                FilledButton.icon(
-                  key: const ValueKey('strip-invite'),
-                  onPressed: session.switching.value ? null : onInvite,
-                  icon: const Icon(Icons.group_add_outlined, size: 18),
-                  label: const Text('Invite friends'),
-                ),
-              const SizedBox(width: 8),
-              OutlinedButton(
-                key: const ValueKey('strip-leave'),
-                onPressed: session.switching.value ? null : onLeave,
-                child: const Text('Stop'),
-              ),
-            ] else if (online) ...[
+            if (social) ...[
               PartyWatch(
                 builder: (context) => AvatarStack(
                   key: const ValueKey('party-avatars'),
@@ -196,41 +183,30 @@ class PartyStrip extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 4),
-              OutlinedButton(
-                key: const ValueKey('strip-leave'),
-                onPressed: onLeave,
-                child: const Text('Leave'),
-              ),
+              if (friend)
+                OutlinedButton(
+                  key: const ValueKey('strip-leave'),
+                  onPressed: onLeave,
+                  child: const Text('Leave'),
+                )
+              else
+                _InviteButton(compact: compact, onInvite: canInvite ? onInvite : null),
             ] else ...[
-              if (!compact) ...[
-                Container(
-                  width: 7,
-                  height: 7,
-                  decoration: BoxDecoration(color: scheme.outline, shape: BoxShape.circle),
-                ),
-                const SizedBox(width: 6),
-                Text('Offline', style: TextStyle(color: scheme.onSurfaceVariant)),
-                const SizedBox(width: 12),
-              ],
-              if (compact) ...[
-                FilledButton(key: const ValueKey('strip-join'), onPressed: onJoin, child: const Text('Join')),
+              if (shared != null) ...[
+                _SharingChip(compact: compact, port: shared.port),
                 const SizedBox(width: 8),
-                FilledButton.tonal(key: const ValueKey('strip-host'), onPressed: onHost, child: const Text('Host')),
-              ] else ...[
-                FilledButton.icon(
+              ],
+              if (compact)
+                FilledButton.tonal(key: const ValueKey('strip-join'), onPressed: onJoin, child: const Text('Join'))
+              else
+                FilledButton.tonalIcon(
                   key: const ValueKey('strip-join'),
                   onPressed: onJoin,
                   icon: const Icon(Icons.login_rounded, size: 18),
                   label: const Text('Join a friend'),
                 ),
-                const SizedBox(width: 8),
-                FilledButton.tonalIcon(
-                  key: const ValueKey('strip-host'),
-                  onPressed: onHost,
-                  icon: const Icon(Icons.podcasts_rounded, size: 18),
-                  label: const Text('Host'),
-                ),
-              ],
+              const SizedBox(width: 8),
+              _InviteButton(compact: compact, onInvite: canInvite ? onInvite : null),
             ],
             const SizedBox(width: 8),
             if (windowControls) ...[
@@ -282,14 +258,15 @@ class _ServerLabel extends StatelessWidget {
     builder: (context) {
       // "connecting…", "reconnecting…", "ready 2/3" (the ready counter
       // counts who the presence policy counts), from the one status.
-      final line = SessionState.instance.coordinator.status.value.party;
+      final graph = AppScope.of(context);
+      final line = graph.coordinator.status.value.party;
       return Column(
         key: const ValueKey('server-label'),
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            serverName(),
+            serverName(graph),
             style: const TextStyle(fontWeight: FontWeight.w600, height: 1.1),
           ),
           Text(
@@ -306,50 +283,74 @@ class _ServerLabel extends StatelessWidget {
   );
 }
 
-/// "Solo" alone, "Your server" when hosting, else the joined server's
-/// name (its `--name`), or its address while unknown.
-String serverName() {
-  final session = SessionState.instance;
-  if (session.solo.value) return 'Solo';
-  if (session.coordinator.hostFile != null) return 'Your server';
-  final label = session.serverLabel.value;
-  return label.isNotEmpty ? label : session.lastForm.host;
+/// "Your server" at home, else the joined server's name (its `--name`),
+/// or its address while unknown.
+String serverName(AppGraph graph) {
+  final nav = graph.navigation;
+  if (nav.home.value) return 'Your server';
+  final label = nav.serverLabel.value;
+  return label.isNotEmpty ? label : nav.address.value;
 }
 
-/// Solo: just you, on your own; a spinner while it becomes a server.
-class _SoloChip extends StatelessWidget {
+/// Invite: opens your server to friends (if it is not yet) and copies
+/// the invite.
+class _InviteButton extends StatelessWidget {
   final bool compact;
-  final bool busy;
-  const _SoloChip({required this.compact, required this.busy});
+  final VoidCallback? onInvite;
+  const _InviteButton({required this.compact, required this.onInvite});
+
+  @override
+  Widget build(BuildContext context) {
+    const tip = 'Copy an invite friends can join with (opens your server to them)';
+    if (compact) {
+      return Tooltip(
+        message: tip,
+        child: FilledButton(key: const ValueKey('strip-invite'), onPressed: onInvite, child: const Text('Invite')),
+      );
+    }
+    return Tooltip(
+      message: tip,
+      child: FilledButton.icon(
+        key: const ValueKey('strip-invite'),
+        onPressed: onInvite,
+        icon: const Icon(Icons.group_add_outlined, size: 18),
+        label: const Text('Invite'),
+      ),
+    );
+  }
+}
+
+/// Your server is open to friends and nobody came yet: the port; a click
+/// opens the members card (the invite, Stop sharing).
+class _SharingChip extends StatelessWidget {
+  final bool compact;
+  final int port;
+  const _SharingChip({required this.compact, required this.port});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Tooltip(
-      message: busy
-          ? 'Starting your server…'
-          : 'Watching on your own. Nobody can join until you invite friends.',
-      child: Container(
-        key: const ValueKey('solo-chip'),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (busy)
-              const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2))
-            else
-              Icon(Icons.person_outline_rounded, size: 16, color: scheme.primary),
-            const SizedBox(width: 6),
-            Text(busy ? 'Inviting…' : 'Solo', style: const TextStyle(fontWeight: FontWeight.w600)),
-            if (!compact && !busy) ...[
+      message: 'Friends can join with your invite. Click for the invite or to stop sharing.',
+      child: InkWell(
+        key: const ValueKey('sharing-chip'),
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => showMembersCard(context),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(20)),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.podcasts_rounded, size: 16, color: scheme.primary),
               const SizedBox(width: 6),
-              Text('only you', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+              const Text('Sharing', style: TextStyle(fontWeight: FontWeight.w600)),
+              if (!compact) ...[
+                const SizedBox(width: 6),
+                Text('port $port', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -425,50 +426,16 @@ class StripTab extends StatelessWidget {
 }
 
 /// Who is in the server, from the avatars: status, host / relay pills,
-/// per member force ready, nudge and sit out, and the address to invite
-/// friends.
+/// per member force ready, nudge and sit out, and the invite (yours) or
+/// the address (a friend's).
 Future<void> showMembersCard(BuildContext context) => showPopover<void>(
   context,
   at: const Alignment(0.7, -0.84),
   child: const MembersCard(),
 );
 
-/// "ip:port" for each of [addresses] friends could dial: IPv4, neither
-/// loopback nor link-local, private (LAN) ranges first, no repeats.
-List<String> inviteAddresses(Iterable<InternetAddress> addresses, String port) {
-  bool private(List<int> b) =>
-      b[0] == 10 || (b[0] == 192 && b[1] == 168) || (b[0] == 172 && b[1] >= 16 && b[1] < 32);
-  final usable = [
-    for (final a in addresses)
-      if (a.type == InternetAddressType.IPv4 &&
-          !a.isLoopback &&
-          !a.isLinkLocal &&
-          !(a.rawAddress[0] == 169 && a.rawAddress[1] == 254))
-        a,
-  ];
-  final ordered = [
-    ...usable.where((a) => private(a.rawAddress)),
-    ...usable.where((a) => !private(a.rawAddress)),
-  ];
-  return {for (final a in ordered) '${a.address}:$port'}.toList();
-}
-
-/// This machine's [inviteAddresses] (empty when the interfaces can't be
-/// listed).
-Future<List<String>> lanInviteAddresses(String port) async {
-  try {
-    final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
-    return inviteAddresses([for (final i in interfaces) ...i.addresses], port);
-  } catch (e) {
-    debugPrint('list network interfaces failed: $e');
-    return const [];
-  }
-}
-
 class MembersCard extends StatelessWidget {
-  /// This machine's invite addresses for a port (tests pass fixed ones).
-  final Future<List<String>> Function(String port) lanAddresses;
-  const MembersCard({super.key, this.lanAddresses = lanInviteAddresses});
+  const MembersCard({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -481,15 +448,14 @@ class MembersCard extends StatelessWidget {
         width: 340,
         child: PartyWatch(
           builder: (context) {
-            final session = SessionState.instance;
-            final coord = session.coordinator;
+            final graph = AppScope.of(context);
+            final coord = graph.coordinator;
+            final nav = graph.navigation;
             final r = coord.serverState.value;
-            final hosting = coord.hostFile != null;
-            final address = hosting
-                ? null
-                : '${session.lastForm.host}:${session.lastForm.port}';
+            final home = nav.home.value;
+            final address = home ? null : nav.address.value;
             final delivery = coord.status.value.delivery;
-            final server = session.serverVersion.value;
+            final server = nav.serverVersion.value;
             return Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -500,7 +466,7 @@ class MembersCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        ['In the server', ?address].join(' · '),
+                        home ? 'Your server' : ['In the server', ?address].join(' · '),
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                       if (server.isNotEmpty)
@@ -531,23 +497,20 @@ class MembersCard extends StatelessWidget {
                     ),
                   ),
                 const Divider(),
-                if (address != null)
+                if (home)
+                  const YourInvite()
+                else if (address != null && address.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
                         key: const ValueKey('copy-invite'),
-                        onPressed: () => copyToClipboard(address, done: 'Invite address copied'),
+                        onPressed: () => copyToClipboard(context, address, done: 'Invite address copied'),
                         icon: const Icon(Icons.copy, size: 16),
                         label: const Text('Copy invite address'),
                       ),
                     ),
-                  )
-                else
-                  _HostInvite(
-                    port: session.lastForm.hostPort,
-                    lanAddresses: lanAddresses,
                   ),
               ],
             );
@@ -571,7 +534,7 @@ class _MemberTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final coord = SessionState.instance.coordinator;
+    final coord = AppScope.of(context).coordinator;
     final m = member;
     final since = m.goneSince;
     final status = m.presence == Presence.gone
@@ -660,76 +623,90 @@ class VersionText extends StatelessWidget {
 bool versionDiffers(String version, {String own = appVersion}) =>
     version.isNotEmpty && own != '0.0.0-dev' && version != '0.0.0-dev' && version != own;
 
-/// Hosting: the addresses friends on this network can join, the first
-/// one behind "Copy invite address", and what friends elsewhere need.
-class _HostInvite extends StatefulWidget {
-  final String port;
-  final Future<List<String>> Function(String port) lanAddresses;
-  const _HostInvite({required this.port, required this.lanAddresses});
-
-  @override
-  State<_HostInvite> createState() => _HostInviteState();
-}
-
-class _HostInviteState extends State<_HostInvite> {
-  late final Future<List<String>> _addresses = widget.lanAddresses(widget.port);
+/// Your server in the members card: shared, the invite's address
+/// (Copy invite), a hint for friends outside the network and Stop
+/// sharing; not shared, Invite (opens it and copies the invite).
+class YourInvite extends StatelessWidget {
+  const YourInvite({super.key});
 
   @override
   Widget build(BuildContext context) {
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
-    return FutureBuilder<List<String>>(
-      future: _addresses,
-      builder: (context, snap) {
-        final list = snap.data ?? const <String>[];
-        void copy(String a) => copyToClipboard(a, done: 'Invite address copied');
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          child: Column(
-            key: const ValueKey('host-invite'),
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+    final graph = AppScope.of(context);
+    final yours = graph.yourServer;
+    return SignalBuilder(builder: (context) {
+      final invite = yours.shared.value;
+      final busy = yours.busy.value || yours.port.value == null;
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: Column(
+          key: const ValueKey('your-invite'),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (invite == null) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+                child: Text('Only you can reach it. Invite opens it to friends; nothing you watch stops.',
+                    style: TextStyle(color: muted, fontSize: 12)),
+              ),
               TextButton.icon(
                 key: const ValueKey('copy-invite'),
-                onPressed: list.isEmpty ? null : () => copy(list.first),
-                icon: const Icon(Icons.copy, size: 16),
-                label: const Text('Copy invite address'),
+                onPressed: busy ? null : () => inviteFriends(context),
+                icon: const Icon(Icons.group_add_outlined, size: 16),
+                label: const Text('Invite'),
               ),
-              if (snap.connectionState != ConnectionState.done)
-                const SizedBox.shrink()
-              else if (list.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text('No network address found', style: TextStyle(color: muted)),
-                )
-              else
-                for (final a in list)
-                  InkWell(
-                    key: ValueKey('invite-$a'),
-                    borderRadius: BorderRadius.circular(8),
-                    onTap: () => copy(a),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      child: Row(
-                        children: [
-                          Expanded(child: Text(a, style: const TextStyle(fontFamily: 'monospace'))),
-                          Icon(Icons.copy, size: 14, color: muted),
-                        ],
-                      ),
-                    ),
-                  ),
+            ] else ...[
               Padding(
-                padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(invite.address,
+                    key: const ValueKey('invite-address'), style: const TextStyle(fontFamily: 'monospace')),
+              ),
+              Wrap(
+                spacing: 4,
+                children: [
+                  TextButton.icon(
+                    key: const ValueKey('copy-invite'),
+                    onPressed: () => copyToClipboard(context, invite.text, done: 'Invite copied'),
+                    icon: const Icon(Icons.copy, size: 16),
+                    label: const Text('Copy invite'),
+                  ),
+                  TextButton(
+                    key: const ValueKey('stop-sharing'),
+                    onPressed: busy ? null : () => yours.stopSharing(),
+                    child: const Text('Stop sharing'),
+                  ),
+                ],
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
                 child: Text(
-                  'Works for friends on your network. Friends elsewhere need port '
-                  '${widget.port} forwarded on your router, or a server they can '
-                  'all reach (like a VPS).',
+                  'Works for friends on your network. Friends elsewhere need port ${invite.port} '
+                  'forwarded on your router, or a server they can all reach (like a VPS). '
+                  'Stop sharing sends everyone else out; you and Up next stay.',
                   style: TextStyle(color: muted, fontSize: 12),
                 ),
               ),
             ],
-          ),
-        );
-      },
-    );
+          ],
+        ),
+      );
+    });
   }
+}
+
+/// Invite: opens your server to friends if it is not yet and copies the
+/// invite ("Invite copied"); a port that can't be opened is a notice.
+Future<void> inviteFriends(BuildContext context) async {
+  final graph = AppScope.of(context);
+  final Invite invite;
+  try {
+    invite = await graph.yourServer.invite();
+  } catch (e) {
+    final port = graph.forms.form.hostPort;
+    graph.notifier.notify(ActionFailed(
+        "couldn't open your server on port $port: $e — pick another port in Settings → Party & network"));
+    return;
+  }
+  if (!context.mounted) return;
+  await copyToClipboard(context, invite.text, done: 'Invite copied · ${invite.address}');
 }

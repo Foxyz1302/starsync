@@ -18,8 +18,12 @@ import 'package:starsync/src/session/identity.dart';
 import 'package:starsync/src/session/notifier.dart';
 import 'package:starsync/src/session/session_coordinator.dart';
 import 'package:starsync/src/sfx/sfx.dart';
-import 'package:starsync/src/state/session_state.dart';
 import 'package:starsync/src/sync/sync_client.dart';
+
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
 
 final _tmp = Platform.environment['WT_TEST_TMP'] ?? Directory.systemTemp.path;
 
@@ -376,22 +380,27 @@ void main() {
     }
   });
 
-  test('cancelling a host setup releases the port', timeout: const Timeout(Duration(minutes: 1)), () async {
+  test('stop sharing releases the port; stopping your server frees its own', timeout: const Timeout(Duration(minutes: 1)),
+      () async {
     Hive.init('$_tmp/hive_coord_test');
     final probe = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
     final port = probe.port;
     await probe.close();
-    final session = SessionState.instance;
+    final yours = _graph.yourServer;
+    _graph.forms.form
+      ..hostPort = '$port'
+      ..hostSecret = '';
     try {
-      final pending = session.host(ConnectParams(host: '', port: port, secret: '', name: 'host'), ConnectForm());
-      await session.cancelPending();
-      await expectLater(pending, throwsA(isA<ConnectCancelled>()));
-      expect(session.route.peek(), isNot(AppRoute.session));
+      final own = await yours.start(name: 'me');
+      expect((await yours.invite()).port, port);
+      await yours.stopSharing();
       final rebind = await ServerSocket.bind(InternetAddress.anyIPv4, port);
       await rebind.close();
+      await yours.stop();
+      final again = await ServerSocket.bind(InternetAddress.loopbackIPv4, own);
+      await again.close();
     } finally {
-      await session.coordinator.leave(silent: true);
-      await session.stopServer();
+      await yours.stop();
     }
   });
 

@@ -6,8 +6,9 @@ import 'package:sync_relay_core/core.dart' show JellyfinStreamType;
 
 import '../jellyfin/track_prefs.dart' show MpvTrack;
 import '../playback/playback_controller.dart' show PlaybackController, RenderMode;
+import '../session/session_coordinator.dart' show SessionCoordinator;
 import '../shaders/shader_presets.dart';
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import '../shell/mark_problem.dart';
 import '../shell/motion.dart';
 import '../state/settings.dart';
@@ -200,11 +201,10 @@ class ProgressLineSetting extends StatelessWidget {
 
 /// Saves a shader choice (also used on the next join) and puts it on the
 /// running player, if any; the player announces the result.
-void applyShaderChoice(ShaderPreset preset, ShaderQuality? quality) {
+void applyShaderChoice(SessionCoordinator coord, ShaderPreset preset, ShaderQuality? quality) {
   final s = AppSettings.instance;
   if (quality != null) s.setShaderQuality(quality);
   s.setShaderPreset(preset);
-  final coord = SessionState.instance.coordinator;
   coord.markInput();
   coord.playback.applyShaders(announce: true);
 }
@@ -242,7 +242,7 @@ class ShaderPresetSetting extends StatelessWidget {
                 for (final p in ShaderPreset.values)
                   if (p != ShaderPreset.custom || hasCustom || preset == p) (p, p.label),
               ],
-              onChanged: (p) => applyShaderChoice(p, null),
+              onChanged: (p) => applyShaderChoice(AppScope.of(context).coordinator, p, null),
             ),
             if (preset.isAnime4k) ...[
               const SizedBox(width: 8),
@@ -250,7 +250,7 @@ class ShaderPresetSetting extends StatelessWidget {
                 key: const ValueKey('shader-quality'),
                 value: quality,
                 items: [for (final q in ShaderQuality.values) (q, q.label)],
-                onChanged: (q) => applyShaderChoice(preset, q),
+                onChanged: (q) => applyShaderChoice(AppScope.of(context).coordinator, preset, q),
               ),
             ],
           ],
@@ -265,9 +265,8 @@ class ShaderPresetSetting extends StatelessWidget {
 
 /// Puts the hwdec setting on the running player (mpv switches decoders
 /// on the fly). `SYNC_RELAY_HWDEC` wins, as at player start.
-Future<void> applyHwdecLive() async {
+Future<void> applyHwdecLive(PlaybackController playback) async {
   if ((Platform.environment['SYNC_RELAY_HWDEC'] ?? '').isNotEmpty) return;
-  final playback = SessionState.instance.coordinator.playback;
   if (!playback.alive.peek()) return;
   try {
     final dynamic platform = playback.player.platform;
@@ -308,7 +307,7 @@ class _HwdecSettingState extends State<HwdecSetting> {
           items: const [(HwdecMode.auto, 'Auto'), (HwdecMode.off, 'Off'), (HwdecMode.custom, 'Custom')],
           onChanged: (m) {
             _s.setHwdecMode(m);
-            applyHwdecLive();
+            applyHwdecLive(AppScope.of(context).coordinator.playback);
           },
         ),
         below: mode != HwdecMode.custom
@@ -324,7 +323,7 @@ class _HwdecSettingState extends State<HwdecSetting> {
                     border: OutlineInputBorder(),
                   ),
                   onChanged: _s.setHwdecCustom,
-                  onSubmitted: (_) => applyHwdecLive(),
+                  onSubmitted: (_) => applyHwdecLive(AppScope.of(context).coordinator.playback),
                 ),
               ),
       );
@@ -342,7 +341,7 @@ class TrackSetting extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final coord = SessionState.instance.coordinator;
+    final coord = AppScope.of(context).coordinator;
     return SignalBuilder(builder: (context) {
       final list = [
         for (final t in coord.playback.tracks.value)

@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../playback/media_marks.dart' show formatClock;
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import '../sync/state_diff.dart' show serverPositionAt;
 import 'now_playing_title.dart';
 import 'start_banner.dart';
@@ -41,10 +41,10 @@ class _SitOutCardState extends State<SitOutCard> {
 
   @override
   Widget build(BuildContext context) {
-    final coord = SessionState.instance.coordinator;
+    final coord = AppScope.of(context).coordinator;
     final small = widget.compact;
     return ListenableBuilder(
-      listenable: artChanges(),
+      listenable: artChanges(context),
       builder: (context, _) => SignalBuilder(builder: (context) {
         final r = coord.serverState.value;
         final now = coord.nowPlaying.value;

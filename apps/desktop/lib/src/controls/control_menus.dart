@@ -121,7 +121,7 @@ Future<void> runControlAction(BuildContext context, PlayerControlsModel model, C
       model.changeVideo();
     case ControlAction.copyLink:
       final link = model.link();
-      if (link != null) await copyToClipboard(link, done: 'Link copied');
+      if (link != null) await copyToClipboard(context, link, done: 'Link copied');
     case ControlAction.reload:
       model.reload();
     case ControlAction.markAllReady:

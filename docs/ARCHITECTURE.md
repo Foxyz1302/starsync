@@ -9,7 +9,7 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 |---|---|---|
 | `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client, updater, watched rule (`WatchSession`); `testing.dart` (test support for all three packages, not in `core.dart`: `FlakyProxy`) | pure Dart, no Flutter |
 | `packages/server` | Relic HTTP + WebSocket server (`SyncServer`, `ServerHub`, `Session`, media endpoint, relay buffer, Jellyfin relay), the `serve()` entrypoint, `bin/server.dart` (dedicated server) | pure Dart, no Flutter |
-| `apps/desktop` | Flutter app: UI, `SyncClient`, `Connection`, `SessionCoordinator`, `PlaybackController` (media_kit/mpv), `ServerIsolate`, update UI (`UpdateController`) | ships with `starsync-server` |
+| `apps/desktop` | Flutter app: UI, `AppGraph` (composition root), `SyncClient`, `Connection`, `SessionCoordinator`, `Navigation`, `YourServer` (`ServerIsolate`), `PlaybackController` (media_kit/mpv), update UI (`UpdateController`) | ships with `starsync-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
 | `deploy` | systemd unit for the dedicated server | |
 
@@ -23,40 +23,80 @@ WebSocket (`web_socket_channel`) lives in `apps/desktop`; Relic has no client.
 
 One entrypoint: `serve(config, events:)` in `packages/server`. `config` is
 an `AppConfig.toMap()` (primitives only, so it crosses isolates). It starts a
-`SyncServer` (bound to all IPv4 interfaces) and reports on the `events` port:
-`ready` (with the port and a `stop` SendPort), `error` (start failed), and
-every log record as `log`. Sending `{'t':'stop'}` to the `stop` port closes
-all sockets and returns, and the isolate exits. `{'t':'file', 'path', 'reply'}`
-on the same port makes a local file the hosted one and answers its name and
-size (`ServerIsolate.setFile`): the host's in-session File swap then sends a
-`swap` with that name and size, which the server matches to the file.
+`SyncServer` (bound to all IPv4 interfaces, or 127.0.0.1 with an extra
+`'loopbackOnly': true` key) and reports on the `events` port: `ready`
+(with the port and a control SendPort), `error` (start failed), and every
+log record as `log`. On the control port: `{'t':'stop'}` closes all
+sockets and returns, and the isolate exits; `{'t':'file', 'path',
+'reply'}` makes a local file the hosted one and answers its name and size
+(`ServerIsolate.setFile`: a File put up here then sends a `swap` with that
+name and size, which the server matches to the file); `{'t':'share',
+'port', 'secret', 'jellyfin', 'reply'}` and `{'t':'unshare', 'reply'}`
+attach and detach the network listener (below).
 
-- **Hosting from the app**: `SessionState.host()` spawns an isolate running
-  `serve` (`ServerIsolate`), waits for `ready`, then joins it over
-  `127.0.0.1` like any other client. Its log records go to the app's log
-  as `server.<logger>` (see "Logging"). The isolate runs with `errorsAreFatal: false`: an
-  uncaught async error is logged and the server keeps going. If the isolate
-  dies anyway, the session shows "server crashed: ..." and leaves; the
-  shell says so in a dialog (during setup the host attempt fails with it).
-  Stop (leave, close, cancel during setup, a failed own join)
-  sends `stop`, waits up to 3 s for exit, then kills the isolate.
-- **Solo session** (watching alone): the same hosting path, so nothing
-  about solo is a second code path or on the wire. Putting something up
-  while offline (`AppShellState._putUp`) calls `SessionState.startSolo`:
-  a `ServerIsolate` with `loopbackOnly` (an extra `'loopbackOnly': true`
-  key next to the `AppConfig` map; `SyncServer` binds 127.0.0.1 instead
-  of every IPv4 interface), port 0 (a free one), no password, a host key;
-  the app joins it and `SessionState.solo` is set. Everything a session
-  has works (Jellyfin progress, next episode, skip pills, the player); a
-  link goes up direct (no relay mode). Invite friends opens the Host card,
-  whose submit (`SessionState.host` while solo) remembers the
-  coordinator's `lastPick` (the last `swapLink` / `swapJellyfin` /
-  `swapFile` of this connection) and position, leaves and stops the solo
-  server, hosts on the card's port and password, swaps the same pick and
-  seeks once a state shows it (`switching` is set meanwhile; the shell
-  closes the player and reopens it as it was). If hosting fails or is
-  cancelled, solo starts again with the same media. Stop leaves without
-  asking.
+- **Your server** (`session/your_server.dart`, `YourServer`): every app
+  runs one server for its whole life, started when the app starts
+  (`Navigation.start`) as a `ServerIsolate` running `serve`: port 0 (a
+  free one), loopback only, no password, a random `hostKey` per app run,
+  named "<your name>'s server", its session log in the app's logs folder
+  and its log records in the app's log as `server.<logger>` (see
+  "Logging"). Nobody else can reach it. The isolate runs with
+  `errorsAreFatal: false`: an uncaught async error is logged and the
+  server keeps going. If the isolate dies anyway, `YourServer.crash` is
+  set (the shell says so in a dialog) and, unless you are in a friend's
+  server, the navigation starts a new one and goes home to it.
+- **Listeners**: `SyncServer.share(port, secret, jellyfin)` attaches a
+  second listener on every IPv4 interface at the port from Settings →
+  Party & network (default 8080) to the running server (Relic serves the
+  same routes on both), sets the password and the Jellyfin relay login
+  (the default account's, so guests without an account watch Jellyfin
+  items through the server); `unshare` closes it. Nothing restarts for
+  either: members on the loopback listener keep their sockets, the media
+  and Up next stay. Unsharing sends everyone but the host out: each
+  leaves at once (feed `leave`, reason `closed`) and its socket closes
+  with 4016, so its app does not retry (see "Connection"); the password
+  goes back to none. A port another program holds fails the share with
+  its reason; nothing else changes.
+- **Invite** (`session/invite.dart`): `YourServer.invite()` shares the
+  server if it is not yet and returns an `Invite`: the host, the port, the
+  name, whether a password is needed (never the password), the version
+  and an `fp` field reserved for a pinned certificate (`wss://` with a
+  self-signed one, later; always null). The host is the best of
+  `inviteAddresses` over `NetworkInterface.list`: IPv4 only, no loopback,
+  link-local (169.254/16) or proxy fake-IP (198.18.0.0/15, what TUN
+  proxies like Clash hand out) address and no container or VM bridge
+  (`docker*`, `br-*`, `veth*`, `virbr*`, `vmnet*`, `vboxnet*`, `cni*`,
+  `podman*`, `lxcbr*`, `lxdbr*`, `vEthernet`, VirtualBox, VMware); 192.168
+  first, then 10/8 and 172.16/12, then a mesh VPN's 100.64/10, then any
+  other (public) address. No public-address lookup: the members card says
+  that friends elsewhere need the port forwarded or a server they can all
+  reach. `Invite.text` is what Invite copies ("Join me on Starsync:
+  192.168.1.20:8080 (ask me for the password) · Starsync 1.3.0");
+  `addressIn` reads the address back out of a pasted invite (the Join
+  card's address field). `stopSharing` unshares.
+- **Where you are** (`session/navigation.dart`, `Navigation`): `place` is
+  `none` (starting, or between two servers), `yours` or `friend`. The app
+  starts at home: your server, joined over 127.0.0.1 with the host key
+  (the `hostKey` stands in for the password, so a password set later never
+  locks this app out), `hostFile` set to `YourServer.setFile`. A join
+  first reads the friend's `/health` (the version gate, below); an
+  unreachable server stops there, still at home. Then this app leaves
+  your server (`bye`) and connects to theirs; a join that fails or is
+  cancelled goes home again. Leaving theirs (Leave), or theirs closing to
+  friends (`ConnRefused` `closed`: "The host stopped sharing their
+  server"), goes home. Your server stays up all the while: what plays
+  there and Up next wait for you, and whoever you invited stays in it.
+  A joined server's name and version (`serverLabel`, `serverVersion`)
+  come from its `/health`; yours is this app's. The Join card's recents
+  are the friends' servers that got in.
+- **Version gate**: `/health` gives `protoMin`, `protoMax` and `version`
+  (a proto 15 server only `proto`, used for both). `versionFit` against
+  this build's range: ranges that meet are fine; a server whose newest is
+  older than this app's oldest "runs Starsync 1.2.1 — they need to
+  update", one whose oldest is newer "— you need to update", and then the
+  Join card offers "Check for the update" (the updater, see "Updater").
+  Nothing is dialled for either. A server that says nothing about its
+  version is left to the hello's refusal (see "Connection").
 - **Dedicated server**: `bin/server.dart` compiled with `dart compile exe`
   and shipped next to the app as `starsync-server`. It parses flags
   (`--port`, `--secret`, `--name`, `--media`, `--advertise-host`,
@@ -65,6 +105,8 @@ size (`ServerIsolate.setFile`): the host's in-session File swap then sends a
   (`--upgrade` / `--check-update` run the [updater](#updater) instead);
   SIGINT and SIGTERM stop it. A Flutter binary cannot run without a
   display, which is why the server is its own build.
+- **App close**: after the players and the `bye` (see "Desktop UI",
+  closing), your server stops (`stop`, then killed after 3 s).
 
 `SyncServer` runs a 1 s heartbeat (`ServerHub.heartbeat`): closed-socket
 sweep, the engine's sweep (silence, joining, gone notices, grace),
@@ -72,16 +114,34 @@ relay source state, warm relay, rates, state + feed broadcast. There is
 one session, id `default`.
 
 Passwords: the default secret is empty, which means an open server (a
-warning is logged). Otherwise one shared secret, compared at hello.
+warning is logged). Otherwise one shared secret, compared at hello; your
+server's is the one from Settings, set when it is shared.
 
-Host: when hosting, the app generates a random `hostKey` per hosting, puts
-it in the server config and sends it in its own `hello`. The member whose
-key matches is the host (`members[].host`: the crown, art rights). The
-address a connection comes from plays no part (so a reverse proxy or tunnel
-on the same machine does not make everyone the host). The dedicated server
-has no key, so it has no host. Nobody removes anyone: members set each
-other away ("Presence" below), the host included, since the hosted
-server and its `/m/` file serving do not need the host's player.
+Host: the app generates a random `hostKey` per app run, puts it in your
+server's config and sends it in its own `hello`. The member whose key
+matches is the host (`members[].host`: the crown, art rights) and needs no
+password. The address a connection comes from plays no part (so a reverse
+proxy or tunnel on the same machine does not make everyone the host). The
+dedicated server has no key, so it has no host. Nobody removes anyone:
+members set each other away ("Presence" below), the host included, since
+your server and its `/m/` file serving do not need the host's player;
+only stopping sharing sends guests out.
+
+## Composition root
+
+`AppGraph` (`app/app_graph.dart`) is built once in `main.dart`
+(`AppGraph.build`) and constructs and disposes the app's systems: the
+`Ports`, the sounds (`SynthSfx`), the `Notifier`, the `Connection`, the
+`SessionCoordinator`, the connect form and recents (`ConnectStore`,
+`state/connect_prefs.dart`), `YourServer` and `Navigation`; it wires them
+through their constructors (and gives `Profile` the form and the push) and
+has no logic or signals of its own. Widgets reach it through one
+`AppScope` InheritedWidget (`AppScope.of(context)`, readable in
+`initState`); `shutDownApp` gets it from `main` (`closeAppWith`). Tests
+build their own (`test/test_graph.dart`). The app's remaining `.instance`
+singletons (settings, Jellyfin accounts, the updater, the profile, Files'
+folders, yt-dlp, recent links) may only lose uses: `singletons_test`
+fails when one gains a use or a new one appears.
 
 ## Sync model
 
@@ -252,7 +312,7 @@ Loosely modeled on Syncplay, with a different readiness design.
   it back `in` (without touching the ready flag), but only from an away
   it set itself: a manual one (own or someone else's) stays. Never when
   alone (`isAlone` in core: no other member connected, `in`, `joining` or
-  `away`) and never in a solo session. The window changes come from
+  `away`). The window changes come from
   `ShellPort.watchActivity` (focused, unfocused, minimised, hidden); the
   timings are `AutoSitOutTimes`.
 - **Nudge**: `nudge` names a member; the server passes it to that member
@@ -272,7 +332,7 @@ Additive wire changes only; bump `proto` and PROTOCOL.md in the same commit.
 ## Connection
 
 `Connection` (`session/connection.dart`) is the link to the server, made
-in the composition root (`SessionState.connection`) and passed to the
+in the composition root (`AppGraph`) and passed to the
 `SessionCoordinator`. It owns the `SyncClient` socket, the first connect
 (`begin` + `dial`), reconnects (`delayFor`: 1 s, doubling per failed
 attempt up to 15 s, each ±20 % jitter), the epoch (`invalidate`,
@@ -302,8 +362,9 @@ dial), `ConnOnline` (welcome received, frames arrive), `ConnUnstable`
 socket closed or errored, or nothing for `silenceLimit`, 9 s: the socket
 is dropped, the next attempt scheduled), `ConnReconnecting(attempt)` (an
 attempt dialling, and after it failed until the next one),
-`ConnRefused(code, message)` (`version`, `secret`, or empty for a first
-dial that failed otherwise; nothing retries) and `ConnReplaced` (`err`
+`ConnRefused(code, message)` (`version`, `secret`, `closed` for close
+4016, the host stopped sharing their server, or empty for a first dial
+that failed otherwise; nothing retries) and `ConnReplaced` (`err`
 `replaced`, close 4013 or 4014: another window of this install holds the
 member; nothing retries, "Retry" takes it back). The silence and the
 lost sound are measured on `Connection.now` (injectable, UTC wall clock
@@ -595,8 +656,9 @@ For viewers without an account on the item's Jellyfin
 (`packages/server/lib/src/jellyfin_relay.dart`). The server may hold one
 `JellyfinCredential` (config key `jellyfin`: `baseUrl`, `serverId`, `token`,
 `client`, `device`, `deviceId`, `version`; primitives, so it crosses the
-isolate boundary in the `serve()` map). The hosting app fills it with its
-own app-obtained token and that token's device fields; the dedicated server
+isolate boundary in the `serve()` map). The app sends it when your server
+is shared (`share`): its own app-obtained token and that token's device
+fields; the dedicated server
 reads it from `--jellyfin <file>` (YAML/JSON with those keys, keeps the
 token off the command line) or a `jellyfin:` map in `--config`. An empty
 `serverId` is looked up at start (`/System/Info/Public`); if that fails the
@@ -631,7 +693,7 @@ What gets relayed (`SessionCoordinator.swapPicked`):
 
 | Put up | Others get it |
 |---|---|
-| File, by the host | `/m` from the hosting app (no relay) |
+| File, on your own server | `/m` from your server (no relay) |
 | File, by anyone else | relayed from that member's computer |
 | Link, "Everyone fetches it" | each app fetches it |
 | Link, "Server fetches it" | the server reads it once into the buffer; the link is never broadcast; refused on an open server (it would fetch any address it can reach for anyone) |
@@ -855,7 +917,7 @@ all three link modes. Nothing is bundled or installed by hand.
   it. `version`, `lastError`, `busy` and `changes` feed Settings → Player
   → yt-dlp ("Update now" forces the check). Every failure is non-fatal.
   Folders: the app's is `<app support>/yt-dlp` (`AppYtDlp`, warmed up at
-  start), shared with its hosted server; the dedicated server's is
+  start), shared with your server; the dedicated server's is
   `--yt-dlp-dir`, else `$STATE_DIRECTORY/yt-dlp` (systemd), else
   `yt-dlp` next to the binary if writable, else
   `~/.cache/watch-together/yt-dlp`.
@@ -874,7 +936,7 @@ all three link modes. Nothing is bundled or installed by hand.
   youtube.com and bilibili's CDNs under bilibili.com). The app: Settings
   → Player → yt-dlp → Cookies (a browser and profile, or a file picked or
   dropped, kept whole: every site in it; "Remove cookies"; the shell's
-  own drop target is off on Settings so only this box takes the file); its hosted server shares the folder,
+  own drop target is off on Settings so only this box takes the file); your server shares the folder,
   so it uses them too. mpv's hook gets the same as `ytdl-raw-options`
   (`cookies=%N%<path>` / `cookies-from-browser=%N%<spec>`, length-quoted),
   re-set before each external link when it changed, after
@@ -1316,7 +1378,7 @@ click on a chat toast); cleared on connect.
 
 **Ports.** UI and session code reach the platform through interfaces
 (`platform/ports/`), made once in the composition root
-(`SessionState.ports`, `desktopPorts()` in `platform/desktop/`) and
+(`AppGraph.ports`, `desktopPorts()` in `platform/desktop/`) and
 handed on from there (the coordinator gets its `Notifier`, `Connection` and
 `LinkResolver` as constructor arguments):
 - `ShellPort` (`DesktopShell`): window start (remembered bounds, the
@@ -1355,8 +1417,9 @@ caches.
 
 ## Desktop UI
 
-One window, `AppShell` (`lib/src/shell/`), whatever the connection state
-(online = `SessionState.route` is `session`). The window comes back as it was
+One window, `AppShell` (`lib/src/shell/`), wherever the app is
+(`Navigation.place`: your server, a friend's, none while it moves). The
+window comes back as it was
 (`platform/desktop/window_memory.dart`, settings key `windowBounds`, saved on
 resize/move/maximize and close): its normal size and maximized state
 everywhere, its position where an app may place itself (Windows, X11;
@@ -1396,27 +1459,34 @@ panel) and chat messages (Copy message, and a link in it).
 - **Party strip** (`party_strip.dart`, 60 px): your avatar (profile card; 42 px like the party's),
   the Library / Schedule / Settings tabs with a growing underline (an
   `HScroll` when narrow; the version in the Settings tab's tooltip, at
-  the bottom of every Settings page and in About), then offline a grey dot,
-  "Offline", Join a friend and Host (connect cards; icon-less "Join" and
-  "Host" under 1100 px), solo a "Solo · only you" chip, Invite friends
-  (the Host card, titled "Invite friends", "Start hosting") and Stop (no
-  dialog; no avatars or chat), online the party: `AvatarStack` (host first, then
-  ready; spreads on hover; 5 shown, 3 under 1100 px), the server name and
-  `Status.party` ("ready n/m": who the ready counter counts,
-  `countsForReady` in `session/party.dart`, on `PresencePolicy`, so not
-  away, gone or errored; "connecting…", "reconnecting…"; hidden under
-  1100 px), chat with an unread badge, and Leave (asks first). The stack
-  opens the members card (the server's version under its title: a hosted
-  server is this app's, a joined one's from `/health.version`; the source
+  the bottom of every Settings page and in About), then the party. Alone
+  on your server (D9, `SessionCoordinator.alone`: nobody else connected)
+  it is a plain player's: no ring on your avatar, no avatars or chat, Join
+  a friend (the Join card; "Join" under 1100 px) and Invite (disabled until
+  your server runs), plus a "Sharing · port 8080" chip while it is shared
+  (it opens the members card). With others there, or in a friend's server:
+  `AvatarStack` (host first, then ready; spreads on hover; 5 shown, 3
+  under 1100 px), the server name ("Your server", else the joined one's
+  `/health` name, else its address) and `Status.party` ("ready n/m": who
+  the ready counter counts, `countsForReady` in `session/party.dart`, on
+  `PresencePolicy`, so not away, gone or errored; "connecting…",
+  "reconnecting…"; hidden under 1100 px), chat with an unread badge, then
+  Invite on yours or Leave on a friend's (asks first, then you are home).
+  Invite (`inviteFriends`) shares your server if it is not yet and copies
+  the invite ("Invite copied · 192.168.1.20:8080"); a port it cannot open
+  is a notice pointing at Settings. The stack
+  opens the members card (the server's version under its title: yours is
+  this app's, a joined one's from `/health.version`; the source
   line, then per member status, route and buffer dot (see "Relay",
   Stats), their Starsync version (`members[].app`, amber when it is not
   this app's; also in the avatar's hover), host / relay pills; "joining…", "sitting out", or for a `gone` member
   "reconnecting… (2 min)" with how long; per member force ready, Nudge and Sit
-  out (anyone, the host too), your own row Sit out / Join back; "Copy invite
-  address": the dialled address when joined; hosting, `inviteAddresses`
-  of `NetworkInterface.list` (IPv4, no loopback or link-local, private
-  ranges first) with the Host port, and a note that friends outside the
-  LAN need a forwarded port or a reachable server). Empty strip space is the window
+  out (anyone, the host too), your own row Sit out / Join back; at the
+  bottom, on yours: not shared, "Only you can reach it" and Invite;
+  shared, the invite's address, Copy invite, Stop sharing and a note
+  that friends outside the LAN need a forwarded port or a reachable
+  server; on a friend's, "Copy invite address" (the dialled address)).
+  Empty strip space is the window
   drag area; the window buttons sit at its end.
 - **Avatars** (`avatar.dart`): `StatusAvatar` draws a ring outside the
   picture with a gap in the background colour (both scale with the size):
@@ -1428,16 +1498,18 @@ panel) and chat messages (Copy message, and a link in it).
   profile, anyone else's from `coordinator.avatars` by `avatarHash`.
   Colours are local: yours is picked in the profile, others' come from
   their name.
-- **Connect cards** (`connect_cards.dart`): Join lists recent servers as
-  one-click rows that poll `GET /health` every 10 s while the card is open
-  (`health_probe.dart`: online, name, viewer count, "needs update" when
-  `proto` differs from ours), then address, port and password. Host takes
-  a port and a password (hosted ports as chips) and puts nothing up: what
-  to watch is picked in the library afterwards. Submit state (busy,
-  cancel, per-card errors) is `ConnectFlow`, owned by the shell so an
-  attempt and its error outlive the card; a card closes itself once
-  in a server that is not solo. Join says that a friend gives the address
-  and that no account or Jellyfin is needed.
+- **Join card** (`connect_cards.dart`): recent servers as one-click rows
+  that poll `GET /health` every 10 s while the card is open
+  (`health_probe.dart`: online, name, viewer count, "needs update" with
+  the version gate's sentence as its hint), then address, port and
+  password; an invite pasted into the address fills the port too
+  (`addressIn`). Submit state (busy, cancel, the error) is `ConnectFlow`,
+  owned by the shell so an attempt and its error outlive the card; the
+  version gate's refusal says who has to update and, when it is you,
+  offers "Check for the update". The card closes itself once in the
+  friend's server. It says that a friend gives the invite and the
+  password, that no account or Jellyfin is needed and that your own
+  server stays as it is.
 - **Profile** (`profile_card.dart`, `session/identity.dart`): a card
   tinted with your colour: picture (hover "Change" opens `CropPicker`:
   drag, wheel or slider zoom, previews at 88/42/24 px, exports a 256 px
@@ -1446,13 +1518,13 @@ panel) and chat messages (Copy message, and a link in it).
   the `connect_form` box (an old picture path is shrunk once and kept as
   bytes). Online, a name change (once typing settles) or picture change
   goes out through `Profile.push` (`coordinator.updateProfile`).
-- **Welcome** (`welcome.dart`): offline the Library opens with
-  `WelcomeBand` over the source switch, only for newcomers (no Jellyfin
-  account, no recent server, not dismissed with "Don't show again";
-  sizes away when online): the app
+- **Welcome** (`welcome.dart`): alone on your server the Library opens
+  with `WelcomeBand` over the source switch, only for newcomers (no
+  Jellyfin account, no recent server, not dismissed with "Don't show
+  again"; sizes away once others are there): the app
   icon, Starsync and "Watch together, in sync", then three `WayCard`s,
-  Join a friend first (filled), Host, Watch solo (opens Files, or
-  Jellyfin when linked); beside the name from 940 px, under it below,
+  Join a friend first (filled), Invite friends, Watch on your own (opens
+  Files, or Jellyfin when linked); beside the name from 940 px, under it below,
   stacked under 520 px. With no Jellyfin server linked the Jellyfin source
   is `NoJellyfinPanel`: Files and Link cards ("No account needed") and an
   optional Jellyfin card whose "Link a server" opens the sign-in in place.
@@ -1490,9 +1562,10 @@ panel) and chat messages (Copy message, and a link in it).
   an isolate, videos grouped by series; series start collapsed, a header
   click opens one and open ones stay open for the app session
   (`showFilesFolder` opens a folder from outside). With nobody else
-  watching (`solo` on the Library, Files and Schedule: offline or solo)
-  the buttons say Play, Link has no relay modes and Files no relay notice;
-  offline a put-up starts a solo session. Schedule (`schedule/`) is a week of day columns built
+  in the server (`alone` on the Library, Files and Schedule, D9) the
+  buttons say Play, Link has no relay modes and a link goes up direct,
+  Files has no relay notice; a put-up before your server is up waits for
+  it. Schedule (`schedule/`) is a week of day columns built
   from AniList's airing schedule (`anilist.dart`: pages cached 10 min in
   memory and 1 h on disk, stale data shown on 429 or failure) matched
   against AnimeFlow (`animeflow.dart`, app API with the Jellyfin token;
@@ -1530,7 +1603,8 @@ panel) and chat messages (Copy message, and a link in it).
   Settings (`settings_tab.dart`) has a left nav with icons
   (icon chips under 760 px) over pages of rounded Material cards
   (`SettingsPanel`), one help line under every setting: profile, party &
-  network (Host card port and password in the connect form, recent
+  network (your server's port and password, used the next time it is
+  shared, in the connect form; recent
   servers), player (the shared rows below, the controls' choices, custom
   shader files),
   Jellyfin & integrations (linked servers, AnimeFlow's `/me` via
@@ -1544,7 +1618,7 @@ panel) and chat messages (Copy message, and a link in it).
   into videos (the Files extensions, `kindOf`), a folder, an http(s) link,
   an image or nothing; videos win over folders, folders over images.
   `HandoffCard` opens as a popover at the pointer: a video goes up through
-  the shell's put-up (Play when alone; offline that starts solo) or adds
+  the shell's put-up (Play when alone) or adds
   its folder to Files; a folder is added to Files and opened; a link fills
   Library → Link (with others the relay mode is picked there). In a
   server, videos and links also get Add to queue / Play next. Images are ignored.
@@ -1767,9 +1841,9 @@ Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
 - Picking an item gives a `JellyfinMedia` (serverId, baseUrl, itemId,
   mediaSourceId?, title, subtitle, runtime; no credentials). The library
   remembers the last pick in the `jellyfin` box and puts it up as a ref
-  (`putUpJellyfinMedia`, `swapPicked`); a hosted server gets the relay
-  credential (`relayCredentialFor`: the account of the
-  item's server, else the default one, not expired; its token with
+  (`putUpJellyfinMedia`, `swapPicked`); your server gets the relay
+  credential when it is shared (`relayCredentialFor`: the default
+  account, not expired; its token with
   exactly `JellyfinAccounts.clientInfo`'s device fields).
 - Browser location: every navigation saves the route stack per server
   (`browse:<serverId>` in the `jellyfin` box, `encodeBrowseStack`: ids,
@@ -1802,7 +1876,7 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   play is always first and fullscreen last. `menuActions` is the ⚙ menu
   (`ControlAction`, fixed order): chapters, the hidden track lists,
   Skip 1:30, upscaling shader, the hidden chat, change video, copy link
-  (when `currentLink` has one), reload, mark everyone ready (not solo),
+  (when `currentLink` has one), reload, mark everyone ready (not alone),
   mark a problem, player settings, leave. Icons, tooltips (with keys) and
   the clock text (`clockText`) are defined there too, once.
 - **Shared pieces**: `ControlsFrame` (`frame.dart`): when the controls
@@ -1887,10 +1961,10 @@ and the sound engine (500 ms), side by side; on Windows 300 ms more,
 since media_kit_video frees a video output on a thread of its own after
 dispose returns, and an output still up when the engine stops blocks the
 plugin's teardown (`~VideoOutput` waits on a texture callback that never
-comes). Then `SessionState.leave`
+comes). Then `Navigation.leave`
 (Jellyfin stop report, last diagnostics, then `bye`, flushed: the app
 waits up to 600 ms for the server to close the socket, so others see
-"left" at once) and the hosted server's stop, 3 s in all. Update and
+"left" at once) and your server's stop (`YourServer.stop`), 3 s in all. Update and
 restart leaves without `bye` (`shutDownApp(restart: true)`): the member
 stays `gone`, and the restarted app, with the same client id, takes it
 back within the grace when it joins again; it then closes Hive (the
@@ -1919,15 +1993,14 @@ dedicated server (`package:logging` loggers named by area: `relay`,
 - **Where**: the app writes `<app support>/logs/app-YYYY-MM-DD.log`
   (Linux `~/.local/share/dev.foxyz.starsync/logs`; with a
   profile `<app support>/profiles/<name>/logs`, see `AppDirs` under
-  "Desktop UI"); its hosted server's records arrive over the isolate's
+  "Desktop UI"); your server's records arrive over the isolate's
   `events` port and go in the same file as `server.<logger>` (`relogLine`). The dedicated server
   writes `server-YYYY-MM-DD.log` in `--log-dir`, else `logs` next to
   `--config`, else `logs` next to the binary (systemd:
   `$STATE_DIRECTORY/logs`), else `~/.cache/watch-together/logs`; it
   prints the folder at start. Both also print every line to stdout.
-  The session log (below) sits next to them: the hosting app's server
-  writes it in the app's logs folder (not for a solo session), the
-  dedicated one in its log folder.
+  The session log (below) sits next to them: your server writes it in
+  the app's logs folder, the dedicated one in its log folder.
 - **Files** (`LogFiles`): one per day, the next `.1.log`, `.2.log` once a
   file passes 10 MiB; files older than 7 days, then the oldest beyond
   100 MiB in all (the app's or server's files and the session log's
@@ -1974,7 +2047,7 @@ dedicated server (`package:logging` loggers named by area: `relay`,
   `packages/core/lib/src/diag_share.dart`): one shared log per server so
   a problem can be read afterwards from every side. While in a session
   the app (`DiagUploader`, owned by the `Connection`) keeps its own
-  records (not its hosted server's `server.*`, which the server logs
+  records (not your server's `server.*`, which the server logs
   itself), redacted, and sends them every 10 s from the connection's 1 s
   heartbeat and when it leaves (before its token goes, at most 1.5 s), as
   gzip batches to `POST /l/<sid>/<token>` (PROTOCOL

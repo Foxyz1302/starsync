@@ -44,10 +44,6 @@ Problems are numbered; delete a line when its fix ships.
   the player instead of being one media pipeline.
 - P18 Bilibili "no video formats" with browser cookies set; the hint
   wording misleads (D11).
-- P22 Friends on different versions (D8). (P20 version visible and P21
-  update band: fixed in 1.2.1-dev.3; check the band in real use.)
-- P23 Solo mode you enter and leave; going hosted loses the queue (D9).
-- P24 The invite address list is unhelpful (shows the proxy's 198.18.x).
 - P25 ssh to Gitea blocked through the proxy (pushes go over https).
 - P28 Log noise: "Failed to create file cache"; an idle relay channel for
   Jellyfin items everyone has an account for.
@@ -75,11 +71,6 @@ the automatic continuation and countdown, relay state), the device
 (client id, library and folders, match corrections, watch history,
 settings, notification prefs, what this app is sourcing) and the
 integrations (Jellyfin played/resume, AniList list).
-3. Your server: one hub, listeners attached and detached without members
-   reconnecting (old isolate path kept until that's proven); Invite as a
-   value (filtered addresses, version gate from `/health.version`, an `fp`
-   field reserved for pinned certificates later); `SessionState` is
-   deleted here. Fixes P22 P23 P24; D9.
 4. Library + Media identity: L1 local grouping (kinds, folder hints,
    gaps, merge across folders) and L2 match (AniList/TVDB, art, names,
    manual pin, cache); `MediaRef` in swap/queue media. Fixes P34.
@@ -96,11 +87,11 @@ integrations (Jellyfin played/resume, AniList list).
 7. Release 1.3.0: publish the manifest (protocol 16 makes it a required
    update for 1.2.x) and update the VPS dedicated server in the same
    window; check a 1.2.x app gets a clear "update the app" message.
-Composition root: an `AppGraph` built in `main.dart` only constructs and
-disposes systems (no logic, no signals); systems get dependencies through
-constructors, widgets through one `AppScope`; a test fails if the count
-of `.instance` singletons grows (today: SessionState 94, AppSettings 51,
-JellyfinAccounts 10, Profile 7).
+Composition root (in place, ARCHITECTURE "Composition root"): the
+remaining `.instance` singletons move into `AppGraph` as the steps touch
+them; `singletons_test` holds the count (today: AppSettings 55,
+JellyfinAccounts 10, UpdateController 8, Profile 8, FolderStore 6,
+AppYtDlp 4, RecentLinks 3).
 Not in the restructure: P25 (ops).
 
 
@@ -130,6 +121,18 @@ restarted app, but the app starts on Home (it does not rejoin by itself)
 and does not remember what it was passing on, so a relay it served ends
 with its grace unless it is put up again; worth doing only if updates
 ever happen mid-session (D8 says never during playback).
+Left of step 3 (your server): a human check of Invite (Linux and, at
+1.3.0, Windows' firewall prompt, now on Invite rather than at start;
+that the invite skips the proxy's 198.18.x here) and of the update band
+from 1.2.1-dev.3 in real use. No public address lookup or UPnP: the
+members card only says friends elsewhere need the port forwarded. Your
+server's `/health` name is the profile name at start (a rename shows
+after a restart). Guests' Jellyfin relay uses the default account (no
+longer the put-up item's server). Joining a friend while others are on
+your server leaves them there without you, unwarned; a join refused
+after dialling (wrong password) costs your own member there (`bye`, back
+as a new member). Your server writes its session log even when you are
+alone.
 Left of step 2: system notifications need a human check (Linux: the
 notification shows and a click brings the window up, also on Wayland,
 where focus may be refused without an activation token; Windows: toasts

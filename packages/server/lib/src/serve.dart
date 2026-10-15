@@ -17,9 +17,14 @@ import 'sync_server.dart';
 /// completes once it is down. `{'t':'file','path':p,'reply':SendPort}` makes
 /// a file on this machine the hosted file (the hosting app's in-session file
 /// swap; a following `swap` with its name and size puts it up) and answers
-/// `{'ok':true,'name':n,'size':s}` or `{'ok':false}`. Without [events] a
+/// `{'ok':true,'name':n,'size':s}` or `{'ok':false}`.
+/// `{'t':'share','port':p,'secret':s,'jellyfin':map?,'reply':SendPort}`
+/// opens the running server to the network ([SyncServer.share]) and
+/// answers `{'ok':true,'port':p}` or `{'ok':false,'message':m}`;
+/// `{'t':'unshare','reply':SendPort}` closes it again
+/// ([SyncServer.unshare]) and answers `{'ok':true}`. Without [events] a
 /// start failure throws. `'loopbackOnly': true` in [config] (next to the
-/// [AppConfig] keys) binds 127.0.0.1 only: the app's solo session;
+/// [AppConfig] keys) binds 127.0.0.1 only: the hosting app's own server;
 /// `'logDir'` is the folder of the session log ([SyncServer.logDir]).
 Future<void> serve(Map<String, Object?> config, {SendPort? events}) async {
   StreamSubscription<pkg_logging.LogRecord>? logs;
@@ -50,6 +55,27 @@ Future<void> serve(Map<String, Object?> config, {SendPort? events}) async {
   await for (final msg in control) {
     if (msg is! Map) continue;
     if (msg['t'] == 'stop') break;
+    if (msg['t'] == 'share' && msg['reply'] is SendPort) {
+      final reply = msg['reply'] as SendPort;
+      try {
+        final port = await server.share(
+            port: (msg['port'] as num?)?.toInt() ?? 0,
+            secret: (msg['secret'] as String?) ?? '',
+            jellyfin: JellyfinCredential.fromMap(msg['jellyfin']));
+        reply.send({'ok': true, 'port': port});
+      } catch (e) {
+        reply.send({'ok': false, 'message': '$e'});
+      }
+      continue;
+    }
+    if (msg['t'] == 'unshare' && msg['reply'] is SendPort) {
+      final reply = msg['reply'] as SendPort;
+      try {
+        await server.unshare();
+      } catch (_) {}
+      reply.send({'ok': true});
+      continue;
+    }
     if (msg['t'] == 'file' && msg['path'] is String && msg['reply'] is SendPort) {
       final reply = msg['reply'] as SendPort;
       try {

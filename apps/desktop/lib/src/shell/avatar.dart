@@ -8,7 +8,7 @@ import '../session/identity.dart';
 import '../session/delivery.dart';
 import '../session/party.dart';
 import '../session/session_coordinator.dart';
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import 'motion.dart';
 
 /// What an avatar shows: who, their picture or initial on [color], and
@@ -144,8 +144,7 @@ AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator 
 }
 
 /// Everyone in the server, from the latest state.
-List<AvatarInfo> partyAvatars([SessionCoordinator? coord]) {
-  final c = coord ?? SessionState.instance.coordinator;
+List<AvatarInfo> partyAvatars(SessionCoordinator c) {
   final r = c.serverState.value;
   return [for (final m in r?.members ?? const <MemberView>[]) memberAvatarInfo(m, r, c)];
 }
@@ -158,7 +157,7 @@ class PartyWatch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: SessionState.instance.coordinator.avatars,
+        listenable: AppScope.of(context).coordinator.avatars,
         builder: (context, _) => SignalBuilder(builder: (context) => builder(context)),
       );
 }
@@ -380,8 +379,7 @@ class Pill extends StatelessWidget {
 /// Someone in a feed line or toast: by member [id] when it has one, else
 /// by display [name]; from the latest state when still there, else their
 /// initial on a stable colour.
-AvatarInfo avatarForName(String name, [SessionCoordinator? coord, String id = '']) {
-  final c = coord ?? SessionState.instance.coordinator;
+AvatarInfo avatarForName(String name, SessionCoordinator c, [String id = '']) {
   final r = c.serverState.value;
   final members = r?.members ?? const <MemberView>[];
   // By id when the line has one (names change and repeat), else by name.

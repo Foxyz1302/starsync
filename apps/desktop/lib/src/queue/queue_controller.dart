@@ -181,7 +181,7 @@ class QueueController {
         );
       case LinkMedia(:final url, :final anyway):
         // Alone, a link plays direct: there is nobody to pass it on to.
-        final relay = coord.solo ? LinkRelay.direct : pick.relay;
+        final relay = coord.alone.peek() ? LinkRelay.direct : pick.relay;
         final linked = await mediaForLink(coord.jellyfin, url);
         final ref = linked.jellyfin;
         if (ref != null) {

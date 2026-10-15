@@ -86,10 +86,14 @@ Three suites, run from each package's folder:
   on loopback: auth and version refusal, identity, takeover and grace
   (`presence_test` on a fake clock), media and relay byte serving with
   source drops, Jellyfin relay against a fake, queue, session log,
-  isolate `serve`.
+  isolate `serve`, sharing (`share_test`: a listener attached and detached
+  under the same members and Up next, the host key standing in for the
+  password).
 - `cd apps/desktop && flutter test test/<file>`: widgets (shell, library,
   controls, settings, schedule), pure app logic (`StateDiff`, name parser,
-  shader list, sound engine with a fake backend) and the real-mpv `*_e2e`
+  shader list, sound engine with a fake backend, invite addresses, the
+  version gate), `singletons_test` (the `.instance` count, see
+  ARCHITECTURE "Composition root"; lower its baseline when a use goes) and the real-mpv `*_e2e`
   tests plus `coord_presence`. The whole suite takes a couple of minutes;
   run it only before a restructure step lands, otherwise only the files
   related to what you changed.
@@ -155,10 +159,10 @@ in [ROADMAP.md](ROADMAP.md)):
 |---|---|---|
 | Drop and reconnect while sharing a relay | server `flaky_link_test` (blackhole: `gone` with ready, queue item and relay kept, the same member back; reset), `sync_wave_test` (takeover by client id, `replaced`, `stale`), `presence_test` (grace on a fake clock, restart), `relay_test` "the source drops (D6)" (`sourceGone`, buffer served, same `info` continues, another 4002, a second channel 4003, leave ends it); desktop `relay_e2e` "the source drops uncleanly and comes back" (gone past the server's silence, the relay kept, the source re-dials and continues), `coord_presence` (a half-open drop while playing: same member, no reopen, the state kept; 10 flaps: at most one lost/back sound; `replaced` is terminal; a restarted server gets the ready again), `connection_test` (the hello's id, `seq`, caps, `feedAfter`) | |
 | Join mid-playback | core `sync_engine_test` "D2: joiners" (never changes the transport while playing, at most 15 s while held, joining ends on error or timeout), `presence_test` (the table); server `relay_test` "a late joiner gets its own /r/ URL"; desktop `coord_presence` (the returning member plays on in sync) | |
-| Sit out / Away and back | core `sync_engine_test` "away" (only oneself comes back, through joining), "return" (away survives a drop), `presence_test` (`isAlone`); server `hardening_test` (anyone sets anyone away, `forbidden`); desktop `server_isolate_test` (host sat out through `presence`), `notice_table_test` (the feed actions one-to-one, matched by id; sitting out gets only chat, nudges, "starting now", Up next and the chosen joins and leaves; alone no social sounds), `session_logic_test` (auto sit-out on a fake clock: never alone, a manual away stays), `player_status_test` / `shell_test` (the ready counter leaves away and gone out) | step 6: not tracked as watched (P7) |
+| Sit out / Away and back | core `sync_engine_test` "away" (only oneself comes back, through joining), "return" (away survives a drop), `presence_test` (`isAlone`); server `hardening_test` (anyone sets anyone away, `forbidden`); desktop `server_isolate_test` (the host sat out through `presence` on your shared server), `notice_table_test` (the feed actions one-to-one, matched by id; sitting out gets only chat, nudges, "starting now", Up next and the chosen joins and leaves; alone no social sounds), `session_logic_test` (auto sit-out on a fake clock: never alone, a manual away stays), `player_status_test` / `shell_test` (the ready counter leaves away and gone out) | step 6: not tracked as watched (P7) |
 | Swap, also while someone is Away or gone | core `sync_engine_test` "swap" (a gone member stays out of the gate, comes back joining), "away" (a swap leaves it away), `queue_test` (a swap takes its item, drops the `auto` one); server `queue_test` (a gone adder's item waits), `relay_test` (a swap drops the buffer); desktop `sync_playback_e2e` | step 5: no commands reach a player mid-switch (P15) |
 | Up next advance | core `queue_test` (skip, play request timeout, `auto` and `cancel`); server `queue_test`, `relay_test` "warm relay"; desktop `jellyfin_session_test` (auto-advance swapper, end card countdown), `queue_switch_e2e` | step 5: preparing it through the media pipeline; step 6: the countdown as server state (`state.advance`) |
-| Close the app cleanly, incl. `bye` | server `lifecycle_test` (a close keeps the member `gone`, `bye` leaves at once, server stop closes sockets); desktop `server_isolate_test` (stop frees the port), `coord_presence` (cancelled host setup releases the port; leave sends `bye` and others see "left" at once, leaving for a restart keeps the member `gone`) | step 5: the Windows close smoke job (P32) |
+| Close the app cleanly, incl. `bye` | server `lifecycle_test` (a close keeps the member `gone`, `bye` leaves at once, server stop closes sockets); desktop `server_isolate_test` (stop frees the port; Stop sharing tells guests with 4016 and keeps you and Up next; a friend's server and back keeps yours), `coord_presence` (Stop sharing and your server's stop release their ports; leave sends `bye` and others see "left" at once, leaving for a restart keeps the member `gone`) | step 5: the Windows close smoke job (P32) |
 
 A test file whose first line is `// restructure: rewrite in step N` pins
 behaviour that step of the restructure ([ROADMAP.md](ROADMAP.md)) changes;
@@ -223,19 +227,22 @@ Tokens come from the environment (`RELEASE_TOKEN`, or Actions-provided
 updater skips the check when absent. Workflows live in `.gitea/workflows`
 (the forge reads `.gitea` before `.github`).
 
-## Debugging the hosted server
+## Debugging your server
 
-When hosting, the server runs on its own isolate (`ServerIsolate`,
-`apps/desktop/lib/src/state/server_isolate.dart`), in the same process.
-Breakpoints in `packages/server` work under `flutter run`: the debugger
-attaches to spawned isolates too (it shows as `server`). Its log lines
-carry `server.<logger>` (e.g. `server.relay`). Hot reload reloads the server isolate's
-code too, but its state (members, clock, sockets) survives until hosting
-restarts; changes to startup code (`SyncServer.start`, routes) need a new
-Host. Hot restart kills the server isolate (flutter_tools kills every
-non-UI isolate first), so a `[server] server crashed: the server stopped
-unexpectedly` line just before it is expected. Without the app:
-`dart run packages/server/bin/server.dart`.
+The app's own server runs on its own isolate (`ServerIsolate`,
+`apps/desktop/lib/src/state/server_isolate.dart`, owned by `YourServer`)
+in the same process, from start to close. Breakpoints in
+`packages/server` work under `flutter run`: the debugger attaches to
+spawned isolates too (it shows as `server`). Its log lines carry
+`server.<logger>` (e.g. `server.relay`). Hot reload reloads the server
+isolate's code too, but its state (members, clock, sockets) survives;
+changes to startup code (`SyncServer.start`, `share`, routes) need a
+restart of the app. Hot restart kills the server isolate (flutter_tools
+kills every non-UI isolate first), so a `[server] server crashed: the
+server stopped unexpectedly` line just before it is expected. Its
+loopback port changes every run (the log's `listening on` line has it);
+`STARSYNC_PROFILE` gives a second window its own server. Without the
+app: `dart run packages/server/bin/server.dart`.
 
 ## Logs
 
@@ -243,7 +250,7 @@ After a session, read the log files rather than reproducing
 ("Logging" in [ARCHITECTURE.md](ARCHITECTURE.md) has what goes in them):
 the app's are `~/.local/share/dev.foxyz.starsync/logs/app-*.log`
 on Linux (on Windows `%APPDATA%\foxyz\Starsync\logs`; Settings → About → "Open logs
-folder" finds it anywhere), with the hosted server's lines
+folder" finds it anywhere), with your server's lines
 in the same file; a dedicated server prints its folder at start
 (`--log-dir`). Users send theirs with Settings → About → "Copy
 diagnostics".
@@ -285,8 +292,8 @@ is off), not software rendering.
 - Relic gives Range as a typed `RangeHeader`; convert from unit + first range.
 - A killed isolate (`Isolate.kill`) does not close its listening socket:
   the port stays bound in the process until exit. `SyncServer` binds with
-  `shared: true` so a new hosted server in the same process can take it
-  over; a normal stop closes it.
+  `shared: true` (both listeners) so a new one in the same process can
+  take it over; a normal stop closes it.
 - Relic server-side `onDone` does not fire for dead peers. Presence is the
   `isClosed` sweep + `onError` forget + `lastSeen` timeouts.
 - `web_socket_channel` 3.x: `channel.ready` errors are unhandled on refused
@@ -318,9 +325,15 @@ is off), not software rendering.
   raw pointer observer (`DoubleClickListener`).
 - The window is frameless: the party strip is the only drag area and holds
   the window buttons.
-- Signal-backed singletons (`Profile`, `SessionState`) live across tests;
-  never cache a `Future` in them (each test runs in its own zone, and a
-  Future from an earlier test never completes in the next).
+- Signal-backed singletons (`Profile`, `AppSettings`) and a test file's
+  `AppGraph` live across tests; never cache a `Future` in them (each test
+  runs in its own zone, and a Future from an earlier test never completes
+  in the next).
+- Widgets read the systems from `AppScope`: a widget test pumps its tree
+  under one (`scoped(graph, ...)` from `test/test_graph.dart`; one
+  `testGraph()` per file). A `State` that needs a system in `dispose`
+  reads it before (`late final` touched in `initState`): the scope cannot
+  be looked up from a deactivated element.
 - Chat arrives twice from the server (see PROTOCOL.md); the client drops the
   textless feed copy.
 - Tab traversal is disabled in the session player on purpose; Tab toggles

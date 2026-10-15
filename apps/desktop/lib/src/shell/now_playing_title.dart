@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../session/now_playing.dart';
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/copy_open.dart';
 import 'motion.dart';
@@ -15,22 +15,22 @@ Uint8List? Function(String hash)? debugArtBytes;
 /// The one lookup for media art (cover, banner) by content hash: null
 /// when there is none or it has not arrived yet (listeners of
 /// [artChanges] hear when it lands).
-Uint8List? artBytes(String hash) {
+Uint8List? artBytes(BuildContext context, String hash) {
   if (hash.isEmpty) return null;
   final debug = debugArtBytes;
   if (debug != null) return debug(hash);
-  return SessionState.instance.coordinator.art.bytesFor(hash);
+  return AppScope.of(context).coordinator.art.bytesFor(hash);
 }
 
 /// Notifies when art arrives.
-Listenable artChanges() => SessionState.instance.coordinator.art;
+Listenable artChanges(BuildContext context) => AppScope.of(context).coordinator.art;
 
 final _images = <String, MemoryImage>{};
 
 /// [hash]'s art as an image, the same provider while the bytes are the
 /// same (so a rebuild never decodes again).
-ImageProvider? artImage(String hash) {
-  final bytes = artBytes(hash);
+ImageProvider? artImage(BuildContext context, String hash) {
+  final bytes = artBytes(context, hash);
   if (bytes == null) return null;
   final hit = _images[hash];
   if (hit != null && identical(hit.bytes, bytes)) return hit;
@@ -59,7 +59,7 @@ class ArtCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final image = artImage(hash);
+    final image = artImage(context, hash);
     final r = BorderRadius.circular(width >= 80 ? 10 : 6);
     return Container(
       width: wide ? width * 1.5 * 16 / 9 : width,
@@ -166,10 +166,10 @@ class NowPlayingTitle extends StatelessWidget {
   Widget build(BuildContext context) => GestureDetector(
         onSecondaryTap: () => nowPlayingMenu(context),
         child: ListenableBuilder(
-          listenable: artChanges(),
+          listenable: artChanges(context),
           builder: (context, _) => SignalBuilder(
             builder: (context) => NowPlayingBlock(
-              now: SessionState.instance.coordinator.nowPlaying.value,
+              now: AppScope.of(context).coordinator.nowPlaying.value,
               cover: cover,
               compact: compact,
             ),
@@ -182,7 +182,7 @@ class NowPlayingTitle extends StatelessWidget {
 /// Copy link and Open in browser; a Jellyfin item on a server linked here,
 /// Open in Jellyfin. [context]: where the menu opens.
 Future<void> nowPlayingMenu(BuildContext context) async {
-  final coord = SessionState.instance.coordinator;
+  final coord = AppScope.of(context).coordinator;
   final now = coord.nowPlaying.peek();
   if (now == null) return;
   final link = coord.currentLink();
@@ -200,12 +200,12 @@ Future<void> nowPlayingMenu(BuildContext context) async {
   ]);
   switch (pick) {
     case 'title':
-      await copyToClipboard(title, done: 'Title copied');
+      if (context.mounted) await copyToClipboard(context, title, done: 'Title copied');
     case 'link':
-      await copyToClipboard(link!, done: 'Link copied');
+      if (context.mounted) await copyToClipboard(context, link!, done: 'Link copied');
     case 'open':
-      await openLink(link!);
+      if (context.mounted) await openLink(context, link!);
     case 'jellyfin':
-      await openLink(page!);
+      if (context.mounted) await openLink(context, page!);
   }
 }

@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../session/session_coordinator.dart' show ToastItem;
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import 'avatar.dart';
 import 'motion.dart';
 
@@ -73,7 +73,7 @@ class _PartyToastsState extends State<PartyToasts> {
   @override
   void initState() {
     super.initState();
-    final coord = SessionState.instance.coordinator;
+    final coord = AppScope.of(context).coordinator;
     // What was there before this mounted is old news.
     _seen = {for (final t in coord.toasts.peek()) t.id};
     _stop = effect(() {
@@ -127,7 +127,7 @@ class _PartyToastsState extends State<PartyToasts> {
 
   void _open(ShellToast t) {
     widget.onOpenChat?.call();
-    SessionState.instance.notifier.dismiss(t.id);
+    AppScope.of(context).notifier.dismiss(t.id);
   }
 
   @override
@@ -282,7 +282,7 @@ class _Thumb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final thumbs = SessionState.instance.coordinator.queue.thumbs;
+    final thumbs = AppScope.of(context).coordinator.queue.thumbs;
     return ClipRRect(
       key: const ValueKey('toast-thumb'),
       borderRadius: BorderRadius.circular(6),

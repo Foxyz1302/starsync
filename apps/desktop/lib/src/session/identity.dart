@@ -9,7 +9,6 @@ import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart' show validClientId;
 
 import '../state/connect_prefs.dart';
-import '../state/session_state.dart';
 import '../state/settings.dart' show settingsBoxName;
 import '../widgets/avatar_pipeline.dart';
 
@@ -96,17 +95,11 @@ const _keyColor = 'profileColor';
 /// avatar = removed). Swappable so tests can watch it.
 typedef ProfilePush = void Function({String? name, String? avatar});
 
-/// The one place a profile change reaches the server.
-void pushProfileToSession({String? name, String? avatar}) {
-  final session = SessionState.instance;
-  if (session.route.peek() != AppRoute.session) return;
-  session.coordinator.updateProfile(name: name, avatar: avatar);
-}
-
-/// Display name, picture and colour of this app's user. Backed by
-/// [SessionState.lastForm] (name) and the connect-form box (the cropped
+/// Display name, picture and colour of this app's user. Backed by the
+/// connect form ([forms]: the name) and the connect-form box (the cropped
 /// 256 px PNG and the colour); every change is persisted, and while in a
-/// server it is pushed through [push] so everyone sees it at once.
+/// server it is pushed through [push] so everyone sees it at once. The
+/// composition root sets both.
 class Profile {
   static final Profile instance = Profile._();
   Profile._();
@@ -116,7 +109,8 @@ class Profile {
   final picture = signal<Uint8List?>(null);
   final color = signal<Color>(profileColors.first);
   final error = signal<String?>(null);
-  ProfilePush push = pushProfileToSession;
+  ProfilePush push = ({String? name, String? avatar}) {};
+  ConnectStore forms = ConnectStore();
   bool _loaded = false;
   Timer? _nameTimer;
 
@@ -131,7 +125,7 @@ class Profile {
   }
 
   Future<void> _load() async {
-    final form = SessionState.instance.lastForm;
+    final form = forms.form;
     name.value = form.name;
     try {
       final box = connectFormBoxIfOpen() ?? await openConnectFormBox();
@@ -162,7 +156,7 @@ class Profile {
     final v = value.trim();
     if (v.isEmpty || v == name.peek()) return;
     name.value = v;
-    SessionState.instance.lastForm.name = v;
+    forms.form.name = v;
     unawaited(_save());
     // Typing renames once it settles, not on every key.
     _nameTimer?.cancel();
@@ -187,7 +181,7 @@ class Profile {
 
   Future<void> _save() async {
     try {
-      await SessionState.instance.saveForm();
+      await forms.save();
       final box = connectFormBoxIfOpen() ?? await openConnectFormBox();
       final png = picture.peek();
       await box.putAll({

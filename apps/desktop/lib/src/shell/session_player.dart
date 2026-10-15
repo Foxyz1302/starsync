@@ -18,7 +18,7 @@ import '../screens/session/player_controls.dart';
 import '../session/app_events.dart' show ShaderMessage;
 import '../session/session_coordinator.dart';
 import '../shaders/shader_presets.dart';
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import '../state/settings.dart';
 import '../widgets/app_keys.dart';
 import '../widgets/text_focus.dart';
@@ -122,12 +122,14 @@ class _SessionPlayerState extends State<SessionPlayer> {
     onLeave: () => widget.onLeave(),
   );
 
-  SessionCoordinator get _coord => SessionState.instance.coordinator;
+  late final SessionCoordinator _coord = AppScope.of(context).coordinator;
   bool get _full => widget.mode == PlayerMode.full;
 
   @override
   void initState() {
     super.initState();
+    // The model reads it in dispose too, when the tree is no longer there.
+    _model;
     _coord.jellyfin.ensureLoaded();
     HardwareKeyboard.instance.addHandler(_globalKey);
     // Tab (AppKeys) reaches the chat through here in fullscreen.
@@ -173,8 +175,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
   /// app-wide ([AppKeys]).
   bool _globalKey(KeyEvent event) {
     if (event is! KeyDownEvent || !mounted) return false;
-    if (SessionState.instance.route.peek() != AppRoute.session) return false;
-    // Mini: Esc is the last step out, asking to leave the server.
+    if (!AppScope.of(context).navigation.online.peek()) return false;
+    // Mini: Esc is the last step out (a friend's server: asking to leave
+    // it; yours: the player closes).
     if (!_full) {
       if (event.logicalKey != LogicalKeyboardKey.escape) return false;
       if (ModalRoute.of(context)?.isCurrent == false || textInputFocused()) return false;
@@ -301,7 +304,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                 if (_full) ...[
                   _blockedCard(),
                   _actionArea(),
-                  if (widget.fullscreen) ...[if (!SessionState.instance.solo.value) _pausedParty(), _unreadChip()],
+                  if (widget.fullscreen) ...[if (!_coord.alone.value) _pausedParty(), _unreadChip()],
                   _volumeReadout(),
                 ] else
                   _miniOverlay(),
@@ -641,7 +644,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                               style: const TextStyle(color: Colors.white70, fontSize: 12)),
                           const Spacer(),
                           Flexible(
-                            child: Text(playerStatusNow()?.short ?? '',
+                            child: Text(playerStatusNow(_coord)?.short ?? '',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(color: Colors.amber, fontSize: 12)),
@@ -786,7 +789,7 @@ class _MiniSeekBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final playback = SessionState.instance.coordinator.playback;
+    final playback = AppScope.of(context).coordinator.playback;
     return SignalBuilder(builder: (context) {
       final d = playback.duration.value;
       final p = playback.position.value;

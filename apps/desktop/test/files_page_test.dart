@@ -13,6 +13,11 @@ import 'package:starsync/src/files/thumbnails.dart';
 import 'package:starsync/src/files/ui/file_tiles.dart';
 import 'package:starsync/src/files/ui/files_page.dart';
 
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
+
 // The Files page over a real (tiny) folder tree: the scan runs in-line
 // instead of in an isolate and thumbnails come from a fake loader, so
 // nothing here decodes video.
@@ -46,7 +51,7 @@ Future<void> frames(WidgetTester tester, [int n = 10]) async {
 Future<void> pumpPage(
   WidgetTester tester, {
   Size size = const Size(1280, 800),
-  bool solo = false,
+  bool alone = false,
   bool relayed = false,
   Future<String?> Function(String path)? onPlay,
   ThumbnailLoader? thumbnails,
@@ -55,10 +60,10 @@ Future<void> pumpPage(
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  await tester.pumpWidget(MaterialApp(
+  await tester.pumpWidget(scoped(_graph, MaterialApp(
     home: Scaffold(
       body: FilesPage(
-        solo: solo,
+        alone: alone,
         relayed: relayed,
         onPlay: onPlay ?? (_) async => null,
         thumbnails: thumbnails ?? fakeThumb,
@@ -67,7 +72,7 @@ Future<void> pumpPage(
         pickFolder: pickFolder,
       ),
     ),
-  ));
+  )));
   await frames(tester);
 }
 
@@ -242,7 +247,7 @@ void main() {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(scoped(_graph, MaterialApp(
       home: Scaffold(
         body: FilesPage(
           relayed: false,
@@ -253,7 +258,7 @@ void main() {
           store: store,
         ),
       ),
-    ));
+    )));
     await frames(tester);
     await openFolder(tester, 'anime');
     await openSeries(tester);

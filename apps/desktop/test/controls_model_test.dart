@@ -7,8 +7,12 @@ import 'package:starsync/src/controls/model/controls_model.dart';
 import 'package:starsync/src/controls/model/controls_prefs.dart';
 import 'package:starsync/src/controls/session_controls.dart';
 import 'package:starsync/src/playback/media_marks.dart';
-import 'package:starsync/src/state/session_state.dart';
 import 'package:starsync/src/state/settings.dart';
+
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
 
 // The controls model and its layout spec: which controls the bar has, in
 // which order, what goes to ⚙; and both skins drawing the same order.
@@ -64,7 +68,7 @@ void main() {
       final all = menuActions(const ControlsSnapshot(hasChapters: true, hasDuration: true, hasLink: true), none);
       expect(all.first, ControlAction.chapters);
       expect(all, containsAllInOrder([ControlAction.skipForward, ControlAction.copyLink]));
-      expect(menuActions(const ControlsSnapshot(solo: true), none), isNot(contains(ControlAction.markAllReady)),
+      expect(menuActions(const ControlsSnapshot(alone: true), none), isNot(contains(ControlAction.markAllReady)),
           reason: 'nobody to mark ready');
     });
 
@@ -74,7 +78,7 @@ void main() {
       expect(controlIcon(BarControl.playPause, const ControlsSnapshot(play: PlayState.waiting)), Icons.check_rounded);
       expect(controlTooltip(BarControl.playPause, const ControlsSnapshot(play: PlayState.playing)),
           'Pause for everyone (Space)');
-      expect(controlTooltip(BarControl.playPause, const ControlsSnapshot(solo: true)), 'Play (Space)');
+      expect(controlTooltip(BarControl.playPause, const ControlsSnapshot(alone: true)), 'Play (Space)');
     });
 
     test('episode buttons: the label and the keys', () {
@@ -98,7 +102,7 @@ void main() {
 
   group('both skins draw the model', () {
     final s = AppSettings.instance;
-    final coord = SessionState.instance.coordinator;
+    final coord = _graph.coordinator;
 
     tearDown(() {
       s.controlsSkin.value = ControlsSkin.standard;
@@ -131,13 +135,13 @@ void main() {
         shown.dispose();
         hold.dispose();
       });
-      await tester.pumpWidget(MaterialApp(
+      await tester.pumpWidget(scoped(_graph, MaterialApp(
         theme: ThemeData.dark(),
         home: Scaffold(
           backgroundColor: Colors.black,
           body: SessionControls(model: model, shown: shown, hold: hold, onDoubleClick: () {}),
         ),
-      ));
+      )));
       await tester.pump();
       return model;
     }

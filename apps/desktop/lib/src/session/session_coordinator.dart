@@ -268,9 +268,12 @@ class SessionCoordinator {
   StreamSubscription? _nudgeSub;
   StreamSubscription? _errSub;
 
-  /// A solo session (set by SessionState): no auto sit-out, there is
-  /// nobody to hold up.
-  bool solo = false;
+  /// Nobody else is in the server (D9): a plain player, Play rather than
+  /// Ready, links go up direct. Also true before the first state.
+  late final Computed<bool> alone = computed(() {
+    final r = serverState.value;
+    return r == null || aloneIn(r.members, connection.memberId);
+  });
   bool _playerReady = false;
   bool _wasPlayAllowed = false;
   // Last ready flag the server reported for self; sent again when a
@@ -316,10 +319,6 @@ class SessionCoordinator {
   final memberNames = MemberNames();
   // The media this member was told its upload is too slow for.
   int _slowWarnedFor = -1;
-  /// What this client put up last in this connection (a solo session
-  /// carries it over when it becomes a hosted server).
-  PickedMedia? get lastPick => _lastPick;
-  PickedMedia? _lastPick;
   // Server seek applied to the player (event id and when), checked once it
   // should have landed.
   int? _pendingSeekEvent;
@@ -548,7 +547,6 @@ class SessionCoordinator {
     _seekGate.reset();
     _clearPendingSeek();
     _lastEventId = -1;
-    _lastPick = null;
     _resetJellyfin();
     _jfToastShown = false;
     if (!_jellyfinListening) {
@@ -1152,7 +1150,7 @@ class SessionCoordinator {
         self: online ? selfMember.peek()?.presence : null,
         playing: r?.transport == 'playing',
         alone: r == null || aloneIn(r.members, connection.memberId),
-        enabled: !solo && AppSettings.instance.autoSitOut.peek());
+        enabled: AppSettings.instance.autoSitOut.peek());
     switch (step) {
       case AutoAway(:final reason):
         _log.info('auto sit-out: away (${reason.name})');
@@ -1475,7 +1473,6 @@ class SessionCoordinator {
   Future<String?> swapLink(String url,
       {LinkRelay relay = LinkRelay.direct, bool anyway = false, String? queueId}) async {
     markInput();
-    _lastPick = LinkMedia(url, relay: relay, anyway: anyway);
     final media = await mediaForLink(jellyfin, url);
     if (media.jellyfin != null) {
       _pendingOrigin = _JellyfinOrigin(url);
@@ -1557,7 +1554,6 @@ class SessionCoordinator {
   /// relayed by this member for viewers without an account.
   void swapJellyfin(JellyfinMedia media, {String? queueId}) {
     markInput();
-    _lastPick = media;
     _pendingOrigin = const _JellyfinOrigin(null);
     _swap(mediaForPick(media).copyWith(relay: const MediaRelay()), queueId: queueId);
   }
@@ -1567,7 +1563,6 @@ class SessionCoordinator {
   /// when sent.
   Future<String?> swapFile(String path, {String? queueId}) async {
     markInput();
-    _lastPick = FileMedia(path);
     final host = hostFile;
     if (host != null) {
       final file = await host(path);

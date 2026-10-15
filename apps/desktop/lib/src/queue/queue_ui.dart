@@ -18,7 +18,7 @@ import '../shell/avatar.dart';
 import '../shell/handoff.dart' show handoffHolds;
 import '../shell/library_link.dart' show LinkPreview, cachedLinkPreview;
 import '../shell/motion.dart';
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import '../widgets/app_menu.dart' show AppGlass, AppMenuItem, AppMenuStyle, showAppMenu;
 import '../widgets/copy_open.dart';
 import '../widgets/text_focus.dart' show KeyboardClaim;
@@ -641,7 +641,7 @@ class _QueuePanelState extends State<QueuePanel> {
 
   /// Ctrl+V: the clipboard's video files, else the links in its text.
   Future<void> _paste() async {
-    final clip = await (widget.readClipboard ?? SessionState.instance.ports.shell.readPaste)();
+    final clip = await (widget.readClipboard ?? AppScope.of(context).ports.shell.readPaste)();
     final picks = _picksFrom([...clip.files, ...?clip.text?.split(RegExp(r'\s+'))]);
     if (!mounted) return;
     if (picks.isEmpty) {
@@ -682,7 +682,8 @@ class _QueuePanelState extends State<QueuePanel> {
       final row = rows[i];
       if (p case LinkMedia(:final url)) {
         // Its title and picture while it resolves (at once when seen before).
-        unawaited((widget.preview ?? cachedLinkPreview)(url).then((v) {
+        final probe = AppScope.of(context).ports.links.probe;
+        unawaited((widget.preview ?? (u) => cachedLinkPreview(u, probe: probe))(url).then((v) {
           if (mounted) setState(() => row.preview = v);
         }, onError: (Object _) {}));
       }
@@ -768,13 +769,13 @@ class _QueuePanelState extends State<QueuePanel> {
       case 'remove':
         _q.remove(item.id);
       case 'title':
-        await copyToClipboard(item.title, done: 'Title copied');
+        if (context.mounted) await copyToClipboard(context, item.title, done: 'Title copied');
       case 'link':
-        await copyToClipboard(link!, done: 'Link copied');
+        if (context.mounted) await copyToClipboard(context, link!, done: 'Link copied');
       case 'open':
-        await openLink(link!);
+        if (context.mounted) await openLink(context, link!);
       case 'jellyfin':
-        await openLink(page!);
+        if (context.mounted) await openLink(context, page!);
     }
   }
 
@@ -814,7 +815,7 @@ class _QueuePanelState extends State<QueuePanel> {
   @override
   Widget build(BuildContext context) {
     final height = MediaQuery.sizeOf(context).height;
-    final drop = SessionState.instance.ports.shell.dropTarget(
+    final drop = AppScope.of(context).ports.shell.dropTarget(
       onEnter: () => setState(() => _dragging = true),
       onExit: () => setState(() => _dragging = false),
       onDrop: (paths, _) {
@@ -1192,8 +1193,8 @@ IconData howIcon(QueueHow how) => switch (how) {
     };
 
 /// Who added it: their picture (still here) or initial, and name.
-AvatarInfo _adderAvatar(QueueItem item, List<MemberView> members) {
-  final coord = SessionState.instance.coordinator;
+AvatarInfo _adderAvatar(BuildContext context, QueueItem item, List<MemberView> members) {
+  final coord = AppScope.of(context).coordinator;
   for (final m in members) {
     if (m.id == item.by) return memberAvatarInfo(m, coord.serverState.peek(), coord);
   }
@@ -1227,7 +1228,7 @@ class _MetaLine extends StatelessWidget {
         children: [
           if (dur.isNotEmpty) ...[Text(dur, style: style), dot],
           Text('added by ', style: style),
-          StatusAvatar(info: _adderAvatar(item, members), size: fontSize + 3, badges: false, ring: false),
+          StatusAvatar(info: _adderAvatar(context, item, members), size: fontSize + 3, badges: false, ring: false),
           const SizedBox(width: 4),
           Text(name, style: style),
           dot,
@@ -1243,7 +1244,7 @@ class _MetaLine extends StatelessWidget {
       children: [
         if (dur.isNotEmpty) ...[Text(dur, style: style), dot],
         Text('added by ', style: style),
-        StatusAvatar(info: _adderAvatar(item, members), size: fontSize + 3, badges: false, ring: false),
+        StatusAvatar(info: _adderAvatar(context, item, members), size: fontSize + 3, badges: false, ring: false),
         const SizedBox(width: 4),
         // Capped rather than flexible: two flexibles split the room in
         // half and would cut the end off even when it fits.

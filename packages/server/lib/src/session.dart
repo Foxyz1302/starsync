@@ -56,7 +56,9 @@ class SessionMedia {
 
 class Session {
   final String id;
-  final String secret;
+  /// The server password; '' is an open server. The hosting app changes it
+  /// when it starts sharing ([SyncServer.share]).
+  String secret;
   final Map<String, ViewerToken> tokens = {};
   SessionMedia? media;
   final _random = Random.secure();

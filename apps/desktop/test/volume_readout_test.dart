@@ -6,8 +6,12 @@ import 'package:media_kit_video/media_kit_video.dart' show VideoState;
 import 'package:starsync/src/controls/model/controls_prefs.dart';
 import 'package:starsync/src/controls/frame.dart';
 import 'package:starsync/src/shell/session_player.dart';
-import 'package:starsync/src/state/session_state.dart';
 import 'package:starsync/src/state/settings.dart';
+
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
 
 // The wheel anywhere on the full player flashes the volume readout, in
 // both skins, windowed and fullscreen, with the controls up or hidden.
@@ -15,7 +19,7 @@ import 'package:starsync/src/state/settings.dart';
 // media_kit `Video`).
 
 void main() {
-  final coord = SessionState.instance.coordinator;
+  final coord = _graph.coordinator;
   final s = AppSettings.instance;
 
   // A real player for the volume steps to go to. Never disposed: the
@@ -46,7 +50,7 @@ void main() {
       for (final fullscreen in [false, true]) {
         final what = '${skin.name}, ${fullscreen ? 'fullscreen' : 'windowed'}';
         s.controlsSkin.value = skin;
-        await tester.pumpWidget(MaterialApp(
+        await tester.pumpWidget(scoped(_graph, MaterialApp(
           theme: ThemeData.dark(),
           home: Scaffold(
             body: SessionPlayer(
@@ -68,7 +72,7 @@ void main() {
               ]),
             ),
           ),
-        ));
+        )));
         await tester.pump();
         expect(opacity(), 0, reason: '$what: nothing before a step');
 
@@ -91,7 +95,7 @@ void main() {
         expect(opacity(), 0, reason: '$what: gone after the second');
       }
     }
-    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(scoped(_graph, const SizedBox()));
     await tester.pump(const Duration(seconds: 5));
   });
 }

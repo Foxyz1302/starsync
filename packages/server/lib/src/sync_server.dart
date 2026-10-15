@@ -53,9 +53,13 @@ class SyncServer {
   /// Upstream connections of the Jellyfin relay; created on first use.
   HttpClient? _relayClient;
 
-  /// Listen on 127.0.0.1 only (the app's solo session), not on every
-  /// IPv4 interface.
+  /// Listen on 127.0.0.1 only (the hosting app's own server until it
+  /// shares it, see [share]), not on every IPv4 interface.
   final bool loopbackOnly;
+
+  /// The second listener [share] attaches: every IPv4 interface, its own
+  /// port; null while not shared.
+  RelicServer? _shared;
 
   /// The folder of the session log (`session-YYYY-MM-DD.log`, every
   /// member's diagnostics and the server's records merged); null: none.
@@ -79,6 +83,9 @@ class SyncServer {
 
   bool get isRunning => _server != null;
   int get boundPort => _server?.port ?? config.port;
+
+  /// The port friends dial while shared ([share]); null otherwise.
+  int? get sharedPort => _shared?.port;
   Session get session => sessions.getOrCreate('default', config.secret);
 
   Future<bool> setLocalFile(String path) async {
@@ -205,8 +212,68 @@ class SyncServer {
     _log.info('jellyfin relay on for server ${hub.jellyfin!.serverId}');
   }
 
+  /// Opens the running server to the network: a second listener on
+  /// every IPv4 interface at [port] (0: a free one), the password
+  /// [secret] ('' : open) and the Jellyfin relay login [jellyfin]. Members
+  /// already in (on the first listener) stay connected; nothing restarts.
+  /// Shared already: the listener moves to [port] when it differs. Returns
+  /// the bound port; throws when it cannot bind.
+  Future<int> share({required int port, required String secret, JellyfinCredential? jellyfin}) async {
+    if (_server == null) throw StateError('the server is not running');
+    final was = _shared;
+    if (was != null && (port == 0 || port == was.port)) {
+      _applyShareSettings(secret, jellyfin);
+      await _resolveJellyfinServerId();
+      return was.port;
+    }
+    if (was != null) {
+      _shared = null;
+      await was.close(force: true);
+    }
+    final listener = RelicServer(() => IOAdapter.bind(InternetAddress.anyIPv4, port: port, shared: true));
+    try {
+      await listener.mountAndStart(_app.asHandler);
+    } catch (e) {
+      try {
+        await listener.close(force: true);
+      } catch (_) {}
+      rethrow;
+    }
+    _shared = listener;
+    _applyShareSettings(secret, jellyfin);
+    await _resolveJellyfinServerId();
+    if (secret.isEmpty) _log.warning('shared without a password: anyone who can reach port ${listener.port} can join');
+    _log.info('server "${config.name}" shared on port ${listener.port}');
+    return listener.port;
+  }
+
+  void _applyShareSettings(String secret, JellyfinCredential? jellyfin) {
+    session.secret = secret;
+    if (jellyfin != null) hub.jellyfin = jellyfin;
+  }
+
+  /// Closes the network listener [share] opened: everyone but the host
+  /// leaves ([ServerHub.closeGuests]), the password goes; the host's own
+  /// member, the media and Up next stay as they are.
+  Future<void> unshare() async {
+    final listener = _shared;
+    if (listener == null) return;
+    _shared = null;
+    final left = hub.closeGuests();
+    session.secret = '';
+    await listener.close(force: true);
+    _log.info('server "${config.name}" no longer shared${left == 0 ? '' : ' ($left left)'}');
+  }
+
   Future<void> stop() async {
     if (_server == null) return;
+    final shared = _shared;
+    _shared = null;
+    if (shared != null) {
+      try {
+        await shared.close(force: true);
+      } catch (_) {}
+    }
     _heartbeat?.cancel();
     _heartbeat = null;
     _relayClient?.close(force: true);

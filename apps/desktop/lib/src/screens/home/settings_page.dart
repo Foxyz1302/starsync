@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 
-import '../../state/session_state.dart';
+import '../../app/app_graph.dart';
 import '../../state/settings.dart';
 import '../../update/update_controller.dart';
 import 'ui.dart';
@@ -88,10 +88,11 @@ class SettingsHintCard extends StatelessWidget {
 class CustomShaderFiles extends StatelessWidget {
   const CustomShaderFiles({super.key});
 
-  Future<void> _addFiles() async {
+  Future<void> _addFiles(BuildContext context) async {
+    final folders = AppScope.of(context).ports.folders;
     final List<String> files;
     try {
-      files = await SessionState.instance.ports.folders.pickFiles(
+      files = await folders.pickFiles(
         dialogTitle: 'Pick mpv GLSL shaders',
         extensions: const ['glsl', 'hook'],
       );
@@ -123,7 +124,7 @@ class CustomShaderFiles extends StatelessWidget {
                     style: muted),
               ),
               TextButton.icon(
-                onPressed: _addFiles,
+                onPressed: () => _addFiles(context),
                 icon: const Icon(Icons.add, size: 18),
                 label: const Text('Add .glsl files'),
               ),

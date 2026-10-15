@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../session/now_playing.dart';
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import 'motion.dart';
 import 'now_playing_title.dart';
 
@@ -21,8 +21,8 @@ class StartCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final banner = artImage(now.bannerHash);
-    final cover = banner == null ? artImage(now.posterHash) : null;
+    final banner = artImage(context, now.bannerHash);
+    final cover = banner == null ? artImage(context, now.posterHash) : null;
     final episode = now.episode;
     return LayoutBuilder(builder: (context, box) {
       final h = box.maxHeight;
@@ -145,10 +145,10 @@ class _StartBannerState extends State<StartBanner> {
 
   @override
   Widget build(BuildContext context) {
-    final coord = SessionState.instance.coordinator;
+    final coord = AppScope.of(context).coordinator;
     return IgnorePointer(
       child: ListenableBuilder(
-        listenable: artChanges(),
+        listenable: artChanges(context),
         builder: (context, _) => SignalBuilder(builder: (context) {
           final r = coord.serverState.value;
           final now = coord.nowPlaying.value;

@@ -89,7 +89,7 @@ class AutoSitOut {
 
   /// Once a second. [self]: this member's presence in the latest state
   /// (null: not in one); [alone]: nobody else connected ([isAlone]);
-  /// [enabled]: the setting (and not a solo session).
+  /// [enabled]: the setting.
   AutoSitOutStep tick(DateTime now,
       {required Presence? self, required bool playing, required bool alone, required bool enabled}) {
     if (playing) _lastActive = now;

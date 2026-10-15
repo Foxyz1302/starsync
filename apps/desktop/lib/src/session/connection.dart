@@ -142,7 +142,8 @@ final class ConnReconnecting extends ConnState {
 }
 
 /// The server refused this app; nothing retries. [code]: `version` or
-/// `secret` when the server said so, else empty (offline, timeout,
+/// `secret` when the server said so, `closed` when the host stopped
+/// sharing (close 4016), else empty (offline, timeout,
 /// anything else on the first dial); [message]: in plain words
 /// ([connectErrorText]).
 final class ConnRefused extends ConnState {
@@ -165,6 +166,10 @@ final class ConnReplaced extends ConnState {
 
 /// [ConnReplaced] in plain words.
 const replacedText = 'Starsync was opened in another window';
+
+/// `ConnRefused('closed')`: the host closed their server to friends
+/// (close 4016).
+const stoppedSharingText = 'the host stopped sharing their server';
 
 /// A version refusal in plain words: [err] is the server's `err`
 /// `version` (its range in `min`/`max`), or a proto 15 server's codeless
@@ -518,6 +523,8 @@ class Connection {
         _end(ConnRefused('version', versionText(null)));
       case CloseCodes.secret:
         _end(const ConnRefused('secret', 'wrong server password (401)'));
+      case CloseCodes.closed:
+        _end(const ConnRefused('closed', stoppedSharingText));
       default:
         _dropped(now());
     }

@@ -12,6 +12,11 @@ import 'package:starsync/src/state/settings.dart';
 import 'package:starsync/src/update/update_controller.dart';
 import 'package:starsync/src/widgets/app_menu.dart';
 
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
+
 // The Minimal skin's pieces and the shared controls frame (never the
 // session screen or a media_kit `Video`).
 
@@ -81,8 +86,8 @@ void main() {
 
   group('timeline', () {
     testWidgets('played part, elapsed left, remaining right, cache label', (tester) async {
-      await tester.pumpWidget(host(MinimalTimeline(
-          position: m(6), duration: m(24), buffered: m(6, 30), chapters: chapters, onSeek: (_) {})));
+      await tester.pumpWidget(scoped(_graph, host(MinimalTimeline(
+          position: m(6), duration: m(24), buffered: m(6, 30), chapters: chapters, onSeek: (_) {}))));
       final bar = tester.getRect(find.byKey(const ValueKey('minimal-timeline')));
       expect(bar.width, 800);
       expect(bar.height, MinimalTimelineSpec.size);
@@ -98,16 +103,16 @@ void main() {
     });
 
     testWidgets('the total instead of the time left', (tester) async {
-      await tester.pumpWidget(host(MinimalTimeline(
-          position: m(6), duration: m(24), remaining: false, onSeek: (_) {})));
+      await tester.pumpWidget(scoped(_graph, host(MinimalTimeline(
+          position: m(6), duration: m(24), remaining: false, onSeek: (_) {}))));
       expect(painter(tester).right, '24:00');
     });
 
     testWidgets('a press on the right-hand time switches it, no seek', (tester) async {
       final seeks = <Duration>[];
       var toggled = 0;
-      await tester.pumpWidget(host(MinimalTimeline(
-          position: m(6), duration: m(24), onSeek: seeks.add, onToggleTime: () => toggled++)));
+      await tester.pumpWidget(scoped(_graph, host(MinimalTimeline(
+          position: m(6), duration: m(24), onSeek: seeks.add, onToggleTime: () => toggled++))));
       final bar = tester.getRect(find.byKey(const ValueKey('minimal-timeline')));
       await tester.tapAt(Offset(bar.right - 20, bar.center.dy));
       expect(toggled, 1);
@@ -115,12 +120,12 @@ void main() {
     });
 
     testWidgets('a mark at each chapter start', (tester) async {
-      await tester.pumpWidget(host(MinimalTimeline(position: m(1), duration: m(24), chapters: chapters, onSeek: (_) {})));
+      await tester.pumpWidget(scoped(_graph, host(MinimalTimeline(position: m(1), duration: m(24), chapters: chapters, onSeek: (_) {}))));
       expect(painter(tester).chapters, [for (final c in chapters) c.start.inSeconds / m(24).inSeconds]);
     });
 
     testWidgets('hover: chapter title over the time, above the band', (tester) async {
-      await tester.pumpWidget(host(MinimalTimeline(position: m(1), duration: m(24), chapters: chapters, onSeek: (_) {})));
+      await tester.pumpWidget(scoped(_graph, host(MinimalTimeline(position: m(1), duration: m(24), chapters: chapters, onSeek: (_) {}))));
       final bar = tester.getRect(find.byKey(const ValueKey('minimal-timeline')));
       final mouse = await mouseAt(tester, Offset.zero);
       // 1:51 of 24:00: inside "Opening".
@@ -143,7 +148,7 @@ void main() {
 
     testWidgets('a press on a hovered chapter mark jumps to its chapter', (tester) async {
       final seeks = <Duration>[];
-      await tester.pumpWidget(host(MinimalTimeline(position: m(1), duration: m(24), chapters: chapters, onSeek: seeks.add)));
+      await tester.pumpWidget(scoped(_graph, host(MinimalTimeline(position: m(1), duration: m(24), chapters: chapters, onSeek: seeks.add))));
       final bar = tester.getRect(find.byKey(const ValueKey('minimal-timeline')));
       final at = Offset(bar.left + bar.width * 2 / 24 + 3, bar.top + 2);
       final mouse = await mouseAt(tester, at);
@@ -159,8 +164,8 @@ void main() {
 
     testWidgets('hidden controls: the progress line, no text, no input', (tester) async {
       final seeks = <Duration>[];
-      await tester.pumpWidget(host(MinimalTimeline(
-          position: m(12), duration: m(24), buffered: m(14), chapters: chapters, expanded: false, onSeek: seeks.add)));
+      await tester.pumpWidget(scoped(_graph, host(MinimalTimeline(
+          position: m(12), duration: m(24), buffered: m(14), chapters: chapters, expanded: false, onSeek: seeks.add))));
       final bar = tester.getRect(find.byKey(const ValueKey('minimal-timeline')));
       expect(bar.height, MinimalTimeline.collapsedHeight);
       final p = painter(tester);
@@ -177,7 +182,7 @@ void main() {
 
     testWidgets('press seeks, every drag move seeks, release holds the target', (tester) async {
       final seeks = <Duration>[];
-      await tester.pumpWidget(host(MinimalTimeline(position: m(1), duration: m(24), chapters: chapters, onSeek: seeks.add)));
+      await tester.pumpWidget(scoped(_graph, host(MinimalTimeline(position: m(1), duration: m(24), chapters: chapters, onSeek: seeks.add))));
       final bar = tester.getRect(find.byKey(const ValueKey('minimal-timeline')));
       final g0 = await tester.startGesture(Offset(bar.left + bar.width / 4, bar.center.dy), kind: PointerDeviceKind.mouse);
       expect(seeks, [m(6)], reason: 'the press seeks');
@@ -220,7 +225,7 @@ void main() {
     bool up(WidgetTester tester) => tester.state<ControlsFrameState>(find.byType(ControlsFrame)).visible;
 
     testWidgets('hide after the delay, mouse brings them back', (tester) async {
-      await tester.pumpWidget(frame());
+      await tester.pumpWidget(scoped(_graph, frame()));
       expect(up(tester), isTrue);
       await tester.pump(const Duration(seconds: 4));
       await tester.pumpAndSettle();
@@ -237,7 +242,7 @@ void main() {
     });
 
     testWidgets('a long drag on the timeline keeps the controls up', (tester) async {
-      await tester.pumpWidget(frame());
+      await tester.pumpWidget(scoped(_graph, frame()));
       final bar = tester.getRect(find.byKey(const ValueKey('minimal-timeline')));
       final g = await tester.startGesture(Offset(bar.left + 100, bar.center.dy), kind: PointerDeviceKind.mouse);
       for (var i = 0; i < 10; i++) {
@@ -254,7 +259,7 @@ void main() {
     });
 
     testWidgets('an open app menu keeps the controls up', (tester) async {
-      await tester.pumpWidget(frame(
+      await tester.pumpWidget(scoped(_graph, frame(
         child: Builder(
           builder: (context) => TextButton(
             key: const ValueKey('open'),
@@ -262,7 +267,7 @@ void main() {
             child: const Text('open'),
           ),
         ),
-      ));
+      )));
       await tester.tap(find.byKey(const ValueKey('open')));
       await tester.pumpAndSettle();
       expect(find.text('One'), findsOneWidget);
@@ -277,13 +282,13 @@ void main() {
 
     testWidgets('double-click on the picture, not on the bars', (tester) async {
       var doubles = 0;
-      await tester.pumpWidget(MaterialApp(
+      await tester.pumpWidget(scoped(_graph, MaterialApp(
         home: ControlsFrame(
           onDoubleClick: () => doubles++,
           barBottom: 100,
           builder: (context, visible) => const SizedBox.expand(),
         ),
-      ));
+      )));
       Future<void> twice(Offset at) async {
         await tester.tapAt(at, kind: PointerDeviceKind.mouse);
         await tester.pump(const Duration(milliseconds: 100));
@@ -300,10 +305,10 @@ void main() {
 
   group('buttons', () {
     testWidgets('count badge in the accent; tooltip on the app glass', (tester) async {
-      await tester.pumpWidget(host(const Row(children: [
+      await tester.pumpWidget(scoped(_graph, host(const Row(children: [
         MinimalButton(key: ValueKey('subs'), icon: Icons.subtitles_outlined, tooltip: 'Subtitles', badge: 2, onPressed: null),
         MinimalButton(key: ValueKey('plain'), icon: Icons.menu, tooltip: 'Menu', onPressed: null),
-      ])));
+      ]))));
       expect(
           find.descendant(of: find.byKey(const ValueKey('subs')), matching: find.byKey(const ValueKey('minimal-badge'))),
           findsOneWidget);
@@ -320,7 +325,7 @@ void main() {
       final got = <double>[];
       var volume = 80.0;
       var before = 80.0;
-      await tester.pumpWidget(host(StatefulBuilder(
+      await tester.pumpWidget(scoped(_graph, host(StatefulBuilder(
         builder: (context, setState) => Row(children: [
           VolumeControl(
             volume: volume,
@@ -337,7 +342,7 @@ void main() {
                 MinimalButton(key: const ValueKey('speaker'), icon: icon, tooltip: tip, onPressed: onPressed),
           ),
         ]),
-      )));
+      ))));
       await tester.tap(find.byKey(const ValueKey('speaker')));
       await tester.pump();
       await tester.tap(find.byKey(const ValueKey('speaker')));
@@ -361,7 +366,7 @@ void main() {
       final steps = <int>[];
       final list = ScrollController();
       addTearDown(list.dispose);
-      await tester.pumpWidget(MaterialApp(
+      await tester.pumpWidget(scoped(_graph, MaterialApp(
         home: VolumeWheel(
           onStep: steps.add,
           child: Stack(children: [
@@ -375,7 +380,7 @@ void main() {
             ),
           ]),
         ),
-      ));
+      )));
       Future<void> wheel(Offset at, Offset delta) =>
           tester.sendEventToBinding(PointerScrollEvent(kind: PointerDeviceKind.mouse, position: at, scrollDelta: delta));
       await wheel(const Offset(100, 400), const Offset(0, -60));
@@ -407,7 +412,7 @@ void main() {
     tester.view.physicalSize = const Size(1280, 2400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(scoped(_graph, MaterialApp(
       theme: ThemeData.dark(),
       home: Scaffold(
         body: SettingsTab(
@@ -416,7 +421,7 @@ void main() {
           updates: UpdateController(currentVersion: '0.0.0-dev'),
         ),
       ),
-    ));
+    )));
     final design = find.byKey(const ValueKey('player-design'));
     expect(find.text('Player design'), findsOneWidget);
     expect(tester.widget<AppSelect<ControlsSkin>>(design).value, ControlsSkin.standard);

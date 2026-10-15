@@ -113,7 +113,7 @@ class ControlsSnapshot {
   final bool hasDuration;
 
   /// Watching alone (no one to mark ready).
-  final bool solo;
+  final bool alone;
 
   /// A link to copy (`SessionCoordinator.currentLink`).
   final bool hasLink;
@@ -126,7 +126,7 @@ class ControlsSnapshot {
     this.nextIsUpNext = false,
     this.hasChapters = false,
     this.hasDuration = false,
-    this.solo = false,
+    this.alone = false,
     this.hasLink = false,
     this.fullscreen = false,
     this.chatOpen = false,
@@ -167,7 +167,7 @@ List<ControlAction> menuActions(ControlsSnapshot s, Set<OptionalControl> hidden)
       ControlAction.skipForward => s.hasDuration,
       ControlAction.chat => hidden.contains(OptionalControl.chat),
       ControlAction.copyLink => s.hasLink,
-      ControlAction.markAllReady => !s.solo,
+      ControlAction.markAllReady => !s.alone,
       _ => true,
     })
       a,
@@ -208,7 +208,7 @@ String controlTooltip(BarControl c, ControlsSnapshot s) => switch (c) {
   BarControl.playPause => switch (s.play) {
     PlayState.playing => 'Pause for everyone (Space)',
     PlayState.waiting => 'Ready, waiting for the others (Space: not ready)',
-    PlayState.paused => s.solo ? 'Play (Space)' : 'Ready: play when everyone is (Space)',
+    PlayState.paused => s.alone ? 'Play (Space)' : 'Ready: play when everyone is (Space)',
     PlayState.finished => 'Ready (Space)',
   },
   BarControl.previous => 'Previous: ${s.previousLabel ?? ''}  (< or Shift+P)',

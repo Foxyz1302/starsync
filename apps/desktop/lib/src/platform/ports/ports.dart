@@ -12,7 +12,7 @@ export 'system_notifications.dart';
 export 'url_opener.dart';
 
 /// The platform as the app sees it: one set, made in the composition
-/// root ([SessionState]) and handed on from there.
+/// root ([AppGraph]) and handed on from there.
 class Ports {
   final ShellPort shell;
   final UrlOpener urls;

@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../session/session_coordinator.dart';
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import '../widgets/app_menu.dart' show AppGlass;
 import 'avatar.dart';
 import 'motion.dart';
@@ -13,8 +13,8 @@ export '../session/status.dart' show StatusAction, StatusKind, StatusLevel, Stat
 /// The pill's line from the session's [SessionCoordinator.status]
 /// (tracked: call inside a builder); "Connecting…" only once it has taken
 /// [PlayerStatus.connectGrace] ([slowConnect]).
-StatusLine? playerStatusNow({bool slowConnect = false}) {
-  final line = SessionState.instance.coordinator.status.value.line;
+StatusLine? playerStatusNow(SessionCoordinator coord, {bool slowConnect = false}) {
+  final line = coord.status.value.line;
   if (line?.kind == StatusKind.connecting && !slowConnect) return null;
   return line;
 }
@@ -73,9 +73,9 @@ class _PlayerStatusState extends State<PlayerStatus> {
   @override
   Widget build(BuildContext context) {
     return PartyWatch(builder: (context) {
-      final coord = SessionState.instance.coordinator;
+      final coord = AppScope.of(context).coordinator;
       _trackConnecting(coord.status.value.line);
-      final view = playerStatusNow(slowConnect: _slow);
+      final view = playerStatusNow(coord, slowConnect: _slow);
       if (view != null) _last = view;
       final shown = _last;
       final ready = view?.action == StatusAction.ready;

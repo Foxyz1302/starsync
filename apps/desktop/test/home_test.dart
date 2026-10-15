@@ -1,7 +1,5 @@
-// restructure: rewrite in step 3 (Your server): hosted recents and the host
-// card; the rest stays.
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, SocketException;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,13 +10,22 @@ import 'package:starsync/src/screens/home/health_probe.dart';
 import 'package:starsync/src/screens/home/media_picker.dart';
 import 'package:starsync/src/screens/home/update_indicator.dart';
 import 'package:starsync/src/shell/app_shell.dart';
-import 'package:starsync/src/shell/library_link.dart' show soloPlayHint;
-import 'package:starsync/src/state/session_state.dart';
+import 'package:starsync/src/shell/library_link.dart' show alonePlayHint;
+import 'package:starsync/src/state/connect_prefs.dart';
 import 'package:starsync/src/state/settings.dart';
 import 'package:starsync/src/update/update_controller.dart';
 
+import 'package:starsync/src/session/connection.dart' show ConnClosed;
+import 'package:starsync/src/session/navigation.dart' show JoinFailed, Place;
+import 'package:starsync/src/session/session_coordinator.dart' show ConnectParams;
+
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
+
 RecentServer join(String host, String port, [String secret = '']) =>
-    RecentServer(hosted: false, host: host, port: port, secret: secret);
+    RecentServer(host: host, port: port, secret: secret);
 
 void main() {
   group('recent servers', () {
@@ -35,21 +42,12 @@ void main() {
       expect(list.where((r) => r.host == '10.0.0.4').length, 1);
     });
 
-    test('hosted entries are one per port, separate from joins', () {
-      var list = <RecentServer>[];
-      list = pushRecent(list, const RecentServer(hosted: true, host: '', port: '8080'));
-      list = pushRecent(list, join('127.0.0.1', '8080'));
-      list = pushRecent(list, const RecentServer(hosted: true, host: '', port: '8080', secret: 'x'));
-      expect(list.length, 2);
-      expect(list.first.secret, 'x');
-    });
-
-    test('round-trips and tolerates junk', () {
-      final list = [join('a.example', '9000', 's'), const RecentServer(hosted: true, host: '', port: '8080')];
+    test('round-trips and tolerates junk; hosted entries of older versions are dropped', () {
+      final list = [join('a.example', '9000', 's'), join('b.example', '8080')];
       final back = decodeRecents(encodeRecents(list));
       expect(back.map((r) => r.key), list.map((r) => r.key));
       expect(back.first.secret, 's');
-      expect(back.last.hosted, isTrue);
+      expect(decodeRecents('[{"hosted":true,"host":"","port":"8080"},{"host":"h","port":"1"}]').single.host, 'h');
       expect(decodeRecents('not json'), isEmpty);
       expect(decodeRecents(42), isEmpty);
       expect(decodeRecents('[{"host":1},{"host":"h","port":"1"}]').single.host, 'h');
@@ -79,8 +77,15 @@ void main() {
   });
 
   test('health parse: online, junk and protocol mismatch', () {
-    final ok = ServerHealth.parse(jsonEncode(
-        {'ok': true, 'name': 'Den', 'proto': RelayConstants.protoVersion, 'viewers': 2, 'version': '1.3.0'}));
+    final ok = ServerHealth.parse(jsonEncode({
+      'ok': true,
+      'name': 'Den',
+      'proto': RelayConstants.protoMax,
+      'protoMin': RelayConstants.protoMin,
+      'protoMax': RelayConstants.protoMax,
+      'viewers': 2,
+      'version': '1.3.0'
+    }));
     expect(ok.online, isTrue);
     expect(ok.name, 'Den');
     expect(ok.version, '1.3.0');
@@ -91,6 +96,73 @@ void main() {
     expect(ServerHealth.parse('nope').online, isFalse);
     expect(ServerHealth.parse('{"ok":false}').online, isFalse);
     expect(healthUri('::1', '8080').toString(), 'http://[::1]:8080/health');
+  });
+
+  group('version gate (/health)', () {
+    String body({required int min, required int max, String version = '', String name = ''}) =>
+        jsonEncode({'ok': true, 'name': name, 'proto': max, 'protoMin': min, 'protoMax': max, 'version': version});
+    const own = RelayConstants.protoMin;
+
+    test('older, newer, compatible', () {
+      final older = ServerHealth.parse(body(min: own - 2, max: own - 1, version: '1.2.1', name: "Bob's server"));
+      expect(older.fit, VersionFit.theyUpdate);
+      expect(versionGateText(older), "Bob's server runs Starsync 1.2.1 — they need to update");
+      final newer = ServerHealth.parse(body(min: RelayConstants.protoMax + 1, max: RelayConstants.protoMax + 2, version: '2.0.0'));
+      expect(newer.fit, VersionFit.youUpdate);
+      expect(versionGateText(newer), 'The server runs Starsync 2.0.0 — you need to update');
+      final overlap = ServerHealth.parse(body(min: own - 1, max: RelayConstants.protoMax + 3));
+      expect(overlap.fit, VersionFit.ok, reason: 'ranges that meet are fine');
+      // A proto 15 server says only `proto`.
+      final old = ServerHealth.parse('{"ok":true,"proto":15,"name":"server"}');
+      expect(old.fit, VersionFit.theyUpdate);
+      expect(versionGateText(old), 'The server runs an older Starsync — they need to update');
+      expect(ServerHealth.parse('{"ok":true}').fit, isNull, reason: 'unknown: let the hello decide');
+    });
+
+    test('a join stops at the gate, still at home, before connecting', () async {
+      final graph = testGraph(healthGet: (uri) async => body(min: own - 2, max: own - 1, version: '1.2.1'));
+      await expectLater(
+          graph.navigation.join(const ConnectParams(host: 'old.example', port: 8080, secret: '', name: 'Me')),
+          throwsA(isA<VersionGateRefused>()
+              .having((e) => e.youUpdate, 'youUpdate', isFalse)
+              .having((e) => e.message, 'message', contains('they need to update'))));
+      expect(graph.connection.state.peek(), isA<ConnClosed>(), reason: 'never dialled');
+      final newer = testGraph(
+          healthGet: (uri) async => body(min: RelayConstants.protoMax + 1, max: RelayConstants.protoMax + 1));
+      await expectLater(newer.navigation.join(const ConnectParams(host: 'new.example', port: 8080, secret: '', name: 'Me')),
+          throwsA(isA<VersionGateRefused>().having((e) => e.youUpdate, 'youUpdate', isTrue)));
+      final offline = testGraph(healthGet: (uri) async => throw const SocketException('refused'));
+      await expectLater(offline.navigation.join(const ConnectParams(host: 'gone.example', port: 8080, secret: '', name: 'Me')),
+          throwsA(isA<JoinFailed>()));
+    });
+
+    testWidgets('the Join card says who has to update and offers the updater when it is you', (tester) async {
+      final graph = testGraph(
+          healthGet: (uri) async => body(min: RelayConstants.protoMax + 1, max: RelayConstants.protoMax + 1, version: '2.0.0'));
+      graph.forms.form.name = 'Me';
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(scoped(
+          graph,
+          MaterialApp(
+            theme: ThemeData.dark(),
+            home: AppShell(
+              updates: UpdateController(currentVersion: '0.0.0-dev'),
+              autoUpdateCheck: false,
+              windowControls: false,
+              healthGet: graph.navigation.healthGet,
+            ),
+          )));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('strip-join')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('join-address')), 'new.example');
+      await tester.tap(find.widgetWithText(FilledButton, 'Join').last);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('you need to update'), findsOneWidget);
+      expect(find.byKey(const ValueKey('join-update')), findsOneWidget);
+    });
   });
 
   test('pasting sorts links and paths into the right source', () {
@@ -118,7 +190,7 @@ void main() {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(scoped(_graph, MaterialApp(
       theme: ThemeData.dark(),
       home: AppShell(
         updates: UpdateController(currentVersion: '0.0.0-dev'),
@@ -126,7 +198,7 @@ void main() {
         windowControls: false,
         healthGet: health ?? fakeHealth(const {}),
       ),
-    ));
+    )));
     await tester.pump();
   }
 
@@ -136,8 +208,8 @@ void main() {
   }
 
   setUp(() {
-    SessionState.instance.recents.value = const [];
-    SessionState.instance.route.value = AppRoute.home;
+    _graph.forms.recents.value = const [];
+    _graph.navigation.place.value = Place.none;
   });
 
   testWidgets('tabs and settings pages switch the body', (tester) async {
@@ -178,7 +250,7 @@ void main() {
   });
 
   testWidgets('Enter in the join card submits; errors show under it', (tester) async {
-    SessionState.instance.lastForm.name = '';
+    _graph.forms.form.name = '';
     await pumpShell(tester, const Size(1280, 720));
     await openCard(tester, 'strip-join');
     await tester.enterText(find.byKey(const ValueKey('join-address')), 'friend.example');
@@ -201,11 +273,10 @@ void main() {
   });
 
   testWidgets('recent rows show live status from /health', (tester) async {
-    SessionState.instance.recents.value = [
+    _graph.forms.recents.value = [
       join('alpha.example', '8080'),
       join('beta.example', '9000', 'pw'),
       join('gamma.example', '7000'),
-      const RecentServer(hosted: true, host: '', port: '8181'),
     ];
     await pumpShell(tester, const Size(1280, 900),
         health: fakeHealth({
@@ -226,8 +297,6 @@ void main() {
     expect(inRow('beta.example:9000', find.text('○ offline')), findsOneWidget);
     expect(inRow('beta.example:9000', find.text('beta.example')), findsOneWidget);
     expect(inRow('gamma.example:7000', find.text('needs update')), findsOneWidget);
-    // Hosted entries live on the Host card, not in the join list.
-    expect(find.byKey(const ValueKey('recent-host:8181')), findsNothing);
     // x forgets.
     await tester.tap(inRow('beta.example:9000', find.byTooltip('Forget')));
     await tester.pump();
@@ -242,13 +311,15 @@ void main() {
     expect(find.byKey(const ValueKey('join-row')), findsOneWidget);
   });
 
-  testWidgets('library offline: welcome band, sources that need nothing, Jellyfin optional', (tester) async {
+  testWidgets('library at home: welcome band, sources that need nothing, Jellyfin optional', (tester) async {
     await pumpShell(tester, const Size(1280, 900));
     // The three ways in, Join first; none needs Jellyfin.
     expect(find.byKey(const ValueKey('welcome-band')), findsOneWidget);
     expect(find.text('Watch together, in sync'), findsOneWidget);
     final join = tester.getTopLeft(find.byKey(const ValueKey('way-join')));
-    expect(join.dx, lessThan(tester.getTopLeft(find.byKey(const ValueKey('way-solo'))).dx));
+    expect(join.dx, lessThan(tester.getTopLeft(find.byKey(const ValueKey('way-invite'))).dx));
+    expect(find.text('Watch on your own'), findsOneWidget);
+    expect(find.text('Host'), findsNothing, reason: 'no Host: your server is always there');
     // No linked server: Files and Link first, Jellyfin as an optional card.
     expect(find.text('Pick something to watch'), findsOneWidget);
     expect(find.text('Add a Jellyfin server'), findsNothing);
@@ -262,25 +333,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Watch from a link'), findsOneWidget);
     // Alone: Play, no relay modes.
-    expect(find.text(soloPlayHint), findsOneWidget);
+    expect(find.text(alonePlayHint), findsOneWidget);
     expect(find.text('How the others get it'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('host without a name errors in the host card', (tester) async {
-    SessionState.instance.lastForm.name = '';
-    SessionState.instance.recents.value = [const RecentServer(hosted: true, host: '', port: '8181', secret: 's')];
+  testWidgets('pasting an invite into the address fills the port', (tester) async {
     await pumpShell(tester, const Size(1280, 900));
-    await openCard(tester, 'strip-host');
-    expect(find.text('No password — anyone can join'), findsOneWidget);
-    expect(find.text('You pick what to watch afterwards, in the library.'), findsOneWidget);
-    // A hosted port refills the fields.
-    await tester.tap(find.byKey(const ValueKey('recent-host:8181')));
+    await openCard(tester, 'strip-join');
+    await tester.enterText(find.byKey(const ValueKey('join-address')),
+        'Join me on Starsync: 192.168.1.20:9123 (ask me for the password) · Starsync 1.3.0');
     await tester.pump();
-    expect(find.text('No password — anyone can join'), findsNothing);
-    await tester.tap(find.widgetWithText(FilledButton, 'Host').last);
-    await tester.pumpAndSettle();
-    expect(find.textContaining('display name', findRichText: true), findsOneWidget);
+    expect(tester.widget<TextField>(find.byKey(const ValueKey('join-address'))).controller!.text, '192.168.1.20');
+    expect(tester.widget<TextField>(find.byKey(const ValueKey('join-port'))).controller!.text, '9123');
   });
 
   testWidgets('narrow window: strip, cards and library fit', (tester) async {
@@ -310,8 +375,8 @@ void main() {
           executablePath: '/nowhere/watch_together',
           restart: (_, _) async {});
       c.status.value = s;
-      await tester.pumpWidget(MaterialApp(
-          home: Scaffold(body: Column(children: [UpdateBar(controller: c)]))));
+      await tester.pumpWidget(scoped(_graph, MaterialApp(
+          home: Scaffold(body: Column(children: [UpdateBar(controller: c)])))));
       return c;
     }
 

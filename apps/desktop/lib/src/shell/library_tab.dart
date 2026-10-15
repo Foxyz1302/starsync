@@ -14,7 +14,7 @@ import '../jellyfin/picker_source.dart';
 import '../jellyfin/session_media.dart';
 import '../screens/home/media_picker.dart';
 import '../session/app_events.dart' show ActionFailed;
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import 'library_link.dart';
 import 'motion.dart';
 import 'welcome.dart';
@@ -68,12 +68,11 @@ const detailsDockFrom = 1000.0;
 /// Jellyfin cards select on click and open their details in a panel at
 /// the right (docked from [detailsDockFrom], floating over the library
 /// below it); a double-click or the panel's button puts it up. With
-/// nobody else watching ([solo]: offline or a solo session) the buttons
-/// say Play and putting something up starts (or uses) a solo session.
+/// nobody else in the server ([alone], D9) the buttons say Play.
 class LibraryTab extends StatefulWidget {
   final MediaPickerController controller;
   final JellyfinAccounts accounts;
-  final bool solo;
+  final bool alone;
   /// This app hosts the server: its files stream from here directly.
   final bool isHost;
   final BrowseStart? jellyfinStart;
@@ -85,9 +84,10 @@ class LibraryTab extends StatefulWidget {
   final VoidCallback? onOpenIntegrations;
   /// Defaults to [RecentLinks.instance].
   final RecentLinks? recentLinks;
-  final LinkProber probe;
+  /// What a link is; defaults to the app's.
+  final LinkProber? probe;
   /// The Files source (tests inject one); defaults to [FilesPage].
-  final Widget Function(BuildContext context, {required bool solo, required bool relayed,
+  final Widget Function(BuildContext context, {required bool alone, required bool relayed,
       required Future<String?> Function(String path) onPlay, String? nowPlayingPath})? filesBuilder;
   /// Clock for the Jellyfin Continue row (tests pin it).
   final DateTime Function() now;
@@ -97,7 +97,7 @@ class LibraryTab extends StatefulWidget {
     super.key,
     required this.controller,
     required this.accounts,
-    required this.solo,
+    required this.alone,
     required this.isHost,
     required this.onPutUp,
     this.onAddToQueue,
@@ -105,7 +105,7 @@ class LibraryTab extends StatefulWidget {
     this.jellyfinStart,
     this.onOpenIntegrations,
     this.recentLinks,
-    this.probe = defaultLinkProber,
+    this.probe,
     this.filesBuilder,
     this.now = DateTime.now,
     this.banner,
@@ -200,14 +200,14 @@ class _LibraryTabState extends State<LibraryTab> {
   /// A card's menu: errors as a toast (the Notifier's).
   Future<void> _cardQueue(JellyfinSelection sel, {bool next = false}) async {
     final error = await _queueJellyfin(sel, next: next);
-    if (error != null) SessionState.instance.notifier.notify(ActionFailed(error));
+    if (error != null && mounted) AppScope.of(context).notifier.notify(ActionFailed(error));
   }
 
   /// Double-click on a card: put it up, errors as a toast.
   Future<void> _doublePutUp(JellyfinSelection sel) async {
     _c.select(sel);
     final error = await _putUpJellyfin(sel);
-    if (error != null) SessionState.instance.notifier.notify(ActionFailed(error));
+    if (error != null && mounted) AppScope.of(context).notifier.notify(ActionFailed(error));
   }
 
   // -------------------------------------------------------------- build
@@ -271,7 +271,7 @@ class _LibraryTabState extends State<LibraryTab> {
         ),
       MediaKind.link => LibraryLinkSource(
           controller: _c,
-          solo: widget.solo,
+          alone: widget.alone,
           recents: widget.recentLinks ?? RecentLinks.instance,
           probe: widget.probe,
           onPutUp: _put,
@@ -305,7 +305,7 @@ class _LibraryTabState extends State<LibraryTab> {
             child: JellyfinDetailsPanel(
               controller: _browse,
               selection: shown,
-              solo: widget.solo,
+              alone: widget.alone,
               onPutUp: _putUpJellyfin,
               onAddToQueue: widget.onAddToQueue == null ? null : _queueJellyfin,
               onClose: () => _c.select(null),
@@ -366,17 +366,17 @@ class _LibraryTabState extends State<LibraryTab> {
     final relayed = !widget.isHost;
     Future<String?> play(String path) => _put(FileMedia(path));
     return SignalBuilder(builder: (context) {
-      final session = SessionState.instance;
-      final now = session.route.value == AppRoute.session
-          ? nowPlayingFile(session.coordinator.serverState.value?.media, session.lastForm.mediaPath)
+      final graph = AppScope.of(context);
+      final now = graph.navigation.online.value
+          ? nowPlayingFile(graph.coordinator.serverState.value?.media, graph.forms.form.mediaPath)
           : null;
       final b = widget.filesBuilder;
       if (b != null) {
-        return b(context, solo: widget.solo, relayed: relayed, onPlay: play, nowPlayingPath: now);
+        return b(context, alone: widget.alone, relayed: relayed, onPlay: play, nowPlayingPath: now);
       }
       final add = widget.onAddToQueue;
       return FilesPage(
-          solo: widget.solo,
+          alone: widget.alone,
           relayed: relayed,
           onPlay: play,
           onAddToQueue: add == null ? null : (path, {next = false}) => add(FileMedia(path), next: next),

@@ -1,5 +1,3 @@
-// restructure: rewrite in step 3 (Your server): invite addresses (P24) and
-// the hosting invite; the settings cards stay.
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -15,9 +13,17 @@ import 'package:starsync/src/shaders/shader_presets.dart';
 import 'package:starsync/src/shell/avatar.dart';
 import 'package:starsync/src/shell/party_strip.dart';
 import 'package:starsync/src/shell/settings_tab.dart';
-import 'package:starsync/src/state/session_state.dart';
 import 'package:starsync/src/state/settings.dart';
 import 'package:starsync/src/update/update_controller.dart';
+
+import 'package:starsync/src/session/invite.dart';
+import 'package:starsync/src/session/navigation.dart' show Place;
+import 'package:starsync/src/state/connect_prefs.dart' show RecentServer;
+
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
 
 // The player settings card (both skins, never a media_kit `Video`), the
 // Settings pages, the host flag in the party UI and invite addresses.
@@ -39,7 +45,7 @@ Future<void> pick(WidgetTester tester, String key, String item) async {
 
 void main() {
   final s = AppSettings.instance;
-  final coord = SessionState.instance.coordinator;
+  final coord = _graph.coordinator;
 
   tearDown(() {
     s.controlsSkin.value = ControlsSkin.standard;
@@ -54,8 +60,8 @@ void main() {
     coord.playback.tracks.value = const [];
     coord.serverState.value = null;
     coord.hostFile = null;
-    SessionState.instance.route.value = AppRoute.home;
-    SessionState.instance.recents.value = const [];
+    _graph.navigation.place.value = Place.none;
+    _graph.forms.recents.value = const [];
   });
 
   Widget opener() => Builder(
@@ -73,7 +79,7 @@ void main() {
         MpvTrack(id: 1, type: JellyfinStreamType.audio, language: 'jpn', codec: 'eac3', channels: 2, selected: true),
         MpvTrack(id: 1, type: JellyfinStreamType.subtitle, language: 'eng', codec: 'ass', title: 'Full'),
       ];
-      await tester.pumpWidget(app(Align(alignment: Alignment.bottomRight, child: opener())));
+      await tester.pumpWidget(scoped(_graph, app(Align(alignment: Alignment.bottomRight, child: opener()))));
       await tester.tap(find.byKey(const ValueKey('open-settings')));
       await tester.pumpAndSettle();
       final card = find.byKey(const ValueKey('player-settings-card'));
@@ -113,10 +119,10 @@ void main() {
 
     testWidgets('keeps the controls up while open', (tester) async {
       bigWindow(tester);
-      await tester.pumpWidget(app(ControlsFrame(
+      await tester.pumpWidget(scoped(_graph, app(ControlsFrame(
         hideAfter: const Duration(seconds: 1),
         builder: (context, visible) => Align(alignment: Alignment.bottomRight, child: opener()),
-      )));
+      ))));
       final controls = tester.state<ControlsFrameState>(find.byType(ControlsFrame));
       await tester.tap(find.byKey(const ValueKey('open-settings')));
       await tester.pumpAndSettle();
@@ -135,12 +141,12 @@ void main() {
     Future<void> pumpSettings(WidgetTester tester, SettingsSection section,
         {Future<AnimeFlowMe> Function()? me, Size size = const Size(1280, 1400)}) async {
       bigWindow(tester, size);
-      await tester.pumpWidget(app(SettingsTab(
+      await tester.pumpWidget(scoped(_graph, app(SettingsTab(
         section: section,
         onSection: (_) {},
         updates: UpdateController(currentVersion: '0.0.0-dev'),
         animeFlowMe: me ?? () async => throw const AnimeFlowException(401, AnimeFlowErrorCode.missingToken, 'x'),
-      )));
+      ))));
       await tester.pumpAndSettle();
     }
 
@@ -196,26 +202,27 @@ void main() {
       expect(s.hiddenControls.value, isEmpty);
     });
 
-    testWidgets('Party & network: host defaults and recent servers with remove', (tester) async {
-      SessionState.instance.recents.value = const [
-        RecentServer(hosted: false, host: 'vps.example', port: '8080', secret: 'pw'),
-        RecentServer(hosted: true, host: '127.0.0.1', port: '9000'),
+    testWidgets('Party & network: your server\'s port and password, recent servers with remove', (tester) async {
+      _graph.forms.recents.value = const [
+        RecentServer(host: 'vps.example', port: '8080', secret: 'pw'),
+        RecentServer(host: 'friend.example', port: '9000'),
       ];
       await pumpSettings(tester, SettingsSection.network);
-      expect(find.text('Default port'), findsOneWidget);
+      expect(find.text('Your server'), findsOneWidget);
+      expect(find.text('Port'), findsOneWidget);
       expect(find.text('vps.example:8080'), findsOneWidget);
-      expect(find.text('Hosted on port 9000'), findsOneWidget);
+      expect(find.text('friend.example:9000'), findsOneWidget);
       await tester.enterText(find.byKey(const ValueKey('host-port')), '70000');
       await tester.pump();
       expect(find.text('A number from 1 to 65535'), findsOneWidget);
       await tester.enterText(find.byKey(const ValueKey('host-port')), '9100');
       await tester.pump();
-      expect(SessionState.instance.lastForm.hostPort, '9100');
+      expect(_graph.forms.form.hostPort, '9100');
       await tester.tap(find.descendant(
           of: find.byKey(const ValueKey('recent-vps.example:8080')), matching: find.byTooltip('Remove')));
       await tester.pumpAndSettle();
       expect(find.text('vps.example:8080'), findsNothing);
-      SessionState.instance.lastForm.hostPort = '8080';
+      _graph.forms.form.hostPort = '8080';
     });
 
     testWidgets('Integrations: AnimeFlow says who you are connected as, or why not', (tester) async {
@@ -224,7 +231,7 @@ void main() {
               userId: 'u1', name: 'foxyz', scopes: {AnimeFlowScope.view, AnimeFlowScope.request}));
       expect(find.text('connected as foxyz · can view, request'), findsOneWidget);
       // A fresh tree: the card keeps its first answer otherwise.
-      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(scoped(_graph, const SizedBox()));
       await pumpSettings(tester, SettingsSection.integrations,
           me: () async => throw const AnimeFlowException(
               401, AnimeFlowErrorCode.missingToken, 'No linked Jellyfin account for AnimeFlow'));
@@ -239,23 +246,43 @@ void main() {
       final chip = tester.widget<ChoiceChip>(find.byKey(const ValueKey('settings-network')));
       expect(chip.selected, isTrue);
       expect((chip.avatar! as Icon).icon, Icons.hub_outlined);
-      expect(find.text('Default port'), findsOneWidget);
+      expect(find.text('Port'), findsOneWidget);
     });
   });
 
   group('party', () {
-    test('invite addresses: LAN IPv4 with the port, private first, no loopback', () {
+    test('invite addresses: home network first; no proxy fake-IP, link-local, loopback or container bridge', () {
+      ({String name, InternetAddress address}) at(String name, String ip) => (name: name, address: InternetAddress(ip));
       final list = inviteAddresses([
-        InternetAddress('127.0.0.1'),
-        InternetAddress('100.64.1.2'),
-        InternetAddress('192.168.1.20'),
-        InternetAddress('169.254.3.4'),
-        InternetAddress('::1'),
-        InternetAddress('10.0.0.5'),
-        InternetAddress('192.168.1.20'),
-      ], '8080');
-      expect(list, ['192.168.1.20:8080', '10.0.0.5:8080', '100.64.1.2:8080']);
-      expect(inviteAddresses(const [], '8080'), isEmpty);
+        at('lo', '127.0.0.1'),
+        at('Meta', '198.18.0.1'), // a TUN proxy's fake-IP range (198.18.0.0/15)
+        at('utun', '198.19.255.2'),
+        at('tailscale0', '100.64.1.2'),
+        at('docker0', '172.17.0.1'),
+        at('br-3f2a', '172.18.0.1'),
+        at('virbr0', '192.168.122.1'),
+        at('eth1', '10.0.0.5'),
+        at('wlan0', '169.254.3.4'),
+        at('eth0', '192.168.1.20'),
+        at('eth0', '192.168.1.20'),
+        at('eth0', '::1'),
+        at('wan', '203.0.113.7'),
+      ]);
+      expect(list, ['192.168.1.20', '10.0.0.5', '100.64.1.2', '203.0.113.7']);
+      expect(inviteAddresses(const []), isEmpty);
+      expect(isFakeIp(InternetAddress('198.19.1.1').rawAddress), isTrue);
+      expect(isFakeIp(InternetAddress('198.20.1.1').rawAddress), isFalse);
+    });
+
+    test('an invite: the address, whether to ask for a password, the version; pasted back', () {
+      const invite = Invite(host: '192.168.1.20', port: 8080, password: true, version: '1.3.0');
+      expect(invite.address, '192.168.1.20:8080');
+      expect(invite.text, 'Join me on Starsync: 192.168.1.20:8080 (ask me for the password) · Starsync 1.3.0');
+      expect(invite.fp, isNull, reason: 'reserved for pinned certificates');
+      expect(addressIn(invite.text), (host: '192.168.1.20', port: '8080'));
+      expect(addressIn('vps.example.com:9000'), (host: 'vps.example.com', port: '9000'));
+      expect(addressIn('[fe80::1]:8080'), (host: 'fe80::1', port: '8080'));
+      expect(addressIn('just a host'), isNull);
     });
 
     void online(List<MemberView> members) {
@@ -267,7 +294,7 @@ void main() {
         mediaId: 0,
         members: members,
       );
-      SessionState.instance.route.value = AppRoute.session;
+      _graph.navigation.place.value = Place.friend;
     }
 
     testWidgets('the state\'s host flag crowns that member for everyone', (tester) async {
@@ -279,7 +306,7 @@ void main() {
       expect(avatars['Hana']!.host, isTrue);
       expect(avatars['Bob']!.host, isFalse);
       bigWindow(tester);
-      await tester.pumpWidget(app(const Center(child: MembersCard())));
+      await tester.pumpWidget(scoped(_graph, app(const Center(child: MembersCard()))));
       await tester.pumpAndSettle();
       expect(find.descendant(of: find.byKey(const ValueKey('member-m1')), matching: find.text('host')),
           findsOneWidget);
@@ -291,18 +318,28 @@ void main() {
       expect(find.text('Sit out'), findsOneWidget);
     });
 
-    testWidgets('hosting: Copy invite address lists this machine\'s addresses', (tester) async {
+    testWidgets('your server, not shared: only you, Invite; shared: the invite and Stop sharing', (tester) async {
       online(const [MemberView(id: 'm1', name: 'Me', ready: false, inSet: false, buffered: 0)]);
-      coord.hostFile = (_) async => null;
-      SessionState.instance.lastForm.hostPort = '8080';
+      _graph.navigation.place.value = Place.yours;
+      final yours = _graph.yourServer;
+      yours.port.value = 40000; // as if it runs
+      addTearDown(() {
+        yours.port.value = null;
+        yours.shared.value = null;
+      });
       bigWindow(tester);
-      await tester.pumpWidget(app(Center(
-        child: MembersCard(lanAddresses: (port) async => ['192.168.1.20:$port', '10.0.0.5:$port']),
-      )));
+      await tester.pumpWidget(scoped(_graph, app(const Center(child: MembersCard()))));
       await tester.pumpAndSettle();
-      expect(find.text('Copy invite address'), findsOneWidget);
+      expect(find.text('Your server'), findsOneWidget);
+      expect(find.textContaining('Only you can reach it'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Invite'), findsOneWidget);
+      expect(find.byKey(const ValueKey('stop-sharing')), findsNothing);
+
+      yours.shared.value = const Invite(host: '192.168.1.20', port: 8080, version: '1.3.0');
+      await tester.pumpAndSettle();
       expect(find.text('192.168.1.20:8080'), findsOneWidget);
-      expect(find.text('10.0.0.5:8080'), findsOneWidget);
+      expect(find.text('Copy invite'), findsOneWidget);
+      expect(find.byKey(const ValueKey('stop-sharing')), findsOneWidget);
       expect(find.textContaining('port 8080 forwarded'), findsOneWidget);
       expect(find.textContaining('VPS'), findsOneWidget);
     });

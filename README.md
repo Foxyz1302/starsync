@@ -60,36 +60,37 @@ telling you to update.
 
 ## Getting started
 
-Three ways in, all at the top of the Library when you are not in a server.
-None of them needs Jellyfin or an account.
+The app always runs its own server, quietly: your server. When it starts
+you are on it, alone, and it is a plain player. Three ways in, at the top
+of the Library the first time; none needs Jellyfin or an account.
 
-- **Join a friend** (most people): your friend sends you an address and,
-  maybe, a password. See [Join](#join).
-- **Host**: you have the video and friends watch it with you. See
-  [Host from the app](#host-from-the-app).
-- **Watch solo**: just play something from the Library. It plays for you
-  alone, with everything a server has (Jellyfin progress, next episode,
-  skip buttons); nothing is reachable from outside this computer. Invite
-  friends in the strip turns it into a hosted server (the Host card's port
-  and password) and the video carries on from where it was; Stop ends it.
+- **Join a friend** (most people): your friend sends you an invite (an
+  address) and, maybe, a password. See [Join](#join).
+- **Invite friends**: you have the video and friends watch it with you.
+  See [Your server and Invite](#your-server-and-invite).
+- **Watch on your own**: just play something from the Library, with
+  everything a server has (Jellyfin progress, next episode, skip buttons).
+  Nobody else can reach your server until you invite them; inviting never
+  interrupts what plays.
 
 ## The window
 
 One window. Along the top, the strip: your avatar (click it for your
 profile: name, picture with a crop editor, colour, and links to the
-settings), the Library / Schedule / Settings tabs, and the party. Offline
-the party side has Join a friend and Host; watching solo it says Solo,
-with Invite friends and Stop; in a server it shows everyone's avatar
+settings), the Library / Schedule / Settings tabs, and the party. Alone
+on your server it has just Join a friend and Invite (and "Sharing" while
+your server is open to friends); with others there it shows everyone's avatar
 with a ring for their state (green ready, amber buffering, grey not ready,
 a little faded joining, dimmed reconnecting, dimmed with a moon sitting
 out; a crown on whoever
 hosts, a tower on whoever passes the video on). Click the avatars for the
 member list (each member's app version, amber when it differs from yours,
-and the server's at the top; force ready, Nudge, Sit out, "Copy invite address"; when you host it lists this computer's
-network addresses with the port, and friends outside your network need
-that port forwarded or a server they can all reach, like a VPS). Beside them the server and "ready n/m" (who is sitting out or
+and the server's at the top; force ready, Nudge, Sit out; on your
+server the invite with Copy invite and Stop sharing, on a friend's "Copy
+invite address"). Beside them the server and "ready n/m" (who is sitting out or
 reconnecting does not count), the chat button with unread
-count, and Leave. Empty strip space drags the window.
+count, and Invite on your server or Leave on a friend's. Empty strip
+space drags the window.
 
 The player fills the window under the strip. Pick a tab and it shrinks to
 a mini player in a corner: drag it anywhere and it snaps to the nearest
@@ -160,18 +161,27 @@ same profile) takes your place over, and the first one says so and stops.
 only they hear it (a sound, a pop-up, and the taskbar entry asks for
 attention when the window is in the background).
 
-## Host from the app
+## Your server and Invite
 
-Host in the strip: set a port and an optional password (blank = anyone can
-join), then Host. The app starts a server inside itself and joins it; you
-are the host (the crown). Nothing is up yet: pick what to
-watch in the Library tab (below) and put it up. Leaving or
-closing the app stops the server. Friends need to reach your machine: open
-the TCP port on your router (or use a LAN or VPN address). Friends open
-nothing. Ports you hosted on before are one click away in the Host card.
+Your server starts with the app and stops when it closes. Only this app
+can reach it until you press **Invite** (in the strip, or in the member
+list): that opens it on your network at the port from Settings → Party &
+network (default 8080, with the password set there; blank = anyone can
+join) and copies an invite ("Join me on Starsync: 192.168.1.20:8080 ·
+Starsync 1.3.0") to send to friends. Nothing restarts: what plays and Up
+next carry on, and you are the host (the crown). The invite picks this
+computer's home-network address (not a VPN or proxy one, nor a Docker or
+VM bridge). Friends elsewhere need the TCP port forwarded on your router
+(or a VPN address, or a server they can all reach, like a VPS). Friends
+open nothing. **Stop sharing** (in the member list) closes it again:
+everyone else leaves (their app goes back to their own server and says
+why), you and Up next stay.
 
-If you put up a local file, the server streams it to everyone from your
+If you put up a local file, your server streams it to everyone from your
 disk. Nothing is uploaded or stored anywhere.
+
+Joining a friend leaves your server for theirs; it stays up meanwhile,
+and leaving theirs brings you back to it as you left it.
 
 ## Library
 
@@ -209,12 +219,12 @@ Up next, add the folder to Files, or fill Link).
 - **Files**: video folders you add on this computer, grouped by series
   (click a series to list its episodes), or any file through Browse. The others stream it from you.
 
-Put it up and the player opens. Not in a server, the buttons say Play
-and it plays for you alone ([Watch solo](#getting-started)).
+Put it up and the player opens. With nobody else in the server, the
+buttons say Play and a link plays straight from the site.
 
 ### Up next (the queue)
 
-In a server (solo too), anything can wait its turn instead of going up
+Anything can wait its turn instead of going up
 now: **Add to queue** on the Link page (in the way you picked), or
 right-click a Jellyfin card or episode, a video in Files, a recent link
 or an episode on the Schedule for **Add to queue** / **Play next**; the
@@ -302,8 +312,8 @@ clipboard: paste it to whoever helps you, from both sides if you can.
 
 While you are in a server, the app also sends its log to that server, which
 merges everyone's lines and its own into one session log
-(`session-YYYY-MM-DD.log` next to the server's logs; the hosting app keeps
-it in its own logs folder), so a problem can be read afterwards from every
+(`session-YYYY-MM-DD.log` next to the server's logs; your own server
+keeps it in the app's logs folder), so a problem can be read afterwards from every
 side. Chat is never logged anywhere, nor passwords, tokens and cookies.
 When something goes wrong, press **Mark a problem** (Ctrl+Shift+B, also in
 the player's ⚙ and Settings → About) and add a few words if you like: a
@@ -315,18 +325,22 @@ notes that you don't share; a problem you mark still goes in).
 
 ## Join
 
-Join in the strip. Servers you got into are listed first (up to 6), with
-live status (online and how many are watching, or offline, plus "needs
-update" when the server runs another protocol): click one to rejoin, x to
-forget it. Or enter the host's address, port, and the password if there
-is one, then Enter or Join. Your name and picture come from your profile
-(your avatar at the top left).
+Join a friend in the strip. Servers you got into are listed first (up
+to 6), with live status (online and how many are watching, or offline,
+plus "needs update" when its version and yours do not match): click one
+to rejoin, x to forget it. Or paste the invite (or the address and port)
+and the password if there is one, then Enter or Join. Before connecting
+the app checks the server's version: when they do not match it says who
+has to update ("Bob's server runs Starsync 1.2.1 — they need to
+update"), and offers the update when it is you. Your name and picture
+come from your profile (your avatar at the top left). Leave goes back to
+your own server.
 
 ## Settings
 
 The Settings tab (Ctrl+,) has a page per topic, each setting with a line
-of help: Profile; Party & network (the Host card's default port and
-password, recent servers with remove); Player (below); Jellyfin &
+of help: Profile; Party & network (your server's port and password for
+Invite, recent servers with remove); Player (below); Jellyfin &
 integrations (linked Jellyfin servers, below, the AnimeFlow connection:
 "connected as <name>" with what you may do, or why not, and playing the
 next episode automatically); Notifications & sounds (what pops up, chat
@@ -412,7 +426,8 @@ during the first 6 minutes.
 | Sync WebSocket and `/health` | TCP 8080 | plain `ws://`, no TLS |
 | Local file streaming | same port | path `/m/...`, needs a session token |
 
-Only the host needs the port reachable.
+Only the one who invites needs the port reachable; until Invite your
+server listens on 127.0.0.1 and a free port only.
 
 ## Jellyfin
 

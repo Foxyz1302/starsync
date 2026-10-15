@@ -14,18 +14,18 @@ import '../jellyfin/browse_scope.dart' show BrowseStart;
 import '../jellyfin/session_media.dart';
 import '../screens/home/connect_flow.dart';
 import '../session/app_events.dart' show ActionFailed, ScheduleResult;
-import '../session/session_coordinator.dart' show ConnectParams;
 import '../screens/home/health_probe.dart';
 import '../screens/home/media_picker.dart';
 import '../session/identity.dart';
 import '../screens/home/update_indicator.dart';
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
+import '../session/navigation.dart' show Place;
 import '../state/settings.dart';
 import '../update/update_controller.dart';
 import 'chat_panel.dart';
 import 'connect_cards.dart';
 import 'handoff.dart';
-import 'library_link.dart' show LinkProber, defaultLinkProber;
+import 'library_link.dart' show LinkProber;
 import 'library_tab.dart';
 import 'motion.dart';
 import 'party_strip.dart';
@@ -38,7 +38,8 @@ import 'welcome.dart';
 
 /// The one window: the party strip over a body that fades through between
 /// the tabs and the full player, the floating mini player, the chat panel
-/// and the toasts. Online/offline follows [SessionState.route].
+/// and the toasts. Where the app is (your server, a friend's) follows
+/// [Navigation.place].
 ///
 /// The player ([SessionPlayer], the only `Video`) lives in one layer of
 /// the body: full it fills the body (fullscreen: the window, strip
@@ -61,7 +62,7 @@ class AppShell extends StatefulWidget {
   final VideoViewBuilder? videoBuilder;
   /// What the Library's Link page asks about a link (tests: a fake, so no
   /// network or yt-dlp runs).
-  final LinkProber linkProbe;
+  final LinkProber? linkProbe;
   const AppShell({
     super.key,
     this.updates,
@@ -70,7 +71,7 @@ class AppShell extends StatefulWidget {
     this.healthGet = defaultHealthGet,
     this.jellyfin,
     this.videoBuilder,
-    this.linkProbe = defaultLinkProber,
+    this.linkProbe,
   });
 
   @override
@@ -112,9 +113,9 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   bool _dragging = false;
   bool _handoffOpen = false;
 
-  final _flow = ConnectFlow();
-  late final _join = JoinFields(SessionState.instance.lastForm);
-  late final _host = HostFields(SessionState.instance.lastForm);
+  late final AppGraph _graph = AppScope.of(context);
+  late final _flow = ConnectFlow(navigation: _graph.navigation, forms: _graph.forms);
+  late final _join = JoinFields(_graph.forms.form);
   late final JellyfinAccounts _jellyfin = widget.jellyfin ?? JellyfinAccounts.instance;
   late MediaPickerController _picker = _newPicker();
   BrowseStart? _libraryStart;
@@ -126,22 +127,17 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   bool _dialogOpen = false;
   final _stops = <void Function()>[];
   // Rebuild the shell on these flips, not on every state broadcast.
-  final _online = computed(() => SessionState.instance.route.value == AppRoute.session);
-  /// Nobody else watches: offline, solo, or solo becoming a server.
-  final _alone = computed(() {
-    final s = SessionState.instance;
-    return s.route.value != AppRoute.session || s.solo.value || s.switching.value;
-  });
-  final _hasMedia = computed(() =>
-      SessionState.instance.route.value == AppRoute.session &&
-      SessionState.instance.coordinator.serverState.value?.media != null);
+  late final _online = computed(() => _graph.navigation.online.value);
+  /// Nobody else is in the server (D9): a plain player.
+  late final _alone = computed(() => !_graph.navigation.online.value || _graph.coordinator.alone.value);
+  late final _hasMedia =
+      computed(() => _graph.navigation.online.value && _graph.coordinator.serverState.value?.media != null);
 
   /// A video is on in the session (not finished): the update bar stays
   /// off the full player.
-  final _watching = computed(() {
-    final s = SessionState.instance;
-    final r = s.coordinator.serverState.value;
-    return s.route.value == AppRoute.session && r?.media != null && r?.transport != 'finished';
+  late final _watching = computed(() {
+    final r = _graph.coordinator.serverState.value;
+    return _graph.navigation.online.value && r?.media != null && r?.transport != 'finished';
   });
 
   PlayerMode get mode => _mode;
@@ -149,7 +145,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   bool get fullscreen => _fullscreen;
 
   MediaPickerController _newPicker({JellyfinMedia? jellyfin, MediaKind? source}) {
-    final f = SessionState.instance.lastForm;
+    final f = _graph.forms.form;
     final c = MediaPickerController(mediaPath: f.mediaPath, linkUrl: f.linkUrl, jellyfin: jellyfin, source: source);
     if (jellyfin == null) unawaited(restoreLastPick(c, _jellyfin, () => mounted && identical(c, _picker)));
     return c;
@@ -163,14 +159,16 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     _jellyfin.ensureLoaded();
     if (widget.autoUpdateCheck) _autoCheck();
     HardwareKeyboard.instance.addHandler(_onKey);
-    final session = SessionState.instance;
-    final coord = session.coordinator;
+    final nav = _graph.navigation;
+    final coord = _graph.coordinator;
     _feedSeen = coord.feedLog.peek().length;
     _stops.add(effect(() {
-      final online = session.route.value == AppRoute.session;
+      final place = nav.place.value;
+      final online = place != Place.none;
       // Set now, not later: the media effect below may run first in this
-      // same flush, and its scheduled show reads these.
-      _autoFull = online;
+      // same flush, and its scheduled show reads these. A friend's video
+      // opens full; back home, yours waits in the mini player.
+      _autoFull = place == Place.friend;
       if (!online) _lastMediaId = -1;
       untracked(() => _later(() => online ? _wentOnline() : _wentOffline()));
     }));
@@ -178,7 +176,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     // after joining or a put-up of ours, else as the mini player).
     _stops.add(effect(() {
       final r = coord.serverState.value;
-      final online = session.route.value == AppRoute.session;
+      final online = nav.online.value;
       if (!online || r == null || r.media == null) return;
       if (r.mediaId == _lastMediaId) return;
       _lastMediaId = r.mediaId;
@@ -218,31 +216,21 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     var wasOut = false;
     _stops.add(effect(() {
       final out = coord.selfAway.value;
-      if (wasOut && !out && session.route.peek() == AppRoute.session) {
+      if (wasOut && !out && nav.online.peek()) {
         _later(() {
           if (_mode == PlayerMode.none) _show(PlayerMode.mini);
         });
       }
       wasOut = out;
     }));
-    // Solo becoming a hosted server: the player closes while the media
-    // moves over and comes back the way it was once it is up again.
+    // Your server died (the navigation starts a new one): say so.
+    final yours = _graph.yourServer;
     _stops.add(effect(() {
-      if (!session.switching.value) return;
-      _later(() {
-        _lastMediaId = -1;
-        _autoFull = _mode == PlayerMode.full;
-        if (_fullscreen) _toggleFullscreen();
-        _show(PlayerMode.none);
-      });
-    }));
-    // The hosted server died mid-session (SessionState leaves): say so.
-    _stops.add(effect(() {
-      final crash = session.serverCrash.value;
+      final crash = yours.crash.value;
       if (crash == null) return;
       _later(() {
-        session.serverCrash.value = null;
-        _alert('Server crashed', crash);
+        yours.crash.value = null;
+        _alert('Your server crashed', '$crash\n\nA new one starts; anyone who was in it joins again.');
       });
     }));
   }
@@ -261,7 +249,6 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     _watching.dispose();
     _flow.dispose();
     _join.dispose();
-    _host.dispose();
     _picker.dispose();
     _chat.dispose();
     _chatFocus.dispose();
@@ -291,8 +278,8 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
 
   void _wentOnline() {
     _unread = 0;
-    _feedSeen = SessionState.instance.coordinator.feedLog.peek().length;
-    // Hosting starts with nothing up: the library is where to pick it.
+    _feedSeen = _graph.coordinator.feedLog.peek().length;
+    // A new server: the library is where to pick something.
     setState(() => _tab = ShellTab.library);
   }
 
@@ -338,7 +325,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   /// The player's ×: sit out (stay in the server, nothing loaded; the
   /// player shows the join-back card). Once out, × closes the player.
   void _closePlayer() {
-    final coord = SessionState.instance.coordinator;
+    final coord = _graph.coordinator;
     if (coord.selfAway.peek()) {
       _show(PlayerMode.none);
     } else {
@@ -349,7 +336,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   Future<void> _setWindowFullscreen(bool on) async {
     if (!widget.windowControls) return;
     try {
-      await SessionState.instance.ports.shell.setFullScreen(on);
+      await _graph.ports.shell.setFullScreen(on);
     } catch (_) {
       // No window manager.
     }
@@ -384,7 +371,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   /// "Change video": the library, opened on the series of the episode
   /// playing (season selected, episode highlighted), else where it was.
   void _changeVideo() {
-    final coord = SessionState.instance.coordinator;
+    final coord = _graph.coordinator;
     coord.markInput();
     final ref = coord.currentRef.peek();
     final pick = ref == null ? null : pickForRef(_jellyfin, ref);
@@ -401,10 +388,10 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     _selectTab(ShellTab.library);
   }
 
-  /// Library → "Put it up for everyone"; the player opens full. Offline
-  /// it starts a solo session first (just you, on this computer).
+  /// Library → "Put it up for everyone" (alone: Play); the player opens
+  /// full. Before your server is up (starting) it waits for it.
   Future<String?> _putUp(PickedMedia media) async {
-    final session = SessionState.instance;
+    final coord = _graph.coordinator;
     if (media is JellyfinMedia) {
       try {
         putUpJellyfinMedia(_jellyfin, media);
@@ -414,47 +401,28 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       unawaited(_jellyfin.rememberPick(media));
     }
     if (!_online.peek()) {
-      final error = await _startSolo();
-      if (error != null || !mounted) return error;
+      if (!await _graph.navigation.goHome()) return "couldn't start your server";
+      if (!mounted) return null;
     }
     // Alone, a link plays direct: there is nobody to pass it on to.
-    if (media is LinkMedia && session.solo.peek()) {
+    if (media is LinkMedia && coord.alone.peek()) {
       media = LinkMedia(media.url, relay: LinkRelay.direct, anyway: media.anyway);
     }
-    final error = await session.coordinator.swapPicked(media);
+    final error = await coord.swapPicked(media);
     if (error != null || !mounted) return error;
-    final f = session.lastForm;
+    final f = _graph.forms.form;
     f
       ..linkUrl = media is LinkMedia ? media.url : f.linkUrl
       ..mediaPath = media is FileMedia ? media.path : f.mediaPath;
-    unawaited(session.saveForm().catchError((Object _) {}));
+    unawaited(_graph.forms.save().catchError((Object _) {}));
     _autoFull = true;
     _show(PlayerMode.full);
     return null;
   }
 
-  /// Starts a solo session; returns an error text, or null.
-  Future<String?> _startSolo() async {
-    final profile = Profile.instance;
-    try {
-      await profile.ensureLoaded();
-      final name = profile.name.peek().trim();
-      await SessionState.instance.startSolo(ConnectParams(
-        host: '127.0.0.1',
-        port: 0,
-        secret: '',
-        name: name.isEmpty ? 'Me' : name,
-        avatar: profile.avatarBase64(),
-      ));
-      return null;
-    } catch (e) {
-      return "couldn't start playing: $e";
-    }
-  }
-
-  /// Library's "Watch solo": somewhere to pick from (Jellyfin when linked,
-  /// else Files).
-  void _watchSolo() => _openLibrary(_jellyfin.isEmpty ? MediaKind.file : MediaKind.jellyfin);
+  /// The welcome band's "Watch on your own": somewhere to pick from
+  /// (Jellyfin when linked, else Files).
+  void _watchAlone() => _openLibrary(_jellyfin.isEmpty ? MediaKind.file : MediaKind.jellyfin);
 
   // --------------------------------------------------------------- handoff
 
@@ -464,7 +432,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   /// Ctrl+V outside a text field (a focused field pastes on its own).
   bool _onKey(KeyEvent e) {
     // Any key is activity (auto sit-out).
-    SessionState.instance.coordinator.markInput();
+    _graph.coordinator.markInput();
     if (e is! KeyDownEvent || e.logicalKey != LogicalKeyboardKey.keyV) return false;
     final keys = HardwareKeyboard.instance;
     if (!(keys.isControlPressed || keys.isMetaPressed) || keys.isShiftPressed || keys.isAltPressed) return false;
@@ -479,7 +447,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   /// Clipboard files first, then text (a link or absolute paths). A pasted
   /// image has no taker yet, so the clipboard's image data is not read.
   Future<void> _paste() async {
-    final clip = await SessionState.instance.ports.shell.readPaste();
+    final clip = await _graph.ports.shell.readPaste();
     await _handOff(classifyHandoff(paths: clip.files, text: clip.text), _pointer);
   }
 
@@ -493,7 +461,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     final HandoffAction? action;
     try {
       action = await showPopover<HandoffAction>(context,
-          at: align, child: HandoffCard(item: item, solo: _alone.peek(), queue: _online.peek()));
+          at: align, child: HandoffCard(item: item, alone: _alone.peek(), queue: _online.peek()));
     } finally {
       _handoffOpen = false;
     }
@@ -502,7 +470,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       case (HandoffVideos(:final paths), HandoffAction.putUp):
         final error = await _putUp(FileMedia(paths.first));
         if (error != null) {
-          SessionState.instance.coordinator.notify(ActionFailed(error));
+          _graph.coordinator.notify(ActionFailed(error));
         } else {
           await FolderStore.instance.ensureLoaded();
           FolderStore.instance.addRecent(paths.first);
@@ -511,15 +479,15 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
         // In order: with Play next, the last one added goes first.
         final next = action == HandoffAction.playNext;
         for (final p in next ? paths.reversed : paths) {
-          final error = await SessionState.instance.coordinator.queue.add(FileMedia(p), next: next);
+          final error = await _graph.coordinator.queue.add(FileMedia(p), next: next);
           if (error != null) {
-            SessionState.instance.coordinator.notify(ActionFailed(error));
+            _graph.coordinator.notify(ActionFailed(error));
             break;
           }
         }
       case (HandoffLink(:final url), HandoffAction.queue || HandoffAction.playNext):
         // In the Link page's mode, probed and refused like there.
-        final coord = SessionState.instance.coordinator;
+        final coord = _graph.coordinator;
         final error = await coord.queue
             .add(LinkMedia(url, relay: _picker.linkRelay), next: action == HandoffAction.playNext);
         if (error != null) coord.notify(ActionFailed(error));
@@ -553,7 +521,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   }
 
   // Off on Settings: its own drop targets (cookies) take the files there.
-  Widget _dropTarget(Widget child) => SessionState.instance.ports.shell.dropTarget(
+  Widget _dropTarget(Widget child) => _graph.ports.shell.dropTarget(
         enable: _tab != ShellTab.settings,
         onEnter: () => setState(() => _dragging = _onTop),
         onExit: () => setState(() => _dragging = false),
@@ -581,18 +549,19 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
 
   // --------------------------------------------------------------- dialogs
 
-  /// Leave asks first; a solo session just stops.
+  /// A friend's server: Leave asks first, then you are back on yours.
+  /// Yours has nothing to leave: the player closes ([_closePlayer]).
   Future<void> _confirmLeave() async {
-    final session = SessionState.instance;
-    if (session.solo.peek()) {
-      await session.leave();
+    final nav = _graph.navigation;
+    if (nav.place.peek() != Place.friend) {
+      _closePlayer();
       return;
     }
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Leave server?'),
-        content: const Text('You can rejoin right away.'),
+        content: const Text('You go back to your own server. You can rejoin right away.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           TextButton(
@@ -603,7 +572,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
         ],
       ),
     );
-    if (ok == true) await SessionState.instance.leave();
+    if (ok == true) await nav.leaveFriend();
   }
 
   Future<void> _alert(String title, String text) async {
@@ -623,14 +592,15 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     }
   }
 
-  void _connect(ConnectMode mode) => showConnectCard(
+  void _joinFriend() => showJoinCard(
         context,
-        mode: mode,
         flow: _flow,
         join: _join,
-        host: _host,
         healthGet: widget.healthGet,
+        updates: widget.updates,
       );
+
+  void _invite() => unawaited(inviteFriends(context));
 
   // ----------------------------------------------------------------- build
 
@@ -658,10 +628,9 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
                   chatOpen: _chatOpen,
                   unread: _unread,
                   onChat: _toggleChat,
-                  onJoin: () => _connect(ConnectMode.join),
-                  onHost: () => _connect(ConnectMode.host),
+                  onJoin: _joinFriend,
                   onLeave: _confirmLeave,
-                  onInvite: () => _connect(ConnectMode.host),
+                  onInvite: _invite,
                   onProfile: () => showProfileCard(context, onOpenSettings: _openSettings, updates: widget.updates),
                   onShowPlayer: hasMedia && _mode == PlayerMode.none ? () => _show(PlayerMode.mini) : null,
                   windowControls: widget.windowControls,
@@ -694,7 +663,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       ),
     );
     // Any pointer use anywhere is activity (auto sit-out).
-    final coord = SessionState.instance.coordinator;
+    final coord = _graph.coordinator;
     return Listener(
       onPointerHover: (e) {
         _pointer = e.localPosition;
@@ -709,41 +678,41 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     );
   }
 
-  /// No Jellyfin account, no server joined or hosted yet, band not
+  /// No Jellyfin account, no friend's server joined yet, band not
   /// dismissed: the welcome band explains the three ways in.
   bool get _newcomer =>
-      !AppSettings.instance.welcomeDismissed.value &&
-      _jellyfin.isEmpty &&
-      SessionState.instance.recents.value.isEmpty;
+      !AppSettings.instance.welcomeDismissed.value && _jellyfin.isEmpty && _graph.forms.recents.value.isEmpty;
 
   Widget _body(bool online, bool alone) {
-    final coord = SessionState.instance.coordinator;
+    final coord = _graph.coordinator;
+    final friend = _graph.navigation.place.value == Place.friend;
     final tabBody = switch (_tab) {
       ShellTab.library => LibraryTab(
           key: ValueKey('library-$_libraryGen'),
           controller: _picker,
           accounts: _jellyfin,
-          solo: alone,
-          // Offline, a put-up starts a solo session, which hosts.
-          isHost: !online || coord.hostFile != null,
-          // Only for newcomers: the strip has Join and Host for everyone else.
-          banner: online || !_newcomer
+          alone: alone,
+          // Your server serves your files itself; a friend's relays them.
+          isHost: !friend,
+          // Only for newcomers alone at home: the strip has Join and Invite
+          // for everyone else.
+          banner: !alone || friend || !_newcomer
               ? null
               : WelcomeBand(
-                  onJoin: () => _connect(ConnectMode.join),
-                  onHost: () => _connect(ConnectMode.host),
-                  onSolo: _watchSolo,
+                  onJoin: _joinFriend,
+                  onInvite: _invite,
+                  onWatch: _watchAlone,
                   onDismiss: () => setState(AppSettings.instance.dismissWelcome),
                 ),
           jellyfinStart: _libraryStart,
           onPutUp: _putUp,
-          // Up next needs a server (a solo session has one).
+          // Up next needs a server (yours, once it is up).
           onAddToQueue: online ? coord.queue.add : null,
           onOpenIntegrations: () => _openSettings(SettingsSection.integrations),
           probe: widget.linkProbe,
         ),
       ShellTab.schedule => SchedulePage(
-          solo: alone,
+          alone: alone,
           onPutUp: _putUp,
           onAddToQueue: online ? coord.queue.add : null,
           onToast: (text) => coord.notify(ScheduleResult(text)),

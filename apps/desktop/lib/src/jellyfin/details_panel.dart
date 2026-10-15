@@ -35,15 +35,15 @@ typedef _Data = ({
 
 /// The selected card's details, at the right of the library: banner,
 /// title, meta, "Put it up · S1E3" ("Play · S1E3" when watching
-/// [solo]), mark watched / unwatched, remove from Continue, overview and,
+/// [alone]), mark watched / unwatched, remove from Continue, overview and,
 /// for a series or an episode, the episode list (click picks which
 /// episode goes up, double-click puts it up). Reloads when the
 /// [controller]'s data version moves.
 class JellyfinDetailsPanel extends StatefulWidget {
   final BrowseController controller;
   final JellyfinSelection selection;
-  /// Nobody else watches (offline or solo): the button says Play.
-  final bool solo;
+  /// Nobody else is in the server: the button says Play.
+  final bool alone;
   /// Puts [item] (playable) up; returns an error text, or null when sent.
   final Future<String?> Function(JellyfinSelection item) onPutUp;
   /// Adds [item] to Up next (with next: right after what plays); null: no
@@ -57,7 +57,7 @@ class JellyfinDetailsPanel extends StatefulWidget {
     required this.onPutUp,
     this.onAddToQueue,
     required this.onClose,
-    this.solo = false,
+    this.alone = false,
   });
 
   @override
@@ -156,7 +156,7 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
     final client = _client;
     final pick = await showAppMenu<int>(context, items: [
       if (queue) ...[
-        AppMenuItem(value: 0, label: widget.solo ? 'Play' : 'Put it up'),
+        AppMenuItem(value: 0, label: widget.alone ? 'Play' : 'Put it up'),
         const AppMenuItem(value: 1, label: 'Add to queue'),
         const AppMenuItem(value: 2, label: 'Play next'),
       ],
@@ -171,9 +171,9 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
       case 2:
         await _queue(e, next: true);
       case 3:
-        await copyToClipboard(jellyfinCopyTitle(e), done: 'Title copied');
+        if (context.mounted) await copyToClipboard(context, jellyfinCopyTitle(e), done: 'Title copied');
       case 4:
-        await openLink(jellyfinWebUrl(client!.baseUrl, e.id, serverId: _serverId));
+        if (context.mounted) await openLink(context, jellyfinWebUrl(client!.baseUrl, e.id, serverId: _serverId));
     }
   }
 
@@ -308,7 +308,7 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
       if (shown.communityRating != null) '★ ${shown.communityRating!.toStringAsFixed(1)}',
       if (!isSeries && shown.userData.played) 'Watched',
     ].join(' · ');
-    final verb = widget.solo ? 'Play' : 'Put it up';
+    final verb = widget.alone ? 'Play' : 'Put it up';
     final label = playable != null && isSeries ? '$verb · ${playable.episodeLabel ?? playable.name}' : verb;
     final inContinue = playable != null &&
         (playable.userData.isResumable || _c.continueKeys.contains(continueKey(playable)));
@@ -397,7 +397,7 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
                     IconButton(
                       key: const ValueKey('details-open-jellyfin'),
                       tooltip: ReuseText.openInJellyfin,
-                      onPressed: () => openLink(jellyfinWebUrl(client.baseUrl, shown.id, serverId: _serverId)),
+                      onPressed: () => openLink(context, jellyfinWebUrl(client.baseUrl, shown.id, serverId: _serverId)),
                       icon: const Icon(Icons.open_in_browser_rounded),
                     ),
                 ],

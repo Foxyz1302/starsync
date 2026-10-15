@@ -1,5 +1,5 @@
-// restructure: rewrite in step 3 (Your server): one hub with listeners
-// attached, nothing restarts, no solo mode.
+// Your server: one hub for the app's life, a network listener attached
+// by Invite and detached by Stop sharing, nothing restarts.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -9,11 +9,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:starsync/src/jellyfin/accounts.dart';
 import 'package:starsync/src/screens/home/picked_media.dart';
 import 'package:starsync/src/session/session_coordinator.dart';
 import 'package:starsync/src/state/server_isolate.dart';
-import 'package:starsync/src/state/session_state.dart';
+import 'package:sync_relay_server/server.dart' show SyncServer;
+
+import 'package:starsync/src/session/navigation.dart' show Place;
+
+import 'test_graph.dart';
+
 
 Future<void> _poll(
   FutureOr<bool> Function() cond,
@@ -33,11 +37,14 @@ class _Raw {
   final WebSocket ws;
   final msgs = <Map<String, Object?>>[];
   _Raw(this.ws) {
-    ws.listen((m) => msgs.add(Map<String, Object?>.from(jsonDecode('$m') as Map)));
+    ws.listen((m) => msgs.add(Map<String, Object?>.from(jsonDecode('$m') as Map)),
+        onDone: () => done.complete(ws.closeCode), onError: (_) {});
   }
 
-  static Future<_Raw> join(int port, String name, {String secret = ''}) async {
-    final r = _Raw(await WebSocket.connect('ws://127.0.0.1:$port/sync'));
+  final done = Completer<int?>();
+
+  static Future<_Raw> join(int port, String name, {String secret = '', String host = '127.0.0.1'}) async {
+    final r = _Raw(await WebSocket.connect('ws://$host:$port/sync'));
     r.ws.add(jsonEncode(HelloMessage(secret: secret, user: HelloUser(name: name)).toJson()));
     await r.next('welcome');
     return r;
@@ -64,6 +71,23 @@ Future<int> _freePort() async {
   final port = s.port;
   await s.close();
   return port;
+}
+
+/// This machine's first LAN address (the invite's); loopback when none.
+Future<String> _lanHost() async {
+  for (final i in await NetworkInterface.list(type: InternetAddressType.IPv4)) {
+    for (final a in i.addresses) {
+      if (!a.isLoopback) return a.address;
+    }
+  }
+  return '127.0.0.1';
+}
+
+List<Map> _members(Map<String, Object?> state) => (state['members'] as List).cast<Map>();
+
+void _hive(String name) {
+  MediaKit.ensureInitialized();
+  Hive.init('${Platform.environment['WT_TEST_TMP'] ?? Directory.systemTemp.path}/$name');
 }
 
 void main() {
@@ -108,153 +132,158 @@ void main() {
     }
   });
 
-  test('host path: isolate server, host sat out and nudging, crash leaves the session',
+  test('your server: Invite attaches the network listener and Stop sharing detaches it; '
+      'members and Up next never reset; a crash brings a new one home',
       timeout: const Timeout(Duration(minutes: 2)), () async {
-    MediaKit.ensureInitialized();
-    Hive.init(
-        '${Platform.environment['WT_TEST_TMP'] ?? Directory.systemTemp.path}/hive_isolate_test');
-    final session = SessionState.instance;
-    final port = await _freePort();
-    _Raw? friend;
-    try {
-      await session.host(
-          ConnectParams(host: '', port: port, secret: 'pw', name: 'host'),
-          ConnectForm());
-      expect(session.route.peek(), AppRoute.session);
-      await session.coordinator.playback.player.setVolume(0);
-
-      friend = await _Raw.join(port, 'friend', secret: 'pw');
-      final state = await friend.next('state',
-          where: (m) => (m['members'] as List).any((x) => (x as Map)['name'] == 'host'));
-      final hostId = ((state['members'] as List)
-          .cast<Map>()
-          .firstWhere((m) => m['name'] == 'host'))['id'];
-      // Anyone may sit the host out; its player unloads, the server serves on.
-      friend.ws.add(jsonEncode(PresenceIntent(target: '$hostId', state: Presence.away).toJson()));
-      await _poll(() => session.coordinator.selfAway.peek(), 'host sat out');
-
-      // The host nudges the friend: only the friend hears it.
-      final friendId = ((state['members'] as List)
-          .cast<Map>()
-          .firstWhere((m) => m['name'] == 'friend'))['id'];
-      session.coordinator.nudgeMember('$friendId');
-      expect((await friend.next('nudge'))['name'], 'host');
-
-      session.hostedServer!.isolate.kill(priority: Isolate.immediate);
-      await _poll(() => session.route.peek() == AppRoute.home, 'leave after crash');
-      expect(session.serverCrash.peek(), startsWith('server crashed'));
-      expect(session.hostedServer, isNull);
-      // The killed isolate's socket stays bound in-process; hosting again on
-      // the same port must still work.
-      session.serverCrash.value = null;
-      await session.host(
-          ConnectParams(host: '', port: port, secret: 'pw', name: 'host'),
-          ConnectForm());
-      expect(session.route.peek(), AppRoute.session);
-      final again = await _Raw.join(port, 'again', secret: 'pw');
-      await again.ws.close();
-      await session.leave();
-      expect(session.hostedServer, isNull);
-    } finally {
-      await friend?.ws.close();
-      await session.coordinator.leave(silent: true);
-      await session.stopServer();
-    }
-  });
-
-  test('host path: a Jellyfin pick goes up as a ref with the host relay; File swap',
-      timeout: const Timeout(Duration(minutes: 2)), () async {
-    MediaKit.ensureInitialized();
+    _hive('hive_your_server_test');
+    final graph = testGraph();
+    final coord = graph.coordinator;
+    final yours = graph.yourServer;
     final tmp = Platform.environment['WT_TEST_TMP'] ?? Directory.systemTemp.path;
-    Hive.init('$tmp/hive_isolate_jf_test');
-    const sid = 'abcdefabcdefabcdefabcdefabcdef12';
-    final accounts = JellyfinAccounts.instance;
-    await accounts.ensureLoaded(validate: false);
-    // An unreachable Jellyfin: only the wire and the relay flag matter here.
-    await accounts.link(
-        baseUrl: 'http://127.0.0.1:9',
-        server: const JellyfinServerInfo(id: sid, name: 'J', version: '10.11.11'),
-        auth: const JellyfinAuthResult(
-            accessToken: 'HOSTTOKEN', user: JellyfinUser(id: 'u', name: 'u'), serverId: sid));
-    final session = SessionState.instance;
+    final file = File('$tmp/your server file.mkv')..writeAsBytesSync(List.filled(4096, 7));
     final port = await _freePort();
     _Raw? friend;
-    final file = File('$tmp/host file swap.mkv')..writeAsBytesSync(List.filled(4096, 7));
     try {
-      await session.host(
-          ConnectParams(
-              host: '',
-              port: port,
-              secret: '',
-              name: 'host',
-              media: const HelloMedia(
-                  name: 'Pilot',
-                  size: 0,
-                  duration: 0,
-                  jellyfin: JellyfinRef(serverId: sid, itemId: 'e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1', title: 'Pilot'))),
-          ConnectForm());
-      await session.coordinator.playback.player.setVolume(0);
-      friend = await _Raw.join(port, 'friend');
-      final state = await friend.next('state', where: (m) => m['media'] != null);
-      final media = state['media'] as Map;
-      expect(media['jellyfin'], isA<Map>());
-      expect(media.containsKey('url'), isFalse);
-      expect(state['relay'], isTrue, reason: "the host's own sign-in relays for guests");
-      expect(jsonEncode(state), isNot(contains('HOSTTOKEN')));
-
-      expect(await session.coordinator.swapFile(file.path), isNull);
-      final swapped = await friend.next('state',
-          where: (m) => (m['media'] as Map?)?['name'] == 'host file swap.mkv');
-      expect((swapped['media'] as Map)['jellyfin'], isNull);
-      expect(swapped['relay'], isNull);
-      expect(await session.coordinator.swapFile('$tmp/missing.mkv'), contains('not found'));
-    } finally {
-      await friend?.ws.close();
-      await session.coordinator.leave(silent: true);
-      await session.stopServer();
-      await accounts.signOut(sid);
-      if (file.existsSync()) file.deleteSync();
-    }
-  });
-
-  test('solo: loopback-only server; inviting friends hosts the same media',
-      timeout: const Timeout(Duration(minutes: 2)), () async {
-    MediaKit.ensureInitialized();
-    final tmp = Platform.environment['WT_TEST_TMP'] ?? Directory.systemTemp.path;
-    Hive.init('$tmp/hive_isolate_solo_test');
-    final session = SessionState.instance;
-    final port = await _freePort();
-    _Raw? friend;
-    final file = File('$tmp/solo carry.mkv')..writeAsBytesSync(List.filled(4096, 7));
-    session.route.value = AppRoute.home; // the tests above leave it set
-    try {
-      await session.startSolo(const ConnectParams(host: '127.0.0.1', port: 0, secret: '', name: 'me'));
-      expect(session.route.peek(), AppRoute.session);
-      expect(session.solo.peek(), isTrue);
-      await session.coordinator.playback.player.setVolume(0);
-      final soloPort = session.hostedServer!.port;
-      // Reachable on loopback only: a LAN address of this machine is refused.
-      final lan = [
-        for (final i in await NetworkInterface.list(type: InternetAddressType.IPv4))
-          for (final a in i.addresses)
-            if (!a.isLoopback) a,
-      ];
-      if (lan.isNotEmpty) {
-        await expectLater(Socket.connect(lan.first, soloPort, timeout: const Duration(seconds: 3)),
+      expect(await graph.navigation.goHome(), isTrue);
+      expect(graph.navigation.place.peek(), Place.yours);
+      await coord.playback.player.setVolume(0);
+      final ownPort = yours.port.peek()!;
+      final me = coord.connection.memberId;
+      expect(me, isNotEmpty);
+      // Only this app can reach it: a LAN address of this machine is refused.
+      final lan = await _lanHost();
+      if (lan != '127.0.0.1') {
+        await expectLater(Socket.connect(lan, ownPort, timeout: const Duration(seconds: 3)),
             throwsA(isA<SocketException>()));
       }
-      expect(await session.coordinator.swapPicked(FileMedia(file.path)), isNull);
-      await _poll(() => session.coordinator.serverState.peek()?.media?['name'] == 'solo carry.mkv', 'solo media');
+      expect(coord.alone.peek(), isTrue);
+      expect(await coord.swapPicked(FileMedia(file.path)), isNull);
+      await _poll(() => coord.serverState.peek()?.media?['name'] == 'your server file.mkv', 'media up');
 
-      await session.host(ConnectParams(host: '', port: port, secret: 'pw', name: 'me'), ConnectForm());
-      expect(session.solo.peek(), isFalse);
-      expect(session.route.peek(), AppRoute.session);
-      friend = await _Raw.join(port, 'friend', secret: 'pw');
-      await friend.next('state', where: (m) => (m['media'] as Map?)?['name'] == 'solo carry.mkv');
+      graph.forms.form
+        ..hostPort = '$port'
+        ..hostSecret = 'pw';
+      final invite = await yours.invite();
+      expect(invite.port, port);
+      expect(invite.password, isTrue);
+      expect(yours.shared.peek(), invite);
+      expect(identical(await yours.invite(), invite), isTrue, reason: 'already shared: the same invite');
+
+      friend = await _Raw.join(port, 'friend', secret: 'pw', host: lan);
+      final state = await friend.next('state', where: (m) => _members(m).length == 2 && m['media'] != null);
+      expect(_members(state).firstWhere((m) => m['id'] == me)['host'], isTrue);
+      friend.ws.add(jsonEncode({
+        't': 'queue',
+        'op': 'add',
+        'item': {
+          'media': {'name': 'b', 'size': 0, 'duration': 0, 'url': 'http://example.com/b.mp4'},
+          'how': 'direct',
+          'title': 'B',
+        },
+      }));
+      await _poll(() => coord.queue.items.peek().length == 1, 'queued by the friend');
+      expect(coord.alone.peek(), isFalse);
+      // Anyone may sit the host out; its player unloads, the server serves on.
+      friend.ws.add(jsonEncode(PresenceIntent(target: me, state: Presence.away).toJson()));
+      await _poll(() => coord.selfAway.peek(), 'host sat out');
+      final friendId = _members(state).firstWhere((m) => m['name'] == 'friend')['id'];
+      coord.nudgeMember('$friendId');
+      expect((await friend.next('nudge'))['name'], isNotEmpty);
+      coord.joinBack();
+
+      await yours.stopSharing();
+      expect(await friend.done.future.timeout(const Duration(seconds: 5)), CloseCodes.closed,
+          reason: 'told: their app does not retry');
+      await _poll(() => coord.alone.peek(), 'alone again');
+      expect(coord.connection.memberId, me, reason: 'the same member, never reconnected');
+      expect(coord.restarts.peek(), 0);
+      expect(coord.queue.items.peek(), hasLength(1), reason: 'Up next stays');
+      expect(coord.serverState.peek()?.media?['name'], 'your server file.mkv');
+      expect(yours.port.peek(), ownPort, reason: 'nothing restarted');
+      final freed = await ServerSocket.bind(InternetAddress.anyIPv4, port);
+      await freed.close();
+
+      // A crash: said, and home again on a new server.
+      yours.server!.isolate.kill(priority: Isolate.immediate);
+      await _poll(() => yours.crash.peek() != null, 'crash reported');
+      await _poll(() => graph.navigation.place.peek() == Place.yours && yours.port.peek() != null, 'home again');
+      expect(yours.crash.peek(), startsWith('server crashed'));
     } finally {
       await friend?.ws.close();
-      await session.leave();
+      await graph.navigation.leave();
+      await yours.stop();
       if (file.existsSync()) file.deleteSync();
+    }
+  });
+
+  test('a friend\'s server and back: yours keeps what plays and Up next', timeout: const Timeout(Duration(minutes: 2)),
+      () async {
+    _hive('hive_your_server_switch_test');
+    final graph = testGraph();
+    final coord = graph.coordinator;
+    final yours = graph.yourServer;
+    final theirs = SyncServer(const AppConfig(port: 0, secret: '', name: "Bob's server"));
+    await theirs.start();
+    try {
+      expect(await graph.navigation.goHome(), isTrue);
+      await coord.playback.player.setVolume(0);
+      final ownPort = yours.port.peek();
+      coord.connection.sendSwap(const HelloMedia(name: 'mine', size: 0, duration: 0, url: 'http://127.0.0.1:9/mine.mp4'));
+      expect(await coord.queue.add(const LinkMedia('http://127.0.0.1:9/next.mp4', relay: LinkRelay.direct, anyway: true)), isNull);
+      await _poll(() => coord.serverState.peek()?.media?['name'] == 'mine' && coord.queue.items.peek().length == 1,
+          'media and Up next on your server');
+
+      await graph.navigation.join(ConnectParams(host: '127.0.0.1', port: theirs.boundPort, secret: '', name: 'me'));
+      expect(graph.navigation.place.peek(), Place.friend);
+      expect(graph.navigation.serverLabel.peek(), "Bob's server");
+      expect(coord.hostFile, isNull, reason: 'not your server');
+      await _poll(() => theirs.hub.engine.members.length == 1, 'in their server');
+      expect(yours.port.peek(), ownPort, reason: 'yours stays up, quiet');
+      expect(graph.forms.recents.peek().first.port, '${theirs.boundPort}');
+
+      expect(await graph.navigation.leaveFriend(), isTrue);
+      expect(graph.navigation.place.peek(), Place.yours);
+      await _poll(() => coord.serverState.peek()?.media?['name'] == 'mine', 'your media again');
+      expect(coord.queue.items.peek(), hasLength(1));
+      expect(yours.port.peek(), ownPort);
+      await _poll(() => theirs.hub.engine.members.isEmpty, 'left theirs with bye');
+    } finally {
+      await graph.navigation.leave();
+      await yours.stop();
+      await theirs.stop();
+    }
+  });
+
+  test('a friend stops sharing: told, and you are back home on yours', timeout: const Timeout(Duration(minutes: 2)),
+      () async {
+    _hive('hive_your_server_closed_test');
+    final me = testGraph();
+    final bob = testGraph();
+    final port = await _freePort();
+    try {
+      expect(await bob.navigation.goHome(), isTrue);
+      await bob.coordinator.playback.player.setVolume(0);
+      bob.forms.form
+        ..hostPort = '$port'
+        ..hostSecret = '';
+      final invite = await bob.yourServer.invite();
+      expect(await me.navigation.goHome(), isTrue);
+      await me.coordinator.playback.player.setVolume(0);
+      final mine = me.yourServer.port.peek();
+      await me.navigation.join(ConnectParams(host: '127.0.0.1', port: invite.port, secret: '', name: 'me'));
+      expect(me.navigation.place.peek(), Place.friend);
+      await _poll(() => !bob.coordinator.alone.peek(), 'bob sees me');
+
+      await bob.yourServer.stopSharing();
+      await _poll(() => me.navigation.place.peek() == Place.yours, 'back home');
+      expect(me.yourServer.port.peek(), mine, reason: 'the same server as before');
+      await _poll(() => me.notifier.toasts.peek().any((t) => t.text.contains('stopped sharing')), 'told why');
+      await _poll(() => bob.coordinator.alone.peek(), 'bob alone again');
+    } finally {
+      await me.navigation.leave();
+      await bob.navigation.leave();
+      await me.yourServer.stop();
+      await bob.yourServer.stop();
     }
   });
 }

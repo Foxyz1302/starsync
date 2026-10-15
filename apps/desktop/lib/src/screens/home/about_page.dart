@@ -3,7 +3,7 @@ import 'package:signals/signals_flutter.dart';
 
 import '../../platform/app_log.dart';
 import '../../shell/mark_problem.dart';
-import '../../state/session_state.dart';
+import '../../app/app_graph.dart';
 import '../../state/settings.dart';
 import '../../update/update_controller.dart';
 import '../../widgets/app_menu.dart';
@@ -43,10 +43,10 @@ class AboutPanel extends StatelessWidget {
                   IconButton(
                     tooltip: ReuseText.copyLink,
                     icon: const Icon(Icons.copy, size: 18),
-                    onPressed: () => copyToClipboard(repoUrl, done: 'Link copied'),
+                    onPressed: () => copyToClipboard(context, repoUrl, done: 'Link copied'),
                   ),
                   FilledButton.tonalIcon(
-                    onPressed: () => openLink(repoUrl),
+                    onPressed: () => openLink(context, repoUrl),
                     icon: const Icon(Icons.open_in_new, size: 18),
                     label: const Text('Source'),
                   ),
@@ -75,7 +75,7 @@ class AboutPanel extends StatelessWidget {
                   ),
                   const MarkProblemButton(outlined: true),
                   OutlinedButton.icon(
-                    onPressed: appLogDir == null ? null : () => _openLogs(),
+                    onPressed: appLogDir == null ? null : () => _openLogs(context),
                     icon: const Icon(Icons.folder_open, size: 18),
                     label: const Text('Open logs folder'),
                   ),
@@ -102,7 +102,8 @@ class AboutPanel extends StatelessWidget {
   /// In a session it asks whether to add the server's session log.
   static Future<void> _copyDiagnostics(BuildContext context) async {
     var withServer = false;
-    if (SessionState.instance.route.peek() == AppRoute.session) {
+    final graph = AppScope.of(context);
+    if (graph.navigation.online.peek()) {
       final pick = await showAppMenu<bool>(context, items: const [
         AppMenuItem(value: false, label: "This app's log"),
         AppMenuItem(value: true, label: "This app's and the server's session log"),
@@ -110,17 +111,20 @@ class AboutPanel extends StatelessWidget {
       if (pick == null) return;
       withServer = pick;
     }
-    final text = await diagnosticsText(sessionLog: withServer);
+    final text = await diagnosticsText(graph, sessionLog: withServer);
     final saved = await saveDiagnostics(text);
-    await copyToClipboard(text,
+    if (!context.mounted) return;
+    await copyToClipboard(context, text,
         done: saved == null ? 'Diagnostics copied' : 'Diagnostics copied (also saved in the logs folder)');
   }
 
-  static Future<void> _openLogs() async {
+  static Future<void> _openLogs(BuildContext context) async {
     final dir = appLogDir;
     if (dir == null) return;
-    if (!await SessionState.instance.ports.folders.reveal(dir)) {
-      await copyToClipboard(dir, done: "Couldn't open it — folder path copied");
+    final folders = AppScope.of(context).ports.folders;
+    if (!await folders.reveal(dir)) {
+      if (!context.mounted) return;
+      await copyToClipboard(context, dir, done: "Couldn't open it — folder path copied");
     }
   }
 }

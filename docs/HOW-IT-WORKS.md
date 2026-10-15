@@ -40,18 +40,20 @@ A five-minute tour. Details: [ARCHITECTURE.md](ARCHITECTURE.md), wire format:
 
 ## Ways to run
 
-- **Host from the app**: the app you click Host in also runs the server.
-  Simplest. The server lives as long as that app.
+- **Your server**: every app runs its own server, quietly, from start to
+  close, reachable only from that computer. You are on it when you are
+  not in a friend's, so watching alone works like a session (progress,
+  next episode). Invite opens it to friends on your network (a second
+  listener on the same server: nothing restarts, the video and Up next
+  carry on) and copies an invite; Stop sharing closes it again.
 - **Dedicated server**: `starsync-server`, a separate program in the
   release tarball, for an always-on box. See the README.
 
 Friends join either way with Join a friend in the strip at the top of the
-window; guests need no Jellyfin or account.
-
-- **Watch solo**: put something up without joining or hosting and the
-  app hosts a private server reachable only from this computer, so
-  watching alone works like a session (progress, next episode). Invite
-  friends turns it into a normal hosted server, video and position kept.
+window; guests need no Jellyfin or account. Before connecting, the app
+checks the server's version and says who has to update when they do not
+match. Joining a friend leaves your server (it stays up); leaving theirs
+brings you back.
 
 ## One session, start to finish
 

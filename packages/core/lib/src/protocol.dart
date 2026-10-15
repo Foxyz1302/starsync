@@ -667,6 +667,9 @@ abstract class CloseCodes {
   static const stale = 4014;
   /// `/sync`: no frame for the silence limit; the member is `gone`.
   static const silent = 4015;
+  /// `/sync`: the hosting app stopped sharing its server; the member has
+  /// left (feed `leave`, reason `closed`) and nothing reconnects.
+  static const closed = 4016;
   /// `/sync`: the member left (`bye`, or grace over).
   static const left = 1000;
 }

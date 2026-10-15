@@ -1,5 +1,3 @@
-// restructure: rewrite in step 3 (Your server): the solo strip and Invite
-// friends.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -19,9 +17,16 @@ import 'package:starsync/src/shell/session_player.dart';
 import 'package:starsync/src/shell/settings_tab.dart' show SettingsTab;
 import 'package:starsync/src/shell/toasts.dart';
 import 'package:starsync/src/session/session_coordinator.dart' show ToastItem;
-import 'package:starsync/src/state/session_state.dart';
 import 'package:starsync/src/state/settings.dart';
 import 'package:starsync/src/update/update_controller.dart';
+
+import 'package:starsync/src/session/invite.dart' show Invite;
+import 'package:starsync/src/session/navigation.dart' show Place;
+
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
 
 /// Stands in for media_kit's `Video` (which hangs flutter_test) and
 /// counts how often one is created.
@@ -55,7 +60,7 @@ MemberView member(String id, String name, {bool ready = false, bool gone = false
         presence: gone ? Presence.gone : Presence.watching);
 
 void main() {
-  final session = SessionState.instance;
+  final session = _graph;
   final coord = session.coordinator;
 
   void online(List<MemberView> members, {bool media = true}) {
@@ -68,16 +73,16 @@ void main() {
       media: media ? {'name': 'Movie.mkv', 'size': 1, 'duration': 0} : null,
       members: members,
     );
-    session.route.value = AppRoute.session;
+    session.navigation.place.value = Place.friend;
   }
 
   setUp(() {
     FakeVideo.created = 0;
-    session.recents.value = const [];
+    session.forms.recents.value = const [];
   });
 
   tearDown(() {
-    session.route.value = AppRoute.home;
+    session.navigation.place.value = Place.none;
     coord.serverState.value = null;
     coord.playback.alive.value = false;
     session.notifier.clear();
@@ -87,7 +92,7 @@ void main() {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(scoped(_graph, MaterialApp(
       theme: ThemeData.dark(),
       home: AppShell(
         updates: updates ?? UpdateController(currentVersion: '0.0.0-dev'),
@@ -97,7 +102,7 @@ void main() {
         // A real probe (network, yt-dlp) never answers on the test clock.
         linkProbe: (url) async => LinkProbe.file(Uri.parse(url), 1000),
       ),
-    ));
+    )));
     await tester.pumpAndSettle();
   }
 
@@ -148,14 +153,53 @@ void main() {
   });
 
   group('party strip', () {
-    testWidgets('offline: Join and Host, no party', (tester) async {
+    testWidgets('home, alone: a plain player\'s strip, Join a friend and Invite (once your server runs)',
+        (tester) async {
       await pumpShell(tester, const Size(1280, 800));
       expect(find.byKey(const ValueKey('strip-join')), findsOneWidget);
-      expect(find.byKey(const ValueKey('strip-host')), findsOneWidget);
-      expect(find.text('Offline'), findsOneWidget);
+      expect(find.byKey(const ValueKey('strip-host')), findsNothing, reason: 'no Host: your server is always there');
       expect(find.byKey(const ValueKey('party-avatars')), findsNothing);
       expect(find.byKey(const ValueKey('strip-leave')), findsNothing);
+      expect(find.byKey(const ValueKey('strip-chat')), findsNothing);
       expect(tester.getSize(find.byType(PartyStrip)).height, partyStripHeight);
+      ButtonStyleButton invite() => tester.widget<ButtonStyleButton>(find.byKey(const ValueKey('strip-invite')));
+      expect(invite().onPressed, isNull, reason: 'your server is not up yet');
+      final yours = session.yourServer;
+      yours.port.value = 40000;
+      addTearDown(() {
+        yours.port.value = null;
+        yours.shared.value = null;
+      });
+      // On your own server with only you in it: still the plain strip.
+      session.navigation.place.value = Place.yours;
+      coord.serverState.value = StateBroadcast(
+          eventId: 1, transport: 'held', position: 0, serverTime: DateTime.now().toUtc(), mediaId: 0,
+          members: [member('', 'Me')]);
+      await tester.pumpAndSettle();
+      expect(invite().onPressed, isNotNull);
+      expect(find.byKey(const ValueKey('party-avatars')), findsNothing);
+      expect(find.byKey(const ValueKey('strip-chat')), findsNothing);
+      expect(find.byKey(const ValueKey('sharing-chip')), findsNothing);
+      // Shared, nobody came yet: the chip says so (and opens the invite).
+      yours.shared.value = const Invite(host: '192.168.1.20', port: 8080);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('sharing-chip')), findsOneWidget);
+      expect(find.text('port 8080'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('sharing-chip')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('stop-sharing')), findsOneWidget);
+      await tester.tapAt(const Offset(40, 700));
+      await tester.pumpAndSettle();
+      // A friend came: the party, with Invite and no Leave (it is yours).
+      coord.serverState.value = StateBroadcast(
+          eventId: 2, transport: 'held', position: 0, serverTime: DateTime.now().toUtc(), mediaId: 0,
+          members: [member('', 'Me'), member('b', 'Bob')]);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('party-avatars')), findsOneWidget);
+      expect(find.byKey(const ValueKey('strip-chat')), findsOneWidget);
+      expect(find.byKey(const ValueKey('strip-invite')), findsOneWidget);
+      expect(find.byKey(const ValueKey('strip-leave')), findsNothing);
+      expect(find.text('Your server'), findsOneWidget);
     });
 
     testWidgets('online: avatars, server and readiness, chat, Leave', (tester) async {
@@ -179,30 +223,7 @@ void main() {
       expect(find.text('Leave server?'), findsOneWidget);
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
-      expect(session.route.value, AppRoute.session);
-    });
-
-    testWidgets('solo: just you, Invite friends opens the host card, Stop asks nothing', (tester) async {
-      await pumpShell(tester, const Size(1280, 800));
-      session.solo.value = true;
-      addTearDown(() => session.solo.value = false);
-      online([member('me', 'Me')], media: false);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('solo-chip')), findsOneWidget);
-      expect(find.byKey(const ValueKey('party-avatars')), findsNothing);
-      expect(find.byKey(const ValueKey('strip-chat')), findsNothing);
-      expect(find.byKey(const ValueKey('welcome-band')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('strip-invite')));
-      await tester.pumpAndSettle();
-      expect(find.text('Invite friends'), findsWidgets);
-      expect(find.text('Start hosting'), findsOneWidget);
-      await tester.tapAt(const Offset(5, 790));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('strip-leave')));
-      await tester.pumpAndSettle();
-      expect(find.text('Leave server?'), findsNothing);
-      expect(session.route.value, AppRoute.home);
-      expect(session.solo.value, isFalse);
+      expect(session.navigation.place.value, Place.friend);
     });
 
     testWidgets('compact below 1100 px: 3 avatars, no server text', (tester) async {
@@ -221,8 +242,8 @@ void main() {
   group('popovers', () {
     testWidgets('members card opens from the avatars and closes outside', (tester) async {
       await pumpShell(tester, const Size(1280, 800));
-      session.serverVersion.value = '1.3.0-dev.1';
-      addTearDown(() => session.serverVersion.value = '');
+      session.navigation.serverVersion.value = '1.3.0-dev.1';
+      addTearDown(() => session.navigation.serverVersion.value = '');
       online([member('a', 'Alex', ready: true, app: '1.3.0-dev.1'), ...party.skip(1)], media: false);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('avatar-stack')));
@@ -255,7 +276,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('strip-profile')));
       await tester.pumpAndSettle();
       expect(find.byType(ProfileCard), findsOneWidget);
-      expect(find.text('offline'), findsOneWidget);
+      expect(find.text('just you'), findsOneWidget);
       await tester.tap(find.text('About'));
       await tester.pumpAndSettle();
       expect(find.byType(ProfileCard), findsNothing);
@@ -263,7 +284,7 @@ void main() {
     });
 
     testWidgets('showPopover fades and scales in, Esc closes it', (tester) async {
-      await tester.pumpWidget(MaterialApp(
+      await tester.pumpWidget(scoped(_graph, MaterialApp(
         home: Builder(
           builder: (context) => Center(
             child: TextButton(
@@ -272,7 +293,7 @@ void main() {
             ),
           ),
         ),
-      ));
+      )));
       await tester.tap(find.text('open'));
       await tester.pump();
       await tester.pump(easeTime ~/ 2);
@@ -303,7 +324,7 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('handoff-card')), findsOneWidget);
-    expect(find.text('Open in Link'), findsOneWidget); // offline
+    expect(find.text('Open in Link'), findsOneWidget); // alone
     await tester.tap(find.byKey(const ValueKey('handoff-openLink')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('handoff-card')), findsNothing);
@@ -318,15 +339,15 @@ void main() {
     final before = p.push;
     p.push = ({String? name, String? avatar}) => pushed.add(name);
     addTearDown(() => p.push = before);
-    session.lastForm.name = 'Old';
+    session.forms.form.name = 'Old';
     p.name.value = 'Old';
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(scoped(_graph, MaterialApp(
       home: Scaffold(body: Center(child: ProfileCard(onOpenSettings: (_) {}))),
-    ));
+    )));
     await tester.enterText(find.byKey(const ValueKey('profile-name')), 'Neo');
     await tester.pump();
     expect(p.name.value, 'Neo');
-    expect(session.lastForm.name, 'Neo');
+    expect(session.forms.form.name, 'Neo');
     // Typing settles before it is sent, once.
     expect(pushed, isEmpty);
     await tester.pump(const Duration(milliseconds: 700));
@@ -391,7 +412,7 @@ void main() {
     // Never rebuilt from scratch on the way.
     expect(FakeVideo.created, 1);
     // Offline: no player at all.
-    session.route.value = AppRoute.home;
+    session.navigation.place.value = Place.none;
     await tester.pumpAndSettle();
     expect(videos, findsNothing);
     expect(tester.takeException(), isNull);
@@ -439,7 +460,7 @@ void main() {
   });
 
   testWidgets("toasts slide in and leave when the Notifier's time is up", (tester) async {
-    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: PartyToasts())));
+    await tester.pumpWidget(scoped(_graph, const MaterialApp(home: Scaffold(body: PartyToasts()))));
     session.notifier.notify(const Copied('Shaders off'));
     await tester.pump();
     await tester.pump();
@@ -484,7 +505,7 @@ void main() {
       final down = tester.getRect(find.byType(ToastCard));
       expect(down.bottom, closeTo(body.bottom - AppShellState.toastInset, 1));
       expect(down.bottom, greaterThan(up.bottom));
-      session.route.value = AppRoute.home;
+      session.navigation.place.value = Place.none;
       await tester.pump(const Duration(seconds: 6));
       await tester.pumpAndSettle();
     });

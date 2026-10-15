@@ -24,9 +24,8 @@ import 'schedule_card.dart';
 enum ScheduleFilter { jellyfin, all }
 
 class SchedulePage extends StatefulWidget {
-  /// Nobody else watches (offline or solo): available episodes say Play
-  /// (offline that starts a solo session).
-  final bool solo;
+  /// Nobody else is in the server (D9): available episodes say Play.
+  final bool alone;
 
   /// Puts a Jellyfin episode up in the server; returns an error to show.
   final Future<String?> Function(JellyfinMedia pick) onPutUp;
@@ -43,7 +42,7 @@ class SchedulePage extends StatefulWidget {
 
   const SchedulePage({
     super.key,
-    this.solo = false,
+    this.alone = false,
     required this.onPutUp,
     this.onAddToQueue,
     required this.onToast,
@@ -228,7 +227,7 @@ class _SchedulePageState extends State<SchedulePage> {
 
   (CardAction, String?) _actionFor(ScheduleEntry e) {
     if (e.status == ScheduleStatus.available || e.status == ScheduleStatus.inLibrary) {
-      final put = widget.solo ? CardAction.play : CardAction.putUp;
+      final put = widget.alone ? CardAction.play : CardAction.putUp;
       if (e.jellyfinSeriesId == null) return (put, 'Not linked to a Jellyfin series yet');
       return (put, null);
     }
@@ -287,7 +286,7 @@ class _SchedulePageState extends State<SchedulePage> {
     final add = widget.onAddToQueue;
     if (add == null) return;
     final pick = await showAppMenu<int>(context, items: [
-      AppMenuItem(value: 0, label: widget.solo ? 'Play' : 'Put it up'),
+      AppMenuItem(value: 0, label: widget.alone ? 'Play' : 'Put it up'),
       const AppMenuItem(value: 1, label: 'Add to queue'),
       const AppMenuItem(value: 2, label: 'Play next'),
     ]);

@@ -1,5 +1,3 @@
-// restructure: rewrite in step 3 (Your server): "solo: the button says
-// Play"; the rest stays.
 import 'dart:convert';
 import 'dart:io';
 
@@ -15,6 +13,11 @@ import 'package:starsync/src/schedule/ui/schedule_page.dart';
 import 'package:starsync/src/screens/home/picked_media.dart';
 
 import 'schedule_fake_server.dart';
+
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
 
 /// Serves [snap] without any network; [animeFlow] is a real client (over
 /// the fake server) for the page's actions.
@@ -234,7 +237,7 @@ void main() {
     WidgetTester tester, {
     Size size = const Size(2560, 1080),
     ScheduleSnapshot Function()? snap,
-    bool solo = false,
+    bool alone = false,
     JellyfinAccounts? accounts,
   }) async {
     toasts.clear();
@@ -243,12 +246,12 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final repo = FakeRepo(snap ?? snapshot, animeFlow: flow);
-    await tester.pumpWidget(
+    await tester.pumpWidget(scoped(_graph, 
       MaterialApp(
         theme: ThemeData.dark(),
         home: Scaffold(
           body: SchedulePage(
-            solo: solo,
+            alone: alone,
             repository: repo,
             accounts: accounts,
             onToast: toasts.add,
@@ -258,8 +261,7 @@ void main() {
             },
           ),
         ),
-      ),
-    );
+      )));
     await tester.pump();
     await tester.pump();
     await io(tester, rounds: 4);
@@ -269,7 +271,7 @@ void main() {
   /// Unmounts the page and lets the HttpClient's idle keep-alive timers
   /// (made in the fake clock) run out.
   Future<void> done(WidgetTester tester) async {
-    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(scoped(_graph, const SizedBox()));
     await tester.pump(const Duration(seconds: 20));
   }
 
@@ -482,8 +484,8 @@ void main() {
     await done(tester);
   });
 
-  testWidgets('solo: the button says Play and works', (tester) async {
-    await pumpPage(tester, solo: true);
+  testWidgets('nobody else in the server (D9): the button says Play and works', (tester) async {
+    await pumpPage(tester, alone: true);
     expect(find.text('Put it up'), findsNothing);
     final b = widgetOf<ButtonStyleButton>(tester, action(111, 3));
     expect(b.onPressed, isNotNull);

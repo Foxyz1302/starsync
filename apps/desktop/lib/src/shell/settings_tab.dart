@@ -17,7 +17,7 @@ import '../screens/home/ui.dart' show appName, displayVersion;
 import '../session/auto_sit_out.dart' show AutoSitOutTimes;
 import '../sfx/sfx.dart';
 import '../sfx/sound_bank.dart';
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import '../state/settings.dart';
 import '../update/update_controller.dart';
 import '../widgets/app_menu.dart';
@@ -86,7 +86,7 @@ class SettingsTab extends StatelessWidget {
         ];
       case SettingsSection.network:
         return [
-          const HostDefaultsPanel(),
+          const YourServerPanel(),
           const RecentServersPanel(),
           SettingsPanel(
             title: 'Watching',
@@ -258,16 +258,18 @@ class SettingsTab extends StatelessWidget {
   }
 }
 
-/// Party & network: what the Host card starts with.
-class HostDefaultsPanel extends StatefulWidget {
-  const HostDefaultsPanel({super.key});
+/// Party & network: your server's port and password, used when you
+/// Invite (the next time sharing starts).
+class YourServerPanel extends StatefulWidget {
+  const YourServerPanel({super.key});
 
   @override
-  State<HostDefaultsPanel> createState() => _HostDefaultsPanelState();
+  State<YourServerPanel> createState() => _YourServerPanelState();
 }
 
-class _HostDefaultsPanelState extends State<HostDefaultsPanel> {
-  final _form = SessionState.instance.lastForm;
+class _YourServerPanelState extends State<YourServerPanel> {
+  late final _forms = AppScope.of(context).forms;
+  late final _form = _forms.form;
   late final _port = TextEditingController(text: _form.hostPort);
   late final _secret = TextEditingController(text: _form.hostSecret);
   bool _show = false;
@@ -286,22 +288,22 @@ class _HostDefaultsPanelState extends State<HostDefaultsPanel> {
 
   Future<void> _save() async {
     try {
-      await SessionState.instance.saveForm();
+      await _forms.save();
     } catch (e) {
-      debugPrint('save host defaults failed: $e');
+      debugPrint('save your server settings failed: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return SettingsPanel(
-      title: 'Hosting',
+      title: 'Your server',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SettingRow(
-            label: 'Default port',
-            help: 'Where your server listens when you host; friends dial it',
+            label: 'Port',
+            help: 'Where friends reach your server once you Invite (the next time you start sharing)',
             control: SizedBox(
               width: 120,
               child: TextField(
@@ -320,7 +322,8 @@ class _HostDefaultsPanelState extends State<HostDefaultsPanel> {
           ),
           SettingRow(
             label: 'Password',
-            help: 'Asked of everyone joining your server; blank lets in anyone who reaches the port',
+            help: 'Asked of every friend joining your server; blank lets in anyone who reaches the port '
+                '(the next time you start sharing)',
             control: SizedBox(
               width: 220,
               child: TextField(
@@ -355,16 +358,16 @@ class RecentServersPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final session = SessionState.instance;
+    final forms = AppScope.of(context).forms;
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     return SettingsPanel(
       title: 'Recent servers',
       child: SignalBuilder(builder: (context) {
-        final list = session.recents.value;
+        final list = forms.recents.value;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Join and Host offer these in one click; remove the ones you no longer use',
+            Text('Join offers these in one click; remove the ones you no longer use',
                 style: TextStyle(color: muted, fontSize: 12)),
             if (list.isEmpty)
               Padding(
@@ -375,13 +378,13 @@ class RecentServersPanel extends StatelessWidget {
               ListTile(
                 key: ValueKey('recent-${r.key}'),
                 contentPadding: EdgeInsets.zero,
-                leading: Icon(r.hosted ? Icons.cast_outlined : Icons.dns_outlined),
-                title: Text(r.hosted ? 'Hosted on port ${r.port}' : '${r.host}:${r.port}'),
+                leading: const Icon(Icons.dns_outlined),
+                title: Text('${r.host}:${r.port}'),
                 subtitle: r.secret.isEmpty ? null : const Text('password saved'),
                 trailing: IconButton(
                   tooltip: 'Remove',
                   icon: const Icon(Icons.close, size: 18),
-                  onPressed: () => session.forgetServer(r),
+                  onPressed: () => forms.forget(r),
                 ),
               ),
           ],
@@ -403,7 +406,7 @@ class YtDlpSettings extends StatefulWidget {
 }
 
 class _YtDlpSettingsState extends State<YtDlpSettings> {
-  late final Future<YtDlp> _y = widget.ytDlp ?? SessionState.instance.ports.links.ytDlp;
+  late final Future<YtDlp> _y = widget.ytDlp ?? AppScope.of(context).ports.links.ytDlp;
 
   @override
   Widget build(BuildContext context) {
@@ -488,7 +491,7 @@ class _YtDlpCookieSettingsState extends State<YtDlpCookieSettings> {
   Future<void> _pickFile() async {
     final List<String> files;
     try {
-      files = await SessionState.instance.ports.folders.pickFiles(
+      files = await AppScope.of(context).ports.folders.pickFiles(
         dialogTitle: 'Pick a cookies.txt or a JSON cookie export',
         extensions: const ['txt', 'json'],
       );
@@ -548,7 +551,7 @@ class _YtDlpCookieSettingsState extends State<YtDlpCookieSettings> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return SessionState.instance.ports.shell.dropTarget(
+    return AppScope.of(context).ports.shell.dropTarget(
       onEnter: () => setState(() => _dragging = true),
       onExit: () => setState(() => _dragging = false),
       onDrop: (paths, _) {
@@ -835,7 +838,8 @@ class NotificationsInfo extends StatelessWidget {
 class SoundSettings extends StatelessWidget {
   const SoundSettings({super.key});
 
-  void _preview(SfxKind kind) => unawaited(SessionState.instance.sfx.preview(kind, readyIndex: 2));
+  void _preview(BuildContext context, SfxKind kind) =>
+      unawaited(AppScope.of(context).sfx.preview(kind, readyIndex: 2));
 
   @override
   Widget build(BuildContext context) {
@@ -859,7 +863,7 @@ class SoundSettings extends StatelessWidget {
                   key: const ValueKey('sound-volume'),
                   value: volume,
                   onChanged: s.setSoundVolume,
-                  onChangeEnd: (_) => _preview(SfxKind.ready),
+                  onChangeEnd: (_) => _preview(context, SfxKind.ready),
                 ),
               ),
               SizedBox(width: 44, child: Text('${(volume * 100).round()}%', textAlign: TextAlign.end)),
@@ -876,7 +880,7 @@ class SoundSettings extends StatelessWidget {
                 value: overall,
                 onChanged: (v) {
                   s.setSoundPreset(v);
-                  _preview(SfxKind.ready);
+                  _preview(context, SfxKind.ready);
                 },
                 items: [
                   for (final MapEntry(key: p, value: (name, _)) in presetInfo.entries) (p.name, name),
@@ -894,7 +898,7 @@ class SoundSettings extends StatelessWidget {
                   IconButton(
                     key: ValueKey('sound-play-${kind.name}'),
                     tooltip: 'Play',
-                    onPressed: volume == 0 ? null : () => _preview(kind),
+                    onPressed: volume == 0 ? null : () => _preview(context, kind),
                     icon: const Icon(Icons.play_arrow_rounded),
                   ),
                   const SizedBox(width: 4),
@@ -910,7 +914,7 @@ class SoundSettings extends StatelessWidget {
                     style: muted,
                     onChanged: (v) {
                       s.setSoundPresetFor(kind.name, v);
-                      if (volume > 0) _preview(kind);
+                      if (volume > 0) _preview(context, kind);
                     },
                     items: [
                       (null, 'Same as set'),

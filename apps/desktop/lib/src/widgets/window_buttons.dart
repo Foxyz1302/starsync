@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 
 class WindowButtons extends StatefulWidget {
   final FocusNode? focusNode;
@@ -18,7 +18,7 @@ class WindowButtons extends StatefulWidget {
 }
 
 class _WindowButtonsState extends State<WindowButtons> {
-  final _shell = SessionState.instance.ports.shell;
+  late final _shell = AppScope.of(context).ports.shell;
   bool _maximized = false;
   late final void Function() _stopWatch;
 
@@ -53,8 +53,9 @@ class _WindowButtonsState extends State<WindowButtons> {
 
   Future<void> _close() async {
     try {
-      await SessionState.instance.coordinator.leave();
-      await SessionState.instance.stopServer();
+      final graph = AppScope.of(context);
+      await graph.navigation.leave();
+      await graph.yourServer.stop();
     } catch (_) {}
     await _shell.requestClose();
   }
@@ -133,7 +134,7 @@ class WindowDragArea extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final shell = SessionState.instance.ports.shell;
+    final shell = AppScope.of(context).ports.shell;
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onPanStart: (_) => shell.startDragging(),

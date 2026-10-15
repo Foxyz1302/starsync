@@ -7,7 +7,6 @@ import '../../playback/playback_controller.dart';
 import '../../queue/queue_controller.dart';
 import '../../session/session_coordinator.dart';
 import '../../shaders/shader_presets.dart';
-import '../../state/session_state.dart';
 import '../../state/settings.dart';
 import '../player_settings.dart' show applyShaderChoice;
 import '../volume.dart' as vol;
@@ -91,7 +90,7 @@ class PlayerControlsModel {
       nextIsUpNext: items.isNotEmpty,
       hasChapters: chapters.value.isNotEmpty,
       hasDuration: duration.value > Duration.zero,
-      solo: SessionState.instance.solo.value,
+      alone: coord.alone.value,
       // Not a signal: read again whenever the state changes.
       hasLink: coord.serverState.value != null && coord.currentLink() != null,
       fullscreen: fullscreen.value,
@@ -184,7 +183,7 @@ class PlayerControlsModel {
 
   /// Saved as the choice and applied live; a null quality keeps the
   /// saved one.
-  void pickShader(ShaderPreset preset, ShaderQuality? quality) => applyShaderChoice(preset, quality);
+  void pickShader(ShaderPreset preset, ShaderQuality? quality) => applyShaderChoice(coord, preset, quality);
 
   void toggleTimeDisplay() => settings.setTimeDisplay(settings.timeDisplay.peek().toggled);
 

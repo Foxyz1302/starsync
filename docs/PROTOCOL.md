@@ -28,7 +28,9 @@ yet; the restructure step named next to them does.
   `name`, `proto` (= `protoMax`), `protoMin`, `protoMax`, `version` (the
   server's app version, e.g. `1.3.0`), `tls` (**reserved**: always false;
   a server with TLS would serve the same endpoints over `wss://` /
-  `https://`), `viewers`, `bytesServed`, `uptimeSecs`.
+  `https://`), `viewers`, `bytesServed`, `uptimeSecs`. The app reads it
+  before joining and does not dial a server whose range does not meet its
+  own (the version gate, see ARCHITECTURE "Server lifecycle").
 - `GET /m/<sid>/<token>/<name>` serves the host's file (Range table in
   ARCHITECTURE.md). `GET /j/<sid>/<token>/<itemId>` relays the current
   Jellyfin media and Up next's first one (see "Jellyfin media" below).
@@ -80,6 +82,7 @@ yet; the restructure step named next to them does.
 | 4013 | `/sync` | `err` `replaced`: another connection of the same client holds the member |
 | 4014 | `/sync` | refused: `err` `stale` |
 | 4015 | `/sync` | silent for 15 s: the member is `gone` |
+| 4016 | `/sync` | the hosting app stopped sharing its server: the member has left (`leave`, reason `closed`); the client does not reconnect |
 
 ## Client to server
 
@@ -114,12 +117,15 @@ Field notes:
   and refuses with `err` `version` when the ranges do not meet.
   `hello.media` is ignored; a proto 16 client still sends `{}` so a proto
   15 server, which requires it, answers with its own `proto mismatch`.
-- `hello.secret`: the server password; a server with an empty secret is open.
+- `hello.secret`: the server password; a server with an empty secret is
+  open. The password may change while members are in (the hosting app
+  sets it when it opens its server to friends).
 - `hello.hostKey` (optional, omitted when empty): the hosting app
-  generates a random key per hosting, gives it to its server and sends it
+  generates a random key per run, gives it to its server and sends it
   from its own client. The member whose key equals the server's is the host
-  (`members[].host`). A server without a key (the dedicated server) has no
-  host. Where the connection comes from does not matter.
+  (`members[].host`), and its hello needs no `secret`. A server without a
+  key (the dedicated server) has no host. Where the connection comes from
+  does not matter.
 - `hello.client` (optional): a random id per install, 16 to 64
   characters of `[A-Za-z0-9_-]` (the app uses 22 characters of
   base64url), else `err` `bad`. Private: never broadcast, never logged.
@@ -184,7 +190,10 @@ Field notes:
   feed line. Unknown targets and no-op changes are ignored.
 - `bye`: the member leaves now (the Leave button, the app closing): feed
   `leave` (reason `bye`), its token stops working, the socket closes
-  (1000). Anything else that ends a socket keeps the member (`gone`).
+  (1000). Anything else that ends a socket keeps the member (`gone`),
+  except the hosting app closing its server to friends: everyone but the
+  host leaves at once (feed `leave`, reason `closed`) and the socket
+  closes with 4016.
 - `nudge`: the server sends `{"t":"nudge","from":<memberId>,"name":<name>}`
   to `target` only (no feed). At most 3 per second and 20 per minute per
   sender; the rest, nudges to oneself and to unknown targets are dropped
@@ -284,7 +293,7 @@ Field notes:
   server's own lines; omitted when none): match people by id, not by
   name. `action` values: `ready`, `unready`, `force-ready`, `force-unready`,
   `force-play`, `force-hold`, `join` (a new member only), `leave` (for
-  good: `reason` `bye` or `grace`), `gone` (10 s after the member went
+  good: `reason` `bye`, `grace` or `closed`), `gone` (10 s after the member went
   `gone`; a quicker return says nothing), `return` (back within the grace
   after a `gone` line), `away` (`target` the member set away, absent when
   the actor set itself; `reason` `idle`/`minimised`/`bye`, empty for

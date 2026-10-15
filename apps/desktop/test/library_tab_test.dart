@@ -1,5 +1,3 @@
-// restructure: rewrite in step 3 (Your server): the "solo" and "hosting"
-// tests (D9: no solo mode); the rest stays.
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -15,6 +13,11 @@ import 'package:starsync/src/shell/library_tab.dart';
 import 'jellyfin_accounts_test.dart'
     show FakeJellyfin, arifuretaId, fixtureServerId, jellyfinFixture, linkedAccounts, season2Id;
 import 'jellyfin_browser_test.dart' show fixtureNow, settle;
+
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
 
 const bsSeries = 'c7974a65e1b7bd43f26858744a7d3c11';
 const bsEpisode = '1c67aa9143ebcdcea7953aada4db543a';
@@ -50,13 +53,13 @@ FakeJellyfin libraryFake() {
 }
 
 class FilesStub extends StatelessWidget {
-  final bool solo, relayed;
+  final bool alone, relayed;
   final Future<String?> Function(String path) onPlay;
-  const FilesStub({super.key, required this.solo, required this.relayed, required this.onPlay});
+  const FilesStub({super.key, required this.alone, required this.relayed, required this.onPlay});
 
   @override
   Widget build(BuildContext context) => Column(children: [
-        Text('files solo=$solo relayed=$relayed'),
+        Text('files alone=$alone relayed=$relayed'),
         TextButton(
           key: const ValueKey('stub-play'),
           onPressed: () => onPlay('/v/a.mkv'),
@@ -77,7 +80,7 @@ class Harness {
 Future<Harness> pumpLibrary(
   WidgetTester tester,
   Size size, {
-  bool solo = false,
+  bool alone = false,
   bool isHost = false,
   MediaKind source = MediaKind.jellyfin,
   Harness? reuse,
@@ -97,7 +100,7 @@ Future<Harness> pumpLibrary(
     addTearDown(c.dispose);
     h = Harness(c, accounts, fake);
   }
-  await tester.pumpWidget(MaterialApp(
+  await tester.pumpWidget(scoped(_graph, MaterialApp(
     theme: ThemeData.dark(),
     home: Scaffold(
       body: LibraryTab(
@@ -105,7 +108,7 @@ Future<Harness> pumpLibrary(
         key: UniqueKey(),
         controller: h.controller,
         accounts: h.accounts,
-        solo: solo,
+        alone: alone,
         isHost: isHost,
         jellyfinStart: start,
         recentLinks: h.recents,
@@ -115,15 +118,15 @@ Future<Harness> pumpLibrary(
             : url.contains('bilibili')
                 ? LinkProbe.page(Uri.parse(url), ytDlpError: 'HTTP Error 412: Precondition Failed')
                 : LinkProbe.page(Uri.parse(url), info: const YtDlpInfo(title: 'A video', uploader: 'Chan')),
-        filesBuilder: (context, {required solo, required relayed, required onPlay, nowPlayingPath}) =>
-            FilesStub(solo: solo, relayed: relayed, onPlay: onPlay),
+        filesBuilder: (context, {required alone, required relayed, required onPlay, nowPlayingPath}) =>
+            FilesStub(alone: alone, relayed: relayed, onPlay: onPlay),
         onPutUp: (m) async {
           h.put.add(m);
           return null;
         },
       ),
     ),
-  ));
+  )));
   await settle(tester, 10);
   return h;
 }
@@ -156,7 +159,7 @@ void main() {
 
     await tester.tap(find.text('Files'));
     await settle(tester, 10);
-    expect(find.text('files solo=false relayed=true'), findsOneWidget);
+    expect(find.text('files alone=false relayed=true'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('stub-play')));
     await settle(tester);
     expect(h.put, [const FileMedia('/v/a.mkv')]);
@@ -251,8 +254,8 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('solo: buttons say Play and put up; a link goes direct, no relay modes', (tester) async {
-    final h = await pumpLibrary(tester, const Size(1600, 1000), solo: true);
+  testWidgets('nobody else in the server (D9): buttons say Play and put up; a link goes direct, no relay modes', (tester) async {
+    final h = await pumpLibrary(tester, const Size(1600, 1000), alone: true);
     await tester.tap(arifuretaCard());
     await settle(tester, 10);
     final go = find.byKey(const ValueKey('details-put-up'));
@@ -267,7 +270,7 @@ void main() {
     await tester.enterText(find.byKey(const ValueKey('link-field')), 'https://cdn.example/a.mkv');
     await settle(tester, 10);
     expect(find.text('How the others get it'), findsNothing);
-    expect(find.text(soloPlayHint), findsOneWidget);
+    expect(find.text(alonePlayHint), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('link-put-up')));
     await settle(tester, 10);
     expect(h.put.last, const LinkMedia('https://cdn.example/a.mkv'));
@@ -324,9 +327,9 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('hosting: files stream from here; now-playing file passes through', (tester) async {
+  testWidgets('your server: files stream from here; now-playing file passes through', (tester) async {
     await pumpLibrary(tester, const Size(1400, 900), source: MediaKind.file, isHost: true);
-    expect(find.text('files solo=false relayed=false'), findsOneWidget);
+    expect(find.text('files alone=false relayed=false'), findsOneWidget);
   });
 
   testWidgets('the last pick comes back selected; "Change video" opens on its series', (tester) async {
@@ -344,7 +347,7 @@ void main() {
     expect(c.selected!.itemId, bsEpisode);
     expect(c.source, MediaKind.jellyfin);
     final h = Harness(c, accounts, FakeJellyfin());
-    await pumpLibrary(tester, const Size(1600, 1000), reuse: h, solo: true);
+    await pumpLibrary(tester, const Size(1600, 1000), reuse: h, alone: true);
     expect(find.byKey(const ValueKey('jf-details')), findsOneWidget);
     expect(find.text('Black Summoner'), findsWidgets);
 

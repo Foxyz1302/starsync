@@ -3,17 +3,23 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:starsync/src/shell/app_shell.dart';
-import 'package:starsync/src/state/session_state.dart';
 import 'package:starsync/src/update/update_controller.dart';
 import 'package:starsync/src/widgets/app_keys.dart';
 import 'package:starsync/src/widgets/text_focus.dart';
 
+import 'package:starsync/src/session/navigation.dart' show Place;
+
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
+
 void main() {
-  final session = SessionState.instance;
+  final session = _graph;
   final coord = session.coordinator;
 
   tearDown(() {
-    session.route.value = AppRoute.home;
+    session.navigation.place.value = Place.none;
     coord.serverState.value = null;
   });
 
@@ -24,7 +30,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     var readies = 0;
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(scoped(_graph, MaterialApp(
       theme: ThemeData.dark(),
       shortcuts: appShortcuts,
       home: AppKeys(
@@ -36,7 +42,7 @@ void main() {
           videoBuilder: (context, controls) => const SizedBox(),
         ),
       ),
-    ));
+    )));
     coord.serverState.value = StateBroadcast(
       eventId: 1,
       transport: 'held',
@@ -45,7 +51,7 @@ void main() {
       mediaId: 0,
       members: [MemberView(id: 'a', name: 'Alex', ready: false, inSet: false, buffered: 0)],
     );
-    session.route.value = AppRoute.session;
+    session.navigation.place.value = Place.friend;
     await tester.pumpAndSettle();
     final panel = find.byKey(const ValueKey('chat-panel'));
 
@@ -67,11 +73,11 @@ void main() {
   });
 
   testWidgets('Ctrl+Shift+B opens Mark a problem; Esc closes it unmarked', (tester) async {
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(scoped(_graph, MaterialApp(
       theme: ThemeData.dark(),
       shortcuts: appShortcuts,
       home: const AppKeys(child: Scaffold(body: SizedBox())),
-    ));
+    )));
     final card = find.byKey(const ValueKey('mark-problem-card'));
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);

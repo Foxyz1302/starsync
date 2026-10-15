@@ -12,15 +12,16 @@ const appTagline = 'Watch together, in sync';
 /// the app name (else under it).
 const welcomeWideFrom = 980.0;
 
-/// Top of the Library while not in a server: the app's name and the three
-/// ways in, Join a friend first (what most people came for), then Host and
-/// Watch solo. None of them needs Jellyfin.
+/// Top of the Library for newcomers alone on their own server: the app's
+/// name and the three ways in, Join a friend first (what most people came
+/// for), then Invite friends and Watch on your own. None of them needs
+/// Jellyfin.
 class WelcomeBand extends StatelessWidget {
   final VoidCallback onJoin;
-  final VoidCallback onHost;
-  final VoidCallback onSolo;
+  final VoidCallback onInvite;
+  final VoidCallback onWatch;
   final VoidCallback? onDismiss;
-  const WelcomeBand({super.key, required this.onJoin, required this.onHost, required this.onSolo, this.onDismiss});
+  const WelcomeBand({super.key, required this.onJoin, required this.onInvite, required this.onWatch, this.onDismiss});
 
   @override
   Widget build(BuildContext context) {
@@ -63,23 +64,23 @@ class WelcomeBand extends StatelessWidget {
         key: const ValueKey('way-join'),
         icon: Icons.login_rounded,
         title: 'Join a friend',
-        caption: 'Got an address from a friend? Join with it. Nothing to set up.',
+        caption: 'Got an invite from a friend? Join with it. Nothing to set up.',
         primary: true,
         onTap: onJoin,
       ),
       WayCard(
-        key: const ValueKey('way-host'),
-        icon: Icons.podcasts_rounded,
-        title: 'Host',
-        caption: 'You have the video. Friends join you and watch it with you.',
-        onTap: onHost,
+        key: const ValueKey('way-invite'),
+        icon: Icons.group_add_outlined,
+        title: 'Invite friends',
+        caption: 'You have the video. Copy an invite; friends join you and watch it with you.',
+        onTap: onInvite,
       ),
       WayCard(
-        key: const ValueKey('way-solo'),
+        key: const ValueKey('way-watch'),
         icon: Icons.person_outline_rounded,
-        title: 'Watch solo',
+        title: 'Watch on your own',
         caption: 'Just you: play anything below. Invite friends any time.',
-        onTap: onSolo,
+        onTap: onWatch,
       ),
     ];
     Widget row(List<Widget> cards) => IntrinsicHeight(

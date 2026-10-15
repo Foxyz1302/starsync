@@ -6,12 +6,17 @@ import 'package:starsync/src/session/session_coordinator.dart';
 import 'package:starsync/src/shell/library_link.dart' show LinkPreview;
 import 'package:starsync/src/widgets/text_focus.dart';
 
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
+
 void main() {
   testWidgets('Up next popover: holds the keys, Ctrl+V adds with a preview row, + Add link opens a field',
       (tester) async {
     final coord = SessionCoordinator();
     var clip = (files: const <String>[], text: 'look https://example.com/v' as String?);
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(scoped(_graph, MaterialApp(
       theme: ThemeData.dark(),
       home: Scaffold(
         body: Center(
@@ -23,7 +28,7 @@ void main() {
           ),
         ),
       ),
-    ));
+    )));
     await tester.pump();
     expect(textInputFocused(), isTrue, reason: 'the player keys rest while it is open');
     expect(find.byKey(const ValueKey('queue-add-field')), findsNothing);

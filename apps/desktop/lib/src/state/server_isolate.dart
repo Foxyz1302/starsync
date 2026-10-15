@@ -8,7 +8,8 @@ import 'package:sync_relay_server/server.dart';
 Future<void> _serverMain((Map<String, Object?>, SendPort) args) =>
     serve(args.$1, events: args.$2);
 
-/// The hosted server, running [serve] on its own isolate. Its log lines
+/// This app's own server ("your server"), running [serve] on its own
+/// isolate for the whole app run. Its log lines
 /// go to [onLog]; if the isolate dies without being asked to stop,
 /// [onCrash] gets the cause once.
 class ServerIsolate {
@@ -33,7 +34,7 @@ class ServerIsolate {
 
   /// Spawns the server and waits until it listens. Throws a
   /// [StateError] with the server's message if it cannot start.
-  /// [loopbackOnly]: 127.0.0.1 only (the solo session). [logDir]: where
+  /// [loopbackOnly]: 127.0.0.1 only until [share]. [logDir]: where
   /// the server writes its session log (none when null).
   static Future<ServerIsolate> start(
     AppConfig config, {
@@ -151,6 +152,46 @@ class ServerIsolate {
       return null;
     } catch (_) {
       return null;
+    } finally {
+      reply.close();
+    }
+  }
+
+  /// Opens the server to the network ([SyncServer.share]): a listener on
+  /// every interface at [port], the password [secret], the Jellyfin relay
+  /// login [jellyfin]. Returns the bound port; throws a [StateError] with
+  /// the server's reason (a port in use) when it cannot.
+  Future<int> share({required int port, required String secret, JellyfinCredential? jellyfin,
+      Duration timeout = const Duration(seconds: 10)}) async {
+    if (_exited.isCompleted) throw StateError('the server is not running');
+    final reply = ReceivePort('server share');
+    try {
+      _stop.send({
+        't': 'share',
+        'port': port,
+        'secret': secret,
+        'jellyfin': ?jellyfin?.toMap(),
+        'reply': reply.sendPort,
+      });
+      final msg = await reply.first.timeout(timeout);
+      if (msg is Map && msg['ok'] == true) return msg['port'] as int;
+      throw StateError(msg is Map ? '${msg['message']}' : 'the server did not answer');
+    } on TimeoutException {
+      throw StateError('the server did not answer');
+    } finally {
+      reply.close();
+    }
+  }
+
+  /// Closes the network listener again ([SyncServer.unshare]): everyone
+  /// but this app's own member leaves; nothing else changes.
+  Future<void> unshare({Duration timeout = const Duration(seconds: 5)}) async {
+    if (_exited.isCompleted) return;
+    final reply = ReceivePort('server unshare');
+    try {
+      _stop.send({'t': 'unshare', 'reply': reply.sendPort});
+      await reply.first.timeout(timeout);
+    } catch (_) {
     } finally {
       reply.close();
     }

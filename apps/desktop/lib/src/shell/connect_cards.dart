@@ -2,12 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
-import 'package:sync_relay_core/core.dart' show RelayConstants;
 
+import '../app/app_graph.dart';
 import '../screens/home/connect_flow.dart';
 import '../screens/home/connect_status.dart';
 import '../screens/home/health_probe.dart';
-import '../state/session_state.dart';
+import '../session/invite.dart' show addressIn;
+import '../session/navigation.dart' show Place;
+import '../state/connect_prefs.dart';
+import '../update/update_controller.dart';
 import 'motion.dart';
 
 /// Join card text, owned by the shell so it survives the card closing.
@@ -27,60 +30,45 @@ class JoinFields {
   }
 }
 
-/// Host card text, owned by the shell so it survives the card closing.
-class HostFields {
-  HostFields(ConnectForm f)
-      : port = TextEditingController(text: f.hostPort),
-        secret = TextEditingController(text: f.hostSecret);
-  final TextEditingController port;
-  final TextEditingController secret;
-
-  void dispose() {
-    port.dispose();
-    secret.dispose();
-  }
-}
-
-/// The strip's Join / Host buttons (and solo's Invite friends, the Host
-/// card): a card over the window. It closes itself once the attempt got
-/// in; a failed one shows its error inside.
-Future<void> showConnectCard(
+/// The strip's Join a friend: a card over the window. It closes itself
+/// once the join got in; a failed one shows its error inside.
+Future<void> showJoinCard(
   BuildContext context, {
-  required ConnectMode mode,
   required ConnectFlow flow,
   required JoinFields join,
-  required HostFields host,
   HealthGetter healthGet = defaultHealthGet,
+  UpdateController? updates,
 }) =>
     showPopover<void>(
       context,
       dim: true,
       at: const Alignment(0.8, -0.75),
-      child: _CloseWhenOnline(
-        child: mode == ConnectMode.host
-            ? HostCard(flow: flow, fields: host)
-            : JoinCard(flow: flow, fields: join, healthGet: healthGet),
+      child: _CloseInFriends(
+        child: JoinCard(flow: flow, fields: join, healthGet: healthGet, updates: updates),
       ),
     );
 
-class _CloseWhenOnline extends StatefulWidget {
+class _CloseInFriends extends StatefulWidget {
   final Widget child;
-  const _CloseWhenOnline({required this.child});
+  const _CloseInFriends({required this.child});
 
   @override
-  State<_CloseWhenOnline> createState() => _CloseWhenOnlineState();
+  State<_CloseInFriends> createState() => _CloseInFriendsState();
 }
 
-class _CloseWhenOnlineState extends State<_CloseWhenOnline> {
+class _CloseInFriendsState extends State<_CloseInFriends> {
   late final void Function() _stop;
 
   @override
   void initState() {
     super.initState();
+    final navigation = AppScope.of(context).navigation;
+    var was = navigation.place.peek();
     _stop = effect(() {
-      final s = SessionState.instance;
-      // Solo is in a session too: wait until it is a hosted server.
-      if (s.route.value != AppRoute.session || s.solo.value || s.switching.value) return;
+      final place = navigation.place.value;
+      final arrived = place == Place.friend && was != Place.friend;
+      was = place;
+      if (!arrived) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) Navigator.of(context).maybePop();
       });
@@ -97,7 +85,7 @@ class _CloseWhenOnlineState extends State<_CloseWhenOnline> {
   Widget build(BuildContext context) => widget.child;
 }
 
-/// Card frame shared by Join and Host.
+/// The card frame.
 class _Card extends StatelessWidget {
   final String title;
   final List<Widget> children;
@@ -128,14 +116,15 @@ class _Card extends StatelessWidget {
 const _dense = InputDecoration(isDense: true);
 
 /// Recent servers as one-click rows (with live status), then address and
-/// password.
+/// password. Pasting an invite into the address fills the port too.
 class JoinCard extends StatelessWidget {
   final ConnectFlow flow;
   final JoinFields fields;
   final HealthGetter healthGet;
-  const JoinCard({super.key, required this.flow, required this.fields, this.healthGet = defaultHealthGet});
+  final UpdateController? updates;
+  const JoinCard({super.key, required this.flow, required this.fields, this.healthGet = defaultHealthGet, this.updates});
 
-  void _join() => flow.submit(ConnectMode.join, (f) {
+  void _join() => flow.submit((f) {
         f
           ..host = fields.host.text
           ..port = fields.port.text.trim()
@@ -149,20 +138,27 @@ class JoinCard extends StatelessWidget {
     _join();
   }
 
+  /// An invite or "host:port" pasted into the address: split it.
+  void _onAddress(String v) {
+    flow.clearError();
+    final a = addressIn(v);
+    if (a == null || v.trim() == a.host) return;
+    fields.host.text = a.host;
+    fields.port.text = a.port;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final forms = AppScope.of(context).forms;
     return ListenableBuilder(
       listenable: flow,
       builder: (context, _) {
-        final busy = flow.busy == ConnectMode.join;
+        final busy = flow.busy;
         return _Card(
           title: 'Join a friend',
           children: [
             SignalBuilder(builder: (context) {
-              final list = [
-                for (final r in SessionState.instance.recents.value)
-                  if (!r.hosted) r
-              ];
+              final list = forms.recents.value;
               if (list.isEmpty) return const SizedBox.shrink();
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -170,10 +166,10 @@ class JoinCard extends StatelessWidget {
                   const Text('Recent', style: TextStyle(color: Colors.grey)),
                   RecentServerRows(
                     servers: list,
-                    enabled: flow.busy == null,
+                    enabled: !busy,
                     healthGet: healthGet,
                     onJoin: _joinRecent,
-                    onForget: SessionState.instance.forgetServer,
+                    onForget: forms.forget,
                   ),
                   const Divider(),
                 ],
@@ -192,8 +188,8 @@ class JoinCard extends StatelessWidget {
                           key: const ValueKey('join-address'),
                           controller: fields.host,
                           autofocus: true,
-                          decoration: _dense.copyWith(labelText: 'Address', hintText: 'IP or hostname'),
-                          onChanged: (_) => flow.clearError(ConnectMode.join),
+                          decoration: _dense.copyWith(labelText: 'Address', hintText: 'IP, hostname or invite'),
+                          onChanged: _onAddress,
                           onSubmitted: (_) => _join(),
                         ),
                       ),
@@ -222,12 +218,13 @@ class JoinCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            ConnectButton(flow: flow, mode: ConnectMode.join, label: 'Join', onSubmit: _join, expand: true),
-            ConnectFeedback(flow: flow, mode: ConnectMode.join),
+            ConnectButton(flow: flow, label: 'Join', onSubmit: _join, expand: true),
+            ConnectFeedback(flow: flow, updates: updates),
             const Padding(
               padding: EdgeInsets.only(top: 8),
               child: Text(
-                'Your friend gives you the address and password. No account or Jellyfin needed.',
+                'Your friend gives you their invite (the address) and the password, if any. '
+                'No account or Jellyfin needed. Your own server stays as it is.',
                 style: TextStyle(color: Colors.grey, fontSize: 12),
               ),
             ),
@@ -235,122 +232,6 @@ class JoinCard extends StatelessWidget {
         );
       },
     );
-  }
-}
-
-/// Port and password; what to watch is picked afterwards, in the library.
-class HostCard extends StatelessWidget {
-  final ConnectFlow flow;
-  final HostFields fields;
-  const HostCard({super.key, required this.flow, required this.fields});
-
-  void _host() => flow.submit(
-        ConnectMode.host,
-        (f) => f
-          ..hostPort = fields.port.text.trim()
-          ..hostSecret = fields.secret.text,
-      );
-
-  @override
-  Widget build(BuildContext context) {
-    // From a solo session this is "Invite friends": same server settings,
-    // and what plays carries over.
-    final solo = SessionState.instance.solo.peek();
-    return ListenableBuilder(
-      listenable: flow,
-      builder: (context, _) => _Card(
-        title: solo ? 'Invite friends' : 'Host a server',
-        children: [
-          AbsorbPointer(
-            absorbing: flow.busy == ConnectMode.host,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  key: const ValueKey('host-port'),
-                  controller: fields.port,
-                  autofocus: true,
-                  decoration: _dense.copyWith(labelText: 'Port', hintText: '8080'),
-                  keyboardType: TextInputType.number,
-                  onChanged: (_) => flow.clearError(ConnectMode.host),
-                  onSubmitted: (_) => _host(),
-                ),
-                const SizedBox(height: 8),
-                ListenableBuilder(
-                  listenable: fields.secret,
-                  builder: (context, _) => TextField(
-                    key: const ValueKey('host-password'),
-                    controller: fields.secret,
-                    obscureText: true,
-                    decoration: _dense.copyWith(
-                      labelText: 'Password (optional)',
-                      helperText: fields.secret.text.isEmpty ? 'No password — anyone can join' : null,
-                    ),
-                    onSubmitted: (_) => _host(),
-                  ),
-                ),
-                _HostedRecents(fields: fields, enabled: flow.busy == null),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          ConnectButton(
-              flow: flow, mode: ConnectMode.host, label: solo ? 'Start hosting' : 'Host', onSubmit: _host, expand: true),
-          ConnectFeedback(flow: flow, mode: ConnectMode.host),
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(
-              solo
-                  ? 'Your video keeps playing from where it is; friends join with your address.'
-                  : 'You pick what to watch afterwards, in the library.',
-              style: const TextStyle(color: Colors.grey, fontSize: 12),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Ports hosted before: one click refills port and password.
-class _HostedRecents extends StatelessWidget {
-  final HostFields fields;
-  final bool enabled;
-  const _HostedRecents({required this.fields, required this.enabled});
-
-  @override
-  Widget build(BuildContext context) {
-    return SignalBuilder(builder: (context) {
-      final list = [
-        for (final r in SessionState.instance.recents.value)
-          if (r.hosted) r
-      ];
-      if (list.isEmpty) return const SizedBox.shrink();
-      return Padding(
-        padding: const EdgeInsets.only(top: 12),
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final r in list)
-              InputChip(
-                key: ValueKey('recent-${r.key}'),
-                avatar: Icon(r.secret.isEmpty ? Icons.history : Icons.lock_outline, size: 16),
-                label: Text('Port ${r.port}'),
-                tooltip: 'Use port ${r.port} again',
-                isEnabled: enabled,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                onPressed: () {
-                  fields.port.text = r.port;
-                  fields.secret.text = r.secret;
-                },
-                deleteButtonTooltipMessage: 'Forget',
-                onDeleted: () => SessionState.instance.forgetServer(r),
-              ),
-          ],
-        ),
-      );
-    });
   }
 }
 
@@ -476,8 +357,7 @@ class _RecentRow extends StatelessWidget {
           Text(status, key: const ValueKey('recent-status'), style: TextStyle(color: statusColor)),
           if (h != null && h.needsUpdate)
             Tooltip(
-              message: 'Server protocol ${h.proto}, this app '
-                  '${RelayConstants.protoVersion} — update so both match',
+              message: versionGateText(h),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                 decoration: BoxDecoration(color: scheme.errorContainer, borderRadius: BorderRadius.circular(6)),

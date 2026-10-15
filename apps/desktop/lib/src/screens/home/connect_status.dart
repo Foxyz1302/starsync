@@ -1,21 +1,20 @@
 import 'package:flutter/material.dart';
 
-import '../../state/session_state.dart';
+import '../../update/update_controller.dart';
 import 'connect_flow.dart';
 import 'ui.dart';
+import 'update_indicator.dart' show runUpdateCheck;
 
-/// The submit button for one [ConnectMode], swapped for a progress bar and
-/// Cancel while that attempt runs. Disabled while the other mode is busy.
+/// The Join button, swapped for a progress bar and Cancel while the
+/// attempt runs.
 class ConnectButton extends StatelessWidget {
   final ConnectFlow flow;
-  final ConnectMode mode;
   final String label;
   final VoidCallback onSubmit;
   final bool expand;
   const ConnectButton({
     super.key,
     required this.flow,
-    required this.mode,
     required this.label,
     required this.onSubmit,
     this.expand = false,
@@ -23,8 +22,7 @@ class ConnectButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final busyHere = flow.busy == mode;
-    if (busyHere) {
+    if (flow.busy) {
       return SizedBox(
         width: expand ? null : 220,
         child: Column(
@@ -35,10 +33,7 @@ class ConnectButton extends StatelessWidget {
             const SizedBox(height: 4),
             Row(
               children: [
-                Expanded(
-                  child: Text(mode == ConnectMode.host ? 'Starting server…' : 'Connecting…',
-                      style: Theme.of(context).textTheme.bodySmall),
-                ),
+                Expanded(child: Text('Connecting…', style: Theme.of(context).textTheme.bodySmall)),
                 TextButton(onPressed: flow.cancel, child: const Text('Cancel')),
               ],
             ),
@@ -46,35 +41,48 @@ class ConnectButton extends StatelessWidget {
         ),
       );
     }
-    final button = FilledButton(
-      onPressed: flow.busy != null ? null : onSubmit,
-      child: Text(label),
-    );
+    final button = FilledButton(onPressed: onSubmit, child: Text(label));
     return expand ? SizedBox(width: double.infinity, child: button) : button;
   }
 }
 
-/// Last error or notice for [mode], or nothing.
+/// The last error or notice, or nothing. A version gate that says this
+/// app is the older one offers the update ([updates], default the app's
+/// [UpdateController]).
 class ConnectFeedback extends StatelessWidget {
   final ConnectFlow flow;
-  final ConnectMode mode;
-  const ConnectFeedback({super.key, required this.flow, required this.mode});
+  final UpdateController? updates;
+  const ConnectFeedback({super.key, required this.flow, this.updates});
 
   @override
   Widget build(BuildContext context) {
-    final error = flow.errors[mode];
-    final notice = flow.notices[mode];
+    final error = flow.error;
+    final notice = flow.notice;
     if (error != null) {
       return Padding(
         padding: const EdgeInsets.only(top: 12),
-        child: ErrorBox(title: error.title, message: error.message),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ErrorBox(title: error.title, message: error.message),
+            if (error.offerUpdate)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  key: const ValueKey('join-update'),
+                  onPressed: () => runUpdateCheck(updates, true),
+                  icon: const Icon(Icons.system_update_alt, size: 16),
+                  label: const Text('Check for the update'),
+                ),
+              ),
+          ],
+        ),
       );
     }
     if (notice != null) {
       return Padding(
         padding: const EdgeInsets.only(top: 12),
-        child: Text(notice,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey)),
+        child: Text(notice, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey)),
       );
     }
     return const SizedBox.shrink();

@@ -10,7 +10,7 @@ import 'package:sync_relay_core/core.dart' show Presence;
 
 import '../jellyfin/accounts.dart';
 import '../session/identity.dart';
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import '../update/update_controller.dart';
 import 'avatar.dart';
 import 'motion.dart';
@@ -74,11 +74,12 @@ class _ProfileCardState extends State<ProfileCard> {
       child: SizedBox(
         width: 360,
         child: SignalBuilder(builder: (context) {
-          final session = SessionState.instance;
-          final coord = session.coordinator;
-          final online = session.route.value == AppRoute.session;
+          final graph = AppScope.of(context);
+          final coord = graph.coordinator;
+          // Alone it is a plain player: no ring, no crown.
+          final online = graph.navigation.online.value && !coord.alone.value;
           final self = online ? coord.selfMember.value : null;
-          final hosting = online && !session.solo.value && coord.hostFile != null;
+          final hosting = online && graph.navigation.home.value;
           final color = _p.color.value;
           final png = _p.picture.value;
           final out = self?.presence == Presence.away;
@@ -164,7 +165,7 @@ class _ProfileCardState extends State<ProfileCard> {
                             runSpacing: 4,
                             children: [
                               if (hosting) const Pill('host', Colors.amber),
-                              Pill(online ? 'in a server' : 'offline',
+                              Pill(online ? 'with others' : 'just you',
                                   online ? Colors.greenAccent : Colors.grey),
                               if (online)
                                 Pill(out ? 'sitting out' : (self?.ready ?? false) ? 'ready' : 'not ready',
@@ -231,7 +232,7 @@ class _ProfileCardState extends State<ProfileCard> {
                 child: Text(
                   online
                       ? 'Name and picture update for everyone in the server right away. Colour is yours only.'
-                      : 'Others see your name and picture when you join. Colour is yours only.',
+                      : 'Others see your name and picture when they join you or you join them. Colour is yours only.',
                   style: small,
                 ),
               ),
@@ -331,7 +332,7 @@ class _CropPickerState extends State<CropPicker> {
   Future<void> _pick() async {
     final List<String> files;
     try {
-      files = await SessionState.instance.ports.folders.pickFiles(
+      files = await AppScope.of(context).ports.folders.pickFiles(
         dialogTitle: 'Pick a picture',
         extensions: const ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'],
       );

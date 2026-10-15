@@ -7,6 +7,11 @@ import 'package:sync_relay_core/core.dart';
 import 'package:starsync/src/session/delivery.dart';
 import 'package:starsync/src/shell/delivery_line.dart';
 
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
+
 MemberView _m(String id, String name, {double buffered = 30, bool host = false, int rate = 0}) =>
     MemberView(id: id, name: name, ready: true, inSet: true, buffered: buffered, host: host, rate: rate);
 
@@ -134,7 +139,7 @@ void main() {
     final r = _state(
         _relayed(const MediaRelay(source: 'm1', live: true, rate: 1200000, need: 2300000)), [foxyz, bob, ann]);
     final d = deliveryOf(r, selfId: 'm2')!;
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(scoped(_graph, MaterialApp(
       theme: ThemeData.dark(),
       home: Scaffold(
         body: Center(
@@ -147,7 +152,7 @@ void main() {
           ),
         ),
       ),
-    ));
+    )));
     await tester.pumpAndSettle();
     expect(find.text("Foxyz's upload is slower than the video"), findsOneWidget);
     expect(find.byKey(const ValueKey('headroom-bar')), findsOneWidget);

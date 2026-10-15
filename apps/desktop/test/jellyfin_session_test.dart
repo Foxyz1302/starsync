@@ -21,6 +21,11 @@ import 'package:starsync/src/shell/library_tab.dart' show putUpJellyfinMedia;
 import 'jellyfin_accounts_test.dart';
 import 'jellyfin_browser_test.dart' show app, setSize, settle;
 
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
+
 const episodeId = '1c67aa9143ebcdcea7953aada4db543a'; // Black Summoner S1E6
 const nextEpisodeId = 'baf73898ff81e215aa025c43d7344020'; // S1E7
 const seriesId = 'c7974a65e1b7bd43f26858744a7d3c11';
@@ -485,7 +490,7 @@ void main() {
         SeriesRoute(const JellyfinItem(id: arifuretaId, name: 'Arifureta', type: 'Series'),
             seasonId: season2Id),
       ]));
-      await tester.pumpWidget(app(JellyfinBrowser(accounts: accounts, onSelect: (_) {}, onPutUp: (_) {})));
+      await tester.pumpWidget(scoped(_graph, app(JellyfinBrowser(accounts: accounts, onSelect: (_) {}, onPutUp: (_) {}))));
       await settle(tester);
       final s2 = tester.widget<ChoiceChip>(find.byKey(const ValueKey('season-$season2Id')));
       expect(s2.selected, isTrue);
@@ -506,18 +511,18 @@ void main() {
 
     testWidgets('end card: Next prompt, countdown with Cancel', (tester) async {
       var play = 0, cancel = 0;
-      await tester.pumpWidget(app(EndOfEpisodeCard(
-          next: next, countdown: null, onPlayNow: () => play++, onCancel: () => cancel++)));
+      await tester.pumpWidget(scoped(_graph, app(EndOfEpisodeCard(
+          next: next, countdown: null, onPlayNow: () => play++, onCancel: () => cancel++))));
       expect(find.text('Next: S1E7 Battle with the Heroes'), findsOneWidget);
       expect(find.byKey(const ValueKey('auto-advance-cancel')), findsNothing);
       await tester.tap(find.byKey(const ValueKey('play-next')));
       expect(play, 1);
 
-      await tester.pumpWidget(app(EndOfEpisodeCard(
+      await tester.pumpWidget(scoped(_graph, app(EndOfEpisodeCard(
           next: next,
           countdown: AutoAdvance(mediaId: 3, secondsLeft: 7, next: next, swapper: false),
           onPlayNow: () => play++,
-          onCancel: () => cancel++)));
+          onCancel: () => cancel++))));
       expect(find.text('Next episode in 7 s'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('auto-advance-cancel')));
       expect(cancel, 1);
@@ -525,7 +530,7 @@ void main() {
 
     testWidgets('next-episode pill: faint at rest, lit on hover, click puts it up', (tester) async {
       var pressed = 0;
-      await tester.pumpWidget(app(Align(child: NextEpisodePill(episode: next, onPressed: () => pressed++))));
+      await tester.pumpWidget(scoped(_graph, app(Align(child: NextEpisodePill(episode: next, onPressed: () => pressed++)))));
       double opacity() => tester.widget<AnimatedOpacity>(find.descendant(
           of: find.byType(NextEpisodePill), matching: find.byType(AnimatedOpacity))).opacity;
       expect(opacity(), lessThan(0.5));
@@ -541,10 +546,10 @@ void main() {
 
     testWidgets('blocked card offers to link an account', (tester) async {
       var link = 0;
-      await tester.pumpWidget(app(JellyfinBlockedCard(
+      await tester.pumpWidget(scoped(_graph, app(JellyfinBlockedCard(
           blocked: const BlockedPlay(serverId: fixtureServerId, serverName: 'Example Server'),
           onLinkAccount: () => link++,
-          onRetry: () {})));
+          onRetry: () {}))));
       expect(find.text('No Jellyfin account here for Example Server, and nobody is passing it on'),
           findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('link-jellyfin-account')));

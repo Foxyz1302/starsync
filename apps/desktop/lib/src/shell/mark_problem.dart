@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:sync_relay_core/core.dart' show RelayConstants;
 
 import '../session/app_events.dart' show ProblemMarked;
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import '../widgets/app_menu.dart' show AppGlass;
 import 'motion.dart';
 
@@ -17,8 +17,8 @@ const markProblemKey = SingleActivator(LogicalKeyboardKey.keyB, control: true, s
 /// Asks for the note, then marks; the toast says where it went.
 Future<void> showMarkProblem(BuildContext context) async {
   final note = await showPopover<String>(context, at: Alignment.center, child: const MarkProblemCard());
-  if (note == null) return;
-  final coord = SessionState.instance.coordinator;
+  if (note == null || !context.mounted) return;
+  final coord = AppScope.of(context).coordinator;
   final inSession = await coord.markProblem(note);
   coord.notify(ProblemMarked(inSession: inSession));
 }

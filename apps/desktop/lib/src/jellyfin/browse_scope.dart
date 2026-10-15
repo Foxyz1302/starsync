@@ -339,9 +339,9 @@ class BrowseScope extends InheritedWidget {
       case 2:
         queue!(item, next: true);
       case 3:
-        await copyToClipboard(jellyfinCopyTitle(item), done: 'Title copied');
+        if (context.mounted) await copyToClipboard(context, jellyfinCopyTitle(item), done: 'Title copied');
       case 4:
-        await openLink(jellyfinWebUrl(client.baseUrl, item.id, serverId: account.serverId));
+        if (context.mounted) await openLink(context, jellyfinWebUrl(client.baseUrl, item.id, serverId: account.serverId));
     }
   }
 

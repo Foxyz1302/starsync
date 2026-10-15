@@ -1,8 +1,8 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 
 import '../session/notifier.dart' show AppEvent, Copied, CopyFailed, noticeFor;
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 
 // Reusing what the app shows elsewhere: copying a link or a title, opening
 // a page in the browser. One wording and one confirmation (a small toast)
@@ -21,27 +21,36 @@ abstract final class ReuseText {
 @visibleForTesting
 void Function(String text)? debugReuseToast;
 
-void _notify(AppEvent event) {
+void Function(AppEvent event) _notifier(BuildContext context) {
   final debug = debugReuseToast;
-  if (debug != null) return debug(noticeFor(event).toast ?? '');
-  SessionState.instance.coordinator.notify(event);
+  if (debug != null) return (event) => debug(noticeFor(event).toast ?? '');
+  return AppScope.of(context).notifier.notify;
 }
 
 /// Puts [text] on the clipboard and confirms it with a toast ([done]:
 /// its text, e.g. "Link copied").
-Future<void> copyToClipboard(String text, {String done = 'Copied'}) async {
+Future<void> copyToClipboard(BuildContext context, String text, {String done = 'Copied'}) async {
+  final notify = _notifier(context);
   try {
     await Clipboard.setData(ClipboardData(text: text));
   } catch (_) {
-    _notify(const CopyFailed());
+    notify(const CopyFailed());
     return;
   }
-  _notify(Copied(done));
+  notify(Copied(done));
 }
 
 /// Opens [url] in the browser; when none opens, copies it instead and
 /// says so.
-Future<void> openLink(String url) async {
-  if (await SessionState.instance.ports.urls.open(url)) return;
-  await copyToClipboard(url, done: "Couldn't open a browser — link copied");
+Future<void> openLink(BuildContext context, String url) async {
+  final urls = AppScope.of(context).ports.urls;
+  final notify = _notifier(context);
+  if (await urls.open(url)) return;
+  try {
+    await Clipboard.setData(ClipboardData(text: url));
+  } catch (_) {
+    notify(const CopyFailed());
+    return;
+  }
+  notify(const Copied("Couldn't open a browser — link copied"));
 }

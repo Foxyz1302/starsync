@@ -12,8 +12,13 @@ import 'package:starsync/src/jellyfin/browse_scope.dart';
 import 'package:starsync/src/jellyfin/picker_source.dart';
 import 'package:starsync/src/state/settings.dart';
 
+import 'test_graph.dart';
+
 import 'jellyfin_accounts_test.dart'
     show FakeJellyfin, arifuretaId, fixtureServerId, linkedAccounts, season2Id;
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
 
 Future<void> setSize(WidgetTester tester, Size size) async {
   tester.view.physicalSize = size;
@@ -55,7 +60,7 @@ Future<(Picks, JellyfinAccounts, FakeJellyfin, BrowseController)> pumpBrowser(
   final controller = BrowseController(accounts, now: () => fixtureNow);
   addTearDown(controller.dispose);
   final picks = Picks();
-  await tester.pumpWidget(app(StatefulBuilder(
+  await tester.pumpWidget(scoped(_graph, app(StatefulBuilder(
     builder: (context, setState) => JellyfinBrowser(
       accounts: accounts,
       controller: controller,
@@ -63,7 +68,7 @@ Future<(Picks, JellyfinAccounts, FakeJellyfin, BrowseController)> pumpBrowser(
       onSelect: (s) => setState(() => picks.selected.add(s)),
       onPutUp: picks.putUp.add,
     ),
-  )));
+  ))));
   await settle(tester);
   return (picks, accounts, fake, controller);
 }
@@ -154,8 +159,8 @@ void main() {
     addTearDown(controller.dispose);
     AppSettings.instance.hideReReleases.value = true;
     addTearDown(() => AppSettings.instance.hideReReleases.value = true);
-    await tester.pumpWidget(app(JellyfinBrowser(
-        accounts: accounts, controller: controller, onSelect: (_) {}, onPutUp: (_) {})));
+    await tester.pumpWidget(scoped(_graph, app(JellyfinBrowser(
+        accounts: accounts, controller: controller, onSelect: (_) {}, onPutUp: (_) {}))));
     await settle(tester);
     expect(find.text('Fresh Show'), findsWidgets);
     expect(find.text('S1E1'), findsWidgets);
@@ -298,9 +303,9 @@ void main() {
     final accounts = JellyfinAccounts(
         store: MemoryJellyfinStore(), httpFactory: () => fake, deviceName: 'Test');
     await accounts.ensureLoaded(validate: false);
-    await tester.pumpWidget(app(SingleChildScrollView(
+    await tester.pumpWidget(scoped(_graph, app(SingleChildScrollView(
         child: JellyfinAccountsPanel(
-            accounts: accounts, pollInterval: const Duration(milliseconds: 100)))));
+            accounts: accounts, pollInterval: const Duration(milliseconds: 100))))));
     await tester.tap(find.byKey(const ValueKey('jf-add-server')));
     await tester.pump();
     await tester.enterText(find.byKey(const ValueKey('jf-address')), 'example.invalid');
@@ -351,8 +356,8 @@ void main() {
     await setSize(tester, const Size(1200, 900));
     final accounts = JellyfinAccounts(store: MemoryJellyfinStore(), httpFactory: () => FakeJellyfin());
     await accounts.ensureLoaded(validate: false);
-    await tester.pumpWidget(app(JellyfinPickerSource(
-        accounts: accounts, onSelect: (_) {}, onPutUp: (_) {}, onOpenIntegrations: () {})));
+    await tester.pumpWidget(scoped(_graph, app(JellyfinPickerSource(
+        accounts: accounts, onSelect: (_) {}, onPutUp: (_) {}, onOpenIntegrations: () {}))));
     await tester.pump();
     expect(find.byKey(const ValueKey('jf-sign-in')), findsOneWidget);
     expect(find.text('Open Integrations'), findsOneWidget);

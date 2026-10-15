@@ -7,13 +7,13 @@ import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
 
 import 'app.dart';
+import 'src/app/app_graph.dart';
 import 'src/platform/app_log.dart';
-import 'src/platform/app_shutdown.dart';
+import 'src/platform/app_shutdown.dart' show closeAppWith;
 import 'src/platform/desktop/desktop_app_dirs.dart';
 import 'src/platform/desktop_entry.dart';
 import 'src/screens/home/ui.dart';
 import 'src/session/app_events.dart' show UpdateAvailable;
-import 'src/state/session_state.dart';
 import 'src/state/settings.dart';
 import 'src/update/update_controller.dart' show UpdateController, UpdatePhase, launchArgs;
 
@@ -46,20 +46,22 @@ Future<void> main(List<String> args) async {
   await startAppLogging(dirs);
   Hive.init(dirs.hive);
   await AppSettings.instance.ensureLoaded();
+  // The composition root: every system, made once.
+  final graph = AppGraph.build();
+  final ports = graph.ports;
   // Close button / Alt+F4: the orderly close ([shutDownApp]), so others
-  // see "left", a hosted server shuts down and no player outlives the
-  // engine.
-  final ports = SessionState.instance.ports;
+  // see "left", your server shuts down and no player outlives the engine.
+  final close = closeAppWith(graph);
   await ports.shell.start(
-      title: dirs.profile == null ? appName : '$appName [${dirs.profile}]', onCloseRequest: shutDownApp);
+      title: dirs.profile == null ? appName : '$appName [${dirs.profile}]', onCloseRequest: () => close());
   // Focus, minimise and restore feed auto sit-out and the Notifier (in
   // the background, notices go out as system notifications).
   ports.shell.watchActivity((a) {
-    SessionState.instance.coordinator.windowActivity(a);
-    SessionState.instance.notifier.window = a;
+    graph.coordinator.windowActivity(a);
+    graph.notifier.window = a;
   });
   try {
-    await SessionState.instance.loadForm();
+    await graph.forms.load();
   } catch (e, st) {
     debugPrint('load connect form failed: $e\n$st');
   }
@@ -74,10 +76,13 @@ Future<void> main(List<String> args) async {
     final s = updates.status.value;
     final version = s.manifest?.version;
     if (s.phase == UpdatePhase.available && version != null) {
-      SessionState.instance.notifier.notify(UpdateAvailable(version));
+      graph.notifier.notify(UpdateAvailable(version));
     }
   });
-  runApp(const WatchTogetherApp());
+  runApp(AppScope(graph: graph, child: const WatchTogetherApp()));
+  // Home: your own server, quietly (only this app can reach it until
+  // Invite).
+  unawaited(graph.navigation.start());
   // The sound device opens once the window is up, not on the first sound.
-  Future.delayed(const Duration(seconds: 2), SessionState.instance.sfx.warmUp);
+  Future.delayed(const Duration(seconds: 2), graph.sfx.warmUp);
 }

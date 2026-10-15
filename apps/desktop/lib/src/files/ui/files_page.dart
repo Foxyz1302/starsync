@@ -6,7 +6,7 @@ import 'package:signals/signals_flutter.dart';
 
 import '../../shell/motion.dart';
 import '../../platform/ports/folder_access.dart';
-import '../../state/session_state.dart';
+import '../../app/app_graph.dart';
 import '../../widgets/app_menu.dart';
 import '../folder_store.dart';
 import '../name_parser.dart';
@@ -33,7 +33,6 @@ String? _lastOpen;
 final _expanded = <String>{};
 final _showRequests = ValueNotifier(0);
 
-FolderAccess get _folders => SessionState.instance.ports.folders;
 
 /// Opens [dir] (null: Recent) in the Files page: now if one is showing,
 /// else when it next opens.
@@ -52,8 +51,8 @@ void resetFilesPageSession() {
 }
 
 class FilesPage extends StatefulWidget {
-  /// Nobody else watches (offline or solo): no relay notice.
-  final bool solo;
+  /// Nobody else is in the server: no relay notice.
+  final bool alone;
   /// The file will stream from this computer through the server.
   final bool relayed;
   /// Plays [path] in the session; returns an error text, or null.
@@ -73,7 +72,7 @@ class FilesPage extends StatefulWidget {
 
   const FilesPage({
     super.key,
-    this.solo = false,
+    this.alone = false,
     required this.relayed,
     required this.onPlay,
     this.onAddToQueue,
@@ -112,6 +111,8 @@ class _Library {
 final _libraries = Expando<_Library>();
 
 class _FilesPageState extends State<FilesPage> {
+  FolderAccess get _folders => AppScope.of(context).ports.folders;
+
   late final ThumbCache _thumbs =
       widget.thumbnails == null ? ThumbCache.shared : ThumbCache(widget.thumbnails!);
   FolderStore get _store => widget.store ?? FolderStore.instance;
@@ -198,7 +199,7 @@ class _FilesPageState extends State<FilesPage> {
     if (path != null && mounted) await _play(path);
   }
 
-  static Future<String?> _pickVideo() async {
+  Future<String?> _pickVideo() async {
     final files = await _folders.pickFiles(dialogTitle: 'Pick a video', extensions: videoExtensions.toList());
     return files.firstOrNull;
   }
@@ -247,7 +248,7 @@ class _FilesPageState extends State<FilesPage> {
     final add = widget.onAddToQueue;
     if (add == null) return;
     final pick = await showAppMenu<int>(context, items: [
-      AppMenuItem(value: 0, label: widget.solo ? 'Play' : 'Put it up'),
+      AppMenuItem(value: 0, label: widget.alone ? 'Play' : 'Put it up'),
       const AppMenuItem(value: 1, label: 'Add to queue'),
       const AppMenuItem(value: 2, label: 'Play next'),
     ]);
@@ -375,7 +376,7 @@ class _FilesPageState extends State<FilesPage> {
     final top = <Widget>[
       _header(context, open),
       if (narrow) _chips(folders, open),
-      if (!widget.solo && widget.relayed) const _RelayNotice(),
+      if (!widget.alone && widget.relayed) const _RelayNotice(),
       AnimatedSize(
         duration: easeTime,
         curve: ease,
@@ -695,6 +696,8 @@ class _RecentRow extends StatefulWidget {
 }
 
 class _RecentRowState extends State<_RecentRow> {
+  FolderAccess get _folders => AppScope.of(context).ports.folders;
+
   FileStat? _stat;
 
   @override

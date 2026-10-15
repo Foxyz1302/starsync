@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../shell/mark_problem.dart';
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import 'text_focus.dart';
 
 /// Tab and Shift+Tab never move focus, and Space never presses the
@@ -61,13 +61,13 @@ class _AppKeysState extends State<AppKeys> {
       return true;
     }
     if (key != LogicalKeyboardKey.space && key != LogicalKeyboardKey.tab) return false;
-    if (SessionState.instance.route.peek() != AppRoute.session) return false;
+    if (!AppScope.of(context).navigation.online.peek()) return false;
     if (ModalRoute.of(context)?.isCurrent == false) return false;
     if (textInputFocused()) return false;
     final keys = HardwareKeyboard.instance;
     if (keys.isControlPressed || keys.isAltPressed || keys.isMetaPressed) return false;
     if (key == LogicalKeyboardKey.space) {
-      (widget.onToggleReady ?? SessionState.instance.coordinator.toggleReady)();
+      (widget.onToggleReady ?? AppScope.of(context).coordinator.toggleReady)();
       return true;
     }
     final toggles = AppKeys._chatToggles;

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sync_relay_core/core.dart';
 
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/copy_open.dart';
 import '../widgets/text_focus.dart';
@@ -55,7 +55,7 @@ class _ChatPanelState extends State<ChatPanel> {
   }
 
   void _send() {
-    SessionState.instance.coordinator.sendChat(widget.chat.text);
+    AppScope.of(context).coordinator.sendChat(widget.chat.text);
     widget.chat.clear();
     widget.chatFocus.requestFocus();
   }
@@ -105,7 +105,7 @@ class _ChatPanelState extends State<ChatPanel> {
             child: ValueListenableBuilder<bool>(
               valueListenable: showActivity,
               builder: (context, activity, _) => PartyWatch(builder: (context) {
-                final all = SessionState.instance.coordinator.feedLog.value;
+                final all = AppScope.of(context).coordinator.feedLog.value;
                 final log = activity ? all : [for (final f in all) if (f.action == 'chat') f];
                 if (log.isEmpty) {
                   return Center(
@@ -169,7 +169,7 @@ class ActivityRow extends StatelessWidget {
           anchors: state.contextMenuAnchors,
           buttonItems: [
             ...state.contextMenuButtonItems,
-            for (final (label, action) in _messageActions(item.reason, link))
+            for (final (label, action) in _messageActions(context, item.reason, link))
               ContextMenuButtonItem(
                 label: label,
                 onPressed: () {
@@ -188,7 +188,7 @@ class ActivityRow extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                StatusAvatar(info: avatarForName(item.actor, null, item.actorId), size: 34, badges: false),
+                StatusAvatar(info: avatarForName(item.actor, AppScope.of(context).coordinator, item.actorId), size: 34, badges: false),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -238,17 +238,17 @@ String? firstLinkIn(String text) => RegExp(r'https?://[^\s<>"]+', caseSensitive:
 
 /// What a chat message offers: Copy message, and its link's Copy link and
 /// Open in browser.
-List<(String, VoidCallback)> _messageActions(String text, String? link) => [
-      (ReuseText.copyMessage, () => copyToClipboard(text, done: 'Message copied')),
+List<(String, VoidCallback)> _messageActions(BuildContext context, String text, String? link) => [
+      (ReuseText.copyMessage, () => copyToClipboard(context, text, done: 'Message copied')),
       if (link != null) ...[
-        (ReuseText.copyLink, () => copyToClipboard(link, done: 'Link copied')),
-        (ReuseText.openInBrowser, () => openLink(link)),
+        (ReuseText.copyLink, () => copyToClipboard(context, link, done: 'Link copied')),
+        (ReuseText.openInBrowser, () => openLink(context, link)),
       ],
     ];
 
 /// Right-click beside a chat message: [_messageActions] in the app's menu.
 Future<void> _messageMenu(BuildContext context, String text, String? link) async {
-  final actions = _messageActions(text, link);
+  final actions = _messageActions(context, text, link);
   final pick = await showAppMenu<int>(context, items: [
     for (final (i, (label, _)) in actions.indexed) AppMenuItem(value: i, label: label),
   ]);

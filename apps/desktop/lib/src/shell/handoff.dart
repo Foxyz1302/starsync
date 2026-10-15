@@ -99,7 +99,7 @@ Handoff classifyHandoff({
 
 /// What the card's buttons ask the shell to do.
 enum HandoffAction {
-  /// Put the (first) video up (offline: watch it solo).
+  /// Put the (first) video up.
   putUp,
   /// Add the video's folder (or the folder) to Files and open it.
   addFolder,
@@ -115,11 +115,11 @@ enum HandoffAction {
 /// pops the [HandoffAction] chosen.
 class HandoffCard extends StatelessWidget {
   final Handoff item;
-  /// Nobody else watches (offline or solo): videos play, no relay talk.
-  final bool solo;
+  /// Nobody else is in the server: videos play, no relay talk.
+  final bool alone;
   /// In a server: videos and links can go to Up next.
   final bool queue;
-  const HandoffCard({super.key, required this.item, required this.solo, this.queue = false});
+  const HandoffCard({super.key, required this.item, required this.alone, this.queue = false});
 
   @override
   Widget build(BuildContext context) {
@@ -144,7 +144,7 @@ class HandoffCard extends StatelessWidget {
           baseName(paths.first),
           paths.length > 1 ? 'and ${paths.length - 1} more · the first one goes up' : 'A video on this computer',
           [
-            button(HandoffAction.putUp, Icons.play_arrow, solo ? 'Play' : 'Put it up', primary: true),
+            button(HandoffAction.putUp, Icons.play_arrow, alone ? 'Play' : 'Put it up', primary: true),
             ...queueButtons,
             button(HandoffAction.addFolder, Icons.create_new_folder_outlined, 'Add its folder to Files'),
           ],
@@ -158,9 +158,9 @@ class HandoffCard extends StatelessWidget {
       HandoffLink(:final url) => (
           Icons.link,
           url,
-          solo ? 'Opens it on the Link page' : 'Pick how the others get it on the Link page',
+          alone ? 'Opens it on the Link page' : 'Pick how the others get it on the Link page',
           [
-            button(HandoffAction.openLink, Icons.link, solo ? 'Open in Link' : 'Put it up as a link…',
+            button(HandoffAction.openLink, Icons.link, alone ? 'Open in Link' : 'Put it up as a link…',
                 primary: true),
             ...queueButtons,
           ],

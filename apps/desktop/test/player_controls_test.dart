@@ -8,6 +8,11 @@ import 'package:starsync/src/jellyfin/track_prefs.dart';
 import 'package:starsync/src/playback/media_marks.dart';
 import 'package:starsync/src/screens/session/player_controls.dart';
 
+import 'test_graph.dart';
+
+/// This file's composition root (see test_graph.dart).
+final _graph = testGraph();
+
 // The control-bar pieces alone (never the session screen or a `Video`):
 // the Standard seek bar, the skip pill and the shared track / chapter
 // lists.
@@ -38,8 +43,8 @@ Widget host(Widget child, {double width = 960}) => MaterialApp(
 void main() {
   group('seek bar', () {
     testWidgets('a mark at each chapter start but the first, placed by time', (tester) async {
-      await tester.pumpWidget(host(ChapterSeekBar(
-          position: m(1), duration: m(24), chapters: chapters, onSeek: (_) {})));
+      await tester.pumpWidget(scoped(_graph, host(ChapterSeekBar(
+          position: m(1), duration: m(24), chapters: chapters, onSeek: (_) {}))));
       expect(find.byKey(const ValueKey('chapter-mark-0')), findsNothing, reason: 'starts at 0');
       final bar = tester.getRect(find.byKey(const ValueKey('seek-bar')));
       for (final c in chapters.skip(1)) {
@@ -51,16 +56,16 @@ void main() {
     });
 
     testWidgets('no marks without a duration or chapters', (tester) async {
-      await tester.pumpWidget(host(ChapterSeekBar(
-          position: Duration.zero, duration: Duration.zero, chapters: chapters, onSeek: (_) {})));
+      await tester.pumpWidget(scoped(_graph, host(ChapterSeekBar(
+          position: Duration.zero, duration: Duration.zero, chapters: chapters, onSeek: (_) {}))));
       expect(find.byKey(const ValueKey('chapter-mark-1')), findsNothing);
-      await tester.pumpWidget(host(ChapterSeekBar(position: Duration.zero, duration: m(24), onSeek: (_) {})));
+      await tester.pumpWidget(scoped(_graph, host(ChapterSeekBar(position: Duration.zero, duration: m(24), onSeek: (_) {}))));
       expect(find.byKey(const ValueKey('chapter-mark-1')), findsNothing);
     });
 
     testWidgets('hover shows the chapter title above the time', (tester) async {
-      await tester.pumpWidget(host(ChapterSeekBar(
-          position: m(1), duration: m(24), chapters: chapters, onSeek: (_) {})));
+      await tester.pumpWidget(scoped(_graph, host(ChapterSeekBar(
+          position: m(1), duration: m(24), chapters: chapters, onSeek: (_) {}))));
       final bar = tester.getRect(find.byKey(const ValueKey('seek-bar')));
       final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await mouse.addPointer(location: Offset.zero);
@@ -84,7 +89,7 @@ void main() {
     });
 
     testWidgets('no chapters: the hover shows only the time', (tester) async {
-      await tester.pumpWidget(host(ChapterSeekBar(position: m(1), duration: m(24), onSeek: (_) {})));
+      await tester.pumpWidget(scoped(_graph, host(ChapterSeekBar(position: m(1), duration: m(24), onSeek: (_) {}))));
       final bar = tester.getRect(find.byKey(const ValueKey('seek-bar')));
       final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await mouse.addPointer(location: Offset.zero);
@@ -97,8 +102,8 @@ void main() {
 
     testWidgets('drag seeks on every move and on release', (tester) async {
       final seeks = <Duration>[];
-      await tester.pumpWidget(host(ChapterSeekBar(
-          position: m(1), duration: m(24), chapters: chapters, onSeek: seeks.add)));
+      await tester.pumpWidget(scoped(_graph, host(ChapterSeekBar(
+          position: m(1), duration: m(24), chapters: chapters, onSeek: seeks.add))));
       final bar = tester.getRect(find.byKey(const ValueKey('seek-bar')));
       final g = await tester.startGesture(Offset(bar.left + bar.width / 4, bar.center.dy),
           kind: PointerDeviceKind.mouse);
@@ -120,7 +125,7 @@ void main() {
         (SkipKind.ending, 'Skip ED'),
         (SkipKind.fixed, 'Skip 1:30'),
       ]) {
-        await tester.pumpWidget(host(Align(child: SkipPill(offer: SkipOffer(kind, m(2)), onPressed: () => pressed++))));
+        await tester.pumpWidget(scoped(_graph, host(Align(child: SkipPill(offer: SkipOffer(kind, m(2)), onPressed: () => pressed++)))));
         expect(find.text(label), findsOneWidget);
       }
       double opacity() => tester.widget<AnimatedOpacity>(

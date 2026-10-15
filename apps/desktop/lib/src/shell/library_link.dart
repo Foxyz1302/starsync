@@ -10,7 +10,7 @@ import '../screens/home/media_picker.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/copy_open.dart';
 import '../state/connect_prefs.dart';
-import '../state/session_state.dart';
+import '../app/app_graph.dart';
 import 'motion.dart';
 
 // The Library's Link source: a big paste field, a preview of what the link
@@ -239,7 +239,6 @@ class LinkPreviewStore {
 /// What a link is (see [LinkResolver.probe]).
 typedef LinkProber = Future<LinkProbe> Function(String url);
 
-Future<LinkProbe> defaultLinkProber(String url) => SessionState.instance.ports.links.probe(url);
 
 String _host(Uri uri) => uri.host.startsWith('www.') ? uri.host.substring(4) : uri.host;
 
@@ -254,7 +253,7 @@ String clockText(double seconds) {
 /// duration and thumbnail; a media file its file name and host; a link
 /// that does not open, why ([LinkPreview.problem]). Null for text that is
 /// not an http(s) link.
-Future<LinkPreview?> previewLink(String url, {LinkProber probe = defaultLinkProber}) async {
+Future<LinkPreview?> previewLink(String url, {required LinkProber probe}) async {
   final uri = Uri.tryParse(url.trim());
   if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https') || uri.host.isEmpty) return null;
   final host = _host(uri);
@@ -290,7 +289,7 @@ Future<LinkPreview?> previewLink(String url, {LinkProber probe = defaultLinkProb
 /// [url]'s preview at once when it was kept before ([LinkPreviewStore]),
 /// else probed and kept (the Up next popover's paste; the Link page has
 /// its own refresh rules).
-Future<LinkPreview?> cachedLinkPreview(String url, {RecentLinks? recents, LinkProber probe = defaultLinkProber}) async {
+Future<LinkPreview?> cachedLinkPreview(String url, {RecentLinks? recents, required LinkProber probe}) async {
   final store = (recents ?? RecentLinks.instance).previews;
   await store.ensureLoaded();
   final kept = store.lookup(url);
@@ -344,27 +343,28 @@ String linkRelayHelp(LinkRelay r) => switch (r) {
     };
 
 /// Under Play when nobody else watches.
-const soloPlayHint = 'Plays just for you. Invite friends any time; it keeps playing.';
+const alonePlayHint = 'Plays just for you. Invite friends any time; it keeps playing.';
 
-/// The Link source. [solo]: nobody else watches (offline or solo), so the
+/// The Link source. [alone]: nobody else is in the server, so the
 /// button says Play and there are no relay modes (the link plays direct).
 class LibraryLinkSource extends StatefulWidget {
   final MediaPickerController controller;
-  final bool solo;
+  final bool alone;
   /// Puts the link up; returns an error text, or null when sent.
   final Future<String?> Function(LinkMedia media) onPutUp;
   /// Adds the link to Up next in the chosen mode; null: no server.
   final AddToQueue? onAddToQueue;
   final RecentLinks recents;
-  final LinkProber probe;
+  /// What a link is; defaults to the app's [LinkResolver.probe].
+  final LinkProber? probe;
   const LibraryLinkSource({
     super.key,
     required this.controller,
     required this.onPutUp,
     this.onAddToQueue,
     required this.recents,
-    this.solo = false,
-    this.probe = defaultLinkProber,
+    this.alone = false,
+    this.probe,
   });
 
   @override
@@ -372,6 +372,8 @@ class LibraryLinkSource extends StatefulWidget {
 }
 
 class _LibraryLinkSourceState extends State<LibraryLinkSource> {
+  LinkProber get _probe => widget.probe ?? AppScope.of(context).ports.links.probe;
+
   MediaPickerController get _c => widget.controller;
   final _previews = <String, LinkPreview?>{};
   String _previewUrl = '';
@@ -450,7 +452,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
       if (DateTime.now().difference(known.at) > linkPreviewFreshFor) unawaited(_refresh(url));
       return;
     }
-    final p = await previewLink(url, probe: widget.probe);
+    final p = await previewLink(url, probe: _probe);
     _previews[url] = p;
     _keep(url, p);
     if (mounted) setState(() {});
@@ -459,7 +461,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
   /// Probes [url] again behind what is shown; a site out of reach keeps
   /// what was found before. Returns the preview shown afterwards.
   Future<LinkPreview?> _refresh(String url) async {
-    final p = await previewLink(url, probe: widget.probe);
+    final p = await previewLink(url, probe: _probe);
     if (p == null || p.problem == unreachableText) return _previews[url];
     _previews[url] = p;
     _keep(url, p);
@@ -491,12 +493,12 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
     });
     // What the probe found refuses it here, with "Put it up anyway": the
     // server or a friend (with cookies) may still open it.
-    final problem = anyway ? null : (_previews[url] ?? await previewLink(url, probe: widget.probe))?.problem;
+    final problem = anyway ? null : (_previews[url] ?? await previewLink(url, probe: _probe))?.problem;
     String? error = problem;
     if (problem == null) {
       try {
         error = await widget.onPutUp(
-            LinkMedia(url, relay: widget.solo ? LinkRelay.direct : _c.linkRelay, anyway: anyway));
+            LinkMedia(url, relay: widget.alone ? LinkRelay.direct : _c.linkRelay, anyway: anyway));
       } catch (e) {
         error = '$e';
       }
@@ -510,7 +512,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
     if (error == null) {
       var p = _previews[url];
       if (p == null) {
-        p = _previews[url] = await previewLink(url, probe: widget.probe);
+        p = _previews[url] = await previewLink(url, probe: _probe);
         _keep(url, p);
       }
       unawaited(widget.recents.add(RecentLink(
@@ -542,7 +544,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
     });
     String? error;
     try {
-      error = await add(LinkMedia(link, relay: widget.solo ? LinkRelay.direct : _c.linkRelay), next: next);
+      error = await add(LinkMedia(link, relay: widget.alone ? LinkRelay.direct : _c.linkRelay), next: next);
     } catch (e) {
       error = '$e';
     }
@@ -556,7 +558,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
   /// Right-click on a recent link: put it up or queue it, copy or open it.
   Future<void> _recentMenu(BuildContext context, RecentLink l) async {
     final pick = await showAppMenu<String>(context, items: [
-      AppMenuItem(value: 'up', label: widget.solo ? 'Play' : 'Put it up'),
+      AppMenuItem(value: 'up', label: widget.alone ? 'Play' : 'Put it up'),
       if (widget.onAddToQueue != null) ...const [
         AppMenuItem(value: 'queue', label: 'Add to queue'),
         AppMenuItem(value: 'next', label: 'Play next'),
@@ -565,14 +567,14 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
       const AppMenuItem(value: 'title', label: ReuseText.copyTitle),
       const AppMenuItem(value: 'open', label: ReuseText.openInBrowser),
     ]);
-    if (pick == null || !mounted) return;
+    if (pick == null || !mounted || !context.mounted) return;
     switch (pick) {
       case 'copy':
-        return copyToClipboard(l.url, done: 'Link copied');
+        return copyToClipboard(context, l.url, done: 'Link copied');
       case 'title':
-        return copyToClipboard(l.title, done: 'Title copied');
+        return copyToClipboard(context, l.title, done: 'Title copied');
       case 'open':
-        return openLink(l.url);
+        return openLink(context, l.url);
     }
     _c.link.text = l.url;
     switch (pick) {
@@ -592,11 +594,11 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
     ]);
     switch (pick) {
       case 'copy':
-        await copyToClipboard(url, done: 'Link copied');
+        if (context.mounted) await copyToClipboard(context, url, done: 'Link copied');
       case 'title':
-        await copyToClipboard(p!.title, done: 'Title copied');
+        if (context.mounted) await copyToClipboard(context, p!.title, done: 'Title copied');
       case 'open':
-        await openLink(url);
+        if (context.mounted) await openLink(context, url);
     }
   }
 
@@ -614,7 +616,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
-    final solo = widget.solo;
+    final alone = widget.alone;
     final url = _c.link.text.trim();
     final preview = url.isEmpty ? null : _previews[url];
     final loading = url.isNotEmpty && !_previews.containsKey(url);
@@ -638,7 +640,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
       icon: _busy
           ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
           : const Icon(Icons.play_arrow),
-      label: Text(solo ? 'Play' : 'Put it up'),
+      label: Text(alone ? 'Play' : 'Put it up'),
       style: FilledButton.styleFrom(
         minimumSize: const Size(0, 56),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -705,10 +707,10 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
                         if (queue != null) ...[const SizedBox(width: 8), queue],
                       ]),
               ),
-              if (solo || _error != null) ...[
+              if (alone || _error != null) ...[
                 const SizedBox(height: 8),
                 Text(
-                  _error ?? soloPlayHint,
+                  _error ?? alonePlayHint,
                   key: const ValueKey('link-hint'),
                   textAlign: TextAlign.center,
                   style: t.bodySmall?.copyWith(color: _error != null ? scheme.error : Colors.grey),
@@ -718,7 +720,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
                     child: TextButton(
                       key: const ValueKey('link-put-up-anyway'),
                       onPressed: _busy ? null : () => _go(anyway: true),
-                      child: Text(solo ? 'Play it anyway' : 'Put it up anyway'),
+                      child: Text(alone ? 'Play it anyway' : 'Put it up anyway'),
                     ),
                   ),
               ],
@@ -737,7 +739,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
                         ),
                       ),
               ),
-              if (!solo) ...[
+              if (!alone) ...[
                 const SizedBox(height: 28),
                 Text('How the others get it', style: t.titleSmall),
                 const SizedBox(height: 10),

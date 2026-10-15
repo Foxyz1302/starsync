@@ -13,7 +13,7 @@ enum CardAction {
   none,
   putUp,
 
-  /// Available, nobody else watching (offline or solo): plays it here.
+  /// Available, nobody else in the server: plays it here.
   play,
   request,
   requestSeries,
