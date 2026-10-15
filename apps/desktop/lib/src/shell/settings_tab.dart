@@ -2,9 +2,7 @@ import 'dart:async';
 
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:fox_utils/fox_utils.dart' show DesktopDropX, DropTarget;
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart'
     show CookieBrowser, CookieFile, NetscapeCookie, YtDlp, YtDlpCookies, cookieBrowsers, parseCookies;
@@ -12,7 +10,6 @@ import 'package:sync_relay_core/core.dart'
 import '../controls/player_settings.dart';
 import '../jellyfin/accounts.dart';
 import '../jellyfin/accounts_panel.dart';
-import '../playback/yt_dlp_app.dart';
 import '../schedule/animeflow.dart';
 import '../screens/home/about_page.dart';
 import '../screens/home/settings_page.dart';
@@ -380,7 +377,7 @@ class RecentServersPanel extends StatelessWidget {
 /// The app's yt-dlp (web page links): its version, "Update now", and the
 /// last error.
 class YtDlpSettings extends StatefulWidget {
-  /// Defaults to [AppYtDlp.instance]'s.
+  /// Defaults to the app's ([Ports.links]).
   final Future<YtDlp>? ytDlp;
   const YtDlpSettings({super.key, this.ytDlp});
 
@@ -389,7 +386,7 @@ class YtDlpSettings extends StatefulWidget {
 }
 
 class _YtDlpSettingsState extends State<YtDlpSettings> {
-  late final Future<YtDlp> _y = widget.ytDlp ?? AppYtDlp.instance.ytDlp;
+  late final Future<YtDlp> _y = widget.ytDlp ?? SessionState.instance.ports.links.ytDlp;
 
   @override
   Widget build(BuildContext context) {
@@ -472,18 +469,17 @@ class _YtDlpCookieSettingsState extends State<YtDlpCookieSettings> {
       };
 
   Future<void> _pickFile() async {
-    final List<PlatformFile> files;
+    final List<String> files;
     try {
-      files = await FilePicker.pickFiles(
+      files = await SessionState.instance.ports.folders.pickFiles(
         dialogTitle: 'Pick a cookies.txt or a JSON cookie export',
-        type: FileType.custom,
-        allowedExtensions: const ['txt', 'json'],
+        extensions: const ['txt', 'json'],
       );
     } catch (_) {
       _reload('file dialog unavailable — try again');
       return;
     }
-    final path = files.firstOrNull?.path;
+    final path = files.firstOrNull;
     if (path != null) await _importFile(path);
   }
 
@@ -535,12 +531,12 @@ class _YtDlpCookieSettingsState extends State<YtDlpCookieSettings> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return DropTarget(
-      onDragEntered: (_) => setState(() => _dragging = true),
-      onDragExited: (_) => setState(() => _dragging = false),
-      onDragDone: (d) {
+    return SessionState.instance.ports.shell.dropTarget(
+      onEnter: () => setState(() => _dragging = true),
+      onExit: () => setState(() => _dragging = false),
+      onDrop: (paths, _) {
         setState(() => _dragging = false);
-        final path = DesktopDropX.pathsOf(d.files).firstOrNull;
+        final path = paths.firstOrNull;
         if (path != null) _importFile(path);
       },
       child: AnimatedContainer(

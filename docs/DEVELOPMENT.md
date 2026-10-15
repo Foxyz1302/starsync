@@ -56,31 +56,53 @@ and `e2e_check` (simulated viewers against a live server).
 
 ## Tests
 
-- `cd packages/core && dart test`, `cd packages/server && dart test`.
-- `cd apps/desktop && flutter test test/<file>`.
-- Real-mpv tests: `sync_playback_e2e`, `coord_presence`, `video_reload_e2e`,
-  `seek_drag_e2e`, `end_of_file_e2e`, `readahead_e2e`, `jellyfin_e2e` (a
-  local fake Jellyfin over HTTP; tests never talk to a real Jellyfin),
-  `queue_switch_e2e` (times Up next switches against a delayed, rate-capped
-  fake Jellyfin and link host: an episode, a direct link, a link passed
-  on and a server-fetched one; `WT_SWITCH_PRELOAD=0` for the cold path,
-  `WT_SWITCH_DELAY_MS` / `WT_SWITCH_RATE_KBS` for the link). The sync and
-  end-of-file ones expect `~/Videos/chiyo.mp4`; others generate media with
-  ffmpeg into `WT_TEST_TMP`. Headless mpv (no video output attached) won't
-  open video-only files, so test media needs an audio track. Tests always log
-  media_kit "S/W rendering" because they have no display; that says nothing
-  about the app. Run only tests related to
-  what you changed.
-- `sound_device_e2e` opens the real audio device (flutter_soloud) and plays
-  every sound of every preset quietly (`WT_SFX_VOLUME`, default 0.1);
-  `sound_engine_test` covers the engine with a fake backend.
-- CI (`.gitea/workflows/ci.yml`): analyze + test for core and server, plus
-  `dart compile exe` of the dedicated server (fails if Flutter creeps into
-  `packages/server`). Desktop tests are not in CI.
-- `packages/server/test/serve_isolate_test.dart` runs `serve` in a real
-  isolate; `apps/desktop/test/server_isolate_test.dart` covers the app's
-  host path (isolate server, raw WebSocket join, crash, rehost).
-- Desktop tests that write files use `WT_TEST_TMP` (default: system temp).
+Three suites, run from each package's folder:
+
+- `cd packages/core && dart test` (a few seconds): protocol round-trips,
+  the sync engine (clock, gate, correction, end of file), queue model,
+  relay pieces, updater, logging redaction, watch rule, yt-dlp and
+  Jellyfin client parsing against captured fixtures.
+- `cd packages/server && dart test` (well under a minute): live servers
+  on loopback: auth, media and relay byte serving, Jellyfin relay against
+  a fake, queue, session log, isolate `serve`.
+- `cd apps/desktop && flutter test test/<file>`: widgets (shell, library,
+  controls, settings, schedule), pure app logic (`StateDiff`, name parser,
+  shader list, sound engine with a fake backend) and the real-mpv `*_e2e`
+  tests plus `coord_presence`. The whole suite takes a couple of minutes;
+  run it only before a restructure step lands, otherwise only the files
+  related to what you changed.
+
+Opt-in, skipped unless set: `JELLYFIN_TEST_*` (core `jellyfin_live` and
+server `jellyfin_relay_live` against a real Jellyfin; read their headers),
+`YTDLP_LIVE=1` (downloads yt-dlp and resolves a real tweet). Everything
+else is offline: Jellyfin and link hosts are local fakes.
+
+Real-mpv tests: `sync_playback_e2e`, `coord_presence`, `video_reload_e2e`,
+`seek_drag_e2e`, `end_of_file_e2e`, `readahead_e2e`, `chapters_mpv_e2e`,
+`ytdl_headers_e2e`, `relay_e2e` (a dedicated server with no file of its
+own: a guest's file, links passed on or fetched by the server, a late
+source, a source that drops and resumes), `jellyfin_e2e`,
+`queue_switch_e2e` (times Up next switches against a delayed, rate-capped
+fake Jellyfin and link host: an episode, a direct link, a link passed on
+and a server-fetched one; `WT_SWITCH_PRELOAD=0` for the cold path,
+`WT_SWITCH_DELAY_MS` / `WT_SWITCH_RATE_KBS` for the link). The sync,
+reload and end-of-file ones expect `~/Videos/chiyo.mp4`; the others
+generate media with ffmpeg into `WT_TEST_TMP` (default: system temp; all
+desktop tests that write files use it). Headless mpv (no video output
+attached) won't open video-only files, so test media needs an audio
+track. Tests always log media_kit "S/W rendering" because they have no
+display; that says nothing about the app. `sound_device_e2e` opens the
+real audio device (flutter_soloud) and plays every sound of every preset
+quietly (`WT_SFX_VOLUME`, default 0.1).
+
+A test file whose first line is `// restructure: rewrite in step N` pins
+behaviour that step of the restructure ([ROADMAP.md](ROADMAP.md)) changes;
+the comment names the tests. Rewrite or delete them in that step, not
+before.
+
+CI (`.gitea/workflows/ci.yml`): analyze + test for core and server, plus
+`dart compile exe` of the dedicated server (fails if Flutter creeps into
+`packages/server`). Desktop tests are not in CI.
 
 Traps:
 - Never pump media_kit's `Video` in `flutter test`: the runner hangs (kill
@@ -91,7 +113,11 @@ Traps:
   response (a relay response cut short when its relay is dropped at a
   swap or stop) to the zone the server started in, which fails the
   test; outside tests it is only logged. Start it in `runZonedGuarded`
-  and fail on anything else (`queue_switch_e2e`).
+  and fail on anything else (`queue_switch_e2e`, `relay_e2e`): a viewer's
+  read is still in flight at the `stop` in tearDown.
+- The Link page probes a filled-in link (network, yt-dlp), which never
+  answers on the widget-test clock: pass `AppShell(linkProbe:)` /
+  `LibraryTab(probe:)` a fake, or `pumpAndSettle` never returns.
 - Never depend on a server-side WebSocket `onDone`; assert presence with
   deadline polling.
 - `sub.asFuture()` can resolve before `onDone`; poll with a deadline.

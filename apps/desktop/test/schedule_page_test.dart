@@ -1,3 +1,5 @@
+// restructure: rewrite in step 3 (Your server): "solo: the button says
+// Play"; the rest stays.
 import 'dart:convert';
 import 'dart:io';
 

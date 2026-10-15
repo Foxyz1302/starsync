@@ -13,6 +13,7 @@ import '../jellyfin/accounts.dart';
 import '../jellyfin/format.dart' show pickFor;
 import '../jellyfin/session_media.dart';
 import '../screens/home/picked_media.dart';
+import '../session/app_events.dart' show AddedToUpNext;
 import '../session/media_art.dart';
 import '../session/session_coordinator.dart';
 import '../state/settings.dart';
@@ -82,7 +83,6 @@ class QueueController {
     if (_attached) return;
     _attached = true;
     coord.sync.states.listen(_onState);
-    coord.sync.feeds.listen(_onFeed);
     effect(() {
       final next = coord.nextEpisode.value;
       final plan = coord.jellyfinPlan.value;
@@ -122,7 +122,7 @@ class QueueController {
     if (item.key.isNotEmpty) _local[item.key] = (pick: pick, at: DateTime.now());
     final thumb = built.thumb;
     coord.sync.sendQueue(QueueIntent.add(item, next: next, thumb: thumb == null ? '' : base64Encode(thumb)));
-    coord.showToast('Added ${item.title} to Up next');
+    coord.notify(AddedToUpNext(item.title));
     return null;
   }
 
@@ -367,12 +367,6 @@ class QueueController {
       if (!finished) _cancelledFor = -1;
     }
     _warm(r);
-  }
-
-  void _onFeed(FeedMessage f) {
-    if (f.action == 'queue-skip') {
-      coord.showToast('Skipped ${f.target ?? 'an item'}${f.reason.isEmpty ? '' : ': ${f.reason}'}');
-    }
   }
 
   /// Forgets what no longer matters: performing marks after a minute (a

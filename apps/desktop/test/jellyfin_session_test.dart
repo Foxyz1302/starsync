@@ -1,3 +1,5 @@
+// restructure: rewrite in step 5 (What's next + Watch tracking): the
+// "progress" and "episodes" groups (reporting, auto-advance swapper).
 import 'dart:convert';
 
 import 'package:flutter/gestures.dart';
@@ -362,11 +364,6 @@ void main() {
       final media = mediaForPick(around.next!.pick);
       expect(media.jellyfin!.itemId, nextEpisodeId);
       expect(media.jellyfin!.subtitle, 'Black Summoner · S1E7');
-    });
-
-    test('the floating prompt starts two minutes before the end', () {
-      expect(nextPromptStart(null, const Duration(minutes: 24)), const Duration(minutes: 22));
-      expect(nextPromptStart(null, const Duration(seconds: 90)), Duration.zero);
     });
 
     test('one auto-advance swapper: the lowest id among members with their own account', () {

@@ -1,3 +1,5 @@
+// restructure: rewrite in step 5 (Watch tracking): the progress-reporting
+// checks; the guest-through-the-relay flow stays.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

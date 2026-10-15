@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
@@ -329,18 +328,17 @@ class _CropPickerState extends State<CropPicker> {
   }
 
   Future<void> _pick() async {
-    final List<PlatformFile> files;
+    final List<String> files;
     try {
-      files = await FilePicker.pickFiles(
+      files = await SessionState.instance.ports.folders.pickFiles(
         dialogTitle: 'Pick a picture',
-        type: FileType.custom,
-        allowedExtensions: const ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'],
+        extensions: const ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'],
       );
     } catch (e) {
       if (mounted) setState(() => _error = 'file dialog unavailable — try again');
       return;
     }
-    final path = files.isEmpty ? null : files.first.path;
+    final path = files.firstOrNull;
     if (path == null) return;
     try {
       final codec = await ui.instantiateImageCodec(await File(path).readAsBytes());

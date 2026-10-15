@@ -3,7 +3,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fox_utils/fox_utils.dart' show ClipboardX, DesktopDropX, DropTarget;
 import 'package:leaf_widgets/leaf_widgets.dart' show LeafPopover, LeafPopoverController;
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
@@ -640,23 +639,9 @@ class _QueuePanelState extends State<QueuePanel> {
     return KeyEventResult.ignored;
   }
 
-  Future<({List<String> files, String? text})> _readClipboard() async {
-    var files = const <String>[];
-    String? text;
-    try {
-      files = await ClipboardX.readFiles();
-    } catch (_) {}
-    if (files.isEmpty) {
-      try {
-        text = await ClipboardX.readText();
-      } catch (_) {}
-    }
-    return (files: files, text: text);
-  }
-
   /// Ctrl+V: the clipboard's video files, else the links in its text.
   Future<void> _paste() async {
-    final clip = await (widget.readClipboard ?? _readClipboard)();
+    final clip = await (widget.readClipboard ?? SessionState.instance.ports.shell.readPaste)();
     final picks = _picksFrom([...clip.files, ...?clip.text?.split(RegExp(r'\s+'))]);
     if (!mounted) return;
     if (picks.isEmpty) {
@@ -829,12 +814,12 @@ class _QueuePanelState extends State<QueuePanel> {
   @override
   Widget build(BuildContext context) {
     final height = MediaQuery.sizeOf(context).height;
-    final drop = DropTarget(
-      onDragEntered: (_) => setState(() => _dragging = true),
-      onDragExited: (_) => setState(() => _dragging = false),
-      onDragDone: (d) {
+    final drop = SessionState.instance.ports.shell.dropTarget(
+      onEnter: () => setState(() => _dragging = true),
+      onExit: () => setState(() => _dragging = false),
+      onDrop: (paths, _) {
         setState(() => _dragging = false);
-        _dropped(DesktopDropX.pathsOf(d.files));
+        _dropped(paths);
       },
       // Esc: the popover's own (it fades out).
       child: Builder(

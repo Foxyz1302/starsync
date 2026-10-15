@@ -119,8 +119,7 @@ class AboutPanel extends StatelessWidget {
   static Future<void> _openLogs() async {
     final dir = appLogDir;
     if (dir == null) return;
-    // The file manager opens a folder path the way a browser opens a link.
-    if (!await openInBrowser(Uri.directory(dir).toString())) {
+    if (!await SessionState.instance.ports.folders.reveal(dir)) {
       await copyToClipboard(dir, done: "Couldn't open it — folder path copied");
     }
   }

@@ -1,3 +1,5 @@
+// restructure: rewrite in step 6 (Media pipeline): preload and the warm
+// relay become one pipeline; keep the timing per source.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

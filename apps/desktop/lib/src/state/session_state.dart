@@ -11,11 +11,13 @@ import '../jellyfin/session_media.dart';
 import '../screens/home/health_probe.dart';
 import '../screens/home/picked_media.dart';
 import '../platform/app_log.dart' show appLogDir;
-import '../playback/yt_dlp_app.dart';
+import '../platform/desktop/desktop_ports.dart';
+import '../platform/ports/ports.dart';
 import '../sfx/sfx.dart';
 import '../sfx/sound_bank.dart';
 import '../sfx/synth_sfx.dart';
 import '../session/health.dart';
+import '../session/notifier.dart';
 import '../session/session_coordinator.dart';
 import '../widgets/avatar_pipeline.dart';
 import 'connect_prefs.dart';
@@ -167,7 +169,11 @@ class SessionState {
     enabled: (k) => k == SfxKind.nudge || !AppSettings.instance.soundsOff.peek().contains(k.name),
     presetFor: soundPresetFor,
   );
-  late final SessionCoordinator coordinator = SessionCoordinator(sfx: sfx);
+  /// The platform (window, links, folders, yt-dlp, notifications).
+  final Ports ports = desktopPorts();
+  /// Every toast, sound and activity-log line goes through it.
+  late final Notifier notifier = Notifier(sfx: sfx, attention: ports.shell.requestAttention);
+  late final SessionCoordinator coordinator = SessionCoordinator(notifier: notifier, ytDlp: ports.links);
   final lastForm = ConnectForm();
   JellyfinAccounts get jellyfin => JellyfinAccounts.instance;
   /// Set when the hosted server died mid-session; Home shows it on the
@@ -188,7 +194,7 @@ class SessionState {
   /// default) when the app-support folder is not available.
   static Future<String> _sharedYtDlpDir() async {
     try {
-      return (await AppYtDlp.instance.ytDlp).dir;
+      return (await instance.ports.links.ytDlp).dir;
     } catch (_) {
       return '';
     }
@@ -285,7 +291,7 @@ class SessionState {
       try {
         if (carry != null) await _resume(carry);
       } catch (e) {
-        coordinator.showToast("couldn't put it up again: $e");
+        coordinator.notify(ActionFailed("couldn't put it up again: $e"));
       }
     } finally {
       switching.value = false;

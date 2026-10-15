@@ -1,3 +1,5 @@
+// restructure: rewrite in step 3 (Your server): the "solo" and "hosting"
+// tests (D9: no solo mode); the rest stays.
 import 'dart:convert';
 
 import 'package:flutter/material.dart';

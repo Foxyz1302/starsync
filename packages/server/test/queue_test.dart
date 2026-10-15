@@ -1,3 +1,5 @@
+// restructure: rewrite in step 1 (Connection + Identity + Presence): queue
+// `by` and adder-only keys follow the lasting client id.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

@@ -6,11 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:sync_relay_core/core.dart'
     show LinkProbe, hasMediaExtension, parseJellyfinLink, playErrorText, unreachableText;
 
-import '../playback/yt_dlp_app.dart';
 import '../screens/home/media_picker.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/copy_open.dart';
 import '../state/connect_prefs.dart';
+import '../state/session_state.dart';
 import 'motion.dart';
 
 // The Library's Link source: a big paste field, a preview of what the link
@@ -236,10 +236,10 @@ class LinkPreviewStore {
   }
 }
 
-/// What a link is (see [AppYtDlp.probe]).
+/// What a link is (see [LinkResolver.probe]).
 typedef LinkProber = Future<LinkProbe> Function(String url);
 
-Future<LinkProbe> defaultLinkProber(String url) => AppYtDlp.instance.probe(url);
+Future<LinkProbe> defaultLinkProber(String url) => SessionState.instance.ports.links.probe(url);
 
 String _host(Uri uri) => uri.host.startsWith('www.') ? uri.host.substring(4) : uri.host;
 

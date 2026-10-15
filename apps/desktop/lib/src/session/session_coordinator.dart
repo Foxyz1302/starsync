@@ -14,12 +14,12 @@ import '../jellyfin/session_media.dart';
 import '../jellyfin/track_prefs.dart';
 import '../playback/media_marks.dart';
 import '../playback/playback_controller.dart';
-import '../platform/attention.dart';
-import '../playback/yt_dlp_app.dart';
+import '../platform/ports/link_resolver.dart';
+import '../playback/yt_dlp_app.dart' show AppYtDlp;
 import '../schedule/anilist.dart';
 import '../screens/home/ui.dart' show appName, displayVersion;
 import '../screens/home/picked_media.dart';
-import '../sfx/sfx.dart';
+import '../sfx/sfx.dart' show NoopSfxService, SfxService;
 import '../state/settings.dart';
 import '../sync/avatar_cache.dart';
 import '../sync/state_diff.dart';
@@ -30,9 +30,12 @@ import 'delivery.dart';
 import 'health.dart';
 import 'idle.dart';
 import 'media_art.dart';
+import 'notifier.dart';
 import 'now_playing.dart';
 import 'now_playing_info.dart';
 import 'switch_trace.dart';
+
+export 'notifier.dart' show ToastItem;
 
 final _log = createLogger('session');
 
@@ -100,18 +103,6 @@ class AutoAdvance {
 /// Seconds of the end-of-episode countdown.
 const autoAdvanceSecs = 10;
 
-class ToastItem {
-  final int id;
-  final String text;
-  final DateTime at;
-  /// The member a feed or chat toast is about (their name, as the feed
-  /// carries it; [text] starts with it); null for the app's own toasts.
-  final String? actor;
-  const ToastItem({required this.id, required this.text, required this.at, this.actor});
-}
-
-const _toastActions = {'join', 'leave', 'swap', 'chat'};
-
 /// "Unready when the video changes": a state with a newer [mediaId] than
 /// the last one this session saw ([lastMediaId], -1 before the first) while
 /// self is ready (or a reconnect is restoring it). A swap keeps the
@@ -164,7 +155,9 @@ String? stateMediaUrl(StateBroadcast state) {
 }
 
 class SessionCoordinator {
-  final SfxService sfx;
+  /// Toasts, sounds and the activity log: every event goes through
+  /// [notify].
+  final Notifier notifier;
   /// Linked Jellyfin servers: how this viewer plays Jellyfin refs.
   final JellyfinAccounts jellyfin;
   /// Audio/subtitle carry-over between Jellyfin items.
@@ -173,7 +166,7 @@ class SessionCoordinator {
   /// null when this app is not the host.
   Future<({String name, int size})?> Function(String path)? hostFile;
   /// The app's yt-dlp and link probes (tests pass their own).
-  final AppYtDlp ytDlp;
+  final LinkResolver ytDlp;
   final SyncClient sync = SyncClient();
   /// This app's log lines to the server's session log (Settings: "Share
   /// diagnostics with the server"), and "Mark a problem".
@@ -217,8 +210,10 @@ class SessionCoordinator {
   final health =
       signal(const HealthStatus(HealthSeverity.info, 'idle'));
   final serverState = signal<StateBroadcast?>(null);
-  final feedLog = signal<List<FeedMessage>>([]);
-  final toasts = signal<List<ToastItem>>([]);
+  /// The activity log ([Notifier.feedLog]).
+  Signal<List<FeedMessage>> get feedLog => notifier.feedLog;
+  /// Toasts on screen ([Notifier.toasts]).
+  Signal<List<ToastItem>> get toasts => notifier.toasts;
   final reconnecting = signal(false);
   final starving = signal<String?>(null);
   /// Why this player cannot open the current media, in plain words
@@ -278,9 +273,6 @@ class SessionCoordinator {
 
   /// Self sits out: the player has nothing open until [joinBack].
   late final Computed<bool> selfOut = computed(() => selfMember.value?.out ?? false);
-
-  /// Asks the desktop to point at the window (a nudge); tests swap it.
-  Future<void> Function() requestAttention = requestWindowAttention;
 
   Timer? _ticker;
   StreamSubscription? _stateSub;
@@ -362,7 +354,6 @@ class SessionCoordinator {
   String _resumeToken = '';
   DateTime? _lastStateAt;
   final IdleTracker _idle = IdleTracker(DateTime.now().toUtc());
-  int _toastId = 0;
   ConnectParams? _params;
   bool _everConnected = false;
   /// The connection-lost sound played; the reconnected one answers it once.
@@ -388,9 +379,15 @@ class SessionCoordinator {
   // Members' last `error`, by id, so a new one toasts once.
   Map<String, String> _memberErrors = const {};
 
+  /// [notifier] defaults to one playing [sfx] (tests).
   SessionCoordinator(
-      {this.sfx = const NoopSfxService(), JellyfinAccounts? jellyfin, TrackPrefs? trackPrefs, AppYtDlp? ytDlp})
-      : ytDlp = ytDlp ?? AppYtDlp.instance,
+      {SfxService sfx = const NoopSfxService(),
+      Notifier? notifier,
+      JellyfinAccounts? jellyfin,
+      TrackPrefs? trackPrefs,
+      LinkResolver? ytDlp})
+      : notifier = notifier ?? Notifier(sfx: sfx),
+        ytDlp = ytDlp ?? AppYtDlp.instance,
         jellyfin = jellyfin ?? JellyfinAccounts.instance,
         trackPrefs = trackPrefs ?? TrackPrefs();
 
@@ -438,7 +435,7 @@ class SessionCoordinator {
     for (final m in r.members) {
       final e = now[m.id];
       if (e != null && m.id != sync.memberId && _memberErrors[m.id] != e) {
-        _pushToast("${m.name} can't play this: $e", actor: m.name);
+        notify(MemberCantPlay(m.name, e));
       }
     }
     _memberErrors = now;
@@ -452,7 +449,7 @@ class SessionCoordinator {
     final warning = slowSourceWarning(r, sync.memberId);
     if (warning == null) return;
     _slowWarnedFor = r.mediaId;
-    _pushToast(warning);
+    notify(SlowSource(warning));
   }
 
   bool _reloadingVideo = false;
@@ -528,8 +525,7 @@ class SessionCoordinator {
     diag
       ..share = AppSettings.instance.shareDiagnostics.peek()
       ..start();
-    feedLog.value = [];
-    toasts.value = [];
+    notifier.clear();
     await initPlayer();
     if (epoch != _epoch) throw const ConnectCancelled();
     health.value =
@@ -807,9 +803,7 @@ class SessionCoordinator {
       _relaySource = warm.src;
       _relaySourceMediaId = mediaId;
       relaying.value = true;
-      if (announce) {
-        _pushToast('Passing the video on through the server. Keep the app open while it plays.');
-      }
+      if (announce) notify(const RelayStarted());
       unawaited(warm.src.done.then((_) {
         if (identical(_relaySource, warm.src)) {
           _relaySource = null;
@@ -823,9 +817,7 @@ class SessionCoordinator {
     _relaySource = src;
     _relaySourceMediaId = mediaId;
     relaying.value = true;
-    if (announce) {
-      _pushToast('Passing the video on through the server. Keep the app open while it plays.');
-    }
+    if (announce) notify(const RelayStarted());
     unawaited(() async {
       try {
         await src.start();
@@ -834,7 +826,7 @@ class SessionCoordinator {
         if (identical(_relaySource, src)) {
           _relaySource = null;
           relaying.value = false;
-          _pushToast('Cannot pass the video on: $e');
+          notify(RelayFailed('$e'));
         }
         return;
       }
@@ -1138,62 +1130,19 @@ class SessionCoordinator {
   }
 
   void _onFeed(FeedMessage f) {
-    feedLog.value = [...feedLog.peek(), f].length > 100
-        ? [...feedLog.peek(), f].sublist(feedLog.peek().length - 99)
-        : [...feedLog.peek(), f];
-    if (_toastActions.contains(f.action)) {
-      final text = f.action == 'chat'
-          ? '${f.actor}: ${f.reason}'
-          : _feedText(f);
-      _toastId++;
-      toasts.value = [
-        ...toasts.peek(),
-        ToastItem(id: _toastId, text: text, at: DateTime.now().toUtc(), actor: f.actor)
-      ];
-    }
+    final event = FeedEvent.of(f,
+        selfName: selfMember.peek()?.name,
+        readyCount: f.action == 'ready' ? serverState.peek()?.members.where((m) => m.ready).length ?? 0 : 0);
+    notify(event);
     // The server gave up fetching what everyone waits for.
-    if (f.action == 'fetch-fail' && _awaitLiveFor != -1 && _awaitLiveFor == serverState.peek()?.mediaId) {
+    if (event is FetchFailed && _awaitLiveFor != -1 && _awaitLiveFor == serverState.peek()?.mediaId) {
       health.value = const HealthStatus(HealthSeverity.error, "the server couldn't fetch this video");
-    }
-    final selfName = selfMember.peek()?.name;
-    // Sat out by someone else: say who (the feed names members by name).
-    if (f.action == 'out' && f.target != null && f.target == selfName && f.actor != selfName) {
-      _pushToast('${f.actor} sat you out', actor: f.actor);
-      unawaited(sfx.play(const SfxCue(SfxKind.kick)));
-    }
-    final kind = sfxForFeedAction(f.action);
-    // Your own message needs no sound.
-    final own = f.action == 'chat' && f.actor == selfName;
-    if (kind != null && !own) {
-      var readyIndex = 0;
-      if (f.action == 'ready') {
-        readyIndex = serverState.peek()?.members.where((m) => m.ready).length ?? 0;
-      }
-      unawaited(sfx.play(SfxCue(kind, readyIndex: readyIndex)));
-    }
-  }
-
-  String _feedText(FeedMessage f) {
-    switch (f.action) {
-      case 'join':
-        return '${f.actor} joined';
-      case 'leave':
-        return '${f.actor} left';
-      case 'swap':
-        return '${f.actor} changed media';
-      default:
-        return '${f.actor} ${f.action}';
     }
   }
 
   /// Someone poked this member: sound (even when its switch is off; the
   /// volume still applies), a toast, and the window asks for attention.
-  void _onNudge(NudgeNotice n) {
-    final name = n.name.isEmpty ? 'Someone' : n.name;
-    _pushToast('$name nudged you', actor: n.name.isEmpty ? null : n.name);
-    unawaited(sfx.play(const SfxCue(SfxKind.nudge)));
-    unawaited(requestAttention());
-  }
+  void _onNudge(NudgeNotice n) => notify(Nudged(n.name));
 
   void _startTicker() {
     _ticker?.cancel();
@@ -1227,8 +1176,7 @@ class SessionCoordinator {
 
   Future<void> _tick() async {
     final now = DateTime.now().toUtc();
-    toasts.value =
-        toasts.peek().where((t) => now.difference(t.at).inSeconds < 4).toList();
+    notifier.expire(now);
     final r = serverState.peek();
     if (sync.token.isNotEmpty) sync.sendPing();
     diag
@@ -1271,17 +1219,7 @@ class SessionCoordinator {
             selfReady: selfMember.peek()?.ready ?? false);
     switch (event) {
       case IdleEvent.warn:
-        _toastId++;
-        toasts.value = [
-          ...toasts.peek(),
-          ToastItem(
-              id: _toastId,
-              text: sitOutWhenIdle
-                  ? 'idle — sitting out in 2 min unless you press Space'
-                  : 'idle — auto-unready in 2 min unless you press Space',
-              at: now)
-        ];
-        unawaited(sfx.play(const SfxCue(SfxKind.warn)));
+        notify(IdleWarning(sitsOut: sitOutWhenIdle));
       case IdleEvent.unready:
         _lastReady = false;
         if (sitOutWhenIdle) {
@@ -1738,17 +1676,9 @@ class SessionCoordinator {
 
   // ------------------------------------------------------------- jellyfin
 
-  /// A toast from outside the session (e.g. the Schedule tab's request
-  /// results), shown like the session's own.
-  void showToast(String text) => _pushToast(text);
-
-  void _pushToast(String text, {String? actor}) {
-    _toastId++;
-    toasts.value = [
-      ...toasts.peek(),
-      ToastItem(id: _toastId, text: text, at: DateTime.now().toUtc(), actor: actor)
-    ];
-  }
+  /// News for the user, from the session or anywhere in the app (see
+  /// [Notifier]).
+  void notify(AppEvent event) => notifier.notify(event);
 
   void _resetJellyfin() {
     _jfGen++;
@@ -1928,7 +1858,7 @@ class SessionCoordinator {
           onError: (e) {
             if (_jfToastShown) return;
             _jfToastShown = true;
-            _pushToast('Jellyfin progress not saved: ${e is JellyfinException && e.isUnauthorized ? 'sign-in expired' : 'server unreachable'}');
+            notify(JellyfinProgressFailed(signInExpired: e is JellyfinException && e.isUnauthorized));
           },
         );
         final snap = await _snapshot();
@@ -2153,7 +2083,7 @@ class SessionCoordinator {
       _everConnected = true;
       if (_lostSounded) {
         _lostSounded = false;
-        unawaited(sfx.play(const SfxCue(SfxKind.back)));
+        notify(const ConnectionBack());
       }
       _resumeToken = sync.token;
       _lastStateAt = DateTime.now().toUtc();
@@ -2195,7 +2125,7 @@ class SessionCoordinator {
   void _soundLost() {
     if (!_everConnected || _lostSounded) return;
     _lostSounded = true;
-    unawaited(sfx.play(const SfxCue(SfxKind.lost)));
+    notify(const ConnectionLost());
   }
 
   void _invalidateAttempts() {

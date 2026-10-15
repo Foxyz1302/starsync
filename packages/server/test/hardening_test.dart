@@ -1,3 +1,5 @@
+// restructure: rewrite in step 1 (Connection + Identity + Presence): "anyone
+// sits anyone out" (Away); the rest stays.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

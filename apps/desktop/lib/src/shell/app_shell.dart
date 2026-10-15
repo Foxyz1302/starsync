@@ -3,9 +3,7 @@ import 'dart:io' show File;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fox_utils/fox_utils.dart' show ClipboardX, DesktopDropX, DropTarget;
 import 'package:signals/signals_flutter.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../controls/frame.dart' show DoubleClickListener;
 import '../files/folder_store.dart';
@@ -14,6 +12,7 @@ import '../jellyfin/accounts.dart';
 import '../jellyfin/browse_scope.dart' show BrowseStart;
 import '../jellyfin/session_media.dart';
 import '../screens/home/connect_flow.dart';
+import '../session/app_events.dart' show ActionFailed, ScheduleResult;
 import '../session/session_coordinator.dart' show ConnectParams;
 import '../screens/home/health_probe.dart';
 import '../screens/home/media_picker.dart';
@@ -25,6 +24,7 @@ import '../update/update_controller.dart';
 import 'chat_panel.dart';
 import 'connect_cards.dart';
 import 'handoff.dart';
+import 'library_link.dart' show LinkProber, defaultLinkProber;
 import 'library_tab.dart';
 import 'motion.dart';
 import 'party_strip.dart';
@@ -58,6 +58,9 @@ class AppShell extends StatefulWidget {
   final JellyfinAccounts? jellyfin;
   /// Stand-in for media_kit's `Video` (tests).
   final VideoViewBuilder? videoBuilder;
+  /// What the Library's Link page asks about a link (tests: a fake, so no
+  /// network or yt-dlp runs).
+  final LinkProber linkProbe;
   const AppShell({
     super.key,
     this.updates,
@@ -66,6 +69,7 @@ class AppShell extends StatefulWidget {
     this.healthGet = defaultHealthGet,
     this.jellyfin,
     this.videoBuilder,
+    this.linkProbe = defaultLinkProber,
   });
 
   @override
@@ -329,7 +333,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   Future<void> _setWindowFullscreen(bool on) async {
     if (!widget.windowControls) return;
     try {
-      await windowManager.setFullScreen(on);
+      await SessionState.instance.ports.shell.setFullScreen(on);
     } catch (_) {
       // No window manager.
     }
@@ -457,17 +461,8 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   /// Clipboard files first, then text (a link or absolute paths). A pasted
   /// image has no taker yet, so the clipboard's image data is not read.
   Future<void> _paste() async {
-    var files = const <String>[];
-    String? text;
-    try {
-      files = await ClipboardX.readFiles();
-    } catch (_) {}
-    if (files.isEmpty) {
-      try {
-        text = await ClipboardX.readText();
-      } catch (_) {}
-    }
-    await _handOff(classifyHandoff(paths: files, text: text), _pointer);
+    final clip = await SessionState.instance.ports.shell.readPaste();
+    await _handOff(classifyHandoff(paths: clip.files, text: clip.text), _pointer);
   }
 
   Future<void> _handOff(Handoff item, Offset? at) async {
@@ -489,7 +484,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       case (HandoffVideos(:final paths), HandoffAction.putUp):
         final error = await _putUp(FileMedia(paths.first));
         if (error != null) {
-          SessionState.instance.coordinator.showToast(error);
+          SessionState.instance.coordinator.notify(ActionFailed(error));
         } else {
           await FolderStore.instance.ensureLoaded();
           FolderStore.instance.addRecent(paths.first);
@@ -500,7 +495,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
         for (final p in next ? paths.reversed : paths) {
           final error = await SessionState.instance.coordinator.queue.add(FileMedia(p), next: next);
           if (error != null) {
-            SessionState.instance.coordinator.showToast(error);
+            SessionState.instance.coordinator.notify(ActionFailed(error));
             break;
           }
         }
@@ -509,7 +504,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
         final coord = SessionState.instance.coordinator;
         final error = await coord.queue
             .add(LinkMedia(url, relay: _picker.linkRelay), next: action == HandoffAction.playNext);
-        if (error != null) coord.showToast(error);
+        if (error != null) coord.notify(ActionFailed(error));
       case (HandoffVideos(:final paths), HandoffAction.addFolder):
         await _addFolder(File(paths.first).parent.path);
       case (HandoffFolder(:final path), _):
@@ -540,13 +535,13 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   }
 
   // Off on Settings: its own drop targets (cookies) take the files there.
-  Widget _dropTarget(Widget child) => DropTarget(
+  Widget _dropTarget(Widget child) => SessionState.instance.ports.shell.dropTarget(
         enable: _tab != ShellTab.settings,
-        onDragEntered: (_) => setState(() => _dragging = _onTop),
-        onDragExited: (_) => setState(() => _dragging = false),
-        onDragDone: (d) {
+        onEnter: () => setState(() => _dragging = _onTop),
+        onExit: () => setState(() => _dragging = false),
+        onDrop: (paths, at) {
           setState(() => _dragging = false);
-          _handOff(classifyHandoff(paths: DesktopDropX.pathsOf(d.files)), d.localPosition);
+          _handOff(classifyHandoff(paths: paths), at);
         },
         child: Stack(
           fit: StackFit.expand,
@@ -718,12 +713,13 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
           // Up next needs a server (a solo session has one).
           onAddToQueue: online ? coord.queue.add : null,
           onOpenIntegrations: () => _openSettings(SettingsSection.integrations),
+          probe: widget.linkProbe,
         ),
       ShellTab.schedule => SchedulePage(
           solo: alone,
           onPutUp: _putUp,
           onAddToQueue: online ? coord.queue.add : null,
-          onToast: coord.showToast,
+          onToast: (text) => coord.notify(ScheduleResult(text)),
         ),
       ShellTab.settings => SettingsTab(
           section: _section,

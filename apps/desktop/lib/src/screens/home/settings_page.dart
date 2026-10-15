@@ -1,7 +1,7 @@
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 
+import '../../state/session_state.dart';
 import '../../state/settings.dart';
 import '../../update/update_controller.dart';
 import 'ui.dart';
@@ -89,12 +89,11 @@ class CustomShaderFiles extends StatelessWidget {
   const CustomShaderFiles({super.key});
 
   Future<void> _addFiles() async {
-    final List<PlatformFile> files;
+    final List<String> files;
     try {
-      files = await FilePicker.pickFiles(
+      files = await SessionState.instance.ports.folders.pickFiles(
         dialogTitle: 'Pick mpv GLSL shaders',
-        type: FileType.custom,
-        allowedExtensions: const ['glsl', 'hook'],
+        extensions: const ['glsl', 'hook'],
       );
     } catch (_) {
       return;
@@ -102,8 +101,8 @@ class CustomShaderFiles extends StatelessWidget {
     final s = AppSettings.instance;
     final current = s.customShaders.peek();
     final added = [
-      for (final f in files)
-        if (f.path case final p? when !current.contains(p)) p,
+      for (final p in files)
+        if (!current.contains(p)) p,
     ];
     if (added.isNotEmpty) s.setCustomShaders([...current, ...added]);
   }

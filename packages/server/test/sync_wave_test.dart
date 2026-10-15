@@ -1,3 +1,6 @@
+// restructure: rewrite in step 1 (Connection + Identity + Presence): the
+// resume-token takeover becomes a lasting client id; ping/pong and the
+// seek echo stay.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

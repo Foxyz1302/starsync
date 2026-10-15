@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sync_relay_core/core.dart';
 
-import '../playback/yt_dlp_app.dart';
 import '../screens/home/ui.dart' show appName, displayVersion;
 import '../state/session_state.dart';
 
@@ -59,7 +58,7 @@ Future<String> diagnosticsText({Duration since = const Duration(hours: 6), bool 
     b.writeln('mpv: unknown');
   }
   try {
-    final y = await AppYtDlp.instance.ytDlp.timeout(const Duration(seconds: 2));
+    final y = await SessionState.instance.ports.links.ytDlp.timeout(const Duration(seconds: 2));
     final cookies = y.cookies.read(count: false);
     b.writeln('yt-dlp: ${y.version ?? 'not ready'}${y.lastError == null ? '' : ' (${y.lastError})'}, '
         'cookies: ${cookies == null ? 'none' : 'set'}');

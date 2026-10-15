@@ -2,11 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../files/thumbnails.dart';
 import '../state/session_state.dart';
-import 'window_memory.dart';
 
 // The one way out of the app (close button, Alt+F4, Update and restart).
 // Order matters: every mpv player goes before the engine does (a live one
@@ -14,9 +12,6 @@ import 'window_memory.dart';
 // closes through the platform's normal path so the engine is torn down
 // inside the message loop. The runners end the process right after
 // (`linux/runner/main.cc`, `windows/runner/main.cpp`).
-
-/// Saved on the way out; set by main once known.
-WindowMemory? shutdownWindowMemory;
 
 bool _shuttingDown = false;
 
@@ -30,9 +25,10 @@ Future<void> shutDownApp({Future<void> Function()? beforeQuit}) async {
   if (_shuttingDown) return;
   _shuttingDown = true;
   final session = SessionState.instance;
+  final shell = session.ports.shell;
   final total = Stopwatch()..start();
-  await _step('window save', shutdownWindowMemory?.save(), const Duration(milliseconds: 500));
-  await _step('hide', windowManager.hide(), const Duration(milliseconds: 500));
+  await _step('window save', shell.saveWindow(), const Duration(milliseconds: 500));
+  await _step('hide', shell.hide(), const Duration(milliseconds: 500));
   await Future.wait([
     _step('players', session.coordinator.releasePlayers(), const Duration(seconds: 3)),
     _step('thumbnails', cancelAllThumbnails(), const Duration(milliseconds: 1500)),
@@ -48,13 +44,7 @@ Future<void> shutDownApp({Future<void> Function()? beforeQuit}) async {
   await _step('server stop', session.stopServer(), const Duration(milliseconds: 500));
   if (beforeQuit != null) await _step('before quit', beforeQuit(), const Duration(seconds: 3));
   debugPrint('close: ready to quit after ${total.elapsedMilliseconds} ms');
-  try {
-    await windowManager.setPreventClose(false);
-    await windowManager.close();
-  } catch (e) {
-    debugPrint('window close failed: $e');
-    await windowManager.destroy();
-  }
+  await shell.quit();
   // The engine stops with the window, so this only fires when the close
   // did not go through. A kill, not exit(): no exit handlers (NVIDIA's
   // EGL one segfaults, Windows DLL detach can hang).

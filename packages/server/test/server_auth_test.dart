@@ -1,3 +1,6 @@
+// restructure: rewrite in step 1 (Connection + Identity + Presence):
+// "proto mismatch rejected" (min/max range, refusal frame) and "silent
+// socket dropped and member removed" (Gone with grace); the rest stays.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

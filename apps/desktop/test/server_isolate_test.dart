@@ -1,3 +1,5 @@
+// restructure: rewrite in step 3 (Your server): one hub with listeners
+// attached, nothing restarts, no solo mode.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

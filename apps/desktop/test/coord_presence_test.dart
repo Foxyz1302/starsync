@@ -1,3 +1,5 @@
+// restructure: rewrite in step 1 (Connection + Identity + Presence): reconnect,
+// resume and ready restore; "feed and chat toasts" in step 2 (Notifier).
 import 'dart:async';
 import 'dart:io';
 

@@ -59,8 +59,6 @@ Problems are numbered; delete a line when its fix ships.
 - P23 Solo mode you enter and leave; going hosted loses the queue (D9).
 - P24 The invite address list is unhelpful (shows the proxy's 198.18.x).
 - P25 ssh to Gitea blocked through the proxy (pushes go over https).
-- P27 Failing tests: shell "Ctrl+V outside a field", relay e2e "a guest
-  puts up a file", "links: through me".
 - P28 Log noise: "Failed to create file cache"; an idle relay channel for
   Jellyfin items everyone has an account for.
 - P29 Relay start delay after a seek into an unbuffered part.
@@ -87,10 +85,9 @@ the automatic continuation and countdown, relay state), the device
 (client id, library and folders, match corrections, watch history,
 settings, notification prefs, what this app is sourcing) and the
 integrations (Jellyfin played/resume, AniList list).
-0. Safety net and seams, no visible change: fix P27; an `AppEvent` type;
-   platform ports wrapping today's calls (window/shell, open URL,
-   notifications, yt-dlp process, folder access, player host);
-   Connection extracted from the coordinator; the proto 16 spec written.
+0. Safety net and seams, no visible change. Left: Connection extracted
+   from the coordinator. (Done: tests audited and tagged per step, P27
+   fixed, AppEvent + Notifier seam, platform ports, protocol 16 planned.)
 1. Connection + Identity + Presence, proto 16 in full (one bump, with a
    min/max version range and a stable refusal frame so later changes are
    additive): a lasting client id; a socket close no longer removes the
@@ -133,7 +130,8 @@ No Windows dev builds: restructure testing happens on Linux; Windows
 friends stay on 1.2.x until the 1.3.0 release (Windows-only fixes like
 P30 reach them then).
 Rename to Starsync everywhere (repo, app id, data folder, updater URL
-migration) is its own step; proposed app id `ru.foxyz.starsync`. Auto
+migration) is its own step; app id `dev.foxyz.starsync`, Windows
+company name `foxyz` (replacing Flutter's default `com.example`). Auto
 sit-out: idle or minimised for a while sets you Away, activity sets you
 In; it replaces the 10-minute auto-unready.
 
@@ -147,6 +145,99 @@ In; it replaces the 10-minute auto-unready.
   first" if Android goes ahead.
 - D10 was dropped on purpose (preload/warm relay/fresh player are folded
   into step 6, not a separate decision).
+
+### Protocol 16 (planned)
+
+Lands in step 1, written into PROTOCOL.md then. Tags against proto 15:
+**new**, **changed**, **removed**. Rooms are out: one server, no room id.
+
+Versions and refusal:
+- `hello.proto` **changed**: the client's version; the server accepts
+  `[protoMin, protoMax]` (both 16 at 1.3.0; later additions raise
+  `protoMax` only, so they stay additive). `welcome.proto` **new**: the
+  version used on this connection.
+- Refusal **changed**, stable from 16 on: `{"t":"err","code":"version",
+  "min":16,"max":16,"server":"1.3.0","message":"proto mismatch: got 15,
+  want 16..16"}`, then close (a proto 15 app shows `message`). Every
+  `err` gets `code` **new**: `version`, `secret`, `rejected`, `bad`,
+  `replaced`.
+- `/health`: `protoMin`, `protoMax`, `tls` **new** (`proto` = `protoMax`).
+
+Handshake:
+- `hello.client` **new**: a random id per install (22 characters
+  base64url), private: never broadcast.
+- `hello.app` (`"1.3.0"`), `hello.platform` (`linux`, `windows`,
+  `android`), `hello.caps` **new**: what this app can do (`source`: serve
+  a relay; `resolve`: run yt-dlp; `jellyfin`: play with its own
+  account); unknown entries ignored.
+- `hello.resume` **removed** (the client id replaces it); `hello.media`
+  **removed** (unused).
+- `members[].app` **new**: the member's `hello.app`.
+
+Lasting member:
+- The server maps `client` to one member. A new socket with a known
+  client id takes that member over (`memberId` and `token` unchanged, so
+  `/m` `/r` `/j` URLs keep working); the older socket gets `err`
+  `replaced` and closes. `welcome.resumed` **new**: true when it did.
+- A socket close no longer removes the member **changed**: it goes
+  `gone` and is kept for the grace period (~10 min, `welcome.grace`
+  **new**, seconds) with its ready flag, presence, queue items and
+  relay. After the grace it leaves (feed `leave`).
+- `{"t":"bye"}` **new**: leave now (Leave button, app close).
+
+Presence:
+- `members[].presence` **new**: `joining` | `in` | `away` | `gone`;
+  `members[].goneSince` **new** (ISO, only while `gone`).
+  `members[].out` and `members[].stale` **removed** (`away`; a silent
+  socket is closed and its member is `gone`).
+- `{"t":"presence","target":"<memberId>","state":"away"|"in"}` **new**,
+  replaces `out` **removed**: anyone sets someone `away`; only the member
+  itself goes back `in`.
+- Feed **changed**: `away` (was `out`), `in` (was `back`), `gone` (was
+  `stale`), `return` **new** (back within the grace: no `join`), `leave`
+  (after the grace or `bye`), `join` (new members only).
+- Gate (one `PresencePolicy` in core, used by server and app): only `in`
+  counts for the gate, the ready counter and watched tracking; `away` and
+  `gone` never. A joiner is `joining` until its report holds the current
+  media with `bufferNeed` at the current position, then `in`. While
+  `playing` a joiner never holds (D2): it loads in the background and
+  comes in already in sync. While held it is in the set like a fresh
+  member today, for at most ~15 s, then out of the set until `in`. A
+  returning member (`gone` → back within grace) is `joining` again with
+  its ready flag kept, treated like a joiner; an `away` one stays
+  `away`.
+
+Relay (D6):
+- `media.relay.sourceGone` **new**: true while the source member is
+  `gone`. The relay and its buffer stay; viewers play what is buffered.
+- Source resume **changed**: the source's close no longer ends the relay;
+  only its leave (grace over, `bye`) or a swap does. Back in the grace,
+  it dials `/r/<sid>/<token>/source` again; an `info` equal to the first
+  continues (pulls restart from the first byte or piece not buffered, new
+  pull ids), a different one ends the relay (close 4002 **new**).
+
+Queue and what's next:
+- `queue[].by` **changed**: lasting (the member id survives reconnects);
+  a `through`/`file` item of a `gone` adder waits instead of being
+  skipped, until its adder leaves.
+- `queue[].auto` **new**: the continuation (next episode): `add` with
+  `auto:true`; at most one, after the others, replaced by a newer one,
+  dropped by a swap to something else.
+- `state.advance` **new**: `{"id":"q3","at":"<server time>","secs":10}`,
+  the shared countdown when the media finishes and an item is first; at
+  `at` + `secs` the server sets `queuePlay` to it.
+  `{"t":"queue","op":"cancel"}` **new** clears it for everyone (feed
+  `advance-cancel` **new**).
+
+Media identity:
+- `media.ref` **new**, in `swap.media`, `state.media` and
+  `queue[].media`: `{"kind":"episode"|"movie"|"extra","ids":{"anilist":1,
+  "tvdb":2},"show":"...","season":1,"episode":6}` (MediaRef); passed
+  through as is, at most 2 KiB.
+
+Transport: paths unchanged. A server with TLS serves the same endpoints
+over `wss://`/`https://` (`/health.tls`); apps use `wss://` when offered,
+`ws://` stays allowed.
 
 ## Backlog
 

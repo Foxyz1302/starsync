@@ -1,3 +1,5 @@
+// restructure: rewrite in step 4 (Library + Media identity): series
+// grouping on the page follows L1/L2.
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';

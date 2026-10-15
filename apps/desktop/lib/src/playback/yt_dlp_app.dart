@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:sync_relay_core/core.dart';
 
+import '../platform/ports/link_resolver.dart';
+
 /// mpv's `ytdl-format` for links every player opens itself.
 const ytdlFormat = 'bv*[height<=1080]+ba/b';
 
@@ -16,13 +18,14 @@ const ytdlSubLangs = 'all,-danmaku';
 /// The app's yt-dlp (see [YtDlp]): in the app-support folder, shared with
 /// the hosted server. [probe] remembers what pasted links are for a while,
 /// so the Link preview and the swap ask once.
-class AppYtDlp {
+class AppYtDlp implements LinkResolver {
   static final instance = AppYtDlp();
 
   /// [ytDlp]: a given one (tests); default in the app-support folder.
   AppYtDlp([YtDlp? ytDlp]) : _ytDlp = ytDlp == null ? null : Future.value(ytDlp);
 
   Future<YtDlp>? _ytDlp;
+  @override
   Future<YtDlp> get ytDlp => _ytDlp ??= () async {
         final base = await getApplicationSupportDirectory();
         return YtDlp(dir(base.path));
@@ -32,10 +35,12 @@ class AppYtDlp {
 
   /// Gets yt-dlp ready in the background (download on first run, a daily
   /// update check afterwards).
+  @override
   void warmUp() => unawaited(ytDlp.then((y) => y.ensure()).catchError((_) => null));
 
   /// mpv's `ytdl-raw-options`: [ytdlSubLangs] and the cookies in the
   /// yt-dlp folder (see [YtDlpCookies]).
+  @override
   Future<String> mpvRawOptions() async {
     const subs = 'sub-langs=%${ytdlSubLangs.length}%$ytdlSubLangs';
     try {
@@ -54,6 +59,7 @@ class AppYtDlp {
   /// is probed again before that runs out). [fresh] probes again: the
   /// remembered result stays until the new one is in, and stays when the
   /// new one fails.
+  @override
   Future<LinkProbe> probe(String url, {Duration keep = _probeTtl, bool fresh = false}) {
     final now = DateTime.now();
     _probes.removeWhere((_, v) => now.isAfter(v.until));
@@ -80,6 +86,7 @@ class AppYtDlp {
   }
 
   /// [url] no longer needs keeping longer: back to the usual 10 minutes.
+  @override
   void release(String url) {
     final hit = _probes[url];
     if (hit == null) return;

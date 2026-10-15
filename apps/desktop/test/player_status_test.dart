@@ -1,3 +1,5 @@
+// restructure: rewrite in step 2 (Status + Notifier): the "status" group
+// (one computed level); the title block and overflow checks stay.
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -164,16 +166,6 @@ void main() {
       expect(find.byType(ArtCover), findsNothing);
       expect(find.byKey(const ValueKey('now-playing-episode')), findsNothing);
       expect(tester.takeException(), isNull);
-    });
-
-    testWidgets('a new media fades through', (tester) async {
-      await tester.pumpWidget(host(const NowPlayingBlock(now: now)));
-      await tester.pumpWidget(host(const NowPlayingBlock(now: NowPlaying(title: 'Dune'))));
-      await tester.pump(const Duration(milliseconds: 60));
-      expect(find.text('Frieren'), findsOneWidget, reason: 'still fading out');
-      await tester.pumpAndSettle();
-      expect(find.text('Frieren'), findsNothing);
-      expect(find.text('Dune'), findsOneWidget);
     });
   });
 

@@ -1,8 +1,7 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../session/notifier.dart' show AppEvent, Copied, CopyFailed, noticeFor;
 import '../state/session_state.dart';
 
 // Reusing what the app shows elsewhere: copying a link or a title, opening
@@ -22,28 +21,10 @@ abstract final class ReuseText {
 @visibleForTesting
 void Function(String text)? debugReuseToast;
 
-void _toast(String text) {
+void _notify(AppEvent event) {
   final debug = debugReuseToast;
-  if (debug != null) return debug(text);
-  SessionState.instance.coordinator.showToast(text);
-}
-
-/// Opens [url] in the default browser (no url_launcher dependency); false
-/// when no browser could be started.
-Future<bool> openInBrowser(String url) async {
-  try {
-    final ProcessResult r;
-    if (Platform.isWindows) {
-      r = await Process.run('rundll32', ['url.dll,FileProtocolHandler', url]);
-    } else if (Platform.isMacOS) {
-      r = await Process.run('open', [url]);
-    } else {
-      r = await Process.run('xdg-open', [url]);
-    }
-    return r.exitCode == 0;
-  } catch (_) {
-    return false;
-  }
+  if (debug != null) return debug(noticeFor(event).toast ?? '');
+  SessionState.instance.coordinator.notify(event);
 }
 
 /// Puts [text] on the clipboard and confirms it with a toast ([done]:
@@ -52,15 +33,15 @@ Future<void> copyToClipboard(String text, {String done = 'Copied'}) async {
   try {
     await Clipboard.setData(ClipboardData(text: text));
   } catch (_) {
-    _toast("Couldn't copy");
+    _notify(const CopyFailed());
     return;
   }
-  _toast(done);
+  _notify(Copied(done));
 }
 
 /// Opens [url] in the browser; when none opens, copies it instead and
 /// says so.
 Future<void> openLink(String url) async {
-  if (await openInBrowser(url)) return;
+  if (await SessionState.instance.ports.urls.open(url)) return;
   await copyToClipboard(url, done: "Couldn't open a browser — link copied");
 }

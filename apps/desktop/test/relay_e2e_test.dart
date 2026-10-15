@@ -1,3 +1,6 @@
+// restructure: rewrite in step 1 (Connection + Identity + Presence): "the
+// source drops uncleanly and resumes" (resume token, D6 source resume); the
+// rest stays.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -65,6 +68,7 @@ Future<(HttpServer, List<String>)> _origin(String file) async {
 void main() {
   late SyncServer server;
   late List<SessionCoordinator> all;
+  late List<Object> serverErrors;
 
   Future<SessionCoordinator> member(String name) async {
     final acc = JellyfinAccounts(store: MemoryJellyfinStore());
@@ -102,7 +106,15 @@ void main() {
     MediaKit.ensureInitialized();
     all = [];
     server = SyncServer(const AppConfig(port: 0, secret: 'pw', name: 'vps'));
-    await server.start();
+    // Relic reports an error writing a response (a relay read cut short
+    // when its relay is dropped at a swap or at the stop in tearDown) to
+    // the zone the server started in, as it logs it outside tests;
+    // anything else fails the test.
+    serverErrors = [];
+    await runZonedGuarded(server.start, (e, _) {
+      if ('$e'.contains('Content size below specified contentLength') || '$e'.contains('did not arrive')) return;
+      serverErrors.add(e);
+    });
   });
 
   tearDown(() async {
@@ -110,6 +122,7 @@ void main() {
       await x.dispose();
     }
     await server.stop();
+    expect(serverErrors, isEmpty, reason: 'server errors');
   });
 
   test('a guest puts up a file: it plays for everyone through the relay', timeout: const Timeout(Duration(minutes: 2)),
@@ -127,8 +140,9 @@ void main() {
     expect(relay.buffers.single.bytesToViewers, greaterThan(0), reason: 'alice played through the relay');
     expect(relay.sourceToken, bob.sync.token);
 
-    // The next swap retires bob's source and the buffer.
-    alice.swapPicked(const LinkMedia('http://127.0.0.1:1/none.mkv'));
+    // The next swap retires bob's source and the buffer. Nothing answers
+    // at that link, so its probe refuses it unless put up anyway.
+    expect(await alice.swapPicked(const LinkMedia('http://127.0.0.1:1/none.mkv', anyway: true)), isNull);
     await _poll(() => !bob.relaying.peek(), 'source stopped');
     expect(server.hub.relay, isNull);
   });
@@ -155,7 +169,8 @@ void main() {
       await playTogether([alice, bob]);
       expect(hits.length, greaterThan(before));
 
-      // A page yt-dlp cannot read is refused up front.
+      // A page is refused up front when this computer cannot read it (here
+      // yt-dlp is off, and the refusal says so).
       final page = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       page.listen((r) {
         r.response.headers.contentType = ContentType.html;
@@ -163,7 +178,7 @@ void main() {
         r.response.close();
       });
       expect(await alice.swapPicked(LinkMedia('http://127.0.0.1:${page.port}/watch?v=x', relay: LinkRelay.me)),
-          contains('Not a video'));
+          'yt-dlp is turned off');
       await page.close(force: true);
     } finally {
       await origin.close(force: true);

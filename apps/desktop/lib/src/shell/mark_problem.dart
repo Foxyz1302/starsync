@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sync_relay_core/core.dart' show RelayConstants;
 
+import '../session/app_events.dart' show ProblemMarked;
 import '../state/session_state.dart';
 import '../widgets/app_menu.dart' show AppGlass;
 import 'motion.dart';
@@ -19,7 +20,7 @@ Future<void> showMarkProblem(BuildContext context) async {
   if (note == null) return;
   final coord = SessionState.instance.coordinator;
   final inSession = await coord.markProblem(note);
-  coord.showToast(inSession ? 'Marked in the session log' : "Marked in this app's log");
+  coord.notify(ProblemMarked(inSession: inSession));
 }
 
 /// The small card: a one-line note and Mark. Pops with the note (maybe

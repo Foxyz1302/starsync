@@ -1,3 +1,5 @@
+// restructure: rewrite in step 1 (Connection + Identity + Presence): a
+// socket close no longer removes the member (explicit `bye`, grace).
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

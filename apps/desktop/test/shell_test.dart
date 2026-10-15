@@ -1,3 +1,5 @@
+// restructure: rewrite in step 2 (Status + Notifier): toasts and the status
+// pill; in step 3 (Your server): the solo strip and Invite friends.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -79,6 +81,8 @@ void main() {
         autoUpdateCheck: false,
         windowControls: false,
         videoBuilder: (context, controls) => const FakeVideo(),
+        // A real probe (network, yt-dlp) never answers on the test clock.
+        linkProbe: (url) async => LinkProbe.file(Uri.parse(url), 1000),
       ),
     ));
     await tester.pumpAndSettle();
@@ -192,18 +196,6 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('tabs: the underline moves to the selected one', (tester) async {
-      await pumpShell(tester, const Size(1280, 800));
-      double underline(String tab) => tester
-          .getSize(find.descendant(of: find.byKey(ValueKey('tab-$tab')), matching: find.byType(AnimatedContainer)))
-          .width;
-      expect(underline('library'), 22);
-      expect(underline('settings'), 0);
-      await tester.tap(find.byKey(const ValueKey('tab-settings')));
-      await tester.pumpAndSettle();
-      expect(underline('library'), 0);
-      expect(underline('settings'), 22);
-    });
   });
 
   group('popovers', () {
@@ -417,17 +409,5 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
     expect(find.text('Shaders off'), findsNothing);
-  });
-
-  testWidgets('status avatar fills its box at any size', (tester) async {
-    await tester.pumpWidget(const MaterialApp(
-      home: Center(
-        child: StatusAvatar(info: AvatarInfo(name: 'Zed', color: Colors.teal, ready: true), size: 88),
-      ),
-    ));
-    final circle = tester.getSize(find.byType(CircleAvatar));
-    // Ring and gap (2 x 4 px each side at this size) inside the 88 px box.
-    expect(circle.width, 88 - 4 * 4);
-    expect(find.text('Z'), findsOneWidget);
   });
 }

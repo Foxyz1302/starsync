@@ -1,3 +1,5 @@
+// restructure: rewrite in step 2 (Status + Notifier): delivery lines become
+// part of the one computed status (and the source-gone half of P2).
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';

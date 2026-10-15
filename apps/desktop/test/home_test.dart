@@ -1,3 +1,5 @@
+// restructure: rewrite in step 3 (Your server): hosted recents and the host
+// card; the rest stays.
 import 'dart:convert';
 import 'dart:io' show Platform;
 

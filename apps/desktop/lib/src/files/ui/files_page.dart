@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../../shell/motion.dart';
+import '../../platform/ports/folder_access.dart';
+import '../../state/session_state.dart';
 import '../../widgets/app_menu.dart';
 import '../folder_store.dart';
 import '../name_parser.dart';
@@ -31,6 +32,8 @@ String? _lastOpen;
 /// Series opened this session, by `folder\nseries key`.
 final _expanded = <String>{};
 final _showRequests = ValueNotifier(0);
+
+FolderAccess get _folders => SessionState.instance.ports.folders;
 
 /// Opens [dir] (null: Recent) in the Files page: now if one is showing,
 /// else when it next opens.
@@ -60,7 +63,7 @@ class FilesPage extends StatefulWidget {
   final String? nowPlayingPath;
   /// Defaults to [thumbnailFor].
   final ThumbnailLoader? thumbnails;
-  /// Defaults to [scanFolder].
+  /// Defaults to [FolderAccess.scan].
   final Future<FolderScan> Function(String dir)? scan;
   /// Defaults to [FolderStore.instance].
   final FolderStore? store;
@@ -142,7 +145,7 @@ class _FilesPageState extends State<FilesPage> {
 
   void _shown() => _select(_lastOpen);
 
-  Future<FolderScan> _runScan(String dir) => (widget.scan ?? scanFolder)(dir);
+  Future<FolderScan> _runScan(String dir) => (widget.scan ?? _folders.scan)(dir);
 
   void _select(String? dir) {
     setState(() {
@@ -176,7 +179,7 @@ class _FilesPageState extends State<FilesPage> {
     String? dir;
     try {
       dir = await (widget.pickFolder ??
-          () => FilePicker.getDirectoryPath(dialogTitle: 'Add a folder with videos'))();
+          () => _folders.pickFolder(dialogTitle: 'Add a folder with videos'))();
     } catch (e) {
       _showError('Folder dialog unavailable (${e.runtimeType})');
     }
@@ -196,12 +199,8 @@ class _FilesPageState extends State<FilesPage> {
   }
 
   static Future<String?> _pickVideo() async {
-    final files = await FilePicker.pickFiles(
-      dialogTitle: 'Pick a video',
-      type: FileType.custom,
-      allowedExtensions: videoExtensions.toList(),
-    );
-    return files.isEmpty ? null : files.first.path;
+    final files = await _folders.pickFiles(dialogTitle: 'Pick a video', extensions: videoExtensions.toList());
+    return files.firstOrNull;
   }
 
   void _removeFolder(String dir) {
@@ -589,7 +588,7 @@ class _FilesPageState extends State<FilesPage> {
       ),
       if (scan.videos.isEmpty)
         SliverToBoxAdapter(
-          child: Directory(dir).existsSync()
+          child: _folders.folderExists(dir)
               ? const FilesEmpty(
                   Icons.search_off,
                   'No videos here',
@@ -701,7 +700,7 @@ class _RecentRowState extends State<_RecentRow> {
   @override
   void initState() {
     super.initState();
-    File(widget.path).stat().then((s) {
+    _folders.stat(widget.path).then((s) {
       if (mounted) setState(() => _stat = s);
     }, onError: (Object _) {});
   }

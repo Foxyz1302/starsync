@@ -1,3 +1,5 @@
+// restructure: rewrite in step 4 (Library + Media identity): groupBySeries
+// becomes L1 local grouping; the scan and classify tests stay.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';

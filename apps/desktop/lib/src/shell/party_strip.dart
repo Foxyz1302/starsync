@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../screens/home/ui.dart' show appName, displayVersion, shortVersion;
 import '../session/delivery.dart';
@@ -263,7 +262,7 @@ class PartyStrip extends StatelessWidget {
             // their own clicks.
             if (windowControls)
               const Positioned.fill(
-                child: DragToMoveArea(child: SizedBox.expand()),
+                child: WindowDragArea(child: SizedBox.expand()),
               ),
             Positioned.fill(child: row),
           ],

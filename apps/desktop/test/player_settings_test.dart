@@ -1,3 +1,5 @@
+// restructure: rewrite in step 3 (Your server): invite addresses (P24) and
+// the hosting invite; the settings cards stay.
 import 'dart:io';
 
 import 'package:flutter/material.dart';

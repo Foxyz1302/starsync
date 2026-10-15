@@ -1,3 +1,8 @@
+// restructure: rewrite in step 1 (Connection + Identity + Presence): the
+// groups "sitting out", "membership + gate", "presence gate", "stale ready
+// rejoins" and the member rules of "swap" pin today's presence (out flag,
+// stale sweep, leave on drop); presence In/Away/Gone with grace replaces
+// them. The clock, correction, end-of-file and wire groups stay.
 import 'dart:convert';
 
 import 'package:sync_relay_core/core.dart';

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../state/session_state.dart';
 
@@ -18,32 +17,26 @@ class WindowButtons extends StatefulWidget {
   State<WindowButtons> createState() => _WindowButtonsState();
 }
 
-class _WindowButtonsState extends State<WindowButtons> with WindowListener {
+class _WindowButtonsState extends State<WindowButtons> {
+  final _shell = SessionState.instance.ports.shell;
   bool _maximized = false;
+  late final void Function() _stopWatch;
 
   @override
   void initState() {
     super.initState();
-    windowManager.addListener(this);
-    windowManager.isMaximized().then((v) {
+    _stopWatch = _shell.watchMaximized((v) {
+      if (mounted) setState(() => _maximized = v);
+    });
+    _shell.isMaximized().then((v) {
       if (mounted) setState(() => _maximized = v);
     });
   }
 
   @override
   void dispose() {
-    windowManager.removeListener(this);
+    _stopWatch();
     super.dispose();
-  }
-
-  @override
-  void onWindowMaximize() {
-    if (mounted) setState(() => _maximized = true);
-  }
-
-  @override
-  void onWindowUnmaximize() {
-    if (mounted) setState(() => _maximized = false);
   }
 
   Future<void> _toggleMaximize() async {
@@ -51,10 +44,10 @@ class _WindowButtonsState extends State<WindowButtons> with WindowListener {
       widget.onToggleFullscreen!();
       return;
     }
-    if (await windowManager.isMaximized()) {
-      await windowManager.unmaximize();
+    if (await _shell.isMaximized()) {
+      await _shell.unmaximize();
     } else {
-      await windowManager.maximize();
+      await _shell.maximize();
     }
   }
 
@@ -63,7 +56,7 @@ class _WindowButtonsState extends State<WindowButtons> with WindowListener {
       await SessionState.instance.coordinator.leave();
       await SessionState.instance.stopServer();
     } catch (_) {}
-    await windowManager.close();
+    await _shell.requestClose();
   }
 
   @override
@@ -77,7 +70,7 @@ class _WindowButtonsState extends State<WindowButtons> with WindowListener {
           icon: Icons.remove,
           tooltip: 'Minimize',
           focusNode: focus,
-          onPressed: () => windowManager.minimize(),
+          onPressed: () => _shell.minimize(),
         ),
         _WinBtn(
           icon: restored ? Icons.filter_none : Icons.crop_square,
@@ -128,6 +121,30 @@ class _WinBtn extends StatelessWidget {
         icon: Icon(icon, size: 15),
         onPressed: onPressed,
       ),
+    );
+  }
+}
+
+/// The title area: drag moves the window, a double click maximizes or
+/// restores it (window_manager's DragToMoveArea, through [ShellPort]).
+class WindowDragArea extends StatelessWidget {
+  final Widget child;
+  const WindowDragArea({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final shell = SessionState.instance.ports.shell;
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onPanStart: (_) => shell.startDragging(),
+      onDoubleTap: () async {
+        if (await shell.isMaximized()) {
+          await shell.unmaximize();
+        } else {
+          await shell.maximize();
+        }
+      },
+      child: child,
     );
   }
 }

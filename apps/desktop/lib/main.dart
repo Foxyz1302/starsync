@@ -5,18 +5,16 @@ import 'package:flutter/material.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
-import 'src/playback/yt_dlp_app.dart';
 import 'src/platform/app_log.dart';
 import 'src/platform/app_shutdown.dart';
 import 'src/platform/desktop_entry.dart';
-import 'src/platform/window_memory.dart';
 import 'src/screens/home/ui.dart';
+import 'src/session/app_events.dart' show UpdateAvailable;
 import 'src/state/session_state.dart';
 import 'src/state/settings.dart';
-import 'src/update/update_controller.dart' show launchArgs;
+import 'src/update/update_controller.dart' show UpdateController, UpdatePhase, launchArgs;
 
 Future<void> main(List<String> args) async {
   launchArgs = List.unmodifiable(args);
@@ -46,24 +44,11 @@ Future<void> main(List<String> args) async {
   await startAppLogging();
   await Hive.initFlutter();
   await AppSettings.instance.ensureLoaded();
-  await windowManager.ensureInitialized();
-  await windowManager.setPreventClose(true);
-  final memory = WindowMemory(Hive.isBoxOpen(settingsBoxName) ? Hive.box(settingsBoxName) : null);
-  shutdownWindowMemory = memory;
-  windowManager.addListener(_CloseGuard());
-  final windowOptions = WindowOptions(
-    size: memory.size,
-    minimumSize: const Size(160, 90),
-    center: !memory.hasPosition,
-    backgroundColor: const Color(0xFF000000),
-    titleBarStyle: TitleBarStyle.hidden,
-    title: appName,
-  );
-  windowManager.waitUntilReadyToShow(windowOptions, () async {
-    await memory.restore();
-    await windowManager.show();
-    await windowManager.focus();
-  });
+  // Close button / Alt+F4: the orderly close ([shutDownApp]), so others
+  // see "left", a hosted server shuts down and no player outlives the
+  // engine.
+  final ports = SessionState.instance.ports;
+  await ports.shell.start(title: appName, onCloseRequest: shutDownApp);
   try {
     await SessionState.instance.loadForm();
   } catch (e, st) {
@@ -71,18 +56,19 @@ Future<void> main(List<String> args) async {
   }
   MediaKit.ensureInitialized();
   // yt-dlp for web page links: downloaded on first run, kept current.
-  AppYtDlp.instance.warmUp();
+  ports.links.warmUp();
   // Linux: the launcher entry and icon Wayland needs (release installs).
   unawaited(installDesktopEntry());
+  // A found update is an event too (the band shows it).
+  final updates = UpdateController.instance;
+  updates.status.addListener(() {
+    final s = updates.status.value;
+    final version = s.manifest?.version;
+    if (s.phase == UpdatePhase.available && version != null) {
+      SessionState.instance.notifier.notify(UpdateAvailable(version));
+    }
+  });
   runApp(const WatchTogetherApp());
   // The sound device opens once the window is up, not on the first sound.
   Future.delayed(const Duration(seconds: 2), SessionState.instance.sfx.warmUp);
-}
-
-/// Close button / Alt+F4: the orderly close ([shutDownApp]), so others
-/// see "left", a hosted server shuts down and no player outlives the
-/// engine.
-class _CloseGuard with WindowListener {
-  @override
-  void onWindowClose() => unawaited(shutDownApp());
 }

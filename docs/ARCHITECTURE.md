@@ -1081,11 +1081,60 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   in order, a link in the Link page's mode). All go through
   `QueueController.add`. None of it offline.
 
+## App events and platform ports
+
+**Events.** Everything that may become a toast, a sound, a window
+attention request or an activity-log line is an `AppEvent`
+(`session/app_events.dart`, a sealed type, pure Dart): the server feed as
+typed `FeedEvent`s (`FeedEvent.of`: joins, leaves, stale, sat out, back,
+ready/unready, force ready/play/hold, swap, seek, pause, resume,
+finished, chat, rename, avatar, queue add/remove/skip, fetch failed),
+the session's own (nudged, a member can't play, slow source, relay
+started/failed, idle warning, connection lost/back, Jellyfin progress
+not saved) and the app's (shader message, added to Up next, a put-up or
+queue add that failed, Schedule results, problem marked, copied / copy
+failed, update available). Code with news calls
+`SessionCoordinator.notify` (= `Notifier.notify`, `session/notifier.dart`);
+nothing else writes toasts or plays sounds (Settings' sound preview
+aside). `noticeFor` is the whole policy, one `Notice` per event: the
+toast text and its actor, the `SfxCue`, attention, the feed line for the
+activity log. Today: every feed line is logged (`Notifier.feedLog`, the
+last 100); joins, leaves, swaps, chat, being sat out by someone else and
+Up next skips toast; the sounds are listed under "Sounds"; a nudge also
+asks for attention; an available update does nothing (the update band
+shows it). `Notifier.toasts` holds the toasts, dropped 4 s after they came
+(`expire`, the session's 1 s tick), cleared on connect. The Library
+tab's card errors are still its own snack bars.
+
+**Ports.** UI and session code reach the platform through interfaces
+(`platform/ports/`), made once in the composition root
+(`SessionState.ports`, `desktopPorts()` in `platform/desktop/`) and
+handed on from there (the coordinator gets its `Notifier` and
+`LinkResolver` as constructor arguments):
+- `ShellPort` (`DesktopShell`): window start (remembered bounds, the
+  close request routed to `shutDownApp`), fullscreen, minimize/maximize
+  and their changes, dragging (`WindowDragArea`), close, the way out
+  (save, hide, quit), attention, the clipboard paste (files, else text)
+  and drop targets (fox_utils).
+- `UrlOpener` (`DesktopUrls`): `xdg-open`, `open`, Windows' `url.dll`.
+- `FolderAccess` (`DesktopFolders`): folder and file dialogs
+  (file_picker), the Files scan, folder exists, file stat, showing a
+  folder in the file manager. Paths for now.
+- `LinkResolver` (`AppYtDlp`): the app's yt-dlp, link probes, mpv's raw
+  options, warm-up.
+- `SystemNotifications`: an interface only; desktop shows none
+  (`NoSystemNotifications`).
+Still direct: the player (`PlaybackController`, media_kit, and its
+`AppYtDlp.instance.mpvRawOptions`), the updater's restart
+(`Process.start`), the session's own file reads for what it plays or
+relays (`QueueController`, thumbnails, cookies import), app-private
+caches.
+
 ## Desktop UI
 
 One window, `AppShell` (`lib/src/shell/`), whatever the connection state
 (online = `SessionState.route` is `session`). The window comes back as it was
-(`platform/window_memory.dart`, settings key `windowBounds`, saved on
+(`platform/desktop/window_memory.dart`, settings key `windowBounds`, saved on
 resize/move/maximize and close): its normal size and maximized state
 everywhere, its position where an app may place itself (Windows, X11;
 not Wayland, where the compositor decides) and only if it still lands
@@ -1269,7 +1318,7 @@ panel) and chat messages (Copy message, and a link in it).
   Library → Link (with others the relay mode is picked there). In a
   server, videos and links also get Add to queue / Play next. Images are ignored.
   Nothing happens while a dialog or popover is over the shell.
-- **Sounds** (`sfx/`): the coordinator plays an `SfxCue` for ready,
+- **Sounds** (`sfx/`): the `Notifier` plays an `SfxCue` for ready,
   unready, force-ready, join, leave, swap and others' chat (feed
   events), being sat out by someone (the `kick` sound), a nudge (always,
   whatever its switch), the idle warning, and connection lost / back (once per drop).
@@ -1390,7 +1439,7 @@ panel) and chat messages (Copy message, and a link in it).
   the controls down and the video not playing a glass chip
   (`PlayerGlass`) top right shows it (while it plays nothing sits on the
   picture).
-  **Toasts** (`toasts.dart`): the coordinator's toasts bottom left, with
+  **Toasts** (`toasts.dart`): the `Notifier`'s toasts bottom left, with
   the avatar of their `ToastItem.actor` (feed and chat toasts; the app's
   own have none); each
   slides in, stays 5 s, then slides out and collapses its gap. A click on
@@ -1551,7 +1600,7 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   `StartBanner` under them); media_kit's own controls are not used, so
   its keys, double-click route and seek bar are out of the picture.
 
-Window chrome is frameless (`window_manager`): the party strip is the drag
+Window chrome is frameless (`window_manager`, behind `ShellPort`): the party strip is the drag
 area and holds the min/max/close buttons (`widgets/window_buttons.dart`);
 fullscreen has no drag area and shows the buttons in the player's top bar.
 

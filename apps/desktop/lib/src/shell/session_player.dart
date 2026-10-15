@@ -15,6 +15,7 @@ import '../queue/queue_ui.dart';
 import '../playback/media_marks.dart' show SkipKind, SkipOffer, formatClock;
 import '../screens/session/jellyfin_widgets.dart';
 import '../screens/session/player_controls.dart';
+import '../session/app_events.dart' show ShaderMessage;
 import '../session/session_coordinator.dart';
 import '../shaders/shader_presets.dart';
 import '../state/session_state.dart';
@@ -92,8 +93,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
   final _noFocus = FocusNode(skipTraversal: true, canRequestFocus: false);
   DateTime? _lastKeyAt;
   late final void Function() _stopShaderWatch;
-  // Own toast ids, negative: the coordinator counts up from 1.
-  int _toastSeq = 0;
   int _shaderNoticeSeen = 0;
   bool _miniHover = false;
   // Whether the controls are up (their frame reports it).
@@ -134,7 +133,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
       final n = _coord.playback.shaderNotice.value;
       if (n == null || n.id == _shaderNoticeSeen) return;
       _shaderNoticeSeen = n.id;
-      _toast(n.text);
+      _coord.notify(ShaderMessage(n.text));
     });
     _stopPopoverWatch = effect(() {
       _hold.set(#upNextPopover, _coord.queue.popoverOpen.value);
@@ -160,13 +159,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
     _hold.dispose();
     _model.dispose();
     super.dispose();
-  }
-
-  void _toast(String text) {
-    _coord.toasts.value = [
-      ..._coord.toasts.peek(),
-      ToastItem(id: --_toastSeq, text: text, at: DateTime.now().toUtc()),
-    ];
   }
 
   void _toggleChat() => _model.toggleChat();

@@ -1,3 +1,6 @@
+// restructure: rewrite in step 1 (Connection + Identity + Presence):
+// IdleTracker and unreadyForNewMedia give way to auto sit-out;
+// linkDisplayName stays.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_together/src/session/idle.dart';
 import 'package:watch_together/src/session/session_coordinator.dart';

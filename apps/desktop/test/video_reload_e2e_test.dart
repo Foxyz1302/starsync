@@ -1,3 +1,5 @@
+// restructure: rewrite in step 6 (Media pipeline + player host): the
+// fresh player per video.
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
