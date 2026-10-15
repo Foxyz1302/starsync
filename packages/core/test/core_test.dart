@@ -316,7 +316,7 @@ void main() {
       expect(r.copyWith(sourceGone: false).toJson().containsKey('sourceGoneSince'), isFalse);
     });
 
-    test('state carries hold and the reserved advance', () {
+    test('state carries hold and advance', () {
       final at = DateTime.utc(2026);
       final s = StateBroadcast(
           eventId: 1,

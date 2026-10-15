@@ -220,8 +220,8 @@ class AutoAdvanceSetting extends StatelessWidget {
         key: const ValueKey('auto-advance'),
         contentPadding: EdgeInsets.zero,
         title: const Text('Play the next episode automatically'),
-        subtitle: const Text('When a Jellyfin episode ends, a 10 s countdown puts up the next one; '
-            'anyone can cancel it'),
+        subtitle: const Text('When you put up an episode (Jellyfin, or a file of a show in Files), the next one '
+            'continues it after a 10 s countdown everyone sees; anyone can cancel it'),
         value: s.autoAdvance.value,
         onChanged: s.setAutoAdvance,
       ),

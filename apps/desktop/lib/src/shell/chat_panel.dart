@@ -278,7 +278,7 @@ Future<void> _messageMenu(BuildContext context, String text, String? link) async
     case 'seek':
       return (Icons.fast_forward, scheme.primary, 'seeked');
     case 'swap':
-      return (Icons.swap_horiz, scheme.primary, 'changed the media');
+      return (Icons.swap_horiz, scheme.primary, f.reason == 'restore' ? 'put back what was playing' : 'changed the media');
     case 'gone':
       return (Icons.cloud_off, Colors.orange, 'lost signal');
     case 'return':
@@ -296,6 +296,9 @@ Future<void> _messageMenu(BuildContext context, String text, String? link) async
     case 'queue-skip':
       final why = f.reason.isEmpty ? '' : ' · ${f.reason}';
       return (Icons.redo_rounded, Colors.orange, 'skipped ${f.target ?? ''}$why');
+    case 'advance-cancel':
+      final what = f.target == null || f.target!.isEmpty ? '' : ' (${f.target} is off Up next)';
+      return (Icons.cancel_outlined, Colors.grey, 'cancelled what plays next$what');
     case 'fetch-fail':
       return (Icons.cloud_off, Colors.red, "couldn't fetch ${f.target ?? 'the video'}");
     default:
@@ -304,9 +307,16 @@ Future<void> _messageMenu(BuildContext context, String text, String? link) async
   }
 }
 
-/// The server's own lines (pause / resume).
+/// The server's own lines (pause / resume, the end, an Up next item
+/// nobody here can put up).
 (IconData, Color, String) serverFeedStyle(FeedMessage f) => switch (f.action) {
       'resume' => (Icons.play_arrow, Colors.green, 'Playback resumed'),
+      'finished' => (Icons.stop_circle_outlined, Colors.grey, 'Finished'),
+      'queue-skip' => (
+          Icons.redo_rounded,
+          Colors.orange,
+          'Skipped ${f.target ?? ''}${f.reason.isEmpty ? '' : ' · ${f.reason}'}'
+        ),
       _ => (Icons.pause, Colors.orange, 'Playback paused · waiting for readiness'),
     };
 

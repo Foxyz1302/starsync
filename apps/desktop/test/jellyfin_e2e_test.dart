@@ -1,5 +1,3 @@
-// restructure: rewrite in step 6 (Watch tracking): the progress-reporting
-// checks; the guest-through-the-relay flow stays.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -14,6 +12,7 @@ import 'package:starsync/src/jellyfin/track_prefs.dart';
 import 'package:starsync/src/playback/media_marks.dart';
 import 'package:starsync/src/screens/home/picked_media.dart';
 import 'package:starsync/src/session/session_coordinator.dart';
+import 'package:starsync/src/state/settings.dart';
 
 // Two account holders and a guest watch Jellyfin episodes together over a
 // real sync server, real mpv and a local fake Jellyfin (never a real one):
@@ -220,7 +219,8 @@ String _kind(_Call c) => c.path.split('/').last;
 
 void main() {
   test(
-    'account holders direct-play and report, the guest plays through the relay, all in sync',
+    'account holders direct-play and report what they watched, the guest plays through the relay, '
+    'the next episode continues it for everyone',
     timeout: const Timeout(Duration(minutes: 4)),
     () async {
       MediaKit.ensureInitialized();
@@ -296,6 +296,11 @@ void main() {
           expect((p - pos.first).abs(), lessThan(1.0), reason: 'in sync: $pos');
         }
 
+        // Carol sits out for the rest of the episode: she is not tracked as
+        // having watched it (P7).
+        c.sitOut();
+        await _poll(() => c.selfAway.peek(), 'carol away');
+
         // Pause (A unreadies): an immediate Progress with IsPaused.
         a.toggleReady();
         await _poll(() => !a.playback.player.state.playing, 'held');
@@ -304,7 +309,7 @@ void main() {
                 _kind(s) == 'Progress' && s.body?['IsPaused'] == true),
             'paused progress');
         a.toggleReady();
-        await _poll(() => all.every((x) => x.playback.player.state.playing), 'playing again');
+        await _poll(() => [a, b].every((x) => x.playback.player.state.playing), 'playing again');
 
         // Account holders see the "Next episode" prompt (this item is
         // shorter than its 2 min lead); the guest cannot put it up.
@@ -319,23 +324,28 @@ void main() {
                 _kind(s) == 'Progress' && s.body?['AudioStreamIndex'] == 2),
             'track change reported');
 
-        // Near the end: finished -> Stopped, then one auto-advance swap.
-        a.seekTo(16);
+        // Alice put the episode up and has the next one: it continues it,
+        // in Up next for everyone.
+        await _poll(() => b.queue.continues.peek()?.media.jellyfin?.itemId == _ep2, 'the continuation');
+        final auto = b.queue.continues.peek()!;
+        expect(auto.by, a.connection.memberId);
+
+        // Played to the end: finished -> Stopped, the server's countdown
+        // on every screen, then one swap.
         await _poll(() => a.serverState.peek()?.transport == 'finished', 'finished',
-            timeout: const Duration(seconds: 20));
+            timeout: const Duration(seconds: 40));
         final finishedId = a.serverState.peek()!.mediaId;
-        await _poll(() => a.autoAdvance.peek() != null && c.autoAdvance.peek() != null,
-            'both account holders count down');
-        expect(b.autoAdvance.peek(), isNull);
-        final swappers = [a.autoAdvance.peek()!.swapper, c.autoAdvance.peek()!.swapper];
-        expect(swappers.where((s) => s), hasLength(1),
-            reason: 'exactly one designated swapper: the lowest member id (alice, m1)');
-        expect(a.autoAdvance.peek()!.swapper, isTrue);
+        await _poll(() => [a, b].every((x) => (x.queue.countdown.peek()?.secondsLeft ?? 0) > 0),
+            'everyone sees the countdown');
+        expect(a.serverState.peek()!.advance!.id, auto.id);
+        expect(a.queue.countdown.peek()!.item.id, auto.id);
         await _poll(() => (a.serverState.peek()?.mediaId ?? 0) > finishedId, 'advanced',
-            timeout: const Duration(seconds: 20));
+            timeout: const Duration(seconds: 25));
         await Future.delayed(const Duration(seconds: 3));
         expect(a.serverState.peek()!.mediaId, finishedId + 1, reason: 'no double swap');
         expect(refOfStateMedia(a.serverState.peek()!.media)!.itemId, _ep2);
+        expect(a.serverState.peek()!.queue, isEmpty, reason: 'the swap took the continuation');
+        c.joinBack();
         await _poll(() => all.every((x) => x.playback.durationSecs > 19 && x.jellyfinPlan.peek() != null),
             'all opened the next episode');
         expect(b.jellyfinPlan.peek(), isA<RelayPlay>());
@@ -383,13 +393,17 @@ void main() {
         expect(ep1.last, 'Stopped');
         expect(ep1.where((k) => k == 'Stopped'), hasLength(1));
         final stopped1 = aCalls.lastWhere((s) => s.body?['ItemId'] == _ep1);
-        // Part of it watched, then a seek to the end: not watched (see
-        // WatchSession). A resume point capped at 85 % of the 20 s, so
-        // Jellyfin cannot mark it played on its own.
-        expect(stopped1.body!['PositionTicks'], lessThan(18 * 10000000),
-            reason: 'part way: resume point under 90 %, so not marked played');
-        expect(jelly.calls.any((c) => c.method == 'POST' && c.path == '/UserPlayedItems/$_ep1'), isFalse,
-            reason: 'seeking to the end is not watching');
+        // Alice watched it through (time In, see WatchSession): Stopped
+        // without a position, then marked played.
+        expect(stopped1.body!.containsKey('PositionTicks'), isFalse, reason: 'watched: Jellyfin marks it played');
+        bool markedPlayed(String token) => jelly.calls.any((c) =>
+            c.method == 'POST' &&
+            c.path == '/UserPlayedItems/$_ep1' &&
+            _FakeJellyfin.authFields(c.auth)['Token'] == token);
+        expect(markedPlayed('ATOKEN'), isTrue);
+        expect(markedPlayed('CTOKEN'), isFalse, reason: 'carol sat out most of it (P7)');
+        final carol1 = jelly.sessions(token: 'CTOKEN').lastWhere((s) => s.body?['ItemId'] == _ep1);
+        expect(_kind(carol1), 'Stopped', reason: 'sitting out stops her reports');
         expect(stopped1.body!['PlaySessionId'], 'ps-ua-$_ep1');
         expect(ep2.first, 'Playing');
         expect(ep2.last, 'Stopped', reason: 'leaving reports Stopped');
@@ -442,7 +456,12 @@ void main() {
       final accA = await _account(jelly.base, 'ATOKEN', 'ua', 'A-PC');
       final accB = JellyfinAccounts(store: MemoryJellyfinStore());
       await accB.ensureLoaded(validate: false);
-      final a = SessionCoordinator(jellyfin: accA, trackPrefs: TrackPrefs(store: MemoryJellyfinStore()));
+      // No continuation: its warm relay would be read while the test stops
+      // (a cut relay response fails a test, see DEVELOPMENT "Traps").
+      final a = SessionCoordinator(
+          jellyfin: accA,
+          trackPrefs: TrackPrefs(store: MemoryJellyfinStore()),
+          settings: AppSettings()..autoAdvance.value = false);
       final b = SessionCoordinator(jellyfin: accB, trackPrefs: TrackPrefs(store: MemoryJellyfinStore()));
       try {
         await a.connect(ConnectParams(

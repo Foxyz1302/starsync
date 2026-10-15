@@ -23,6 +23,7 @@ import '../schedule/anilist.dart';
 import '../screens/home/picked_media.dart';
 import '../sfx/sfx.dart' show NoopSfxService, SfxService;
 import '../state/settings.dart';
+import '../watch/watch_tracker.dart';
 import '../sync/avatar_cache.dart';
 import '../sync/state_diff.dart';
 import '../sync/user_seek.dart';
@@ -51,21 +52,6 @@ final _log = createLogger('session');
 /// Display name for a link: last path segment, decoded, never the query
 /// (Jellyfin-style links carry api_key there and names are broadcast).
 String linkDisplayName(String url) => linkName(url);
-
-/// The end-of-episode countdown (auto-advance). Every client with the
-/// setting on shows it; only [swapper] puts the next episode up.
-class AutoAdvance {
-  final int mediaId;
-  final int secondsLeft;
-  final EpisodeLink next;
-  /// This client performs the swap (see [autoAdvanceSwapper]).
-  final bool swapper;
-  const AutoAdvance(
-      {required this.mediaId, required this.secondsLeft, required this.next, required this.swapper});
-}
-
-/// Seconds of the end-of-episode countdown.
-const autoAdvanceSecs = 10;
 
 /// "Unready when the video changes": a state with a newer [mediaId] than
 /// the last one this session saw ([lastMediaId], -1 before the first) while
@@ -100,6 +86,14 @@ class SessionCoordinator {
   /// What a local file is (`media.ref`, from the library: `ShowMatcher`),
   /// set by the composition root; null: files go up without one.
   MediaRef? Function(String path)? fileRef;
+  /// The next episode of the local show a file belongs to (the library's
+  /// `nextAfter`, `LocalNextFinder`), set by the composition root; null:
+  /// files have no continuation.
+  Future<LocalNext?> Function(String path)? nextFile;
+  /// The app's preferences (the composition root's).
+  final AppSettings settings;
+  /// Watch tracking: one watch per media, fed every second (D3).
+  final WatchTracker watch;
   /// The app's yt-dlp and link probes (tests pass their own).
   final LinkResolver ytDlp;
   /// The link to the server (socket, reconnects, clock offset, its
@@ -217,8 +211,6 @@ class SessionCoordinator {
   /// else the last two minutes); the pill shows in it only while the
   /// controls are up.
   final nextPromptVisible = signal(false);
-  /// End-of-episode countdown; null when none runs here.
-  final autoAdvance = signal<AutoAdvance?>(null);
 
   /// The skip pill for the current position ([skipOfferAt]: Skip OP,
   /// Skip ED, or Skip 1:30 without opening info or chapters); null while nothing
@@ -284,7 +276,8 @@ class SessionCoordinator {
   // This client's last swap, until a state shows it landed (a newer
   // mediaId than [after] with this member as `swapBy`): its art goes up then.
   // [link]: the web link it came from (a relayed one has no `url`).
-  ({HelloMedia media, int after, String? link, Uint8List? art})? _pendingArt;
+  // [file]: the local file it came from.
+  ({HelloMedia media, int after, String? link, String? file, Uint8List? art})? _pendingArt;
   AniListClient? _aniList;
   /// This member serves the current media's bytes through the server.
   Signal<bool> get relaying => media.feeder.relaying;
@@ -317,8 +310,16 @@ class SessionCoordinator {
   JellyfinProgressReporter? _reporter;
   PlayerSnapshot? _lastSnap;
   bool _jfToastShown = false;
-  Timer? _advanceTimer;
-  int _advanceDoneFor = -1;
+  // The media whose end was recorded as a watch checkpoint.
+  int _watchEndFor = -1;
+  // A restarted server came back without media while this app still had
+  // what played: that state, this member's id in it and the token then,
+  // until a state has media again (see [_beginRestore]).
+  ({StateBroadcast before, String self, String oldToken, DateTime at})? _restore;
+  Timer? _restoreTimer;
+  static const _restoreGiveUp = Duration(seconds: 30);
+  // The member id the latest state was seen as (the old one, at a welcome).
+  String _stateSelf = '';
   String _blockedKey = '';
   bool _jellyfinListening = false;
   // The mediaId [playerError] belongs to, and the player's duration when
@@ -337,7 +338,9 @@ class SessionCoordinator {
       JellyfinAccounts? jellyfin,
       TrackPrefs? trackPrefs,
       LinkResolver? ytDlp,
-      PlayerHost? players}) {
+      PlayerHost? players,
+      AppSettings? settings,
+      WatchTracker? watch}) {
     final n = notifier ?? Notifier(sfx: sfx);
     final links = ytDlp ?? AppYtDlp.instance;
     return SessionCoordinator._(
@@ -347,6 +350,8 @@ class SessionCoordinator {
       jellyfin: jellyfin ?? JellyfinAccounts.instance,
       trackPrefs: trackPrefs ?? TrackPrefs(),
       media: MediaPipeline(host: players ?? (MediaKitHost()..init()), links: links),
+      settings: settings ?? AppSettings.instance,
+      watch: watch ?? WatchTracker(),
     );
   }
 
@@ -356,7 +361,9 @@ class SessionCoordinator {
       required this.ytDlp,
       required this.jellyfin,
       required this.trackPrefs,
-      required this.media}) {
+      required this.media,
+      required this.settings,
+      required this.watch}) {
     connection
       ..onWelcome = _onWelcome
       ..caps = () => caps;
@@ -614,7 +621,10 @@ class SessionCoordinator {
   /// three viewers readying at once). A state that arrives meanwhile
   /// replaces any still waiting.
   void _onState(StateBroadcast r) {
+    final hold = _restore;
+    if (hold != null && r.media != null) _landRestore(hold, r);
     serverState.value = r;
+    _stateSelf = connection.memberId;
     if (r.transport == 'playing') switchTrace.mark(r.mediaId, SwitchTrace.playing);
     _toastMemberErrors(r);
     _warnSlowSource(r);
@@ -641,6 +651,9 @@ class SessionCoordinator {
   }
 
   Future<void> _applyState(StateBroadcast r) async {
+    // A restarted server without media yet: the player goes on with what
+    // played until it is back (or given up).
+    if (_restore != null && r.media == null) return;
     _trackSelfReady(r);
     if (_lastAway) {
       // A newer media than the one this member serves: that relay ended.
@@ -737,7 +750,7 @@ class SessionCoordinator {
     // A ready restored by a reconnect may not have echoed yet: unready
     // anyway (it was sent first, so this one lands last).
     if (unreadyForNewMedia(
-        enabled: AppSettings.instance.unreadyOnSwap.peek(),
+        enabled: settings.unreadyOnSwap.peek(),
         lastMediaId: last,
         mediaId: r.mediaId,
         ready: self.ready || _restoringReady)) {
@@ -834,10 +847,45 @@ class SessionCoordinator {
       _sendReport(r);
       if (!_lastAway) _checkSeekLanded(r);
     }
-    // The Jellyfin progress goes on through a drop (the player does).
+    // The Jellyfin progress and the watch go on through a drop (the
+    // player does).
+    if (r != null) _sampleWatch(r, now);
     if (connection.token.isNotEmpty && r != null && _playerReady && !_lastAway) unawaited(_tickJellyfin(r));
     if (r != null && online) _readyAfterJoinBack(r, now);
     _tickAutoSitOut(r, now, online: online);
+  }
+
+  /// One second of the watch of what plays ([WatchTracker]): its position
+  /// while this player holds it, whether it plays here, whether this
+  /// viewer is In; its end is recorded once (it may go on after a seek
+  /// back).
+  void _sampleWatch(StateBroadcast state, DateTime now) {
+    // A restarted server waiting for what played to come back: the watch
+    // goes on with it (the player plays on); a reconnect never ends it.
+    final hold = _restore;
+    final waiting = hold != null && state.media == null;
+    final r = waiting ? hold.before : state;
+    final holds = _playerReady && !_lastAway && !_opening && _openUrl != null && media.playerMediaId == r.mediaId;
+    final ending = playback.ending.peek()?.start;
+    watch.sample(WatchSample(
+      mediaId: r.mediaId,
+      media: r.media,
+      ownFile: _ownFile?.$1 == r.mediaId ? _ownFile!.$2 : null,
+      ownLink: _ownLink?.$1 == r.mediaId ? _ownLink!.$2 : null,
+      position: holds ? playback.positionSecs : 0,
+      playing: holds && (waiting || r.transport == 'playing') && playback.playing,
+      present: selfMember.peek()?.presence == Presence.watching,
+      duration: holds ? playback.durationSecs : 0,
+      endingStart: ending == null ? null : ending.inMilliseconds / 1000,
+      at: now,
+    ));
+    if (waiting) return;
+    if (r.transport == 'finished' && _watchEndFor != r.mediaId) {
+      _watchEndFor = r.mediaId;
+      watch.checkpoint(at: now);
+    } else if (r.transport != 'finished' && _watchEndFor == r.mediaId) {
+      _watchEndFor = -1;
+    }
   }
 
   /// Auto sit-out's second (only while online: the state is current).
@@ -846,7 +894,7 @@ class SessionCoordinator {
         self: online ? selfMember.peek()?.presence : null,
         playing: r?.transport == 'playing',
         alone: r == null || aloneIn(r.members, connection.memberId),
-        enabled: AppSettings.instance.autoSitOut.peek());
+        enabled: settings.autoSitOut.peek());
     switch (step) {
       case AutoAway(:final reason):
         _log.info('auto sit-out: away (${reason.name})');
@@ -1075,7 +1123,7 @@ class SessionCoordinator {
 
   /// [queueId]: the Up next item this puts up (the server takes it off
   /// the queue); [art]: a picture to send as its art (a queued item's).
-  void _swap(HelloMedia media, {String? link, String? queueId, Uint8List? art}) {
+  void _swap(HelloMedia media, {String? link, String? file, String? queueId, Uint8List? art, SwapRestore? restore}) {
     // A swap sent into a dropped link would be lost without a word.
     if (!connection.state.peek().online) {
       notify(const ActionFailed('Reconnecting: put it up again once back'));
@@ -1084,12 +1132,13 @@ class SessionCoordinator {
     // Putting something up means watching it: back first. Not for Up next
     // coming up by itself: whoever puts it up may be sitting out.
     final self = selfMember.peek();
-    if (self != null && self.presence == Presence.away && queueId == null) {
+    if (self != null && self.presence == Presence.away && queueId == null && restore == null) {
       autoSitOut.manual();
       connection.sendPresence(const PresenceIntent(state: Presence.watching));
     }
-    _pendingArt = (media: media, after: serverState.peek()?.mediaId ?? 0, link: link ?? media.url, art: art);
-    connection.sendSwap(media, queueId: queueId);
+    _pendingArt =
+        (media: media, after: serverState.peek()?.mediaId ?? 0, link: link ?? media.url, file: file, art: art);
+    connection.sendSwap(media, queueId: queueId, restore: restore);
   }
 
   /// An Up next item put up as queued, for one this app cannot build
@@ -1107,12 +1156,20 @@ class SessionCoordinator {
     _pendingArt = null;
     final link = pending.link;
     _ownLink = link == null || link.isEmpty ? null : (r.mediaId, link);
+    final file = pending.file;
+    _ownFile = file == null ? null : (r.mediaId, file);
+    ownFile.value = _ownFile;
     unawaited(_sendArt(r.mediaId, pending.media, pending.link, given: pending.art));
   }
 
   /// The link this app put up as [StateBroadcast.mediaId] (passed on or
   /// fetched by the server, so not in the state).
   (int, String)? _ownLink;
+  (int, String)? _ownFile;
+
+  /// The local file this app put up, with the mediaId it went up as (null:
+  /// none); Up next's continuation of a show reads it.
+  final ownFile = signal<(int, String)?>(null);
 
   /// The link of what plays, as this app may hand it out (Copy link, Open
   /// in browser): one this app put up, else one everyone opens (it is in
@@ -1170,12 +1227,12 @@ class SessionCoordinator {
   /// reason in plain words unless [anyway]. Returns an error text, or null
   /// when sent.
   Future<String?> swapLink(String url,
-      {LinkRelay relay = LinkRelay.direct, bool anyway = false, String? queueId}) async {
+      {LinkRelay relay = LinkRelay.direct, bool anyway = false, String? queueId, SwapRestore? restore}) async {
     markInput();
     final media = await mediaForLink(jellyfin, url);
     if (media.jellyfin != null) {
       this.media.expectOrigin(JellyfinOrigin(url));
-      _swap(media.copyWith(relay: const MediaRelay()), queueId: queueId);
+      _swap(media.copyWith(relay: const MediaRelay()), queueId: queueId, restore: restore);
       return null;
     }
     LinkProbe? probe;
@@ -1192,7 +1249,7 @@ class SessionCoordinator {
     final name = probe?.title ?? (probe != null || hasMediaExtension(uri) || uri.host.isEmpty ? media.name : uri.host);
     final what = linkMediaRef(name);
     if (relay == LinkRelay.direct) {
-      _swap(HelloMedia(name: name, size: 0, duration: 0, url: url, ref: what), queueId: queueId);
+      _swap(HelloMedia(name: name, size: 0, duration: 0, url: url, ref: what), queueId: queueId, restore: restore);
       return null;
     }
     if (relay == LinkRelay.me) {
@@ -1227,7 +1284,7 @@ class SessionCoordinator {
       }
       this.media.expectOrigin(LinkOrigin(url, probe, y));
       _swap(HelloMedia(name: name, size: size, duration: 0, relay: MediaRelay(tracks: specs), ref: what),
-          link: url, queueId: queueId);
+          link: url, queueId: queueId, restore: restore);
       return null;
     }
     // The server reads it with its own yt-dlp; only a page this app knows
@@ -1243,7 +1300,8 @@ class SessionCoordinator {
         url: url,
         relay: const MediaRelay(fetch: true),
         ref: what),
-        queueId: queueId);
+        queueId: queueId,
+        restore: restore);
     return null;
   }
 
@@ -1257,23 +1315,24 @@ class SessionCoordinator {
 
   /// A Jellyfin pick (browser, next / previous episode) goes up as a ref,
   /// relayed by this member for viewers without an account.
-  void swapJellyfin(JellyfinMedia media, {String? queueId}) {
+  void swapJellyfin(JellyfinMedia media, {String? queueId, SwapRestore? restore}) {
     markInput();
     this.media.expectOrigin(const JellyfinOrigin(null));
-    _swap(mediaForPick(media).copyWith(relay: const MediaRelay()), queueId: queueId);
+    _swap(mediaForPick(media).copyWith(relay: const MediaRelay()), queueId: queueId, restore: restore);
   }
 
   /// A file on this computer. The host's app serves it itself; anyone
   /// else's goes through the server's relay. Returns an error text, or null
   /// when sent.
-  Future<String?> swapFile(String path, {String? queueId}) async {
+  Future<String?> swapFile(String path, {String? queueId, SwapRestore? restore}) async {
     markInput();
     final what = fileRef?.call(path);
     final host = hostFile;
     if (host != null) {
       final file = await host(path);
       if (file == null) return 'file not found — check the path';
-      _swap(HelloMedia(name: file.name, size: file.size, duration: 0, ref: what), queueId: queueId);
+      _swap(HelloMedia(name: file.name, size: file.size, duration: 0, ref: what),
+          file: path, queueId: queueId, restore: restore);
       return null;
     }
     final file = File(path);
@@ -1285,7 +1344,9 @@ class SessionCoordinator {
         duration: 0,
         relay: const MediaRelay(),
         ref: what),
-        queueId: queueId);
+        file: path,
+        queueId: queueId,
+        restore: restore);
     return null;
   }
 
@@ -1302,24 +1363,22 @@ class SessionCoordinator {
     return null;
   }
 
+  /// The next episode now: through Up next when it is the continuation
+  /// there (its preload and relay carry on), else a swap.
   void playNextEpisode() {
     final n = nextEpisode.peek();
-    if (n != null) swapJellyfin(n.pick);
+    if (n == null) return;
+    final auto = queue.continues.peek();
+    if (auto != null && auto.media.jellyfin?.itemId == n.item.id) {
+      queue.playNow(auto.id);
+    } else {
+      swapJellyfin(n.pick);
+    }
   }
 
   void playPreviousEpisode() {
     final p = previousEpisode.peek();
     if (p != null) swapJellyfin(p.pick);
-  }
-
-  /// Hides the countdown here; this client will not auto-advance this
-  /// item (if it is the swapper, nobody does).
-  void cancelAutoAdvance() {
-    _advanceTimer?.cancel();
-    _advanceTimer = null;
-    final a = autoAdvance.peek();
-    if (a != null) _advanceDoneFor = a.mediaId;
-    autoAdvance.value = null;
   }
 
   // ------------------------------------------------------------- jellyfin
@@ -1342,10 +1401,6 @@ class SessionCoordinator {
     nextEpisode.value = null;
     nextPromptVisible.value = false;
     playback.segments.value = const [];
-    _advanceTimer?.cancel();
-    _advanceTimer = null;
-    _advanceDoneFor = -1;
-    autoAdvance.value = null;
   }
 
   /// The current item is being replaced: Stopped goes out (not awaited:
@@ -1449,6 +1504,12 @@ class SessionCoordinator {
         if (gen != _jfGen) return;
         final before = await userDataF;
         if (gen != _jfGen) return;
+        // The watch of this media (the tracker feeds it; Jellyfin's played
+        // state and resume point are what came before).
+        _sampleWatch(r, DateTime.now().toUtc());
+        watch.before(
+            played: before?.played ?? false,
+            resumeAt: (before?.playbackPositionTicks ?? 0) / jellyfinTicksPerSecond);
         final reporter = JellyfinProgressReporter(
           client: plan.client,
           itemId: ref.itemId,
@@ -1456,6 +1517,7 @@ class SessionCoordinator {
           playSessionId: plan.info.playSessionId,
           playedBefore: before?.played ?? false,
           resumeTicksBefore: before?.playbackPositionTicks ?? 0,
+          watch: watch.mediaId == r.mediaId ? watch.session : null,
           onUnauthorized: () => jellyfin.markExpired(ref.serverId),
           onStopped: () => jellyfin.watchedChanged(ref.serverId),
           onError: (e) {
@@ -1545,7 +1607,7 @@ class SessionCoordinator {
     final next = nextEpisode.peek();
     final duration = playback.durationSecs;
     var show = false;
-    if (next != null && duration > 0 && autoAdvance.peek() == null && r.transport != 'finished') {
+    if (next != null && duration > 0 && r.transport != 'finished') {
       final item = (jellyfinPlan.peek() as OwnPlay?)?.item;
       final at = nextPromptStart(item, Duration(milliseconds: (duration * 1000).round()),
           endingStart: playback.ending.peek()?.start);
@@ -1554,9 +1616,8 @@ class SessionCoordinator {
     nextPromptVisible.value = show;
   }
 
-  /// Per state: played to the end -> Stopped (Jellyfin marks it watched)
-  /// and the auto-advance countdown; seeked back from the end -> Playing
-  /// again.
+  /// Per state: played to the end -> Stopped (with the watched rule's
+  /// verdict); seeked back from the end -> Playing again.
   void _jellyfinTransport(StateBroadcast r) {
     final ref = _jfRef;
     if (ref == null || r.mediaId != _jfMediaId) return;
@@ -1571,48 +1632,7 @@ class SessionCoordinator {
         reporter.start(snap);
       }
     }
-    if (!finished) {
-      if (autoAdvance.peek() != null) cancelAutoAdvance();
-      _advanceDoneFor = -1;
-      return;
-    }
-    nextPromptVisible.value = false;
-    final next = nextEpisode.peek();
-    // Up next goes first; "Clear" in it hides the next episode here.
-    if (next == null ||
-        !queue.continuationShown(r.mediaId) ||
-        !AppSettings.instance.autoAdvance.peek() ||
-        _advanceDoneFor == r.mediaId ||
-        autoAdvance.peek()?.mediaId == r.mediaId) {
-      return;
-    }
-    autoAdvance.value = AutoAdvance(
-        mediaId: r.mediaId, secondsLeft: autoAdvanceSecs, next: next, swapper: _isSwapper(r, ref));
-    _advanceTimer?.cancel();
-    _advanceTimer = Timer.periodic(const Duration(seconds: 1), (_) => _advanceTick());
-  }
-
-  bool _isSwapper(StateBroadcast r, JellyfinRef ref) =>
-      autoAdvanceSwapper(r.members, ref.serverId) == connection.memberId;
-
-  void _advanceTick() {
-    final a = autoAdvance.peek();
-    final r = serverState.peek();
-    final ref = _jfRef;
-    if (a == null || r == null || ref == null || r.mediaId != a.mediaId || r.transport != 'finished') {
-      cancelAutoAdvance();
-      return;
-    }
-    final left = a.secondsLeft - 1;
-    if (left > 0) {
-      autoAdvance.value = AutoAdvance(
-          mediaId: a.mediaId, secondsLeft: left, next: a.next, swapper: _isSwapper(r, ref));
-      return;
-    }
-    // Decided on the latest state: one swapper among the clients counting.
-    final swap = _isSwapper(r, ref);
-    cancelAutoAdvance();
-    if (swap) swapJellyfin(a.next.pick);
+    if (finished) nextPromptVisible.value = false;
   }
 
   String _accountKey(String serverId) =>
@@ -1667,11 +1687,18 @@ class SessionCoordinator {
     final tokenUrl = rejoin.oldToken.isNotEmpty &&
         rejoin.oldToken != welcome.token &&
         (_openUrl?.contains('/${rejoin.oldToken}/') ?? false);
-    if (changed || tokenUrl) {
+    // A restarted server without media while this app had some: it is
+    // offered back (and the player keeps playing it meanwhile).
+    final restoring = !rejoin.sameServer && before?.media != null && now != null && now.media == null;
+    if (restoring) {
+      _beginRestore(before!, rejoin.oldToken);
+    } else if (changed || tokenUrl) {
       _forgetMedia();
     } else if (!rejoin.sameServer && _mediaId != -1) {
       // The same media under a restarted server's numbering: the player
-      // keeps it.
+      // keeps it, and so do the watch and the Jellyfin reports.
+      watch.renumber(before.mediaId, now.mediaId);
+      if (_jfMediaId == before.mediaId) _jfMediaId = now.mediaId;
       _mediaId = now.mediaId;
       media.renumber(now.mediaId);
       _seenMediaId = now.mediaId;
@@ -1679,7 +1706,7 @@ class SessionCoordinator {
     // The intent the server lost: ready (unless the video changed and the
     // user unreadies then), and sitting out.
     var wantReady = _lastReady && !_lastAway;
-    if (changed && wantReady && _seenMediaId >= 0 && AppSettings.instance.unreadyOnSwap.peek()) {
+    if (changed && !restoring && wantReady && _seenMediaId >= 0 && settings.unreadyOnSwap.peek()) {
       wantReady = false;
       _lastReady = false;
     }
@@ -1691,6 +1718,125 @@ class SessionCoordinator {
       _restoringReady = true;
       connection.sendReady(true, source: 'manual');
     }
+  }
+
+  /// A restarted server answered without media while this app had [before]
+  /// up: one app puts it back (`swap.restore`; the server keeps the first
+  /// offer). Who offers is decided from the old state alone, so the apps
+  /// agree: who put it up or passes it on first, then the others by their
+  /// old member id, 1.5 s apart; each only while the server is still
+  /// empty and only what it can put up (see [_offerBack]). Given up after
+  /// [_restoreGiveUp]: then the next state is applied as it is.
+  void _beginRestore(StateBroadcast before, String oldToken) {
+    final self = _stateSelf;
+    _restore = (before: before, self: self, oldToken: oldToken, at: DateTime.now());
+    queue.restoreFrom(before.mediaId);
+    final swapBy = before.media?['swapBy'];
+    final source = stateMediaRelay(before)?.source;
+    final first = self.isNotEmpty && (self == swapBy || self == source);
+    final others = [
+      for (final m in before.members)
+        if (m.id != swapBy && m.id != source && isPresent(m)) m.id,
+    ]..sort(compareMemberIds);
+    final rank = others.indexOf(self);
+    final wait = first
+        ? const Duration(milliseconds: 500)
+        : Duration(milliseconds: 3000 + 1500 * (rank < 0 ? others.length : rank));
+    _log.info('the server restarted without media: offering "${before.media?['name']}" back in '
+        '${wait.inMilliseconds} ms unless someone does first');
+    _restoreTimer?.cancel();
+    _restoreTimer = Timer(wait, () => unawaited(_offerBack()));
+  }
+
+  /// Puts what played back up the way it went up, from here, when this app
+  /// can: a Jellyfin item with its own account (it passes it on again),
+  /// its file, the link it put up (passed on, fetched by the server, or
+  /// opened by everyone), a link everyone opens. Where it was: this
+  /// player's position, else the old server's clock; and whether it
+  /// played.
+  Future<void> _offerBack() async {
+    final hold = _restore;
+    if (hold == null) return;
+    _restoreTimer = Timer(_restoreGiveUp - DateTime.now().difference(hold.at), _giveUpRestore);
+    final r = serverState.peek();
+    if (r == null || r.media != null || !connection.state.peek().online) return;
+    final before = hold.before;
+    final m = before.media!;
+    final holds = _playerReady && media.playerMediaId == before.mediaId && _openUrl != null;
+    final position = holds ? playback.positionSecs : serverPositionAt(before, connection.serverNow());
+    final restore = SwapRestore(position: position, transport: before.transport);
+    final relay = stateMediaRelay(before);
+    final ownFile = _ownFile?.$1 == before.mediaId ? _ownFile!.$2 : null;
+    final ownLink = _ownLink?.$1 == before.mediaId ? _ownLink!.$2 : null;
+    final ref = refOfStateMedia(m);
+    String? error = 'nothing here to put it back from';
+    if (ref != null) {
+      final pick = pickForRef(jellyfin, ref);
+      if (pick != null) {
+        swapJellyfin(pick, restore: restore);
+        error = null;
+      }
+    } else if (ownFile != null) {
+      error = await swapFile(ownFile, restore: restore);
+    } else {
+      final url = ownLink ?? stateMediaUrl(before);
+      final mode = relay == null ? LinkRelay.direct : (relay.fetch ? LinkRelay.server : LinkRelay.me);
+      if (url != null && (url.startsWith('http://') || url.startsWith('https://')) && (mode != LinkRelay.me || ownLink != null)) {
+        error = await swapLink(url, relay: mode, anyway: true, restore: restore);
+      }
+    }
+    _log.info(error == null
+        ? 'offered "${m['name']}" back at ${position.toStringAsFixed(1)} s (${before.transport})'
+        : 'cannot offer "${m['name']}" back: $error');
+  }
+
+  /// Nobody put it back: the player lets go of it with the next state.
+  void _giveUpRestore() {
+    if (_restore == null) return;
+    _log.info('nothing came back after the restart: letting go of what played');
+    _restore = null;
+    _restoreTimer = null;
+    queue.restoreFrom(-1);
+    _forgetMedia();
+    final r = serverState.peek();
+    if (r != null) _onState(r);
+  }
+
+  /// What played is up again ([r], a new mediaId) or other media is: the
+  /// same media carries on here, the player keeping it unless its URL
+  /// named the old server's token (a relay, the host's file: opened
+  /// again); the watch, the Jellyfin reports and what this member passes
+  /// on go on with it. Up next comes back too ([QueueController]).
+  void _landRestore(({StateBroadcast before, String self, String oldToken, DateTime at}) hold, StateBroadcast r) {
+    _restore = null;
+    _restoreTimer?.cancel();
+    _restoreTimer = null;
+    final before = hold.before;
+    if (!_sameMedia(before.media, r.media)) {
+      _log.info('after the restart the server has other media: "${r.media?['name']}"');
+      queue.restoreFrom(-1);
+      _forgetMedia();
+      return;
+    }
+    _log.info('"${r.media?['name']}" is back as media ${r.mediaId}');
+    watch.renumber(before.mediaId, r.mediaId);
+    if (_watchEndFor == before.mediaId) _watchEndFor = r.mediaId;
+    _seenMediaId = r.mediaId;
+    queue.restoreAfterRestart(before, hold.self, winner: r.media?['swapBy'] == connection.memberId);
+    final url = _openUrl;
+    final keep = _mediaId == before.mediaId &&
+        media.playerMediaId == before.mediaId &&
+        url != null &&
+        (hold.oldToken.isEmpty || !url.contains('/${hold.oldToken}/'));
+    if (!keep) {
+      _forgetMedia();
+      return;
+    }
+    if (_jfMediaId == before.mediaId) _jfMediaId = r.mediaId;
+    _mediaId = r.mediaId;
+    diff.reset();
+    final plan = jellyfinPlan.peek();
+    media.resumeAs(r, ownJellyfin: plan is OwnPlay ? (url: plan.url, headers: plan.headers) : null);
   }
 
   /// Whether two states' `media` are the same media (a restarted server
@@ -1746,10 +1892,18 @@ class SessionCoordinator {
     _seekTimer?.cancel();
     _seekTimer = null;
     _seekGate.reset();
+    watch.close();
+    _watchEndFor = -1;
+    _restore = null;
+    _restoreTimer?.cancel();
+    _restoreTimer = null;
+    queue.restoreFrom(-1);
     await _stopJellyfin();
     media.reset();
     _pendingArt = null;
     _ownLink = null;
+    _ownFile = null;
+    ownFile.value = null;
     _playerReady = false;
     try {
       await media.release();

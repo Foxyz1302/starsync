@@ -16,23 +16,27 @@ import '../screens/home/picked_media.dart';
 import '../session/app_events.dart' show AddedToUpNext;
 import '../session/media_art.dart';
 import '../session/session_coordinator.dart';
-import '../state/settings.dart';
 import '../sync/avatar_cache.dart';
-import 'queue_logic.dart';
 
-// Up next on this client (see ARCHITECTURE.md "Up next"): the server's
-// queue as signals, adding to it (probed, with a picture), the end-of-media
-// countdown for its first item, putting an item up when this app is the
-// one that can, and keeping that item ready.
+// What's next on this app (see ARCHITECTURE.md "What's next" and "Up
+// next"): the server's queue as signals (Up next and its continuation),
+// adding to it (probed, with a picture), the continuation of what this
+// app put up (the next Jellyfin episode, the next file of a local show),
+// the server's countdown as the end card shows it, putting an item up
+// when the server asks this app (`queuePlay`), and keeping the item that
+// plays next ready (the media pipeline prepares it).
 
-/// The end-of-media card for the first Up next item. [secondsLeft] null:
-/// no countdown here (auto-advance off, cancelled, or another app puts
-/// it up), the card offers Play now only.
+/// The end-of-media card for the first item (Up next's, else the
+/// continuation). [secondsLeft]: the server's countdown (`state.advance`);
+/// null when none runs (cancelled, or nothing counts down), then the card
+/// offers Play now only. [waitingFor]: the countdown ran out and the one
+/// who puts the item up is not here (its name).
 class UpNextCountdown {
   final int mediaId;
   final QueueItem item;
   final int? secondsLeft;
-  const UpNextCountdown({required this.mediaId, required this.item, this.secondsLeft});
+  final String? waitingFor;
+  const UpNextCountdown({required this.mediaId, required this.item, this.secondsLeft, this.waitingFor});
 }
 
 /// The first item's readiness on this app.
@@ -46,21 +50,33 @@ class QueueController {
   late final PictureCache thumbs = PictureCache(coord.connection.client,
       route: 'i', keep: RelayConstants.maxQueueItems + 8, live: (s) => [for (final q in s.queue) q.thumb]);
 
-  /// Up next, in order (empty when nothing is queued or not in a server).
-  late final Computed<List<QueueItem>> items =
-      computed(() => coord.serverState.value?.queue ?? const <QueueItem>[]);
+  /// Up next, in order, without the continuation (empty when nothing is
+  /// queued or not in a server).
+  late final Computed<List<QueueItem>> items = computed(
+      () => [for (final q in coord.serverState.value?.queue ?? const <QueueItem>[]) if (!q.auto) q]);
 
+  /// The continuation of what plays (`auto`: the next episode), shared by
+  /// everyone; null when none.
+  late final Computed<QueueItem?> continues =
+      computed(() => coord.serverState.value?.queue.where((q) => q.auto).firstOrNull);
+
+  /// What plays next: Up next's first item, else the continuation.
+  late final Computed<QueueItem?> head = computed(() => coord.serverState.value?.queue.firstOrNull);
+
+  /// The end card while the media has ended with something next (see
+  /// [UpNextCountdown]).
   final countdown = signal<UpNextCountdown?>(null);
 
   /// The first item's id and how ready it is here (null: nothing to get
   /// ready on this app).
   final warm = signal<({String id, WarmState state})?>(null);
 
-  /// The natural continuation of what plays: the next episodes of the
-  /// Jellyfin series (not queued; shown greyed under Up next).
+  /// The next episodes of the Jellyfin series playing, on an app that
+  /// plays it with its own account (the first one is what continues it;
+  /// the rest show greyed under "Continues with", "+" adds one).
   final continuation = signal<List<EpisodeLink>>(const []);
 
-  /// The mediaId whose continuation was cleared here.
+  /// The mediaId whose continuation was cleared (by anyone: `cancel`).
   final _hiddenFor = signal(-1);
 
   /// The queue popover is open: the Up next button holds the controls up.
@@ -70,10 +86,12 @@ class QueueController {
   // here, a file here). Never leaves this app.
   final Map<String, ({PickedMedia pick, DateTime at})> _local = {};
   final Map<String, DateTime> _performing = {};
-  final Set<String> _skipped = {};
-  int _cancelledFor = -1;
   Timer? _timer;
   bool _attached = false;
+  // The mediaId whose continuation this app added (or is adding).
+  int _continuedFor = -1;
+  // A restarted server waits for what played (that mediaId) to come back.
+  int _restoreFrom = -1;
   String _continuationFor = '';
   final _random = Random.secure();
 
@@ -83,15 +101,26 @@ class QueueController {
     if (_attached) return;
     _attached = true;
     coord.connection.states.listen(_onState);
+    // `cancel` from anyone: no continuation for that media any more.
+    coord.connection.feeds.listen((f) {
+      final id = coord.serverState.peek()?.mediaId;
+      if (f.action == 'advance-cancel' && id != null) _hiddenFor.value = id;
+    });
     effect(() {
       final next = coord.nextEpisode.value;
       final plan = coord.jellyfinPlan.value;
       unawaited(_loadContinuation(next, plan));
     });
-    // The continuation and the state decide what to get ready; the media
-    // playing having started (or sitting out) lets the preload go.
+    // What continues this media becomes known (the next episode found, a
+    // file of ours up): add it.
     effect(() {
-      shownContinuation.value;
+      coord.nextEpisode.value;
+      coord.ownFile.value;
+      untracked(() => _continue(coord.serverState.peek()));
+    });
+    // The state decides what to get ready; the media playing having
+    // started (or sitting out) lets the preload go.
+    effect(() {
       coord.settledMediaId.value;
       coord.selfAway.value;
       final r = coord.serverState.value;
@@ -319,62 +348,54 @@ class QueueController {
     }
   }
 
-  /// Plays the first Up next item now.
+  /// Plays what comes next now (Up next's first item, else the
+  /// continuation).
   void skip() {
-    final first = items.peek().firstOrNull;
+    final first = head.peek();
     if (first != null) playNow(first.id);
   }
 
-  /// Cancel on the end-of-media card: no countdown here for this media.
+  /// Cancel on the end card: the countdown stops for everyone, and the
+  /// continuation goes (`cancel`).
   void cancelCountdown() {
-    final c = countdown.peek();
-    _timer?.cancel();
-    _timer = null;
-    if (c == null) return;
-    _cancelledFor = c.mediaId;
-    countdown.value = UpNextCountdown(mediaId: c.mediaId, item: c.item);
+    coord.markInput();
+    coord.connection.sendQueue(const QueueIntent.cancel());
   }
 
-  /// "Clear": hides the continuation of what plays now (and its next
-  /// episode does not come up by itself).
+  /// "Clear" under "Continues with": the continuation of what plays goes
+  /// for everyone (`cancel`) and does not come back for this media.
   void clearContinuation() {
     final id = coord.serverState.peek()?.mediaId;
     if (id != null) _hiddenFor.value = id;
-    if (coord.autoAdvance.peek() != null) coord.cancelAutoAdvance();
+    cancelCountdown();
   }
 
-  /// The continuation applies to [mediaId]: nothing is queued and it was
-  /// not cleared.
-  bool continuationShown(int mediaId) =>
-      (coord.serverState.peek()?.queue.isEmpty ?? true) && _hiddenFor.peek() != mediaId;
-
-  /// [continuation] unless cleared for the media playing.
+  /// The further episodes of [continuation] (after the one that continues
+  /// what plays), unless it was cleared for the media playing.
   late final Computed<List<EpisodeLink>> shownContinuation = computed(() {
     final id = coord.serverState.value?.mediaId;
-    return id != null && _hiddenFor.value == id ? const <EpisodeLink>[] : continuation.value;
+    if (id == null || _hiddenFor.value == id) return const <EpisodeLink>[];
+    final auto = continues.value?.media.jellyfin?.itemId;
+    return [for (final e in continuation.value) if (e.item.id != auto) e];
   });
 
   // --------------------------------------------------------- per state
 
   void _onState(StateBroadcast r) {
     _lastState = r;
+    // What played came back after a restart under a new mediaId: a
+    // continuation cleared for it stays cleared.
+    if (_restoreFrom != -1 && r.media != null && _hiddenFor.peek() == _restoreFrom) _hiddenFor.value = r.mediaId;
     _prune(r);
-    final queue = r.queue;
+    // The server asks for an item (a countdown ran out, Play now from
+    // another app, nothing up yet): the app that puts it up does.
     final play = r.queuePlay;
     if (play != null) {
-      final item = queue.where((q) => q.id == play).firstOrNull;
-      if (item != null) _bringUp(item, r);
+      final item = r.queue.where((q) => q.id == play).firstOrNull;
+      if (item != null && queuePerformer(item, r.members).id == _me) _perform(item);
     }
-    final finished = r.transport == 'finished';
-    if (queue.isNotEmpty && r.media == null) {
-      // Nothing up yet: the first item goes up at once.
-      _bringUp(queue.first, r);
-    } else if (finished && queue.isNotEmpty) {
-      _atEnd(r);
-    } else {
-      if (countdown.peek() != null) _stopCountdown();
-      if (!finished) _cancelledFor = -1;
-    }
+    _syncCountdown(r);
+    _continue(r);
     _warm(r);
   }
 
@@ -385,75 +406,133 @@ class QueueController {
     final now = DateTime.now();
     _performing.removeWhere((_, at) => now.difference(at) > const Duration(minutes: 1));
     final keys = {for (final q in r.queue) q.key};
-    _local.removeWhere((k, v) => !keys.contains(k) && now.difference(v.at) > const Duration(minutes: 1));
-    final ids = {for (final q in r.queue) q.id};
-    _skipped.removeWhere((id) => !ids.contains(id));
+    // Kept while a restarted server waits for what played: Up next comes
+    // back with it.
+    if (_restoreFrom == -1) {
+      _local.removeWhere((k, v) => !keys.contains(k) && now.difference(v.at) > const Duration(minutes: 1));
+    }
   }
 
-  /// [item] should go up now: by this app when it is the one that can;
-  /// nobody can: the lowest member takes it off with the reason.
-  void _bringUp(QueueItem item, StateBroadcast r) {
-    final perf = queuePerformer(item, r.members);
-    if (perf.id == null) {
-      final why = perf.why;
-      if (why != null && queueJanitor(r.members) == _me && _skipped.add(item.id)) {
-        coord.connection.sendQueue(QueueIntent.remove(item.id, why: why));
-      }
-      return;
-    }
-    if (perf.id == _me) _perform(item);
-  }
-
-  /// The media finished with Up next waiting: the card, and with
-  /// auto-advance on the countdown, for its first item.
-  void _atEnd(StateBroadcast r) {
-    // Up next goes before the next episode, even one already counting.
-    if (coord.autoAdvance.peek() != null) coord.cancelAutoAdvance();
-    final head = r.queue.first;
-    final perf = queuePerformer(head, r.members);
-    if (perf.id == null && perf.why != null) {
-      // Taken off by [_bringUp]'s rule; the next state shows the next one.
-      _bringUp(head, r);
-      return;
-    }
-    final c = countdown.peek();
-    if (c != null && c.mediaId == r.mediaId) {
-      if (c.item.id != head.id || c.item.thumb != head.thumb) {
-        countdown.value = UpNextCountdown(mediaId: c.mediaId, item: head, secondsLeft: c.secondsLeft);
-      }
-      return;
-    }
-    final auto = AppSettings.instance.autoAdvance.peek() && _cancelledFor != r.mediaId;
-    countdown.value = UpNextCountdown(mediaId: r.mediaId, item: head, secondsLeft: auto ? autoAdvanceSecs : null);
-    _timer?.cancel();
-    _timer = auto ? Timer.periodic(const Duration(seconds: 1), (_) => _tick()) : null;
-  }
-
-  void _tick() {
-    final c = countdown.peek();
-    final r = coord.serverState.peek();
-    final left = c?.secondsLeft;
-    if (c == null || left == null || r == null || r.mediaId != c.mediaId || r.transport != 'finished') {
-      _stopCountdown();
-      return;
-    }
-    if (left > 1) {
-      countdown.value = UpNextCountdown(mediaId: c.mediaId, item: c.item, secondsLeft: left - 1);
-      return;
-    }
-    _timer?.cancel();
-    _timer = null;
-    _cancelledFor = c.mediaId;
-    countdown.value = UpNextCountdown(mediaId: c.mediaId, item: c.item);
-    // Decided on the latest state: only the app that can puts it up.
+  /// The end card from the server's state: the media ended with something
+  /// next; the seconds of `state.advance` move on with a 1 s timer.
+  void _syncCountdown(StateBroadcast r) {
     final head = r.queue.firstOrNull;
-    if (head != null && queuePerformer(head, r.members).id == _me) _perform(head);
+    if (r.transport != 'finished' || head == null || r.media == null) {
+      _timer?.cancel();
+      _timer = null;
+      if (countdown.peek() != null) countdown.value = null;
+      return;
+    }
+    final a = r.advance != null && r.advance!.id == head.id ? r.advance : null;
+    int? left;
+    String? waiting;
+    if (a != null) {
+      left = advanceSecondsLeft(a, coord.connection.serverNow());
+      if (left == 0 && queuePerformer(head, r.members).id == null) {
+        waiting = r.members.where((m) => m.id == head.by).firstOrNull?.name ?? head.byName;
+      }
+    }
+    countdown.value = UpNextCountdown(mediaId: r.mediaId, item: head, secondsLeft: left, waitingFor: waiting);
+    if (a == null) {
+      _timer?.cancel();
+      _timer = null;
+    } else {
+      _timer ??= Timer.periodic(const Duration(seconds: 1), (_) {
+        final now = coord.serverState.peek();
+        if (now != null) _syncCountdown(now);
+      });
+    }
   }
 
-  void _stopCountdown() {
-    _timer?.cancel();
-    _timer = null;
-    countdown.value = null;
+  // ------------------------------------------------------------ restart
+
+  /// The server restarted without media; what played ([mediaId]) is being
+  /// offered back (-1: that is over).
+  void restoreFrom(int mediaId) => _restoreFrom = mediaId;
+
+  /// What played is back after a server restart: Up next as [before] had
+  /// it comes back too. The app whose offer won ([winner]) adds the items
+  /// anyone can put up (links everyone opens, Jellyfin items); every app
+  /// its own links passed on and files (only it has them; [self] is its
+  /// member id then). A server-fetched link's address stayed with the old
+  /// server, so it is gone; the continuation comes back as usual.
+  void restoreAfterRestart(StateBroadcast before, String self, {required bool winner}) {
+    for (final q in before.queue) {
+      if (q.auto) continue;
+      final ok = switch (q.how) {
+        QueueHow.direct || QueueHow.jellyfin => winner,
+        QueueHow.through || QueueHow.file => self.isNotEmpty && q.by == self && _local.containsKey(q.key),
+        QueueHow.server => false,
+      };
+      if (!ok) continue;
+      final local = _local[q.key];
+      if (local != null) _local[q.key] = (pick: local.pick, at: DateTime.now());
+      final thumb = thumbs.bytesFor(q.thumb);
+      coord.connection.sendQueue(QueueIntent.add(
+          QueueItem(media: q.media, how: q.how, title: q.title, sub: q.sub, duration: q.duration, key: q.key),
+          thumb: thumb == null ? '' : base64Encode(thumb)));
+    }
+    _restoreFrom = -1;
+  }
+
+  // ------------------------------------------------------- continuation
+
+  /// Adds what continues the media playing (`auto`, PROTOCOL.md "Queue")
+  /// when this app may ([mayAddContinuation]: it put it up, or that
+  /// member is not in and this is the first who is), knows what comes
+  /// next, and it is not there or cancelled yet; with the setting on. A
+  /// Jellyfin episode played with this app's account continues with the
+  /// series' next one, a file this app put up with the next episode of its
+  /// show in the library (numbers skipped on the way said in its line).
+  void _continue(StateBroadcast? r) {
+    if (r == null || r.media == null || !coord.settings.autoAdvance.peek()) return;
+    final id = r.mediaId;
+    if (_continuedFor == id || _hiddenFor.peek() == id) return;
+    if (r.queue.any((q) => q.auto && q.forMedia == id)) {
+      _continuedFor = id;
+      return;
+    }
+    final swapBy = r.media?['swapBy'];
+    if (!mayAddContinuation(_me, swapBy is String ? swapBy : null, r.members)) return;
+    final ref = refOfStateMedia(r.media);
+    final next = coord.nextEpisode.peek();
+    if (ref != null) {
+      if (next == null || !sameJellyfinItem(ref, coord.currentRef.peek())) return;
+      _continuedFor = id;
+      unawaited(_addContinuation(id, next.pick));
+      return;
+    }
+    final own = coord.ownFile.peek();
+    final finder = coord.nextFile;
+    if (own == null || own.$1 != id || finder == null) return;
+    _continuedFor = id;
+    unawaited(() async {
+      try {
+        final n = await finder(own.$2);
+        if (n == null) return;
+        final gap = n.skipped;
+        await _addContinuation(id, FileMedia(n.episode.path),
+            note: gap == null ? null : 'skips ${gap.label}');
+      } catch (e) {
+        debugPrint('queue: what continues ${own.$2}: $e');
+      }
+    }());
+  }
+
+  Future<void> _addContinuation(int mediaId, PickedMedia pick, {String? note}) async {
+    try {
+      final b = await _build(pick);
+      if (b is! ({QueueItem item, Uint8List? thumb})) return;
+      final r = coord.serverState.peek();
+      if (r == null || r.mediaId != mediaId || _hiddenFor.peek() == mediaId) return;
+      final sub = [b.item.sub, ?note].where((s) => s.isNotEmpty).join('  ·  ');
+      final item = b.item.copyWith(auto: true, forMedia: mediaId, sub: sub);
+      if (item.key.isNotEmpty) _local[item.key] = (pick: pick, at: DateTime.now());
+      final thumb = b.thumb;
+      coord.connection.sendQueue(QueueIntent.add(item, thumb: thumb == null ? '' : base64Encode(thumb)));
+    } catch (e) {
+      debugPrint('queue: adding what continues media $mediaId: $e');
+    }
   }
 
   /// Puts [item] up from here (once per item while it is in flight).
@@ -530,9 +609,8 @@ class QueueController {
   bool _ownAccount(String serverId) =>
       coord.jellyfin.account(serverId) != null && coord.jellyfin.statusOf(serverId) != JellyfinAccountStatus.expired;
 
-  /// What this app gets ready: Up next's first item, else (Up next empty)
-  /// the first continuation episode (only here when this app plays the
-  /// series with its own account). Every app does, each its own copy (see
+  /// What this app gets ready: the first item of the queue (Up next's,
+  /// else the continuation). Every app does, each its own copy (see
   /// [_WarmTarget]); while sitting out only the probe of a link this app
   /// puts up (its swap reads it). Null: nothing.
   _WarmTarget? _warmTarget(StateBroadcast? r) {
@@ -579,9 +657,7 @@ class QueueController {
           return performer ? _WarmTarget(head.id) : null;
       }
     }
-    final next = shownContinuation.peek().firstOrNull;
-    if (next == null) return null;
-    return _WarmTarget('next:${next.item.id}', ref: mediaForPick(next.pick).jellyfin);
+    return null;
   }
 
   /// Keeps the one item that plays next ready on this app, so a skip or

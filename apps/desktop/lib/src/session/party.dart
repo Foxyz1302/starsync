@@ -12,8 +12,8 @@ const presencePolicy = PresencePolicy();
 bool countsForReady(MemberView m) => m.error.isEmpty && presencePolicy.countsFor(m.presence, Purpose.readyCounter);
 
 /// Connected and watching (`in` or `joining`): can do things for the
-/// party now (put up an Up next item, the auto-advance swap).
-bool isPresent(MemberView m) => m.presence == Presence.watching || m.presence == Presence.joining;
+/// party now (put up an Up next item; core's [isPresentMember]).
+bool isPresent(MemberView m) => isPresentMember(m);
 
 /// Nobody but [selfId] is connected in [members] (D9, core's [isAlone]).
 bool aloneIn(List<MemberView> members, String selfId) =>

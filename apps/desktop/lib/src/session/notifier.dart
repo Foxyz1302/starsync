@@ -187,6 +187,12 @@ Notice _plain(AppEvent e) => switch (e) {
           category: NoticeCategory.people, log: feed, toast: '${feed.actor} lost connection', actor: feed.actor),
       MemberReturned(:final feed) =>
         Notice(category: NoticeCategory.people, log: feed, toast: '${feed.actor} is back', actor: feed.actor),
+      // Put back after a server restart: news, but not a change.
+      MediaSwapped(:final feed) when feed.reason == 'restore' => Notice(
+          category: NoticeCategory.upNext,
+          log: feed,
+          toast: '${feed.actor} put back what was playing',
+          actor: feed.actor),
       MediaSwapped(:final feed) => Notice(
           category: NoticeCategory.upNext,
           log: feed,

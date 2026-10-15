@@ -419,16 +419,14 @@ class _SessionPlayerState extends State<SessionPlayer> {
     });
   }
 
-  /// The action area's right end: the end-of-media card (Up next, else the
-  /// next episode; it stays up), else the pills, shown only with the
+  /// The action area's right end: the end-of-media card (Up next, else
+  /// the continuation; it stays up), else the pills, shown only with the
   /// controls ([PillGate]).
   Widget _actionSide() {
     final coord = _coord;
     return SignalBuilder(
       builder: (context) {
         final next = coord.nextEpisode.value;
-        final countdown = coord.autoAdvance.value;
-        // Up next goes before the next episode.
         final upNext = coord.queue.countdown.value;
         final finished = coord.serverState.value?.transport == 'finished';
         final pill = coord.nextPromptVisible.value;
@@ -436,18 +434,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
         final showNext = next != null && pill;
         if (upNext != null && finished) {
           return ControlsHoldRegion(hold: _hold, child: UpNextCard(queue: coord.queue, countdown: upNext));
-        }
-        // "Clear" in Up next hides the next episode for this media.
-        if (next != null && (finished || countdown != null) && coord.queue.shownContinuation.value.isNotEmpty) {
-          return ControlsHoldRegion(
-            hold: _hold,
-            child: EndOfEpisodeCard(
-              next: next,
-              countdown: countdown,
-              onPlayNow: coord.playNextEpisode,
-              onCancel: coord.cancelAutoAdvance,
-            ),
-          );
         }
         if (!showNext && skip == null) return const SizedBox.shrink();
         return Column(

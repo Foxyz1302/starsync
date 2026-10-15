@@ -84,15 +84,18 @@ Three suites, run from each package's folder:
   what a player opens for a page (`YtDlpPlay`) and the cookie notes of a
   failed resolve against a stand-in yt-dlp (`cookies_test`, D11),
   the sync engine (clock, gate, presence and grace, correction, end of
-  file), the `PresencePolicy` table, queue model, the library's L1
+  file), the `PresencePolicy` table, queue model and what's next (who
+  puts an item up, the countdown on a fake clock), the library's L1
   (release and folder names, `groupLocal` over a real anime folder's
   names: shows across folders, holes, extras, a movie),
-  relay pieces, updater, logging redaction, watch rule, yt-dlp and
+  relay pieces, updater, logging redaction, the watched rule (time In),
+  yt-dlp and
   Jellyfin client parsing against captured fixtures.
 - `cd packages/server && dart test` (well under a minute): live servers
   on loopback: auth and version refusal, identity, takeover and grace
   (`presence_test` on a fake clock), media and relay byte serving with
-  source drops, Jellyfin relay against a fake, queue, session log,
+  source drops, Jellyfin relay against a fake, queue (and the shared
+  countdown on a fake clock), session log,
   isolate `serve`, sharing (`share_test`: a listener attached and detached
   under the same members and Up next, the host key standing in for the
   password).
@@ -101,7 +104,9 @@ Three suites, run from each package's folder:
   fake AniList (`show_matcher_test`), `media.ref` producers,
   shader list, sound engine with a fake backend, invite addresses, the
   version gate, the media plan's table with the Jellyfin relay rule and
-  the "Waiting for" status (`media_plan_test`)), `singletons_test` (the `.instance` count, see
+  the "Waiting for" status (`media_plan_test`), watch tracking and the
+  device history (`watch_tracker_test`), what continues a file of a
+  local show (`queue_logic_test`)), `singletons_test` (the `.instance` count, see
   ARCHITECTURE "Composition root"; lower its baseline when a use goes) and the real-mpv `*_e2e`
   tests plus `coord_presence`. The whole suite takes a couple of minutes;
   run it only before a restructure step lands, otherwise only the files
@@ -114,7 +119,9 @@ else is offline: Jellyfin and link hosts are local fakes.
 
 Real-mpv tests: `sync_playback_e2e`, `coord_presence` (drops through a
 `FlakyProxy`: a half-open link and return, 10 flaps, `replaced`, `bye`,
-a dead or restarted server), `video_reload_e2e` (a fresh player from the
+a dead or restarted server; a restarted server that came back empty gets
+what played back at its position, a link everyone opens and a file
+passed on, nothing reopened, the watch and Up next carrying on), `video_reload_e2e` (a fresh player from the
 host, the old one retired, leave releases them all),
 `seek_drag_e2e`, `end_of_file_e2e`, `readahead_e2e`, `chapters_mpv_e2e`,
 `ytdl_headers_e2e` (a page through the app's own resolve against a
@@ -126,7 +133,11 @@ own: a guest's file, links passed on or fetched by the server, a late
 source, a source that drops and resumes; a seek past what a slow source
 has sent, timed; a source that drops while a viewer seeks past
 the buffer and another joins: no seek loop, "Waiting for", all resume
-(D6)), `jellyfin_e2e`, `queue_switch_e2e` (times Up next switches
+(D6)), `jellyfin_e2e` (account holders report what they watched, one
+who sat out is not marked watched, the next episode continues for
+everyone), `whats_next_e2e` (a file of a show continued by its next
+episode with the gap said, the server's countdown on both screens, a
+shared cancel, the watch history), `queue_switch_e2e` (times Up next switches
 through the media pipeline against a delayed, rate-capped fake Jellyfin
 and link host: an episode, a direct link, a link passed on and a
 server-fetched one, each prepared and promoted; no mpv "error running
@@ -179,11 +190,11 @@ in [ROADMAP.md](ROADMAP.md)):
 
 | Scenario | Covered today | Missing, added in |
 |---|---|---|
-| Drop and reconnect while sharing a relay | server `flaky_link_test` (blackhole: `gone` with ready, queue item and relay kept, the same member back; reset), `sync_wave_test` (takeover by client id, `replaced`, `stale`), `presence_test` (grace on a fake clock, restart), `relay_test` "the source drops (D6)" (`sourceGone`, buffer served, same `info` continues, another 4002, a second channel 4003, leave ends it); desktop `relay_e2e` "the source drops uncleanly and comes back" (gone past the server's silence, the relay kept, the source re-dials and continues), `coord_presence` (a half-open drop while playing: same member, no reopen, the state kept; 10 flaps: at most one lost/back sound; `replaced` is terminal; a restarted server gets the ready again), `connection_test` (the hello's id, `seq`, caps, `feedAfter`) | |
+| Drop and reconnect while sharing a relay | server `flaky_link_test` (blackhole: `gone` with ready, queue item and relay kept, the same member back; reset), `sync_wave_test` (takeover by client id, `replaced`, `stale`), `presence_test` (grace on a fake clock, restart), `relay_test` "the source drops (D6)" (`sourceGone`, buffer served, same `info` continues, another 4002, a second channel 4003, leave ends it); desktop `relay_e2e` "the source drops uncleanly and comes back" (gone past the server's silence, the relay kept, the source re-dials and continues), `coord_presence` (a half-open drop while playing: same member, no reopen, the state kept; 10 flaps: at most one lost/back sound; `replaced` is terminal; a restarted server gets the ready again, and what played if it came back empty), server `queue_test` (the first restore offer wins), `connection_test` (the hello's id, `seq`, caps, `feedAfter`) | |
 | Join mid-playback | core `sync_engine_test` "D2: joiners" (never changes the transport while playing, at most 15 s while held, joining ends on error or timeout), `presence_test` (the table); server `relay_test` "a late joiner gets its own /r/ URL"; desktop `coord_presence` (the returning member plays on in sync) | |
-| Sit out / Away and back | core `sync_engine_test` "away" (only oneself comes back, through joining), "return" (away survives a drop), `presence_test` (`isAlone`); server `hardening_test` (anyone sets anyone away, `forbidden`); desktop `server_isolate_test` (the host sat out through `presence` on your shared server), `notice_table_test` (the feed actions one-to-one, matched by id; sitting out gets only chat, nudges, "starting now", Up next and the chosen joins and leaves; alone no social sounds), `session_logic_test` (auto sit-out on a fake clock: never alone, a manual away stays), `player_status_test` / `shell_test` (the ready counter leaves away and gone out) | step 6: not tracked as watched (P7) |
+| Sit out / Away and back | core `sync_engine_test` "away" (only oneself comes back, through joining), "return" (away survives a drop), `presence_test` (`isAlone`); server `hardening_test` (anyone sets anyone away, `forbidden`); desktop `server_isolate_test` (the host sat out through `presence` on your shared server), `notice_table_test` (the feed actions one-to-one, matched by id; sitting out gets only chat, nudges, "starting now", Up next and the chosen joins and leaves; alone no social sounds), `session_logic_test` (auto sit-out on a fake clock: never alone, a manual away stays), `player_status_test` / `shell_test` (the ready counter leaves away and gone out); core `watch_session_test`, desktop `watch_tracker_test`, `jellyfin_session_test` "sat out", `jellyfin_e2e` (sat out: not tracked as watched, P7) | |
 | Swap, also while someone is Away or gone | core `sync_engine_test` "swap" (a gone member stays out of the gate, comes back joining), "away" (a swap leaves it away), `queue_test` (a swap takes its item, drops the `auto` one); server `queue_test` (a gone adder's item waits), `relay_test` (a swap drops the buffer); desktop `sync_playback_e2e`, `media_switch_e2e` (no command reaches a player mid-switch) | |
-| Up next advance | core `queue_test` (skip, play request timeout, `auto` and `cancel`); server `queue_test`, `relay_test` "warm relay"; desktop `jellyfin_session_test` (auto-advance swapper, end card countdown), `queue_switch_e2e` (prepared and promoted through the media pipeline) | step 6: the countdown as server state (`state.advance`) |
+| Up next advance | core `queue_test` (skip, play request timeout, `auto` and `cancel`; the countdown: start, follow the first item, seek, cancel, hold for a gone performer or source, skip what nobody can put up), `whats_next_test`; server `queue_test` (the countdown and cancel shared, a skip by the server); `relay_test` "warm relay"; desktop `jellyfin_session_test` (end card), `jellyfin_e2e` and `whats_next_e2e` (the continuation and the countdown end to end), `queue_switch_e2e` (prepared and promoted through the media pipeline) | |
 | Close the app cleanly, incl. `bye` | server `lifecycle_test` (a close keeps the member `gone`, `bye` leaves at once, server stop closes sockets); desktop `server_isolate_test` (stop frees the port; Stop sharing tells guests with 4016 and keeps you and Up next; a friend's server and back keeps yours), `coord_presence` (Stop sharing and your server's stop release their ports; leave sends `bye` and others see "left" at once, leaving for a restart keeps the member `gone`), `video_reload_e2e` (leave releases every player); the close smoke run on the built app (`tool/smoke_windows.ps1` in CI, `tool/smoke_linux.sh` by hand) | |
 
 A test file whose first line is `// restructure: rewrite in step N` pins

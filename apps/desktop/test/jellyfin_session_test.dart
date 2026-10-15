@@ -1,5 +1,3 @@
-// restructure: rewrite in step 6 (What's next + Watch tracking): the
-// "progress" and "episodes" groups (reporting, auto-advance swapper).
 import 'dart:convert';
 
 import 'package:flutter/gestures.dart';
@@ -14,8 +12,9 @@ import 'package:starsync/src/jellyfin/session_media.dart';
 import 'package:starsync/src/jellyfin/track_prefs.dart';
 import 'package:starsync/src/screens/home/media_picker.dart';
 import 'package:starsync/src/screens/session/jellyfin_widgets.dart';
+import 'package:starsync/src/queue/queue_controller.dart' show UpNextCountdown;
+import 'package:starsync/src/queue/queue_ui.dart' show UpNextCard;
 import 'package:starsync/src/session/delivery.dart';
-import 'package:starsync/src/session/session_coordinator.dart' show AutoAdvance;
 import 'package:starsync/src/shell/library_tab.dart' show putUpJellyfinMedia;
 
 import 'jellyfin_accounts_test.dart';
@@ -212,9 +211,12 @@ void main() {
     });
   });
 
+  // The reporter reads the watch the session's tracker feeds (time In,
+  // D3); here the test feeds it.
   group('progress', () {
     late JellyfinAccounts accounts;
     late DateTime now;
+    late WatchSession watch;
     late JellyfinProgressReporter reporter;
     final errors = <Object>[];
     var unauthorized = 0;
@@ -224,16 +226,26 @@ void main() {
       now = DateTime(2026, 1, 1, 20);
       errors.clear();
       unauthorized = 0;
+      watch = WatchSession();
       reporter = JellyfinProgressReporter(
         client: accounts.clientFor(fixtureServerId)!,
         itemId: episodeId,
         source: fixtureSource(),
         playSessionId: playSessionId,
+        watch: watch,
         clock: () => now,
         onError: errors.add,
         onUnauthorized: () => unauthorized++,
       );
     });
+
+    /// One second of the session at wall second [secs]: the watch gets its
+    /// sample (In unless [away]), the reporter its snapshot.
+    void tick(int secs, double pos, {bool paused = false, bool away = false, int? aid, int? sid}) {
+      now = DateTime(2026, 1, 1, 20).add(Duration(seconds: secs));
+      watch.sample(pos, playing: !paused, present: !away, at: now);
+      reporter.update(PlayerSnapshot(position: pos, paused: paused, aid: aid, sid: sid));
+    }
 
     Future<void> idle() => reporter.stop(const PlayerSnapshot(position: 0, paused: true))
         .then((_) {});
@@ -241,10 +253,8 @@ void main() {
     test('Playing, Progress every 10 s and on pause / seek / track change, Stopped', () async {
       // English audio (mpv aid 2 = Jellyfin index 2), English full subs (sid 1 = 3).
       reporter.start(const PlayerSnapshot(position: 0, paused: true, aid: 2, sid: 1));
-      void at(int secs, double pos, {bool paused = false, int? aid = 2, int? sid = 1}) {
-        now = DateTime(2026, 1, 1, 20).add(Duration(seconds: secs));
-        reporter.update(PlayerSnapshot(position: pos, paused: paused, aid: aid, sid: sid));
-      }
+      void at(int secs, double pos, {bool paused = false, int? aid = 2, int? sid = 1}) =>
+          tick(secs, pos, paused: paused, aid: aid, sid: sid);
 
       at(1, 0); // resume -> Progress
       at(2, 1);
@@ -282,15 +292,14 @@ void main() {
         'MediaSourceId': episodeId,
         'PlaySessionId': playSessionId,
         'PositionTicks': 0,
-      }, reason: '11 s watched is a peek: the resume point from before (none) stays');
+      }, reason: '11 s In is a peek: the resume point from before (none) stays');
       expect(errors, isEmpty);
     });
 
     test('watched to the end: Stopped without a position, then marked played', () async {
       reporter.start(const PlayerSnapshot(position: 0, paused: false));
-      for (var i = 1; i <= 1420; i++) {
-        now = DateTime(2026, 1, 1, 20).add(Duration(seconds: i));
-        reporter.update(PlayerSnapshot(position: i.toDouble(), paused: false));
+      for (var i = 0; i <= 1420; i++) {
+        tick(i, i.toDouble());
       }
       await reporter.stop(const PlayerSnapshot(position: 1420, paused: true));
       expect(reports.map((r) => r.path.split('/').last).toList().sublist(reports.length - 3),
@@ -300,6 +309,19 @@ void main() {
       final nearEnd = [for (final r in reports) if (r.path.endsWith('Progress')) r.body]
           .where((b) => b.containsKey('PositionTicks') && b['PositionTicks'] >= 1207 * jellyfinTicksPerSecond);
       expect(nearEnd, isEmpty, reason: 'near the end Progress carries no position: Jellyfin must not decide');
+    });
+
+    test('sat out for most of it: a resume point, never played (P7)', () async {
+      reporter.start(const PlayerSnapshot(position: 0, paused: false));
+      for (var i = 0; i <= 1420; i++) {
+        // In for five minutes, then away while the others watch on.
+        tick(i, i.toDouble(), away: i > 300);
+      }
+      await reporter.stop(const PlayerSnapshot(position: 1420, paused: true));
+      expect(reports.map((r) => r.path.split('/').last), isNot(contains('UserPlayedItems')));
+      final stopped = reports.lastWhere((r) => r.path.endsWith('Stopped')).body;
+      expect(stopped['PositionTicks'], 300 * jellyfinTicksPerSecond,
+          reason: 'it resumes where this viewer stopped watching');
     });
 
     test('played before: a peek never unmarks it', () async {
@@ -374,21 +396,6 @@ void main() {
       final media = mediaForPick(around.next!.pick);
       expect(media.jellyfin!.itemId, nextEpisodeId);
       expect(media.jellyfin!.subtitle, 'Black Summoner · S1E7');
-    });
-
-    test('one auto-advance swapper: the lowest id among members with their own account', () {
-      final members = [
-        member('m10', 'Ann', jf: {fixtureServerId: true}),
-        member('m2', 'Bob', jf: {fixtureServerId: true}),
-        member('m1', 'Guest', jf: {fixtureServerId: false}),
-        member('m0', 'Old', jf: {fixtureServerId: true}, gone: true),
-        member('m3', 'Fresh'),
-      ];
-      expect(autoAdvanceSwapper(members, fixtureServerId), 'm2');
-      expect(autoAdvanceSwapper(members.reversed.toList(), fixtureServerId), 'm2',
-          reason: 'order does not matter: every client agrees');
-      expect(autoAdvanceSwapper(members, 'other-server'), isNull);
-      expect(compareMemberIds('m9', 'm10'), lessThan(0));
     });
 
     test('member route: via server only for relay viewers of the current item', () {
@@ -508,23 +515,36 @@ void main() {
         const JellyfinMedia(
             serverId: fixtureServerId, baseUrl: 'b', itemId: nextEpisodeId, title: 'Battle with the Heroes'));
 
-    testWidgets('end card: Next prompt, countdown with Cancel', (tester) async {
-      var play = 0, cancel = 0;
-      await tester.pumpWidget(scoped(_graph, app(EndOfEpisodeCard(
-          next: next, countdown: null, onPlayNow: () => play++, onCancel: () => cancel++))));
-      expect(find.text('Next: S1E7 Battle with the Heroes'), findsOneWidget);
-      expect(find.byKey(const ValueKey('auto-advance-cancel')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('play-next')));
-      expect(play, 1);
+    testWidgets("end card: the server's countdown with Cancel, Play now; waiting for who puts it up",
+        (tester) async {
+      final queue = _graph.coordinator.queue;
+      const item = QueueItem(
+          id: 'q4',
+          media: HelloMedia(name: 'ep7', size: 0, duration: 0, jellyfin: JellyfinRef(serverId: fixtureServerId, itemId: nextEpisodeId)),
+          how: QueueHow.jellyfin,
+          title: 'Battle with the Heroes',
+          sub: 'S1E7',
+          by: 'm1',
+          byName: 'Ann',
+          auto: true,
+          forMedia: 3);
+      await tester.pumpWidget(scoped(_graph, app(UpNextCard(
+          queue: queue, countdown: const UpNextCountdown(mediaId: 3, item: item, secondsLeft: 7)))));
+      expect(find.text('Next in 7 s'), findsOneWidget);
+      expect(find.text('Battle with the Heroes'), findsOneWidget);
+      expect(find.byKey(const ValueKey('up-next-cancel')), findsOneWidget);
+      expect(find.byKey(const ValueKey('up-next-play-now')), findsOneWidget);
 
-      await tester.pumpWidget(scoped(_graph, app(EndOfEpisodeCard(
-          next: next,
-          countdown: AutoAdvance(mediaId: 3, secondsLeft: 7, next: next, swapper: false),
-          onPlayNow: () => play++,
-          onCancel: () => cancel++))));
-      expect(find.text('Next episode in 7 s'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('auto-advance-cancel')));
-      expect(cancel, 1);
+      // Cancelled (for everyone): Play now only.
+      await tester.pumpWidget(scoped(_graph, app(UpNextCard(
+          queue: queue, countdown: const UpNextCountdown(mediaId: 3, item: item)))));
+      expect(find.text('Next'), findsOneWidget);
+      expect(find.byKey(const ValueKey('up-next-cancel')), findsNothing);
+
+      // Ran out while the one who puts it up is gone: the card says so.
+      await tester.pumpWidget(scoped(_graph, app(UpNextCard(
+          queue: queue, countdown: const UpNextCountdown(mediaId: 3, item: item, secondsLeft: 0, waitingFor: 'Ann')))));
+      expect(find.text('Waiting for Ann'), findsOneWidget);
     });
 
     testWidgets('next-episode pill: faint at rest, lit on hover, click puts it up', (tester) async {

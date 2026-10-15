@@ -1,25 +1,20 @@
-// restructure: rewrite in step 6 (What's next): who performs an item and
-// the janitor become server state.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
+import 'package:starsync/src/files/scanner.dart' show FolderScan;
+import 'package:starsync/src/library/library_store.dart';
+import 'package:starsync/src/library/local_next.dart';
+import 'package:starsync/src/library/show_matcher.dart';
 import 'package:starsync/src/queue/queue_logic.dart';
 
-MemberView member(String id,
-        {bool gone = false, bool away = false, Map<String, bool> jf = const {}, String name = ''}) =>
-    MemberView(
-        id: id,
-        name: name.isEmpty ? id : name,
-        ready: false,
-        inSet: true,
-        buffered: 0,
-        presence: gone ? Presence.gone : away ? Presence.away : Presence.watching,
-        jf: jf);
+import 'show_matcher_test.dart' show FakeAniList;
+
+// What's next on the app: an item's words, and what continues a file of
+// a local show (who puts an item up and the countdown are core's and the
+// server's: core `whats_next_test`, `queue_test`).
 
 QueueItem item(QueueHow how, {String by = 'm2', String byName = 'Bob'}) => QueueItem(
       id: 'q1',
-      media: how == QueueHow.jellyfin
-          ? const HelloMedia(name: 'ep', size: 0, duration: 0, jellyfin: JellyfinRef(serverId: 'S', itemId: 'i'))
-          : const HelloMedia(name: 'x', size: 0, duration: 0, url: 'https://x/y'),
+      media: const HelloMedia(name: 'x', size: 0, duration: 0, url: 'https://x/y'),
       how: how,
       title: 'x',
       by: by,
@@ -27,49 +22,58 @@ QueueItem item(QueueHow how, {String by = 'm2', String byName = 'Bob'}) => Queue
     );
 
 void main() {
-  group('queuePerformer', () {
-    test('a link passed on or a file: only its adder; gone waits for it, left means skipped', () {
-      for (final how in [QueueHow.through, QueueHow.file]) {
-        expect(queuePerformer(item(how), [member('m1'), member('m2', away: true)]).id, 'm2');
-        final waits = queuePerformer(item(how), [member('m1'), member('m2', gone: true)]);
-        expect((waits.id, waits.why), (null, null), reason: 'a gone adder may come back within its grace');
-        final left = queuePerformer(item(how), [member('m1'), member('m3')]);
-        expect(left.id, isNull);
-        expect(left.why, 'Bob left');
-      }
-    });
-
-    test('Jellyfin: the adder with access, else the lowest member with access, else skipped', () {
-      final access = {'S': true};
-      expect(queuePerformer(item(QueueHow.jellyfin), [member('m1', jf: access), member('m2', jf: access)]).id, 'm2');
-      expect(
-          queuePerformer(item(QueueHow.jellyfin), [member('m10', jf: access), member('m3', jf: access), member('m2')])
-              .id,
-          'm3');
-      expect(queuePerformer(item(QueueHow.jellyfin), [member('m3', jf: access, away: true), member('m2')]).why,
-          isNotNull);
-    });
-
-    test('a link everyone opens or the server fetches: the adder, else the lowest active member', () {
-      for (final how in [QueueHow.direct, QueueHow.server]) {
-        expect(queuePerformer(item(how), [member('m1'), member('m2')]).id, 'm2');
-        expect(queuePerformer(item(how), [member('m4'), member('m2', gone: true), member('m3')]).id, 'm3');
-        final nobody = queuePerformer(item(how), [member('m2', away: true)]);
-        expect((nobody.id, nobody.why), (null, null), reason: 'nobody around is not a skip');
-      }
-    });
-  });
-
-  test('the janitor is the lowest member that is not gone', () {
-    expect(queueJanitor([member('m9'), member('m1', gone: true), member('m2')]), 'm2');
-  });
-
   test('labels', () {
     expect(queueHowLabel(item(QueueHow.through), selfId: 'm2'), 'through you');
     expect(queueHowLabel(item(QueueHow.through), selfId: 'm1'), 'through Bob');
     expect(queueHowLabel(item(QueueHow.file), selfId: 'm1'), "Bob's file");
+    expect(queueHowLabel(item(QueueHow.file, byName: ''), selfId: 'm1'), "who added it's file");
     expect(queueClock(3725), '1:02:05');
     expect(queueClock(65), '1:05');
     expect(queueClock(0), '');
+  });
+
+  group('what continues a file of a local show', () {
+    const dir = '/lib/Bleach';
+    String ep(int n) => '$dir/[Judas] Bleach - ${n.toString().padLeft(3, '0')}.mkv';
+    // 064 and 065 are there, 066..107 are not.
+    final files = [for (final n in [63, 64, 65, 108, 109]) LocalFile(ep(n), 1 << 30, DateTime(2026))];
+    late List<String> scanned;
+    late LocalNextFinder finder;
+    late ShowMatcher matcher;
+
+    setUp(() {
+      scanned = [];
+      matcher = ShowMatcher(store: MemoryLibraryStore(), aniList: FakeAniList(), delay: (_) async {});
+      finder = LocalNextFinder(
+          matcher: matcher,
+          scan: (d) async {
+            scanned.add(d);
+            return FolderScan(videos: files, hiddenCount: 0, hiddenExamples: const [], subtitles: const {}, truncated: false);
+          });
+    });
+
+    test('from its own folder when the library has not seen it this run', () async {
+      final next = await finder.nextAfter(ep(64));
+      expect(next!.episode.path, ep(65));
+      expect(next.skipped, isNull);
+      expect(scanned, [dir]);
+    });
+
+    test('numbers skipped on the way are said', () async {
+      final next = await finder.nextAfter(ep(65));
+      expect(next!.episode.path, ep(108));
+      expect(next.skipped!.label, '66–107');
+    });
+
+    test('the last one, or not an episode: nothing continues it', () async {
+      expect(await finder.nextAfter(ep(109)), isNull);
+      expect(await finder.nextAfter('$dir/notes.mkv'), isNull);
+    });
+
+    test('the library the Files page saw is used without a scan', () async {
+      matcher.remember(groupLocal(files, roots: const ['/lib']));
+      expect((await finder.nextAfter(ep(63)))!.episode.path, ep(64));
+      expect(scanned, isEmpty);
+    });
   });
 }

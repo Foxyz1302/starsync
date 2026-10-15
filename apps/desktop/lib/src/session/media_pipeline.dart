@@ -446,6 +446,37 @@ class MediaPipeline {
     await playback.stop();
   }
 
+  /// The same media came back as [r.mediaId] (a restarted server put back
+  /// what played, `swap.restore`) and the player keeps it open: what this
+  /// member passes on is served again (its file, its link, the Jellyfin
+  /// item played with its own account: [ownJellyfin]).
+  void resumeAs(StateBroadcast r, {({String url, Map<String, String> headers})? ownJellyfin}) {
+    renumber(r.mediaId);
+    settledMediaId.value = r.mediaId;
+    final source = plan(r);
+    final name = (r.media?['name'] as String?) ?? '';
+    final queueId = stateMediaRelay(r)?.queueId ?? '';
+    final duration = (r.media?['duration'] as num?)?.toDouble() ?? 0;
+    switch (source) {
+      case OwnFile(:final path):
+        feeder.serve(r.mediaId, RelayMedia.single(FileRelayBytes(File(path))),
+            queueId: queueId, name: name, duration: duration);
+      case OwnLink(:final url, :final origin):
+        feeder.serve(r.mediaId, LinkRelayMedia(Uri.parse(url), ytDlp: origin.ytDlp, probe: origin.probe),
+            queueId: queueId, name: name, duration: duration);
+      case JellyfinSource(:final ref, :final origin):
+        if (origin == null || ownJellyfin == null) return;
+        final media = RelayMedia.single(HttpRelayBytes(Uri.parse(ownJellyfin.url), headers: ownJellyfin.headers));
+        if (jellyfinRelayNeeded(r, ref, session.selfId())) {
+          feeder.serve(r.mediaId, media, queueId: queueId, name: name, duration: duration);
+        } else {
+          _jellyfinFeed = (mediaId: r.mediaId, ref: ref, media: media, queueId: queueId, name: name, duration: duration);
+        }
+      default:
+        break;
+    }
+  }
+
   /// The media was settled here (opened, failed, nothing to open).
   void settled(int mediaId) {
     if (_mediaId == mediaId) settledMediaId.value = mediaId;

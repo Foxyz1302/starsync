@@ -165,7 +165,7 @@ class StandardControls extends StatelessWidget {
     return Row(
       children: [
         const Expanded(child: NowPlayingTitle()),
-        UpNextButton(queue: m.queue, onPlayNextEpisode: m.playNextEpisode, look: UpNextLook.standard, hold: hold),
+        UpNextButton(queue: m.queue, look: UpNextLook.standard, hold: hold),
         SignalBuilder(
           builder: (context) {
             final full = m.fullscreen.value;

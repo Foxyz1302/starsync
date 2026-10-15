@@ -129,6 +129,7 @@ class ShowMatcher {
 
   // Files seen in scans this run, for refs of files put up.
   final _byPath = <String, LocalEpisode>{};
+  final _showByPath = <String, LocalShow>{};
   final _entries = <int, AniListEntry>{};
   final _flows = <int, FlowShow?>{};
   final _jobs = <String, Future<void> Function()>{};
@@ -152,12 +153,21 @@ class ShowMatcher {
 
   // ------------------------------------------------------------- reads
 
-  /// Remembers [library]'s files, so [refForPath] knows their show.
+  /// Remembers [library]'s files, so [refForPath] and [showAt] know
+  /// their show.
   void remember(LocalLibrary library) {
     for (final e in library.files) {
       _byPath[e.path] = e;
     }
+    for (final s in library.shows) {
+      for (final e in s.files) {
+        _showByPath[e.path] = s;
+      }
+    }
   }
+
+  /// The show the file at [path] belongs to, as seen in a scan this run.
+  LocalShow? showAt(String path) => _showByPath[path];
 
   AniListEntry? entry(int id) {
     final known = _entries[id];

@@ -288,8 +288,8 @@ class SyncClient {
     _send(PingMessage(clientMs: _clock().millisecondsSinceEpoch).toJson());
   }
 
-  void sendSwap(HelloMedia media, {String? queueId}) {
-    _send(SwapIntent(media: media, queueId: queueId).toJson());
+  void sendSwap(HelloMedia media, {String? queueId, SwapRestore? restore}) {
+    _send(SwapIntent(media: media, queueId: queueId, restore: restore).toJson());
   }
 
   /// One change to Up next (see [QueueIntent]).

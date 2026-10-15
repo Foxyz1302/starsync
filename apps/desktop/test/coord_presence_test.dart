@@ -362,6 +362,87 @@ void main() {
     }
   });
 
+  test('a restarted server comes back empty: what played is offered back where it was, nothing reopens, '
+      'the watch goes on, Up next comes back', timeout: const Timeout(Duration(minutes: 2)), () async {
+    final first = SyncServer(const AppConfig(port: 0, secret: 'pw', name: 'restart'));
+    await first.start();
+    final port = first.boundPort;
+    final origin = await _origin(await _media());
+    SyncServer? second;
+    try {
+      final alice = await member(port, 'alice');
+      final bob = await member(port, 'bob');
+      await playTogether(alice, [alice, bob], 'http://127.0.0.1:${origin.port}/ep.mkv');
+      expect(await bob.queue.add(LinkMedia('http://127.0.0.1:${origin.port}/next.mkv', anyway: true)), isNull);
+      await _poll(() => alice.queue.items.peek().length == 1, 'Up next has an item');
+      await Future.delayed(const Duration(seconds: 4));
+      final opens = [alice.opens, bob.opens];
+      final watch = alice.watch.session;
+      final watched = watch!.timeIn;
+      expect(watched, greaterThan(2));
+
+      await first.stop();
+      await _poll(() => alice.reconnecting.peek() && bob.reconnecting.peek(), 'both reconnecting');
+      second = SyncServer(AppConfig(port: port, secret: 'pw', name: 'restart'));
+      await second.start();
+      final engine = second.hub.engine;
+      await _poll(() => engine.media?.name == 'ep.mkv', 'the media offered back', timeout: const Duration(seconds: 30));
+      expect(engine.mediaId, 2, reason: 'one offer taken: the server started at 1');
+      expect(engine.positionAt(), greaterThan(4), reason: 'where it was, not the start');
+      await _poll(() => [alice, bob].every((x) => x.playback.player.state.playing && x.serverState.peek()?.transport == 'playing'),
+          'playing again', timeout: const Duration(seconds: 20));
+      expect([alice.opens, bob.opens], opens, reason: 'the players kept it: nothing reopened');
+      await _poll(() => engine.queue.items.length == 1, 'Up next back');
+      expect(engine.queue.items.single.media.url, endsWith('/next.mkv'));
+      // The watch went on through the restart (one watch, still counting).
+      await Future.delayed(const Duration(seconds: 2));
+      expect(identical(alice.watch.session, watch), isTrue);
+      expect(alice.watch.mediaId, engine.mediaId);
+      expect(watch.timeIn, greaterThan(watched + 1));
+    } finally {
+      await second?.stop();
+      await origin.close(force: true);
+    }
+  });
+
+  test('a restarted server comes back empty: the member passing its file on puts it back and feeds it again',
+      timeout: const Timeout(Duration(minutes: 2)), () async {
+    final first = SyncServer(const AppConfig(port: 0, secret: 'pw', name: 'restart'));
+    await first.start();
+    final port = first.boundPort;
+    final file = await _media();
+    SyncServer? second;
+    try {
+      final alice = await member(port, 'alice');
+      final bob = await member(port, 'bob');
+      expect(await alice.swapPicked(FileMedia(file)), isNull);
+      await _poll(() => [alice, bob].every((x) => x.playback.durationSecs > 100), 'both opened it',
+          timeout: const Duration(seconds: 30));
+      for (final x in [alice, bob]) {
+        x.toggleReady();
+      }
+      await _poll(() => [alice, bob].every((x) => x.playback.player.state.playing), 'both playing');
+      await Future.delayed(const Duration(seconds: 3));
+      final aliceOpens = alice.opens;
+
+      await first.stop();
+      await _poll(() => alice.reconnecting.peek() && bob.reconnecting.peek(), 'both reconnecting');
+      second = SyncServer(AppConfig(port: port, secret: 'pw', name: 'restart'));
+      await second.start();
+      final hub = second.hub;
+      await _poll(() => hub.engine.media?.name == 'coord_presence_120s.mkv', 'the file offered back',
+          timeout: const Duration(seconds: 30));
+      expect(hub.engine.positionAt(), greaterThan(3));
+      await _poll(() => hub.relay?.sourceToken == alice.connection.token && alice.relaying.peek(), 'alice feeds it again');
+      await _poll(() => [alice, bob].every((x) => x.playback.player.state.playing && x.serverState.peek()?.transport == 'playing'),
+          'playing again', timeout: const Duration(seconds: 30));
+      expect(alice.opens, aliceOpens, reason: 'her own file stayed open');
+      expect(hub.relay!.buffers.single.bytesToViewers, greaterThan(0), reason: 'bob reads the new relay');
+    } finally {
+      await second?.stop();
+    }
+  });
+
   test('cancel during connect setup aborts without joining', timeout: const Timeout(Duration(minutes: 1)), () async {
     final server = SyncServer(const AppConfig(port: 0, secret: '', name: 'cancel'));
     await server.start();

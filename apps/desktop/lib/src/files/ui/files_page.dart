@@ -9,6 +9,7 @@ import '../../library/show_matcher.dart';
 import '../../shell/motion.dart';
 import '../../platform/ports/folder_access.dart';
 import '../../app/app_graph.dart';
+import '../../watch/watch_history.dart';
 import '../../widgets/app_menu.dart';
 import '../folder_store.dart';
 import '../scanner.dart';
@@ -127,6 +128,7 @@ class _FilesPageState extends State<FilesPage> {
   late final ThumbCache _thumbs =
       widget.thumbnails == null ? ThumbCache.shared : ThumbCache(widget.thumbnails!);
   FolderStore get _store => widget.store ?? FolderStore.instance;
+  WatchHistory get _history => AppScope.of(context).watch.history;
 
   /// Null: Recent; [libraryPlace]: every folder.
   String? _open = _lastOpen;
@@ -325,8 +327,15 @@ class _FilesPageState extends State<FilesPage> {
     thumbs: _thumbs,
   );
 
-  /// The last episode of [show] played here (Recent), by key.
+  /// The last episode of [show] watched here (the watch history: the
+  /// newest one watched to the end), else the last one opened (Recent), by
+  /// key.
   String? _lastPlayed(_Library lib, LocalShow show) {
+    for (final (key, entry) in _history.entries) {
+      if (!entry.played || !key.value.startsWith('file:')) continue;
+      final e = lib.byPath[key.value.substring(5)];
+      if (e != null && e.showKey == show.key && e.kind == LocalKind.episode) return e.key;
+    }
     for (final p in _store.recent.value) {
       final e = lib.byPath[p];
       if (e != null && e.showKey == show.key && e.kind == LocalKind.episode) return e.key;
@@ -342,6 +351,7 @@ class _FilesPageState extends State<FilesPage> {
             final folders = _store.folders.value;
             final recent = _store.recent.value;
             _matcher.revision.value;
+            _history.revision.value;
             final open = _open == null || _open == libraryPlace || folders.contains(_open) ? _open : libraryPlace;
             final showKey = open == null ? null : _openShows[open];
             final main = fadeThrough(

@@ -388,6 +388,22 @@ void main() {
   group('swap', () {
     const ep2 = HelloMedia(name: 'Ep02.mkv', size: 9, duration: 90.0);
 
+    test('a restore (after a restart) puts it back at its position, held; finished stays finished', () {
+      join('a', 'alice');
+      engine.applySwap('a', ep2, restore: const SwapRestore(position: 42.5, transport: 'playing'));
+      expect((engine.positionAt(), engine.transport), (42.5, Transport.held));
+      expect(engine.feed.drain().last.reason, 'restore');
+      engine.applyReady('a', true);
+      buffer('a', 4.0);
+      expect(engine.transport, Transport.playing, reason: 'the gate starts it again');
+      engine.applySwap('a', ep2, restore: const SwapRestore(position: 90, transport: 'finished'));
+      expect((engine.positionAt(), engine.transport), (90.0, Transport.finished));
+      final rt = SwapIntent.fromJson(
+          const SwapIntent(media: ep2, restore: SwapRestore(position: 3, transport: 'playing')).toJson());
+      expect((rt.restore!.position, rt.restore!.transport), (3.0, 'playing'));
+      expect(SwapIntent.fromJson(const SwapIntent(media: ep2).toJson()).restore, isNull);
+    });
+
     test('swap bumps mediaId, holds, keeps ready, fresh members in set', () {
       join('a', 'alice');
       engine.applyReady('a', true);

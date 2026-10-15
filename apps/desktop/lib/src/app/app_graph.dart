@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 
 import '../jellyfin/accounts.dart';
 import '../library/library_store.dart';
+import '../library/local_next.dart';
 import '../library/show_matcher.dart';
 import '../platform/app_log.dart' show appLogDir;
 import '../platform/desktop/desktop_ports.dart';
@@ -20,6 +21,8 @@ import '../sfx/sound_bank.dart';
 import '../sfx/synth_sfx.dart';
 import '../state/connect_prefs.dart';
 import '../state/settings.dart';
+import '../watch/watch_history.dart';
+import '../watch/watch_tracker.dart';
 
 /// The composition root: builds the app's systems once (in `main`), wires
 /// them through their constructors and disposes them. No logic and no
@@ -51,6 +54,9 @@ class AppGraph {
   /// The library's matches (L2): local shows to AniList, pins, offsets.
   final ShowMatcher library;
 
+  /// Watch tracking and the device's watch history (D3).
+  final WatchTracker watch;
+
   AppGraph._({
     required this.ports,
     required this.sfx,
@@ -61,6 +67,7 @@ class AppGraph {
     required this.yourServer,
     required this.navigation,
     required this.library,
+    required this.watch,
   });
 
   /// The desktop app's graph. Tests pass their own [ports], [identity]
@@ -72,12 +79,14 @@ class AppGraph {
     ServerStarter? serverStarter,
     JellyfinAccounts? jellyfin,
     ShowMatcher? library,
+    WatchHistory? history,
   }) {
     final p = ports ?? desktopPorts();
+    final settings = AppSettings.instance;
     final sfx = SynthSfx(
-      volume: () => AppSettings.instance.soundVolume.peek(),
+      volume: () => settings.soundVolume.peek(),
       // A nudge is an explicit poke: it ignores its switch (not the volume).
-      enabled: (k) => k == SfxKind.nudge || !AppSettings.instance.soundsOff.peek().contains(k.name),
+      enabled: (k) => k == SfxKind.nudge || !settings.soundsOff.peek().contains(k.name),
       presetFor: soundPresetFor,
     );
     final notifier = Notifier(
@@ -85,11 +94,19 @@ class AppGraph {
       attention: p.shell.requestAttention,
       system: p.notifications,
       focusWindow: p.shell.focus,
-      prefs: () => AppSettings.instance.notifyPrefs,
+      prefs: () => settings.notifyPrefs,
     );
     final connection = Connection(notify: notifier.notify, identity: identity ?? ClientIdentity.stored());
+    // Device-owned: the watch history box.
+    final watch = WatchTracker(history: history ?? WatchHistory());
     final coordinator = SessionCoordinator(
-        notifier: notifier, connection: connection, ytDlp: p.links, jellyfin: jellyfin, players: p.players);
+        notifier: notifier,
+        connection: connection,
+        ytDlp: p.links,
+        jellyfin: jellyfin,
+        players: p.players,
+        settings: settings,
+        watch: watch);
     // Device-owned: the library box; AnimeFlow's runs when signed in.
     final matcher = library ??
         ShowMatcher(
@@ -97,7 +114,9 @@ class AppGraph {
           aniList: AniListClient(),
           flow: AnimeFlowLookup(AnimeFlowClient.fromAccounts(coordinator.jellyfin)),
         );
-    coordinator.fileRef = matcher.refForPath;
+    coordinator
+      ..fileRef = matcher.refForPath
+      ..nextFile = LocalNextFinder(matcher: matcher, scan: p.folders.scan).nextAfter;
     final forms = ConnectStore();
     final yourServer = YourServer(
       forms: forms,
@@ -137,12 +156,14 @@ class AppGraph {
       yourServer: yourServer,
       navigation: navigation,
       library: matcher,
+      watch: watch,
     );
   }
 
   Future<void> dispose() async {
     navigation.dispose();
     await coordinator.dispose();
+    await watch.dispose();
     await yourServer.stop();
     await sfx.dispose();
   }

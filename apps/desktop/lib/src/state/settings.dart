@@ -59,7 +59,9 @@ class AppSettings {
   final hwdecMode = signal(HwdecMode.auto);
   final hwdecCustom = signal('');
   final autoCheckUpdates = signal(true);
-  /// Jellyfin episodes: at the end, count down 10 s and put up the next.
+  /// An episode this app puts up (Jellyfin, a file of a local show) is
+  /// continued by the next one (Up next's `auto` item, the server's
+  /// countdown at its end).
   final autoAdvance = signal(true);
   /// Session: send ready=false when the video changes (a swap keeps the
   /// server's ready flags).

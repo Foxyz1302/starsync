@@ -50,7 +50,17 @@ class ServerHub {
         engine = engine ?? SyncEngine() {
     this.engine
       ..onGone = _memberGone
-      ..onLeft = _memberLeft;
+      ..onLeft = _memberLeft
+      ..itemSourceGone = _warmSourceGone;
+  }
+
+  /// The warm relay of Up next item [queueId] waits for a member source
+  /// that is `gone`: the countdown holds (see `SyncEngine.whatsNext`).
+  bool _warmSourceGone(String queueId) {
+    final w = warm;
+    if (w == null || w.queueId != queueId || w.fetch || w.sourceToken == null) return false;
+    final src = engine.members[w.sourceToken];
+    return src == null || src.presence == Presence.gone;
   }
 
   static String _randomId() {
@@ -698,8 +708,16 @@ void mountSyncRoute(
               final swap = SwapIntent.fromJson(decoded);
               var parsed = swap.media;
               final queueId = swap.queueId;
+              final restore = swap.restore;
+              // What played before a restart, offered back: the first
+              // offer wins (see `swap.restore`).
+              if (restore != null && hub.engine.media != null) {
+                _hubLog.info('restore by ${hub.who(token)} ignored: media is up already');
+                return;
+              }
               _hubLog.info('swap by ${hub.who(token)}: "${parsed.name}" ${_swapKind(parsed)}'
-                  '${queueId == null ? '' : ' (Up next $queueId)'}');
+                  '${queueId == null ? '' : ' (Up next $queueId)'}'
+                  '${restore == null ? '' : ' (restored at ${restore.position.toStringAsFixed(1)} s, ${restore.transport})'}');
               if (queueId != null) {
                 // Already put up by someone else: nothing to do.
                 if (!hub.engine.queue.has(queueId)) return;
@@ -737,7 +755,7 @@ void mountSyncRoute(
                             : promoted != null
                                 ? hub.promotedRelay(promoted, queueId!)
                                 : hub.relayFor(token, const MediaRelay()));
-                if (media == null || !hub.engine.applySwap(token, media, queueId: queueId)) {
+                if (media == null || !hub.engine.applySwap(token, media, queueId: queueId, restore: restore)) {
                   promoted?.dispose();
                   wsErr(ws, ErrCode.bad, 'bad swap media', forType: 'swap');
                   return;
@@ -785,7 +803,7 @@ void mountSyncRoute(
                     duration: parsed.duration,
                     ref: parsed.ref,
                     relay: promoted != null ? hub.promotedRelay(promoted, queueId!) : hub.relayFor(token, relayReq));
-                if (!hub.engine.applySwap(token, media, queueId: queueId)) {
+                if (!hub.engine.applySwap(token, media, queueId: queueId, restore: restore)) {
                   promoted?.dispose();
                   wsErr(ws, ErrCode.bad, 'bad swap media', forType: 'swap');
                   return;
@@ -827,7 +845,7 @@ void mountSyncRoute(
                 wsErr(ws, ErrCode.bad, 'swap needs a url or the hosted file', forType: 'swap');
                 return;
               }
-              if (!hub.engine.applySwap(token, intent.media, queueId: queueId)) {
+              if (!hub.engine.applySwap(token, intent.media, queueId: queueId, restore: restore)) {
                 wsErr(ws, ErrCode.bad, 'bad swap media', forType: 'swap');
                 return;
               }

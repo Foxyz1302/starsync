@@ -148,7 +148,7 @@ class MinimalControls extends StatelessWidget {
         const Expanded(
           child: Align(alignment: AlignmentDirectional.centerStart, child: NowPlayingTitle()),
         ),
-        UpNextButton(queue: m.queue, onPlayNextEpisode: m.playNextEpisode, look: UpNextLook.minimal, hold: hold),
+        UpNextButton(queue: m.queue, look: UpNextLook.minimal, hold: hold),
         const SizedBox(width: 4),
         SignalBuilder(
           builder: (context) {

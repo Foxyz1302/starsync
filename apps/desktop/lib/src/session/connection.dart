@@ -391,7 +391,8 @@ class Connection {
   void sendReady(bool ready, {String source = 'manual'}) => client.sendReady(ready, source: source);
   void sendForce(String target, bool ready) => client.sendForce(target, ready);
   void sendSeek(double position, {int seq = 0}) => client.sendSeek(position, seq: seq);
-  void sendSwap(HelloMedia media, {String? queueId}) => client.sendSwap(media, queueId: queueId);
+  void sendSwap(HelloMedia media, {String? queueId, SwapRestore? restore}) =>
+      client.sendSwap(media, queueId: queueId, restore: restore);
   void sendQueue(QueueIntent intent) => client.sendQueue(intent);
   void sendReport({
     required double position,

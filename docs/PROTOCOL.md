@@ -98,6 +98,7 @@ yet; the restructure step named next to them does.
 {"t":"swap","media":{"name":"","size":0,"duration":0,"jellyfin":{<ref>}}}
 {"t":"swap","media":{"name":"","size":123,"duration":0,"url":"...","relay":{}}}
 {"t":"swap","media":{...},"queueId":"q3"}         puts up an Up next item
+{"t":"swap","media":{...},"restore":{"position":512.3,"transport":"playing"}}   puts back what played (see below)
 {"t":"report","position":123.1,"buffered":6.2,"eventId":41,
  "duration":1440.5,"mediaId":2,"jf":{"<serverId>":true},"error":"Not allowed (403)"}
 {"t":"ping","c":1767225600000}
@@ -205,6 +206,13 @@ Field notes:
   every member's `ready` and puts every member in the set (`inSet`; who
   counts is up to presence); clients that want to be unready for the new
   media send `ready` themselves (gate: ARCHITECTURE.md, "Ready gate").
+- `swap.restore`: what played before the server restarted, offered back
+  by a member that still holds it (`position` seconds, `transport`
+  `playing`, `held` or `finished` as it was). The server takes it only
+  while it has no media; any later one is ignored, so the first offer
+  wins. It is a swap otherwise (relays, art, the gate), held at
+  `position` (`finished`: at the end), its feed `swap` line with
+  `reason` `restore`.
 - Frames before `welcome` (other than `hello`) are ignored; unparsable or
   unknown frames are ignored silently. Frames
   from a socket another hello took over are ignored.
@@ -282,8 +290,8 @@ Field notes:
   `source` (the same while the relay's source is `gone`), `start` (nobody
   counts for the gate: someone has to ready up). `members`: the member
   ids the gate waits for (empty for `start`).
-- `state.advance` (**reserved**, step 6): the shared countdown to Up next
-  (see "Queue").
+- `state.advance` (omitted when none runs): the shared countdown to Up
+  next's first item at the end of the media (see "Queue").
 - `pong.c` echoes the ping's `c`; `pong.s` is the server's clock in epoch ms
   (the clock `serverTime` uses). With `t3` the local receive time, the offset
   is `s - (c + t3) / 2`, accurate to half the round trip.
@@ -299,9 +307,10 @@ Field notes:
   the actor set itself; `reason` `idle`/`minimised`/`bye`, empty for
   manual), `in` (back from away), `swap`, `seek`, `pause`, `resume`,
   `finished`, `chat`, `rename`, `avatar`, `queue-add`, `queue-remove`,
-  `queue-skip`, `advance-cancel` (`target` the dropped continuation's
-  title, if any), `fetch-fail` (the server could not fetch the current
-  media, `target` its name). `reason` carries `auto`/`manual` for ready.
+  `queue-skip` (actor `server` when the server skipped it), `advance-cancel`
+  (`target` the dropped continuation's title, if any), `fetch-fail` (the server could not fetch the current
+  media, `target` its name). `reason` carries `auto`/`manual` for ready,
+  `restore` for a swap that put back what played (`swap.restore`).
   `rename`: `actor` is the new name, `target` the old one. `avatar`: the
   actor changed only the picture. `queue-*`: `target` is the item's
   title, `reason` (skip) why it could not play (see "Queue").
@@ -623,7 +632,7 @@ state  "queue":[<item>,...], "queuePlay":"q3"
 <item> = {"id":"q3","media":{<swap media>},"how":"direct"|"server"|"through"|"file"|"jellyfin",
           "title":"...","sub":"...","duration":213,"thumb":"<hash>",
           "by":"m2","byName":"Bob","key":"<adder's handle>","auto":true?,"for":2?}
-state  "advance":{"id":"q3","at":"<server time>","secs":10}   reserved
+state  "advance":{"id":"q3","at":"<server time>","secs":10}
 ```
 
 - `add`: `item` without `id`, `by`, `byName`, `thumb` (the server sets
@@ -634,7 +643,8 @@ state  "advance":{"id":"q3","at":"<server time>","secs":10}   reserved
   item is queued. `title` and `sub` are cleaned like media names and cut
   to 200 characters (an empty title becomes the media's name); `duration`
   (seconds, omitted when unknown) is informational. At most 100 items;
-  over that the sender gets `err` `Up next is full (100 items)`.
+  over that the sender gets `err` `Up next is full (100 items)`. With
+  nothing up, the first item is asked for at once (`queuePlay`).
 - `how` and what `media` must carry:
   - `direct`: an http(s) `url`; everyone opens the link.
   - `server`: an http(s) `url` and `relay` `{"fetch":true}`, on a server
@@ -654,7 +664,10 @@ state  "advance":{"id":"q3","at":"<server time>","secs":10}   reserved
 - `play`: moves `id` first and sets `state.queuePlay` to it: a request for
   the member who can put it up to do so now. `skip` is `play` of the
   first item. `queuePlay` ends with any swap, when the item is removed,
-  or after 30 s.
+  or after 30 s. An item asked for that nobody here can put up (its
+  adder left for good, nobody has its Jellyfin server; the rule is
+  core's `queuePerformer`, ARCHITECTURE "What's next") is taken off by the
+  server: feed `queue-skip`, actor `server`, `reason` why.
 - `auto` (with `for`, the `mediaId` it continues): the continuation (the
   next episode). Only for the current media (else `err` `bad`), and only
   from the member who put it up (`media.swapBy`) or, when that member is
@@ -662,12 +675,19 @@ state  "advance":{"id":"q3","at":"<server time>","secs":10}   reserved
   one: a newer one replaces it; it stays after the other items (an `add`
   goes before it, `next` puts an item first, `move` never passes it, it
   does not move itself); any swap that does not put it up drops it.
+  Adding it gives no feed line.
 - `cancel`: drops the `auto` item and the countdown for everyone (feed
   `advance-cancel`); nothing to drop, nothing happens.
-- `state.advance` (**reserved**, step 6): the shared countdown when the
-  media finishes and an item is first; at `at` + `secs` the server would
-  set `queuePlay` to `id`, holding while its performer or source is
-  `gone`. The server never starts one yet; `cancel` and any swap clear it.
+- `state.advance`: the shared countdown, started when the media finishes
+  with an item first (or an item comes first while it is finished);
+  `secs` is 10, `at` its start (server clock). A new first item takes it
+  over with the same end. At `at` + `secs` the server sets `queuePlay` to
+  `id` and the countdown is over; while the member who puts the item up
+  is not around (its adder `gone`, nobody present) or the item's warm
+  relay waits for a `gone` source, it holds, and asks once they are
+  back. A seek (the end of `finished`), an empty queue, `cancel` and any
+  swap clear it; after `cancel` it does not start again for that media,
+  nor again for the item it already asked for.
 - `swap.queueId`: the swap puts that item up and takes it off the queue
   in the same step. A swap naming an item that is no longer queued is
   ignored (someone put it up first). For a `server` item the swap may

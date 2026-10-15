@@ -7,6 +7,7 @@ import 'constants.dart';
 import 'presence.dart';
 import 'protocol.dart';
 import 'queue.dart';
+import 'whats_next.dart';
 
 typedef SyncClock = DateTime Function();
 
@@ -245,9 +246,19 @@ class SyncEngine {
   /// Up next ([EngineQueue]): in `state.queue`, edited by `queue`
   /// messages, taken from by swaps that name an item.
   final EngineQueue queue = EngineQueue();
-  /// The shared countdown to Up next (`state.advance`); reserved: only
-  /// `cancel` touches it today.
+  /// The shared countdown to Up next's first item at the end of the media
+  /// (`state.advance`, see [whatsNext]).
   QueueAdvance? advance;
+  /// The relay of Up next item `queueId` waits for its source, who is
+  /// `gone` (set by the server: the engine does not hold relays). The
+  /// countdown holds while it does.
+  bool Function(String queueId)? itemSourceGone;
+  // The mediaId whose countdown was cancelled (`cancel`): it does not
+  // start again for that media.
+  int _advanceOffFor = -1;
+  // The item last asked to play for the current media: not counted down
+  // again.
+  String? _advancedId;
   /// A member went `gone` (its socket closed or fell silent): the server
   /// closes the socket and marks a relay it serves.
   void Function(EngineMember member)? onGone;
@@ -316,12 +327,97 @@ class SyncEngine {
       at: now);
 
   /// Heartbeat (1 s): silence, joining timeouts, gone notices, grace,
-  /// a stale play request, end of media.
+  /// a stale play request, end of media, what's next.
   void tick() {
     sweepSilent();
     sweepPresence();
     queue.tick(now);
     evaluate();
+    whatsNext();
+  }
+
+  /// What's next (PROTOCOL.md "Queue"), on every tick and queue change:
+  /// - a play request (`queuePlay`) nobody here can serve is skipped
+  ///   (feed `queue-skip`, actor `server`, with why: [queuePerformer]);
+  /// - with nothing up, the first item is asked to play at once;
+  /// - at the end of the media with an item first, the countdown
+  ///   ([advance], [RelayConstants.advanceSecs]) starts (not again for a
+  ///   media whose countdown was cancelled, nor for the item it already
+  ///   asked for); it follows the first item when that changes, keeping
+  ///   its end; it ends with the end of `finished` (a seek), an empty
+  ///   queue, `cancel` or a swap. At its end the first item is asked to
+  ///   play (`queuePlay`) and the countdown is over, unless nobody can
+  ///   put it up (skipped) or its performer is not around or its relay's
+  ///   source is `gone` ([itemSourceGone]): then it holds until they are
+  ///   back.
+  /// Returns whether anything changed.
+  bool whatsNext() {
+    var changed = false;
+    final views = [for (final m in members.values) m.view(inGate: false)];
+    final play = queue.play;
+    if (play != null) {
+      final item = queue.item(play);
+      final why = item == null ? null : queuePerformer(item, views).why;
+      if (item != null && why != null) {
+        _skipQueued(item, why);
+        changed = true;
+      }
+    }
+    final first = queue.items.firstOrNull;
+    if (media == null) {
+      if (first != null && queue.play == null) changed = _due(first, views) || changed;
+      return changed;
+    }
+    var a = advance;
+    if (a != null && (transport != Transport.finished || first == null || queue.play != null)) {
+      advance = a = null;
+      changed = true;
+    }
+    if (transport != Transport.finished || first == null || queue.play != null) return changed;
+    if (a == null) {
+      if (_advanceOffFor == mediaId || _advancedId == first.id) return changed;
+      advance = a = QueueAdvance(id: first.id, at: now, secs: RelayConstants.advanceSecs);
+      changed = true;
+    } else if (a.id != first.id) {
+      advance = a = QueueAdvance(id: first.id, at: a.at, secs: a.secs);
+      changed = true;
+    }
+    if (now.isBefore(a.at.add(Duration(seconds: a.secs)))) return changed;
+    return _due(first, views) || changed;
+  }
+
+  /// [item] should play now: asked for (`queuePlay`), skipped when nobody
+  /// can put it up, or held. Returns whether anything changed.
+  bool _due(QueueItem item, List<MemberView> views) {
+    final perf = queuePerformer(item, views);
+    final why = perf.why;
+    if (why != null) {
+      _skipQueued(item, why);
+      return true;
+    }
+    if (perf.id == null || (itemSourceGone?.call(item.id) ?? false)) return false;
+    queue.requestPlay(item.id, now);
+    advance = null;
+    _advancedId = item.id;
+    return true;
+  }
+
+  void _skipQueued(QueueItem item, String why) {
+    queue.remove(item.id);
+    // The countdown goes on with the next item (asked for on the next
+    // tick when its time is up).
+    final a = advance, first = queue.items.firstOrNull;
+    if (a != null && a.id == item.id) {
+      advance = first == null ? null : QueueAdvance(id: first.id, at: a.at, secs: a.secs);
+    }
+    feed.add(FeedMessage(
+        actor: 'server', actorId: 'server', action: 'queue-skip', target: item.title, reason: why, at: now));
+  }
+
+  /// `cancel` for the current media: no countdown for it any more.
+  void cancelAdvance() {
+    advance = null;
+    _advanceOffFor = mediaId;
   }
 
   /// Joining: loads in the background until its reports hold the media
@@ -617,6 +713,8 @@ class SyncEngine {
     _seekSeq = seq;
     _seekEventId = eventId;
     feed.add(_line('seek', actor: member));
+    // A seek stops the countdown to Up next.
+    advance = null;
     // Seeking back from the end: held, and resumes once the gate passes.
     if (transport == Transport.finished) {
       transport = Transport.held;
@@ -627,11 +725,15 @@ class SyncEngine {
   /// Returns false (no state change) for media with non-finite numbers.
   /// [queueId]: the Up next item this swap puts up; it leaves the queue
   /// (any other swap drops the continuation item, [EngineQueue.auto]).
-  bool applySwap(String actorToken, HelloMedia next, {String? queueId}) {
+  /// [restore]: what played before a restart, put back where it was (the
+  /// server takes it only while nothing is up; see `swap.restore`): held
+  /// at its position (the gate starts it again), or finished.
+  bool applySwap(String actorToken, HelloMedia next, {String? queueId, SwapRestore? restore}) {
     if (!next.duration.isFinite || next.size < 0) return false;
     final actor = members[actorToken];
     queue.swapped(queueId);
     advance = null;
+    _advancedId = null;
     mediaId++;
     media = next;
     swapBy = actorToken;
@@ -648,7 +750,15 @@ class SyncEngine {
       member.inSet = true;
       member.buffered = 0;
     }
-    feed.add(_line('swap', actor: actor));
+    if (restore != null) {
+      final d = next.duration;
+      position = restore.position < 0 ? 0 : (d > 0 && restore.position > d ? d : restore.position);
+      if (restore.transport == 'finished' && d > 0) {
+        position = d;
+        transport = Transport.finished;
+      }
+    }
+    feed.add(_line('swap', actor: actor, reason: restore == null ? '' : 'restore'));
     return true;
   }
 
@@ -715,6 +825,7 @@ class SyncEngine {
         eventId++;
         transport = Transport.finished;
         feed.add(_line('finished'));
+        whatsNext();
         return;
       }
       final blocked =

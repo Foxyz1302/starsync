@@ -70,6 +70,7 @@ void main() {
   });
 
   test('skip asks for the first item; a play request times out', () {
+    engine.applySwap('a', const HelloMedia(name: 'up', size: 0, duration: 0, url: 'https://x/up'));
     expect(engine.applyQueuePlay('a', ''), isFalse, reason: 'nothing queued');
     engine.applyQueueAdd('a', link('one'));
     expect(engine.applyQueuePlay('a', ''), isTrue);
@@ -169,6 +170,134 @@ void main() {
           queueId: id);
       expect(engine.queue.isEmpty, isTrue);
       expect(engine.media!.name, 'Ep02');
+    });
+  });
+
+  group("what's next (the server's countdown)", () {
+    QueueItem file(String title, {String key = 'abcdefgh12'}) => QueueItem(
+        media: HelloMedia(name: title, size: 3, duration: 0), how: QueueHow.file, title: title, key: key);
+
+    // Both keep talking (pings), so nobody goes silent.
+    void after(int secs) {
+      t = t.add(Duration(seconds: secs));
+      engine
+        ..touch('a')
+        ..touch('b')
+        ..tick();
+    }
+
+    /// Ep01 (20 s) up by alice, both ready and buffered, played to its end.
+    void finish() {
+      engine.applySwap('a', const HelloMedia(name: 'Ep01', size: 0, duration: 20, url: 'https://example.com/1'));
+      for (final tok in ['a', 'b']) {
+        engine.applyReady(tok, true);
+        engine.applyReport(tok, 0, 100, engine.eventId, mediaId: engine.mediaId);
+      }
+      expect(engine.transport, Transport.playing);
+      after(21);
+      expect(engine.transport, Transport.finished);
+    }
+
+
+    test('nothing up: the first item is asked for at once', () {
+      engine.applyQueueAdd('b', link('one'));
+      expect(engine.queue.play, idOf('one'));
+      expect(engine.advance, isNull);
+    });
+
+    test('at the end with an item first: 10 s for everyone, then queuePlay', () {
+      finish();
+      expect(engine.advance, isNull, reason: 'nothing queued, nothing counts down');
+      engine.applyQueueAdd('b', link('two'));
+      final a = engine.advance!;
+      expect([a.id, a.secs], [idOf('two'), RelayConstants.advanceSecs]);
+      expect(a.at, t);
+      expect(engine.broadcast().advance!.id, a.id, reason: 'in every state');
+      expect(advanceSecondsLeft(a, t.add(const Duration(milliseconds: 2500))), 8);
+      after(5);
+      expect(engine.queue.play, isNull);
+      // A new first item takes the countdown over, its end unchanged.
+      engine.applyQueueAdd('a', link('first'), next: true);
+      expect([engine.advance!.id, engine.advance!.at], [idOf('first'), a.at]);
+      after(5);
+      expect(engine.queue.play, idOf('first'));
+      expect(engine.advance, isNull, reason: 'over once it asked');
+      after(1);
+      expect(engine.advance, isNull, reason: 'not counted down again while the request waits');
+    });
+
+    test('a seek stops it; cancel stops it for this media and drops the continuation', () {
+      engine.applyQueueAdd('b', link('two'));
+      finish();
+      expect(engine.advance, isNotNull);
+      engine.applySeek('b', 5);
+      expect(engine.advance, isNull);
+      expect(engine.transport, isNot(Transport.finished));
+      // Played to the end again: a fresh countdown.
+      after(16);
+      expect(engine.transport, Transport.finished);
+      expect(engine.advance, isNotNull);
+      engine.applyQueueAdd('a', link('Ep02').copyWith(auto: true, forMedia: engine.mediaId));
+      engine.feed.drain();
+      expect(engine.applyQueueCancel('b'), isTrue);
+      expect(engine.advance, isNull);
+      expect(titles(), ['two']);
+      expect(engine.feed.drain().single.action, 'advance-cancel');
+      after(30);
+      expect((engine.advance, engine.queue.play), (null, null), reason: 'cancelled for this media');
+    });
+
+    test("holds while its performer is gone, plays once they're back", () {
+      engine.applyQueueAdd('b', file('bobs'));
+      finish();
+      engine.applyGone('b');
+      after(12);
+      expect(engine.queue.play, isNull, reason: 'held: only bob has the file');
+      expect(engine.advance, isNotNull);
+      engine.applyTakeover('b', seq: 1);
+      after(1);
+      expect(engine.queue.play, idOf('bobs'));
+    });
+
+    test("holds while the item's relay source is gone", () {
+      var sourceGone = true;
+      engine.itemSourceGone = (_) => sourceGone;
+      engine.applyQueueAdd('b', link('two'));
+      finish();
+      after(12);
+      expect(engine.queue.play, isNull);
+      sourceGone = false;
+      after(1);
+      expect(engine.queue.play, idOf('two'));
+    });
+
+    test('what nobody here can put up is skipped by the server', () {
+      engine.applyQueueAdd('b', file('bobs'));
+      engine.applyQueueAdd('a', link('next'));
+      finish();
+      engine.applyLeave('b', reason: 'bye');
+      engine.feed.drain();
+      after(11);
+      expect(titles(), ['next']);
+      final skip = engine.feed.drain().firstWhere((f) => f.action == 'queue-skip');
+      expect([skip.actorId, skip.target, skip.reason], ['server', 'bobs', 'bob left']);
+      expect(engine.advance!.id, idOf('next'), reason: 'the countdown goes on with the next one');
+      after(1);
+      expect(engine.queue.play, idOf('next'));
+      // A play request for a Jellyfin item nobody here can open: skipped too.
+      engine.applyQueueAdd('a', QueueItem(
+          media: const HelloMedia(name: 'ep', size: 0, duration: 0, jellyfin: JellyfinRef(serverId: 'S', itemId: 'i')),
+          how: QueueHow.jellyfin,
+          title: 'ep'));
+      engine.applyQueuePlay('a', idOf('ep'));
+      expect(titles().contains('ep'), isFalse);
+    });
+
+    test('the continuation adds no feed line', () {
+      engine.applySwap('a', const HelloMedia(name: 'Ep01', size: 0, duration: 0, url: 'https://example.com/1'));
+      engine.feed.drain();
+      engine.applyQueueAdd('a', link('Ep02').copyWith(auto: true, forMedia: engine.mediaId));
+      expect(engine.feed.drain().where((f) => f.action == 'queue-add'), isEmpty);
     });
   });
 }

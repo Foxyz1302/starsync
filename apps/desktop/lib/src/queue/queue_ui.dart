@@ -12,7 +12,6 @@ import '../controls/minimal/style.dart';
 import '../jellyfin/images.dart';
 import '../jellyfin/session_media.dart' show EpisodeLink;
 import '../screens/home/picked_media.dart';
-import '../session/session_coordinator.dart' show autoAdvanceSecs;
 import '../shell/avatar.dart';
 import '../shell/handoff.dart' show handoffHolds;
 import '../shell/library_link.dart' show LinkPreview, cachedLinkPreview;
@@ -38,17 +37,14 @@ enum UpNextLook { standard, minimal }
 /// The next item's picture, "UP NEXT" over its title, a +n count and ⏭
 /// (play it now) in the player's top bar, one flat control among its
 /// buttons; the title opens the queue, resting on it shows a preview card.
-/// Without Up next, the continuation ("NEXT · S1 E8" over its name, ⏭
+/// Without Up next, the continuation ("NEXT · S1E8" over its name, ⏭
 /// plays it). Nothing when both are empty.
 class UpNextButton extends StatefulWidget {
   final QueueController queue;
-  /// Plays the continuation's first episode (the next episode).
-  final VoidCallback onPlayNextEpisode;
   final UpNextLook look;
   /// Held while the preview card is up, so the controls stay up with it.
   final ControlsHold? hold;
-  const UpNextButton(
-      {super.key, required this.queue, required this.onPlayNextEpisode, required this.look, this.hold});
+  const UpNextButton({super.key, required this.queue, required this.look, this.hold});
 
   @override
   State<UpNextButton> createState() => _UpNextButtonState();
@@ -143,9 +139,9 @@ class _UpNextButtonState extends State<UpNextButton> {
     final thumbRadius = _minimal ? MinimalStyle.radius - 4 : 6.0;
     return SignalBuilder(builder: (context) {
       final items = _q.items.value;
-      final cont = _q.shownContinuation.value;
+      final auto = _q.continues.value;
       final open = _q.popoverOpen.value;
-      if (items.isEmpty && cont.isEmpty && !open) {
+      if (items.isEmpty && auto == null && !open) {
         // Gone with the preview up: let go of the controls.
         if (_preview.isShowing) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -155,21 +151,15 @@ class _UpNextButtonState extends State<UpNextButton> {
         return const SizedBox.shrink();
       }
       final queued = items.isNotEmpty;
-      final item = items.firstOrNull;
-      final episode = cont.firstOrNull;
+      final item = items.firstOrNull ?? auto;
       final more = items.length - 1;
       final String kicker;
       final String title;
       final Widget thumb;
       if (item != null) {
-        kicker = 'UP NEXT';
+        kicker = queued ? 'UP NEXT' : (item.sub.isEmpty ? 'NEXT' : 'NEXT  ·  ${item.sub}');
         title = item.title;
         thumb = QueueThumb(queue: _q, item: item, width: thumbWidth, radius: thumbRadius);
-      } else if (episode != null) {
-        final n = episodeNumbers(episode.item);
-        kicker = n == null ? 'NEXT' : 'NEXT  ·  $n';
-        title = episode.item.name;
-        thumb = _EpisodeThumb(queue: _q, episode: episode, width: thumbWidth, radius: thumbRadius);
       } else {
         kicker = 'UP NEXT';
         title = 'Nothing yet';
@@ -246,10 +236,8 @@ class _UpNextButtonState extends State<UpNextButton> {
           ),
         ),
       );
-      final playTip = queued
-          ? 'Play ${item!.title} now  ($playNextKeys)'
-          : 'Play ${episode == null ? '' : episode.label} now  ($playNextKeys)';
-      final VoidCallback? play = queued ? _q.skip : (episode != null ? widget.onPlayNextEpisode : null);
+      final playTip = 'Play ${item?.title ?? ''} now  ($playNextKeys)';
+      final VoidCallback? play = item == null ? null : _q.skip;
       final playButton = _minimal
           ? MinimalButton(key: const ValueKey('up-next-play'), icon: Icons.skip_next_rounded, tooltip: playTip, onPressed: play)
           : Tooltip(
@@ -337,58 +325,33 @@ class UpNextPreview extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(_pad),
           child: SignalBuilder(builder: (context) {
-            final item = queue.items.value.firstOrNull;
-            final episode = queue.shownContinuation.value.firstOrNull;
+            final queued = queue.items.value.firstOrNull;
+            final item = queued ?? queue.continues.value;
             final warm = queue.warm.value;
             const picture = _width - 2 * _pad;
-            if (item != null) {
-              final r = queue.coord.serverState.value;
-              final selfId = queue.coord.connection.memberId;
-              final more = queue.items.value.length - 1;
-              final ready = warm?.id == item.id ? warm!.state : null;
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  QueueThumb(queue: queue, item: item, width: picture, radius: 8),
-                  const SizedBox(height: 10),
-                  Text(more > 0 ? 'UP NEXT  ·  $more MORE AFTER IT' : 'UP NEXT', style: _kicker),
-                  const SizedBox(height: 3),
-                  Text(item.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: _title),
-                  if (item.sub.isNotEmpty)
-                    Text(item.sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: _sub),
-                  const SizedBox(height: 6),
-                  _MetaLine(item: item, members: r?.members ?? const [], selfId: selfId, wrap: true),
-                  _footer(ready, ready == null ? performerNote(queue, item, r) : null),
-                ],
-              );
-            }
-            if (episode == null) return const SizedBox.shrink();
-            final n = episodeNumbers(episode.item);
-            final runtime = episode.pick.runtime;
-            final sub = [episode.item.seriesName ?? '', if (runtime != null) queueClock(runtime.inSeconds.toDouble())]
-                .where((s) => s.isNotEmpty)
-                .join('  ·  ');
-            final overview = episode.item.overview?.trim() ?? '';
-            final ready = warm?.id == 'next:${episode.item.id}' ? warm!.state : null;
+            if (item == null) return const SizedBox.shrink();
+            final r = queue.coord.serverState.value;
+            final selfId = queue.coord.connection.memberId;
+            final more = queue.items.value.length - 1;
+            final ready = warm?.id == item.id ? warm!.state : null;
+            final kicker = queued == null
+                ? 'CONTINUES WITH'
+                : more > 0
+                    ? 'UP NEXT  ·  $more MORE AFTER IT'
+                    : 'UP NEXT';
             return Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _EpisodeThumb(queue: queue, episode: episode, width: picture, radius: 8),
+                QueueThumb(queue: queue, item: item, width: picture, radius: 8),
                 const SizedBox(height: 10),
-                Text(n == null ? 'NEXT EPISODE' : 'NEXT EPISODE  ·  $n', style: _kicker),
+                Text(kicker, style: _kicker),
                 const SizedBox(height: 3),
-                Text(episode.item.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: _title),
-                if (sub.isNotEmpty) Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: _sub),
-                if (overview.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(overview,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white54, fontSize: 12, height: 1.35)),
-                ],
-                _footer(ready, null),
+                Text(item.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: _title),
+                if (item.sub.isNotEmpty) Text(item.sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: _sub),
+                const SizedBox(height: 6),
+                _MetaLine(item: item, members: r?.members ?? const [], selfId: selfId, wrap: true),
+                _footer(ready, ready == null ? performerNote(queue, item, r) : null),
               ],
             );
           }),
@@ -481,8 +444,7 @@ class _EpisodeThumb extends StatelessWidget {
   final QueueController queue;
   final EpisodeLink episode;
   final double width;
-  final double radius;
-  const _EpisodeThumb({required this.queue, required this.episode, required this.width, this.radius = 6});
+  const _EpisodeThumb({required this.queue, required this.episode, required this.width});
 
   @override
   Widget build(BuildContext context) {
@@ -490,7 +452,7 @@ class _EpisodeThumb extends StatelessWidget {
     final client = queue.coord.jellyfin.clientFor(e.pick.serverId);
     final image = e.item.ownImage(JellyfinImageType.primary) ?? e.item.image(JellyfinImageType.thumb);
     return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
+      borderRadius: BorderRadius.circular(6),
       child: SizedBox(
         width: width,
         height: width * 9 / 16,
@@ -838,6 +800,7 @@ class _QueuePanelState extends State<QueuePanel> {
                 ),
                 child: SignalBuilder(builder: (context) {
                   final items = _ordered(_q.items.value);
+                  final auto = _q.continues.value;
                   final cont = _q.shownContinuation.value;
                   final warm = _q.warm.value;
                   final r = _q.coord.serverState.value;
@@ -848,7 +811,7 @@ class _QueuePanelState extends State<QueuePanel> {
                     children: [
                       _header(items.length),
                       Flexible(
-                        child: items.isEmpty && cont.isEmpty && _adding.isEmpty
+                        child: items.isEmpty && auto == null && cont.isEmpty && _adding.isEmpty
                             ? _empty()
                             : ListView(
                                 shrinkWrap: true,
@@ -900,7 +863,9 @@ class _QueuePanelState extends State<QueuePanel> {
                                       adding: a,
                                       onDismiss: () => setState(() => _adding.remove(a)),
                                     ),
-                                  if (cont.isNotEmpty) ..._continuation(cont, items.isEmpty && _adding.isEmpty),
+                                  if (auto != null || cont.isNotEmpty)
+                                    ..._continuation(auto, cont, items.isEmpty && _adding.isEmpty,
+                                        warm: auto != null && warm?.id == auto.id ? warm!.state : null),
                                 ],
                               ),
                       ),
@@ -956,7 +921,9 @@ class _QueuePanelState extends State<QueuePanel> {
         ),
       );
 
-  List<Widget> _continuation(List<EpisodeLink> cont, bool alone) => [
+  /// "Continues with": the continuation everyone shares ([auto], Clear
+  /// drops it for everyone), then the series' further episodes known here.
+  List<Widget> _continuation(QueueItem? auto, List<EpisodeLink> cont, bool alone, {WarmState? warm}) => [
         Padding(
           padding: EdgeInsets.fromLTRB(12, alone ? 0 : 8, 2, 0),
           child: Row(
@@ -964,15 +931,17 @@ class _QueuePanelState extends State<QueuePanel> {
               const Text('CONTINUES WITH',
                   style: TextStyle(color: Colors.white38, fontSize: 11, letterSpacing: 0.8, fontWeight: FontWeight.w600)),
               const Spacer(),
-              TextButton(
-                key: const ValueKey('queue-clear-continuation'),
-                style: TextButton.styleFrom(foregroundColor: Colors.white54, visualDensity: VisualDensity.compact),
-                onPressed: _q.clearContinuation,
-                child: const Text('Clear', style: TextStyle(fontSize: 12)),
-              ),
+              if (auto != null)
+                TextButton(
+                  key: const ValueKey('queue-clear-continuation'),
+                  style: TextButton.styleFrom(foregroundColor: Colors.white54, visualDensity: VisualDensity.compact),
+                  onPressed: _q.clearContinuation,
+                  child: const Text('Clear', style: TextStyle(fontSize: 12)),
+                ),
             ],
           ),
         ),
+        if (auto != null) _ContinuesRow(item: auto, queue: _q, warm: warm),
         for (final e in cont) _ContinuationRow(episode: e, queue: _q),
       ];
 
@@ -1479,6 +1448,76 @@ class _WarmDotState extends State<_WarmDot> with SingleTickerProviderStateMixin 
   }
 }
 
+/// The continuation's row (the `auto` item): greyed like what is not
+/// queued yet, its picture with how ready it is here, ▶ plays it now.
+class _ContinuesRow extends StatefulWidget {
+  final QueueItem item;
+  final QueueController queue;
+  final WarmState? warm;
+  const _ContinuesRow({required this.item, required this.queue, required this.warm});
+
+  @override
+  State<_ContinuesRow> createState() => _ContinuesRowState();
+}
+
+class _ContinuesRowState extends State<_ContinuesRow> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final item = widget.item;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 120),
+        opacity: _hover ? 0.95 : 0.7,
+        child: Container(
+          key: ValueKey('queue-continues-${item.id}'),
+          height: queueRowHeight,
+          padding: const EdgeInsets.only(left: _lead, right: 8),
+          decoration: BoxDecoration(
+            color: _hover ? AppMenuStyle.hover : Colors.transparent,
+            borderRadius: BorderRadius.circular(AppMenuStyle.rowRadius),
+          ),
+          child: Row(
+            children: [
+              Stack(
+                children: [
+                  QueueThumb(queue: widget.queue, item: item, width: _thumb),
+                  if (widget.warm != null) Positioned(top: 3, right: 3, child: _WarmDot(state: widget.warm!)),
+                ],
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: _titleStyle),
+                    Text(
+                      [item.sub, queueClock(item.duration)].where((s) => s.isNotEmpty).join('  ·  '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: _subStyle,
+                    ),
+                  ],
+                ),
+              ),
+              _RoundIcon(
+                key: ValueKey('queue-play-${item.id}'),
+                icon: Icons.play_arrow_rounded,
+                tooltip: 'Play now',
+                onPressed: () => widget.queue.playNow(item.id),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ContinuationRow extends StatefulWidget {
   final EpisodeLink episode;
   final QueueController queue;
@@ -1545,8 +1584,9 @@ class _ContinuationRowState extends State<_ContinuationRow> {
 
 // -------------------------------------------------------------- end card
 
-/// When the media ended with Up next waiting: its picture, title and who
-/// added it, the countdown with Cancel, and Play now.
+/// When the media ended with something next (Up next's first item, else
+/// the continuation): its picture, title and who added it, the server's
+/// countdown with Cancel (for everyone), and Play now.
 class UpNextCard extends StatelessWidget {
   final QueueController queue;
   final UpNextCountdown countdown;
@@ -1559,7 +1599,13 @@ class UpNextCard extends StatelessWidget {
     final left = c.secondsLeft;
     final r = queue.coord.serverState.value;
     final selfId = queue.coord.connection.memberId;
-    final waiting = left == null ? performerNote(queue, item, r) : null;
+    final waitingFor = c.waitingFor;
+    final waiting = waitingFor != null
+        ? 'Waiting for $waitingFor'
+        : left == null || left == 0
+            ? performerNote(queue, item, r)
+            : null;
+    final what = item.auto ? 'Next' : 'Up next';
     return AppGlass(
       key: const ValueKey('up-next-card'),
       child: SizedBox(
@@ -1579,7 +1625,7 @@ class UpNextCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(left == null ? 'Up next' : 'Up next in $left s',
+                        Text(left == null || left == 0 ? what : '$what in $left s',
                             style: const TextStyle(color: Colors.white60, fontSize: 12)),
                         const SizedBox(height: 2),
                         Text(item.title,
@@ -1605,7 +1651,7 @@ class UpNextCard extends StatelessWidget {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(2),
                   child: TweenAnimationBuilder<double>(
-                    tween: Tween(end: left / autoAdvanceSecs),
+                    tween: Tween(end: left / RelayConstants.advanceSecs),
                     duration: const Duration(seconds: 1),
                     builder: (context, v, _) => LinearProgressIndicator(
                       value: v,

@@ -26,13 +26,14 @@ class PlayerSnapshot {
 /// (the session shows one quiet toast) and never touches playback. A 401
 /// calls [onUnauthorized] and ends reporting.
 ///
-/// Watched or not is [WatchSession]'s rule, not Jellyfin's position
-/// percentages (see ARCHITECTURE.md "Jellyfin in a session"): an item
-/// played before ([playedBefore]) stays played (re-marked after Playing,
-/// Progress without a position, Stopped without one, then marked played
-/// again); otherwise Progress leaves the position out past
-/// [_noPositionFrom] of the runtime so Jellyfin cannot mark it played on
-/// its own, and Stopped carries what the rule says.
+/// Watched or not is [WatchSession]'s rule (time In, D3), not Jellyfin's
+/// position percentages (see ARCHITECTURE.md "Watch tracking"): the
+/// session's watch tracker feeds [watch] and this reporter only reads its
+/// verdict. An item played before ([playedBefore]) stays played
+/// (re-marked after Playing, Progress without a position, Stopped without
+/// one, then marked played again); otherwise Progress leaves the position
+/// out past [_noPositionFrom] of the runtime so Jellyfin cannot mark it
+/// played on its own, and Stopped carries what the rule says.
 class JellyfinProgressReporter {
   final JellyfinClient client;
   final String itemId;
@@ -43,7 +44,8 @@ class JellyfinProgressReporter {
   final void Function(Object error)? onError;
   final VoidCallback? onUnauthorized;
 
-  /// What this viewer watched of the item while it was open here.
+  /// What this viewer watched of the item while it was open here (fed by
+  /// the watch tracker, not by this reporter).
   final WatchSession watch;
 
   JellyfinProgressReporter({
@@ -57,12 +59,14 @@ class JellyfinProgressReporter {
     this.onError,
     this.onUnauthorized,
     this.onStopped,
+    WatchSession? watch,
     DateTime Function()? clock,
   })  : _clock = clock ?? DateTime.now,
         _keepPlayed = playedBefore,
         _runtime = (source.runTimeTicks ?? 0) / jellyfinTicksPerSecond,
-        watch = WatchSession(
-            playedBefore: playedBefore, resumeBefore: resumeTicksBefore / jellyfinTicksPerSecond);
+        watch = (watch ?? WatchSession())
+          ..playedBefore = playedBefore
+          ..resumeBefore = resumeTicksBefore / jellyfinTicksPerSecond;
 
   /// Past this share of the runtime Progress carries no position: Jellyfin
   /// marks an item played past its "max resume" share (90 % by default).
@@ -126,7 +130,6 @@ class JellyfinProgressReporter {
     if (_playing || _dead) return;
     _playing = true;
     _mark(s);
-    watch.sample(s.position, playing: !s.paused, at: _clock());
     _send('Playing', () => client.reportPlaybackStart(reportFor(s)));
     if (_keepPlayed) _send('played', () => client.markPlayed(itemId));
   }
@@ -136,7 +139,6 @@ class JellyfinProgressReporter {
     if (!_playing || _dead) return;
     final last = _last, lastAt = _lastAt, sentAt = _lastSentAt;
     final now = _clock();
-    watch.sample(s.position, playing: !s.paused, at: now);
     var due = force || last == null || lastAt == null || sentAt == null;
     if (!due) {
       final elapsed = now.difference(lastAt).inMilliseconds / 1000;
@@ -163,11 +165,10 @@ class JellyfinProgressReporter {
   Future<void> stop(PlayerSnapshot s) {
     if (!_playing || _dead) return _chain;
     _playing = false;
-    watch.sample(s.position, playing: !s.paused, at: _clock());
     final v = _keepPlayed
         ? const WatchVerdict(WatchOutcome.keepPlayed)
         : watch.verdict(runtime: _runtime, endingStart: _endingStart);
-    debugPrint('jellyfin $itemId: $v (covered ${watch.covered.round()} s of ${_runtime.round()} s)');
+    debugPrint('jellyfin $itemId: $v (${watch.credited.round()} s In of ${_runtime.round()} s)');
     final int? ticks;
     switch (v.outcome) {
       case WatchOutcome.played || WatchOutcome.keepPlayed:

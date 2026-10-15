@@ -152,7 +152,7 @@ class SettingsTab extends StatelessWidget {
                   }
                 },
           ),
-          const SettingsPanel(title: 'Jellyfin playback', child: AutoAdvanceSetting()),
+          const SettingsPanel(title: 'Episodes', child: AutoAdvanceSetting()),
           const SettingsPanel(title: 'Jellyfin library', child: HideReReleasesSetting()),
         ];
       case SettingsSection.notifications:

@@ -141,4 +141,110 @@ void main() {
     expect(back.queue.single.by, aliceId, reason: 'the same member: its items are its own again');
     expect(back.members.where((m) => m.name == 'alice'), hasLength(1));
   });
+
+  test('after a restart, the first offer of what played wins; later ones are ignored', () async {
+    final a = await _Peer.join(server.boundPort, 'alice');
+    final b = await _Peer.join(server.boundPort, 'bob');
+    const media = HelloMedia(name: 'v', size: 0, duration: 600, url: 'https://example.com/v.mp4');
+    a.send(const SwapIntent(media: media, restore: SwapRestore(position: 120.5, transport: 'playing')).toJson());
+    final back = await b.state((s) => s.media != null);
+    expect((back.position, back.transport), (120.5, 'held'));
+    final line = await b.until((m) => m['t'] == 'feed' && m['action'] == 'swap');
+    expect(line['reason'], 'restore');
+    b.send(const SwapIntent(
+            media: HelloMedia(name: 'w', size: 0, duration: 0, url: 'https://example.com/w.mp4'),
+            restore: SwapRestore(position: 3))
+        .toJson());
+    a.msgs.clear();
+    final later = await a.state((s) => true);
+    expect((later.mediaId, later.media?['name'], later.position), (back.mediaId, 'v', 120.5));
+  });
+
+  group('the countdown (state.advance), on a fake clock', () {
+    late DateTime t;
+    late SyncServer clocked;
+
+    setUp(() async {
+      t = DateTime.utc(2026, 1, 1);
+      clocked = SyncServer(const AppConfig(port: 0, secret: 's', name: 't'), clock: () => t);
+      await clocked.start();
+    });
+
+    tearDown(() => clocked.stop());
+
+    /// Moves the clock on; everyone keeps talking; one heartbeat.
+    void step(int secs) {
+      t = t.add(Duration(seconds: secs));
+      final engine = clocked.hub.engine;
+      for (final token in engine.members.keys) {
+        engine.touch(token);
+      }
+      clocked.hub.heartbeat();
+    }
+
+    /// Alice and bob in; a 20 s video up, both ready with a full buffer,
+    /// then played to its end; [queue] what bob adds first.
+    Future<(_Peer, _Peer)> playToEnd(List<QueueItem> queue) async {
+      final a = await _Peer.join(clocked.boundPort, 'alice');
+      final b = await _Peer.join(clocked.boundPort, 'bob');
+      a.send(const SwapIntent(media: HelloMedia(name: 'Ep01', size: 0, duration: 20, url: 'https://example.com/1.mp4'))
+          .toJson());
+      final up = await b.state((s) => s.media != null);
+      for (final p in [a, b]) {
+        p.send(const ReadyIntent(ready: true).toJson());
+        p.send(ReportMessage(position: 0, buffered: 100, eventId: up.eventId + 1, mediaId: up.mediaId).toJson());
+      }
+      await b.state((s) => s.transport == 'playing');
+      for (final q in queue) {
+        b.send(QueueIntent.add(q).toJson());
+      }
+      await b.state((s) => s.queue.length == queue.length);
+      step(21);
+      return (a, b);
+    }
+
+    const next = QueueItem(
+        media: HelloMedia(name: 'n', size: 0, duration: 0, url: 'https://example.com/n.mp4'),
+        how: QueueHow.direct,
+        title: 'Next');
+
+    test('everyone sees the same countdown; at its end the first item is asked for', () async {
+      final (a, b) = await playToEnd([next]);
+      final s = await a.state((s) => s.advance != null);
+      expect(s.transport, 'finished');
+      expect([s.advance!.id, s.advance!.secs], [s.queue.first.id, RelayConstants.advanceSecs]);
+      expect((await b.state((s) => s.advance != null)).advance!.at, s.advance!.at);
+      step(5);
+      expect((await a.state((s) => true)).queuePlay, isNull);
+      step(5);
+      final due = await a.state((s) => s.queuePlay != null);
+      expect(due.queuePlay, s.queue.first.id);
+      expect(due.advance, isNull);
+    });
+
+    test('cancel is shared: the countdown stops for everyone', () async {
+      final (a, b) = await playToEnd([next]);
+      await a.state((s) => s.advance != null);
+      b.send(const QueueIntent.cancel().toJson());
+      await a.state((s) => s.advance == null);
+      final line = await a.until((m) => m['t'] == 'feed' && m['action'] == 'advance-cancel');
+      expect(line['actor'], 'bob');
+      step(15);
+      expect(clocked.hub.engine.queue.play, isNull);
+    });
+
+    test('an item whose adder left is skipped by the server, with why', () async {
+      final (a, b) = await playToEnd([
+        const QueueItem(
+            media: HelloMedia(name: 'f.mkv', size: 10, duration: 0), how: QueueHow.file, title: 'Bobs', key: 'k1234567890'),
+      ]);
+      await a.state((s) => s.advance != null);
+      b.send(const ByeMessage().toJson());
+      await a.until((m) => m['t'] == 'feed' && m['action'] == 'leave');
+      step(10);
+      final skip = await a.until((m) => m['t'] == 'feed' && m['action'] == 'queue-skip');
+      expect([skip['actorId'], skip['target'], skip['reason']], ['server', 'Bobs', 'bob left']);
+      expect((await a.state((s) => true)).queue, isEmpty);
+    });
+  });
 }

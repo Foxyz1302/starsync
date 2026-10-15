@@ -224,8 +224,10 @@ Up next, add the folder to Files, or fill Link).
   "Show (Season 3 - Alicization)" gives the season and its name. Shows
   are looked up on AniList for their proper name, cover and banner. A
   show's page has its seasons and episodes and a button for the next one
-  after what you last played here; when episodes are missing on the way
-  it says so ("66–107 aren't in your folders — skip to 108?"). Matched
+  after what you last watched here; when episodes are missing on the way
+  it says so ("66–107 aren't in your folders — skip to 108?"). An
+  episode you put up continues with the next one at its end (see Up
+  next). Matched
   the wrong show? **Wrong show?** searches AniList and pins the right one
   for the show everywhere or just one folder; **Episode numbers…** says
   which episode the first file is when the files count differently. Both
@@ -253,7 +255,7 @@ app open for that. Everyone shares one Up next and anyone can change it; what
 you added stays when you leave.
 
 In the player, Up next sits in the top bar, right of the title: the
-next item's picture and title (or the next episode's). Rest the mouse on
+next item's picture and title (or what continues the episode). Rest the mouse on
 it for a larger preview (who added it, its length, whether it is ready
 to start); ⏭ plays it now, a click opens the queue: drag rows to reorder, hover a
 row to play it now (▶) or remove it (×), right-click it for more (copy its
@@ -261,17 +263,22 @@ title or link, open it in the browser or in Jellyfin). To add, press
 Ctrl+V with the queue open (a copied link or video file goes in at once,
 its title and picture showing while it is checked), type one after
 **+ Add link**, or drop a link or a video on it. When a video ends, a card shows
-what is up next with a 10 s countdown (Cancel stops it on your screen)
-and it plays; `>` or Shift+N plays it at once. Under the queue,
-**Continues with** shows the next episodes of the Jellyfin series
-playing (greyed: they play only once Up next is empty); **+** adds one,
-**Clear** drops them for this episode.
+what is up next with a 10 s countdown everyone sees, and it plays;
+Cancel stops it for everyone, and so does seeking back. `>` or Shift+N
+plays it at once. Under the queue, **Continues with** shows what
+continues the episode playing: its next episode (a Jellyfin episode's,
+or a file's next one in your Files library, saying which numbers it
+skips), added by whoever put the episode up, and greyed because it
+plays only once Up next is empty; **Clear** drops it for everyone. The
+further episodes of a Jellyfin series show under it; **+** adds one.
 
 A link you pass on ("through me") or a file of yours can only be played
 by your app: if you left when its turn comes, it is skipped ("Skipped …:
-Foxyz left"). A Jellyfin item needs someone with an account on that
-server. Up next is kept by the server while it runs; restarting the
-server empties it.
+Foxyz left"). If you are only gone for a moment, the countdown waits for
+you. A Jellyfin item needs someone with an account on that server. Up
+next is kept by the server while it runs. If the server restarts, the
+apps put back what was playing, where it was, and Up next with it (a
+link the server fetched has to be added again).
 
 ## Schedule
 
@@ -473,10 +480,13 @@ Watching:
   directly with their own sign-in. Jellyfin tracks progress per account:
   your watched state, Continue watching and resume point follow what you
   saw (reported on start, every 10 s, on pause, resume, seek and track
-  change, and when it stops). Watched means you actually played most of
-  it (or reached the ending after half), not where you stopped: opening
-  a watched episode to check a moment keeps it watched, and a quick peek
-  leaves no resume point.
+  change, and when it stops). Watched means you were there while most
+  of it played (or while half of it played and it reached the ending),
+  not where it stopped: time you sat out does not count, skipping around
+  does not count, opening a watched episode to check a moment keeps it
+  watched, and a quick peek leaves no resume point. Files and links you
+  watch are remembered the same way on your computer (a show's next
+  episode in Files follows them).
 - Friends without an account watch through the server: whoever put the
   item up passes it on automatically, with their own sign-in, which never
   leaves their computer (only the current item, only to people in the
@@ -493,12 +503,11 @@ Episodes: the ⏮ / ⏭ buttons next to play (or `<` / `>`,
 Shift+P / Shift+N) put up the previous or next episode for everyone. From
 the ending (when it is known, see Skipping above; else in the last two
 minutes) a "Next episode" button floats in the corner while the controls
-are up. When an
-episode ends, a card shows what is next with Play next; with "Play the
-next episode automatically" (Settings, on by default) it counts down 10 s
-first, and Cancel stops it on your screen (seeking back stops it for
-everyone). Anyone with an account can put the next one up; friends
-watching via the host cannot.
+are up. With "Play the next episode automatically" (Settings, on by
+default), the episode you put up continues with the next one: when it
+ends, everyone sees a 10 s countdown, and anyone can cancel it (see Up
+next). Anyone with an account can put the next one up; friends watching
+via the host cannot.
 
 Audio and subtitles: the Audio and Subtitles buttons in the controls pick tracks.
 Your choice is remembered per series (and as a default) and the closest

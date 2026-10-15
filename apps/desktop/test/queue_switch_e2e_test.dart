@@ -14,6 +14,7 @@ import 'package:starsync/src/queue/queue_controller.dart' show WarmState;
 import 'package:starsync/src/screens/home/picked_media.dart';
 import 'package:starsync/src/session/session_coordinator.dart';
 import 'package:starsync/src/session/switch_trace.dart';
+import 'package:starsync/src/state/settings.dart';
 
 // How long an Up next switch takes through the media pipeline, end to
 // end, over real mpv and a real sync server: two Jellyfin account holders
@@ -244,8 +245,14 @@ void main() {
       final hosts = <SessionCoordinator, MediaKitHost>{};
       SessionCoordinator coord(JellyfinAccounts acc) {
         final host = MediaKitHost()..init();
+        // Up next alone: no continuation of the episodes (it would be
+        // queued after the items this test adds and times).
         final c = SessionCoordinator(
-            jellyfin: acc, trackPrefs: TrackPrefs(store: MemoryJellyfinStore()), ytDlp: ytDlp, players: host)
+            jellyfin: acc,
+            trackPrefs: TrackPrefs(store: MemoryJellyfinStore()),
+            ytDlp: ytDlp,
+            players: host,
+            settings: AppSettings()..autoAdvance.value = false)
           ..media.preloadEnabled = preload;
         hosts[c] = host;
         return c;

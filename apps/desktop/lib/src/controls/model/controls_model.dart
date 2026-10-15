@@ -81,13 +81,16 @@ class PlayerControlsModel {
   /// Everything the layout depends on (not the position: that changes
   /// four times a second and only the timeline needs it).
   late final Computed<ControlsSnapshot> snapshot = computed(() {
-    final items = queue.items.value;
+    final queued = queue.items.value.firstOrNull;
+    final continues = queue.continues.value;
     final next = coord.nextEpisode.value;
     return ControlsSnapshot(
       play: play.value,
       previousLabel: coord.previousEpisode.value?.label,
-      nextLabel: items.isNotEmpty ? items.first.title : next?.label,
-      nextIsUpNext: items.isNotEmpty,
+      // Up next's first item, else the next episode, else what continues
+      // this (a file's next episode).
+      nextLabel: queued?.title ?? next?.label ?? continues?.title,
+      nextIsUpNext: queued != null,
       hasChapters: chapters.value.isNotEmpty,
       hasDuration: duration.value > Duration.zero,
       alone: coord.alone.value,
@@ -137,9 +140,10 @@ class PlayerControlsModel {
 
   void pickChapter(MediaChapter c) => coord.seekTo(c.start.inMicroseconds / 1e6);
 
-  /// Up next's first item, else the next episode. False when neither.
+  /// What plays next (Up next's first item, else the continuation), else
+  /// the next episode. False when neither.
   bool next() {
-    if (queue.items.peek().isNotEmpty) {
+    if (queue.head.peek() != null) {
       queue.skip();
       return true;
     }

@@ -78,7 +78,13 @@ brings you back.
 6. **Swap.** Anyone can change the video by pasting another link. Everybody
    stops at 0 and the gate runs again for everyone there; ready flags stay
    as they were (a setting unreadies you instead).
-7. **Leave.** Closing the app or Leave says goodbye and drops you from the
+7. **What's next.** Up next is one list on the server for everyone, and
+   an episode you put up is followed by its next one. When a video ends
+   with something next, the server counts down 10 s on every screen;
+   anyone can cancel it for everyone (a seek stops it too). At zero the
+   app that has what plays next puts it up; if that person is away for a
+   moment, the countdown waits for them.
+8. **Leave.** Closing the app or Leave says goodbye and drops you from the
    server; the others keep going. If you vanish without a goodbye, after 15 s
    of silence you are "gone": you stop blocking but keep your place
    (ready flag, sitting out, Up next items, the video you pass on) for
@@ -89,6 +95,11 @@ There are no roles: anyone can seek, swap, force-ready others, nudge
 anyone, and sit anyone out (the host too). Someone sitting out stays
 connected and in the chat, but their app loads nothing and nobody waits
 for them until they join back.
+
+Watched or not is counted by the time you were there while it played:
+sitting out, skipping around or a quick look never counts as watching.
+Jellyfin hears it for your account; files and links are remembered on
+your computer.
 
 ## Where video comes from
 

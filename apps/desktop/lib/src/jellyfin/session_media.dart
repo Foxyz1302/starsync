@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:sync_relay_core/core.dart';
 
 import '../screens/home/picked_media.dart';
-import '../session/party.dart' show isPresent;
 import 'accounts.dart';
 import 'format.dart';
 import '../library/media_refs.dart';
@@ -340,27 +339,4 @@ Duration nextPromptStart(JellyfinItem? item, Duration runtime, {Duration? ending
   }
   const lead = Duration(minutes: 2);
   return runtime > lead ? runtime - lead : Duration.zero;
-}
-
-/// Who performs the auto-advance swap, so several counting clients do not
-/// swap twice: the lowest member id among members that play the item with
-/// their own account (`jf[serverId] == true`, present: `in` or joining). Only what every
-/// client sees in `state` decides (who put the item up is not in it: a
-/// late joiner never saw that swap), so all clients agree.
-String? autoAdvanceSwapper(List<MemberView> members, String serverId) {
-  final eligible = [
-    for (final m in members)
-      if (isPresent(m) && m.jf[serverId] == true) m
-  ];
-  if (eligible.isEmpty) return null;
-  eligible.sort((a, b) => compareMemberIds(a.id, b.id));
-  return eligible.first.id;
-}
-
-/// "m2" before "m10": numeric suffix order, then plain text.
-int compareMemberIds(String a, String b) {
-  final na = int.tryParse(a.replaceFirst(RegExp(r'^\D+'), ''));
-  final nb = int.tryParse(b.replaceFirst(RegExp(r'^\D+'), ''));
-  if (na != null && nb != null && na != nb) return na.compareTo(nb);
-  return a.compareTo(b);
 }

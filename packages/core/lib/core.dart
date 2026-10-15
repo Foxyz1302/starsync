@@ -16,6 +16,7 @@ export 'src/media_source.dart';
 export 'src/sync_engine.dart';
 export 'src/updater.dart';
 export 'src/watch_session.dart';
+export 'src/whats_next.dart';
 export 'src/jellyfin/client.dart';
 export 'src/jellyfin/client_info.dart';
 export 'src/jellyfin/http.dart';

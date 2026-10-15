@@ -66,8 +66,10 @@ Future<void> main(List<String> args) async {
   } catch (e, st) {
     debugPrint('load connect form failed: $e\n$st');
   }
-  // The library's matches, pins and offsets (device-owned).
+  // The library's matches, pins and offsets, and the watch history
+  // (device-owned).
   unawaited(graph.library.ensureLoaded());
+  unawaited(graph.watch.history.ensureLoaded());
   ports.players.init();
   thumbnailPlayers = ports.players;
   // yt-dlp for web page links: downloaded on first run, kept current.

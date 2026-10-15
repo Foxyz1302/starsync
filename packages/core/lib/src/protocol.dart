@@ -836,16 +836,42 @@ class SeekIntent {
   }
 }
 
+/// `swap.restore`: what played before the server restarted, offered back
+/// by an app that still holds it: at [position] (seconds), [transport]
+/// as it was (`playing`, `held` or `finished`). The server takes it only
+/// while it has no media (the first offer wins, later ones are ignored).
+class SwapRestore {
+  final double position;
+  final String transport;
+  const SwapRestore({required this.position, this.transport = 'held'});
+
+  Map<String, Object?> toJson() => {'position': position, 'transport': transport};
+
+  static SwapRestore? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final t = j['transport'];
+    return SwapRestore(
+        position: finiteDouble(j['position'], 'restore.position'),
+        transport: t == 'playing' || t == 'finished' ? t as String : 'held');
+  }
+}
+
 class SwapIntent {
   final HelloMedia media;
   /// The Up next item this swap puts up (`queue[].id`); the server takes
   /// it out of the queue with the swap, and ignores the swap when it is no
   /// longer queued (someone else put it up first).
   final String? queueId;
-  const SwapIntent({required this.media, this.queueId});
+  /// Puts back what played before a server restart ([SwapRestore]).
+  final SwapRestore? restore;
+  const SwapIntent({required this.media, this.queueId, this.restore});
 
-  Map<String, Object?> toJson() =>
-      {'t': 'swap', 'media': media.toJson(), if (queueId != null) 'queueId': queueId};
+  Map<String, Object?> toJson() => {
+        't': 'swap',
+        'media': media.toJson(),
+        if (queueId != null) 'queueId': queueId,
+        if (restore != null) 'restore': restore!.toJson(),
+      };
 
   factory SwapIntent.fromJson(Map<String, Object?> json) {
     if (json['t'] != 'swap') throw const ProtocolException('not a swap intent');
@@ -854,7 +880,8 @@ class SwapIntent {
     final queueId = json['queueId'];
     return SwapIntent(
         media: HelloMedia.fromJson(Map<String, Object?>.from(media)),
-        queueId: queueId is String && queueId.isNotEmpty ? queueId : null);
+        queueId: queueId is String && queueId.isNotEmpty ? queueId : null,
+        restore: SwapRestore.fromJson(json['restore']));
   }
 }
 
@@ -1147,11 +1174,11 @@ class HoldInfo {
   }
 }
 
-/// `state.advance` (reserved, step 6): the shared countdown to Up next's
-/// first item when the media finishes. At [at] + [secs] (server clock) the
-/// server sets `queuePlay` to [id]; `{"t":"queue","op":"cancel"}` clears
-/// it for everyone. The server parses and broadcasts it but never starts
-/// one yet.
+/// `state.advance`: the shared countdown to Up next's first item when the
+/// media finishes. At [at] + [secs] (server clock) the server sets
+/// `queuePlay` to [id] (holding while its performer or its relay's source
+/// is `gone`); `{"t":"queue","op":"cancel"}` and a seek clear it for
+/// everyone (see `SyncEngine.whatsNext`).
 class QueueAdvance {
   final String id;
   final DateTime at;
@@ -1211,7 +1238,7 @@ class StateBroadcast {
   final String? queuePlay;
   /// Why it is held ([HoldInfo]); null unless `held` with media up.
   final HoldInfo? hold;
-  /// The shared countdown to Up next (reserved, [QueueAdvance]).
+  /// The shared countdown to Up next's first item ([QueueAdvance]); null when none runs.
   final QueueAdvance? advance;
   const StateBroadcast({
     required this.eventId,

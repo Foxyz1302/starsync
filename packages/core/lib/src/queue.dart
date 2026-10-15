@@ -2,9 +2,9 @@ import 'dart:typed_data';
 
 import 'constants.dart';
 import 'errors.dart';
-import 'presence.dart';
 import 'protocol.dart';
 import 'sync_engine.dart';
+import 'whats_next.dart';
 
 // Up next: what plays after the current media, held by the server for
 // everyone (see PROTOCOL.md "Queue"). Wire types, and [EngineQueue], the
@@ -342,14 +342,15 @@ typedef QueueRefusal = ({ErrCode code, String message});
 
 /// The `queue` messages applied to the engine's [SyncEngine.queue], with
 /// their feed lines (`queue-add`, `queue-remove`, `queue-skip`,
-/// `advance-cancel`). Each returns whether the queue changed;
-/// [applyQueueAdd] a refusal for the sender instead (null when added).
+/// `advance-cancel`), then what's next ([SyncEngine.whatsNext]). Each
+/// returns whether the queue changed; [applyQueueAdd] a refusal for the
+/// sender instead (null when added).
 extension EngineQueueOps on SyncEngine {
   /// [item] is already cleaned by the server (see `cleanQueueAdd`). An
   /// [QueueItem.auto] item must continue the current media
   /// ([QueueItem.forMedia] = [SyncEngine.mediaId]) and come from who put
-  /// it up ([SyncEngine.swapBy]) or, when that member is not `in`, from the
-  /// first member who is.
+  /// it up or, when that member is not `in`, from the first member who is
+  /// ([mayAddContinuation]); it adds no feed line (it is no news).
   QueueRefusal? applyQueueAdd(String token, QueueItem item,
       {bool next = false, String? privateUrl, Uint8List? thumb}) {
     final member = members[token];
@@ -358,24 +359,27 @@ extension EngineQueueOps on SyncEngine {
       if (media == null || item.forMedia != mediaId) {
         return (code: ErrCode.bad, message: 'bad message: an auto item must name the current media');
       }
-      final swapper = members[swapBy];
-      final firstIn = members.values.where((m) => m.presence == Presence.watching).firstOrNull;
-      final allowed = token == swapBy ||
-          ((swapper == null || swapper.presence != Presence.watching) && identical(firstIn, member));
-      if (!allowed) {
+      final views = [for (final m in members.values) m.view(inGate: false)];
+      if (!mayAddContinuation(member.id, members[swapBy]?.id, views)) {
         return (code: ErrCode.forbidden, message: 'only who put this media up adds what continues it');
       }
     }
     final added = queue.add(item.copyWith(by: member.id, byName: member.name),
         next: next, privateUrl: privateUrl, thumb: thumb);
     if (added == null) return (code: ErrCode.full, message: 'Up next is full (${RelayConstants.maxQueueItems} items)');
-    feed.add(FeedMessage(
-        actor: member.name, actorId: member.id, action: 'queue-add', target: added.title, at: now));
+    if (!added.auto) {
+      feed.add(FeedMessage(
+          actor: member.name, actorId: member.id, action: 'queue-add', target: added.title, at: now));
+    }
+    whatsNext();
     return null;
   }
 
-  bool applyQueueMove(String token, String id, int to) =>
-      members.containsKey(token) && queue.move(id, to);
+  bool applyQueueMove(String token, String id, int to) {
+    if (!members.containsKey(token) || !queue.move(id, to)) return false;
+    whatsNext();
+    return true;
+  }
 
   /// [why] set: skipped because it cannot play (`queue-skip`, with the
   /// reason), else removed by hand (`queue-remove`).
@@ -391,6 +395,7 @@ extension EngineQueueOps on SyncEngine {
         target: gone.title,
         reason: why,
         at: now));
+    whatsNext();
     return true;
   }
 
@@ -399,17 +404,20 @@ extension EngineQueueOps on SyncEngine {
     if (!members.containsKey(token)) return false;
     final target = id.isEmpty ? (queue.isEmpty ? null : queue.items.first.id) : id;
     if (target == null || queue.play == target) return false;
-    return queue.requestPlay(target, now);
+    if (!queue.requestPlay(target, now)) return false;
+    whatsNext();
+    return true;
   }
 
   /// `cancel`: drops the continuation ([EngineQueue.auto]) and the
-  /// countdown ([SyncEngine.advance]) for everyone (feed `advance-cancel`).
+  /// countdown ([SyncEngine.advance]) for everyone (feed `advance-cancel`);
+  /// no countdown starts again for this media.
   bool applyQueueCancel(String token) {
     final member = members[token];
     if (member == null) return false;
     final dropped = queue.dropAuto();
     final hadAdvance = advance != null;
-    advance = null;
+    cancelAdvance();
     if (dropped == null && !hadAdvance) return false;
     feed.add(FeedMessage(
         actor: member.name, actorId: member.id, action: 'advance-cancel', target: dropped?.title, at: now));

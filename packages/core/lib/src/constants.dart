@@ -92,10 +92,12 @@ abstract class RelayConstants {
   /// Up next (`queue`): at most this many items; a title or second line
   /// is cut to [maxQueueTextLength] characters; an item's picture is
   /// capped like a poster ([maxPosterBytes]). A play request nobody acts on
-  /// ends after [queuePlayTimeoutSecs].
+  /// ends after [queuePlayTimeoutSecs]. The countdown to the first item at
+  /// the end of the media (`state.advance`) runs [advanceSecs].
   static const int maxQueueItems = 100;
   static const int maxQueueTextLength = 200;
   static const int queuePlayTimeoutSecs = 30;
+  static const int advanceSecs = 10;
 
   /// Diagnostics sharing (`/l/...`, ARCHITECTURE "Logging"): a member's
   /// batch carries at most [diagBatchBytes] of lines (gzip on the wire, at

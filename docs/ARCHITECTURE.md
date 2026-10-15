@@ -7,9 +7,9 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 
 | Path | What | Rule |
 |---|---|---|
-| `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client, updater, watched rule (`WatchSession`), the library's L1 (`library/`: release and folder names, `groupLocal`); `testing.dart` (test support for all three packages, not in `core.dart`: `FlakyProxy`) | pure Dart, no Flutter |
+| `packages/core` | protocol messages, sync engine (`SyncEngine`, with what's next: `whatsNext`), constants, config, Range parsing, logging, Jellyfin client, updater, the rules every side reads alike (`whats_next.dart`: who puts an Up next item up, who adds the continuation), watched rule (`WatchSession`), the library's L1 (`library/`: release and folder names, `groupLocal`); `testing.dart` (test support for all three packages, not in `core.dart`: `FlakyProxy`) | pure Dart, no Flutter |
 | `packages/server` | Relic HTTP + WebSocket server (`SyncServer`, `ServerHub`, `Session`, media endpoint, relay buffer, Jellyfin relay), the `serve()` entrypoint, `bin/server.dart` (dedicated server) | pure Dart, no Flutter |
-| `apps/desktop` | Flutter app: UI, `AppGraph` (composition root), `SyncClient`, `Connection`, `SessionCoordinator`, `Navigation`, `YourServer` (`ServerIsolate`), `MediaPipeline` (opening media), `PlaybackController` (the session player's marks and commands), the player host (`PlayerHost`, `MediaKitHost`: the only media_kit user besides the `Video` widget glue), update UI (`UpdateController`) | ships with `starsync-server` |
+| `apps/desktop` | Flutter app: UI, `AppGraph` (composition root), `SyncClient`, `Connection`, `SessionCoordinator`, `Navigation`, `YourServer` (`ServerIsolate`), `MediaPipeline` (opening media), `QueueController` (what's next on this app), `WatchTracker` (watch tracking), `PlaybackController` (the session player's marks and commands), the player host (`PlayerHost`, `MediaKitHost`: the only media_kit user besides the `Video` widget glue), update UI (`UpdateController`) | ships with `starsync-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
 | `deploy` | systemd unit for the dedicated server | |
 | `third_party/media_kit_video` | upstream media_kit_video 2.0.1 with Starsync's patches (`starsync/README.md`: Flutter ≥ 3.38 EGL display on the platform thread, the X11 GLX step-aside) | vendored; re-apply patches on update |
@@ -134,10 +134,13 @@ only stopping sharing sends guests out.
 `AppGraph` (`app/app_graph.dart`) is built once in `main.dart`
 (`AppGraph.build`) and constructs and disposes the app's systems: the
 `Ports` (the player host among them, handed to the coordinator), the sounds (`SynthSfx`), the `Notifier`, the `Connection`, the
-`SessionCoordinator`, the connect form and recents (`ConnectStore`,
-`state/connect_prefs.dart`), `YourServer`, `Navigation` and the library's
-matches (`ShowMatcher`, "Library", whose `refForPath` it hands the
-coordinator as `fileRef`); it wires them
+`SessionCoordinator` (handed the settings and the watch tracker), the
+connect form and recents (`ConnectStore`, `state/connect_prefs.dart`),
+`YourServer`, `Navigation`, the library's matches (`ShowMatcher`,
+"Library", whose `refForPath` it hands the coordinator as `fileRef`, and
+a `LocalNextFinder` over it as `nextFile`) and watch tracking
+(`WatchTracker` with the device's `WatchHistory`, "Watch tracking"); it
+wires them
 through their constructors (and gives `Profile` the form and the push) and
 has no logic or signals of its own. Widgets reach it through one
 `AppScope` InheritedWidget (`AppScope.of(context)`, readable in
@@ -301,11 +304,35 @@ Loosely modeled on Syncplay, with a different readiness design.
   unstable", 9 s is lost (well under the server's 15 s). A welcome that
   resumed needs nothing re-sent; a new member (grace over, server
   restarted) gets the app's ready and sitting out again, and the media
-  opens again only when it changed (or its URL named the old token). The
+  opens again only when it changed (or its URL named the old token). A
+  restarted server that has no media while this app had some gets it
+  back ("Server restart" below). The
   app's own `ping` every second keeps it under the server's silence limit
   even with nothing playing. Cancel during setup aborts the join. Leave
   and closing the window send `bye` (see "App close" under Desktop UI);
   Update and restart does not.
+- **Server restart** (the queue stays in memory, the server stores
+  nothing): a reconnect that finds another `welcome.instance` with no
+  media, while this app had media up, holds it: the player plays on and
+  states without media are not applied (the watch goes on with it, see
+  "Watch tracking"). One app offers it back (`swap.restore`: the media,
+  this player's position, whether it played); who goes first is read
+  from the old state alone, so the apps agree: who put it up or passes
+  it on after 0.5 s, the others by their old member id from 3 s on,
+  1.5 s apart, each only while the server is still empty and only what
+  it can put up again (`_offerBack`: a Jellyfin item with its own
+  account, its file, the link it put up, a link everyone opens). The
+  server keeps the first offer. When it is back as the same media under
+  a new `mediaId`, the player keeps it unless its URL named the old
+  token (a relay viewer's `/r/`, the host's `/m/`: opened again), and
+  what this member passes on is served again (`MediaPipeline.resumeAs`:
+  its file, its link, its Jellyfin item for viewers without an account);
+  the watch, the Jellyfin reports and a cleared continuation carry over.
+  Up next comes back too (`QueueController.restoreAfterRestart`): the
+  app whose offer won adds the links everyone opens and the Jellyfin
+  items, every app its own links passed on and files; a server-fetched
+  link is lost with the old server. Nobody offering within 30 s: the
+  app lets go of it.
 - **Auto sit-out** (`AutoSitOut`, `session/auto_sit_out.dart`; Settings
   "Auto sit-out", `AppSettings.autoSitOut`, default on): not playing and
   no input for 5 min sets this member `away` (reason `idle`); minimised
@@ -1154,29 +1181,19 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   should be) or a track change; Stopped on swap, leave, sitting out, window close
   (bounded to 1.5 s inside the graceful leave) and at `finished`; seeking
   back from the end sends Playing again. Reports carry `PositionTicks`
-  (see "Watched rule"), `IsPaused` and mpv's `aid`/`sid` as Jellyfin
+  (see "Watched on Jellyfin"), `IsPaused` and mpv's `aid`/`sid` as Jellyfin
   stream indices (`jellyfinIndexForMpvTrack`, `SubtitleStreamIndex -1` =
   off). They go out in order on one chain; failures are logged, one quiet
   toast per session, playback is never touched; a 401 marks the account
   expired and ends reporting.
-- **Watched rule** (`WatchSession` in `packages/core/lib/src/watch_session.dart`,
-  pure, meant for any tracker): each opening samples the position every
-  tick; only normal playback counts (forward, at most 2x speed + 1.5 s,
-  samples at most 10 s apart; seeks, skips and pauses add nothing). The
-  union of the watched stretches is the coverage (rewatching counts once),
-  alongside the plain watched time, first / last / furthest position and
-  start / end time. At a stop: played before this opening -> keep played;
-  coverage >= 70 % of the runtime, or the ending reached (furthest position
-  past the Outro / ED start or into the last 15 %, at most 4 min, whichever
-  is earlier) with coverage >= 40 % -> played (someone who watched that
-  far and stops is done with it); coverage under max(2 min, 5 %) (at most a quarter of a short
-  item) -> a peek; else part way, resuming at the last position. An
-  unknown runtime never makes it played. Jellyfin decides played from
+- **Watched on Jellyfin**: the watch of the item is the session's (see
+  "Watch tracking"); `JellyfinProgressReporter` reads its verdict and
+  never samples itself. Jellyfin decides played from
   positions alone (10.11): Playing sets a resumable item unplayed, a
   Progress or Stopped position past "max resume" (90 %) marks it played,
-  one in between keeps a resume point. So `JellyfinProgressReporter`
+  one in between keeps a resume point. So the reporter
   (played before = `UserData.Played` read at open with
-  `/UserItems/{id}/UserData`):
+  `/UserItems/{id}/UserData`, handed to the watch with the resume point):
   - played (before, or by the rule at an earlier stop of this opening):
     `UserPlayedItems` right after Playing, Progress without
     `PositionTicks` (leaves the saved position and played state), Stopped
@@ -1199,22 +1216,10 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   there is one); from `nextPromptStart` (the ending's
   start when one is known, see "Skip rules", else the last 2 min of the
   runtime) a floating "Next episode" pill shows while the controls are up
-  (see "Player controls"). Auto-advance still waits for `finished`. Any
-  of them swaps to that episode's ref with the clicker's account. Guests
-  (relay, blocked) see none of it.
-- **Auto-advance** (Settings, on by default): at `finished` with a known
-  next episode, every client with the setting on shows a 10 s countdown
-  card (Cancel / Play now; without the setting, a "Next" card with Play
-  next). Exactly one client swaps: `autoAdvanceSwapper`, the lowest member
-  id among present members (`in` or `joining`) whose `jf` for that
-  server is true. Only what
-  every client sees in `state` decides it (who put the item up is not in
-  `state`; a late joiner never saw that swap), so clients agree without a
-  wire change. Cancel is local: it stops the countdown on that screen, and
-  the swapper's Cancel stops the swap; a seek by anyone ends `finished`
-  and with it every countdown. Only while Up next is empty and its
-  continuation was not cleared (see "Up next"); a queued item replaces
-  a countdown already running.
+  (see "Player controls"). Any of them puts that episode up with the
+  clicker's account (through Up next when it is the continuation there).
+  At the end, the next episode continues the item by itself (see "What's
+  next"). Guests (relay, blocked) see none of it.
 - **Tracks**: the controls' Audio and Subtitles buttons (or ⚙ when
   hidden from the bar) list `PlaybackController.tracks`. A pick is applied, reported, and saved as a `TrackChoice`
   (language, title, codec, channels, forced/HI: from the Jellyfin streams
@@ -1226,6 +1231,43 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
 - **Change video**: the player's ⚙ → Change video opens the Library tab;
   Link goes through `mediaForLink`, a Jellyfin pick as a ref, a file
   through `ServerIsolate.setFile` (host) or the relay (`swapFile`).
+
+## What's next
+
+One system decides which item plays next and when, and has it prepared
+ahead. The server holds the decision (`SyncEngine.whatsNext`, on every
+tick and queue change; wire in [PROTOCOL.md](PROTOCOL.md), "Queue"); each
+app's `QueueController` (`lib/src/queue/`) adds to the one list, puts an
+item up when the server asks it, shows the countdown and keeps the next
+item ready ("Getting ready" under "Up next").
+
+- **One list**: the queue, Up next's items, then at most one `auto`
+  item, the continuation of the media playing (`for` its `mediaId`).
+  Everyone sees it; any swap that does not put it up drops it.
+- **The continuation**: added by the app that put the media up (or, when
+  that member is not `in`, the first member who is: core's
+  `mayAddContinuation`), when it knows what comes next and the setting
+  "Play the next episode automatically" is on there: a Jellyfin episode
+  played with its own account continues with the series' next one
+  (`adjacentEpisodes`), a file this app put up with the next episode of
+  its show (`LocalNextFinder`: the library the Files page saw this run,
+  else the file's own folder scanned and grouped; `LocalShow.nextAfter`,
+  so the numbers skipped on the way are said in its second line, "skips
+  66–107"). It goes up like any item of its kind (a Jellyfin ref, the
+  adder's file), with a picture, and adds no feed line. A `cancel`
+  (Clear, or Cancel on the end card) drops it for everyone, and no app
+  adds it again for that media (the feed's `advance-cancel`).
+- **When**: with nothing up, the first item is asked for at once. When
+  the media finishes with an item first, the server's countdown starts
+  (`state.advance`, 10 s, the same on every screen); a new first item
+  takes it over with the same end; a seek, `cancel` (shared) or a swap
+  ends it. At its end the server sets `queuePlay` and the app that puts
+  the item up (`queuePerformer`) swaps it in. It holds while that member
+  is `gone` (in its grace) or nobody is around, or while the item's warm
+  relay waits for a `gone` source, and asks once they are back. An item
+  asked for that nobody here can put up (its adder left, nobody has its
+  Jellyfin server) is skipped by the server (feed `queue-skip`, actor
+  `server`), and the countdown goes on with the next one.
 
 ## Up next
 
@@ -1249,27 +1291,28 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   and a file go up as a `key` only: the app keeps the URL or path in
   memory under it and nothing else leaves it. The adder gets a toast
   "Added … to Up next"; everyone else an activity-log line.
-- **Who puts an item up** (`queuePerformer`, from `state` alone, so all
-  clients agree): a link passed on or a file, only its adder (`gone`:
+- **Who puts an item up** (core's `queuePerformer`, from `state` alone,
+  so the server and every app agree): a link passed on or a file, only its adder (`gone`:
   the item waits for it through its grace; left for good: skipped, "Bob
   left"); a Jellyfin item, its adder when it plays that server with its
   own account, else the lowest present member id that does (`jf`, which
   lists every working account; nobody: skipped); a link everyone opens
   or the server fetches, its adder when present, else the lowest present
-  member id (present: `in` or `joining`, `isPresent` in
-  `session/party.dart`). A skip is a `remove` with the reason from the
-  lowest member id that is not `gone` (`queueJanitor`); the feed's
-  `queue-skip` toasts on every screen.
-- **Advancing**: at `finished` with Up next waiting, every screen shows
-  `UpNextCard` (picture, title, who added it and how; with auto-advance on
-  a 10 s countdown with Cancel, else Play now only); at zero the app that
-  puts the first item up does, with a swap naming it (`swap.queueId`), so
+  member id (present: `in` or `joining`, `isPresentMember`). An item asked
+  for that nobody can put up is skipped by the server (see "What's
+  next"); an item whose swap fails is taken off by the app that tried,
+  with the reason; the feed's `queue-skip` toasts on every screen.
+- **Advancing**: at `finished` with something next, every screen shows
+  `UpNextCard` (picture, title, who added it and how; the server's
+  countdown with Cancel while `state.advance` runs, "Waiting for Bob"
+  when it ran out without the one who puts it up, else Play now only;
+  see "What's next"). The app that puts the item up does when the server
+  asks (`state.queuePlay`), with a swap naming it (`swap.queueId`), so
   the server takes it off in the same step and a second swap of it is
-  ignored. Cancel is per screen like the next-episode countdown. "Play
-  now" anywhere (a row, the card, the Up next button's ⏭, `>` / Shift+N) swaps
-  directly from the app that can, else sends `play` and that app reacts
-  to `state.queuePlay`. With nothing up at all, the first item goes up as
-  soon as it is added. The swap goes through the usual paths
+  ignored. "Play now" anywhere (a row, the card, the Up next button's ⏭,
+  `>` / Shift+N) swaps directly from the app that can, else sends `play`
+  and that app reacts to `state.queuePlay`. With nothing up at all, the
+  server asks for the first item as soon as it is added. The swap goes through the usual paths
   (`swapPicked`, `swapJellyfin`; a server-fetched item through
   `swapQueued`, without the URL, its picture as the art), so relays, art
   and refusals work as for any swap; when it fails the item is skipped
@@ -1278,9 +1321,9 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   out comes back first; any other queued swap leaves the swapper out.
 - **Getting ready** (`QueueController._warm`): every app keeps the one
   item that plays next ready all the time, its own copy, so a skip, Play
-  now or the end of the media starts it at once. That is the first Up
-  next item, else, with Up next empty, the first "Continues with"
-  episode (on the apps that have it); while sitting out only the probe
+  now or the end of the media starts it at once. That is the queue's
+  first item (Up next's, else the continuation, which is in the queue
+  for everyone); while sitting out only the probe
   of a link this app puts up (its swap reads it). Per
   kind: a Jellyfin item is resolved with this app's account
   (`resolveJellyfinRef`: PlaybackInfo and the item) into
@@ -1346,19 +1389,19 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   says which): hollow waiting, pulsing getting ready (resolving, then
   preloading its first 4 s), filled ready, red failed (tried again every
   2 minutes).
-- **Continues with**: not queued, computed here like the next episode:
-  with an own-account Jellyfin episode playing, the next three episodes
-  of the series (`/Shows/{id}/Episodes`, cached), greyed under Up next,
-  "+" adds one. "Clear" hides them for the media playing and keeps its
-  next-episode countdown from starting.
+- **Continues with**: the continuation (the `auto` item, see "What's
+  next"), greyed under Up next for everyone, ▶ plays it now; "Clear"
+  drops it for everyone (`cancel`). Under it, on an app playing a
+  Jellyfin episode with its own account, the series' further episodes
+  (`/Shows/{id}/Episodes`, cached), "+" adds one to Up next.
 - **UI**: `UpNextButton` is one of the player's top-bar controls, before
   the window controls (see "Player overlay" under Desktop UI), in the look
   of the skin's buttons (`UpNextLook`); it shows and hides with the controls,
   which an open popover holds up: the first item's picture (`QueueThumb`,
   the rows' faint box and icon until it arrives), "UP NEXT" over its
   title, a +n count, ⏭ plays it now; without Up next the continuation
-  (the episode's image, "NEXT · S1 E8" over its name, ⏭ = next episode);
-  nothing when both are empty. Resting on it 600 ms (popover closed)
+  (its picture, "NEXT · S1E8" (its second line) over its name, ⏭ plays
+  it); nothing when both are empty. Resting on it 600 ms (popover closed)
   shows `UpNextPreview` under it, right edges aligned, in `AppGlass`:
   the picture large, title, second line, "length · added by (avatar)
   name · how" (an episode: series, length, overview), how ready it is
@@ -1464,7 +1507,54 @@ show or movie, `ProviderIds` in the item fields; from a pick's lines,
 title). Swaps (`swapFile`, `swapJellyfin`, `swapLink`) and Up next adds
 carry it; Up next names a file item by it. Consumers: receivers' now
 playing title and episode line (`refTitle`), the swapper's art (by the
-AniList id); later the watch tracking keys on it.
+AniList id), the watch tracking's records (see "Watch tracking").
+
+## Watch tracking
+
+What this device watched, by D3: watched means at least as good as
+Jellyfin's own, and a peek, skipping around or a screenshot visit never
+counts. The truth is split: the device holds its watch history, Jellyfin
+its played state and resume point (reported now), AniList its list
+(later).
+
+- **The rule** (`WatchSession` in `packages/core/lib/src/watch_session.dart`,
+  pure): one per opening, sampled every second with the position,
+  whether the media plays here (the server's transport is playing and
+  this player plays it) and whether this viewer is In (its presence in
+  `state`). The basis is time In: wall time it played while this viewer
+  was `in`. Time sat out (Away), joining, gone, paused or held never
+  counts, nor does a jump (skipping around adds only what was played);
+  samples more than 10 s apart add nothing. A resume carries the earlier
+  watch: when what played starts within 60 s of the resume point, the
+  time up to it counts too. At a stop: played before -> keep played;
+  time In >= 70 % of the runtime, or the ending reached (furthest
+  position while In past the Outro / ED start or into the last 15 %, at
+  most 4 min, whichever is earlier) with time In >= 40 % -> played;
+  under max(2 min, 5 %) (at most a quarter of a short item) -> a peek;
+  else part way, resuming at the last position seen while In. An unknown
+  runtime never makes it played.
+- **The tracker** (`WatchTracker`, `lib/src/watch/`, made by the
+  composition root): one watch per media of the server (`mediaId`), fed
+  by the coordinator's 1 s tick, also through drops (the player goes
+  on); a reconnect or a server restart never ends it while the media
+  plays on (it follows the media to its new `mediaId`, and goes on while
+  a restarted server waits for it, see "Server restart"); another media
+  or leaving closes it, the end of the media
+  (`finished`) records it as it stands (a seek back goes on with it).
+  Each record (`WatchRecord`: key, title, `media.ref`, verdict, time In,
+  runtime) goes out on `records`, where AniList progress will listen,
+  and to the device's history. Keys (`WatchKey`): a file this app put up
+  by its path, a Jellyfin item by its ids, a link this app put up or
+  everyone opens by its URL, else name and size (someone else's file).
+- **The history** (`WatchHistory`, Hive box `watch_history`): files and
+  links only (Jellyfin keeps its own): played, or a resume point (a part
+  way watch of an item played before keeps it played); a peek changes
+  nothing. Played before (and the resume point) for the next opening
+  come from it; the Files page's "Next" follows the newest watched
+  episode of a show, else the last one opened (Recent).
+- **Jellyfin**: the reporter reads the same watch (see "Jellyfin in a
+  session", "Watched on Jellyfin"); Jellyfin's played state and resume
+  point read at open become the watch's "before".
 
 ## App events and platform ports
 
@@ -1811,7 +1901,8 @@ panel) and chat messages (Copy message, and a link in it).
   servers), player (the shared rows below, the controls' choices, custom
   shader files),
   Jellyfin & integrations (linked servers, AnimeFlow's `/me` via
-  `AnimeFlowClient.fromAccounts`, auto-advance), notifications & sounds
+  `AnimeFlowClient.fromAccounts`, "Play the next episode automatically":
+  whether this app adds the continuation, see "What's next"), notifications & sounds
   (what pops up, chat pop-ups, joins and leaves while sitting out or in
   the background), updates, shortcuts, about.
 - **Drop and paste** (`handoff.dart`, `fox_utils`): the shell is one
@@ -1928,8 +2019,8 @@ panel) and chat messages (Copy message, and a link in it).
   16 px from the bottom while they are hidden (`AnimatedPositioned`,
   the shell's `ease` / `easeTime`); in it the status pill centred
   (moved left only as far as it must to clear the right end, never
-  overlapping it) and at the right end the end card (`UpNextCard`, else
-  `EndOfEpisodeCard`, which stay up) or the action pills (Skip OP / ED /
+  overlapping it) and at the right end the end card (`UpNextCard`, which
+  stays up) or the action pills (Skip OP / ED /
   1:30 over Next episode, `PillGate`). The Jellyfin blocked card sits in
   the middle. Two surfaces: cards and popovers use `AppGlass`
   (`widgets/app_menu.dart`, the menus' recipe: blur, dark tint, hairline
@@ -2064,8 +2155,8 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   volume, skip offer, render mode; the shell's fullscreen, chat open and
   unread count) and what they do (`togglePlay` = ready, as Space;
   `seek` through `player.seek`, the user path; `nudge`, `skipForward`,
-  `skip`, `stepChapter`, `pickChapter`; `next` = Up next's first item,
-  else the next episode, `previous`; volume set / step (flashes) / mute;
+  `skip`, `stepChapter`, `pickChapter`; `next` = the queue's first item
+  (Up next's, else the continuation), else the next episode, `previous`; volume set / step (flashes) / mute;
   `pickTrack`, `pickShader`; time display; fullscreen, chat, change
   video, collapse, leave, reload, mark everyone ready, link). The
   player keys call the same actions. `ControlsSnapshot` (computed) is
