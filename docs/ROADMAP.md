@@ -118,9 +118,6 @@ integrations (Jellyfin played/resume, AniList list).
    P30 P31 P32 as a player-host sub-step; D6 client half, D11.
 Not in the restructure: P25 (ops).
 
-- P35 Windows friends can't get dev builds (Linux only), so Windows
-  fixes wait for a release: add a manual CI run that adds the Windows zip
-  to the dev prerelease.
 
 **Agreed since:** the queue stays in memory (no server storage).
 Transport: `wss://` preferred when a server offers it, `ws://` still
@@ -132,7 +129,9 @@ How: incremental on `main` (one system extracted per step, every dev
 build usable), `signals` plus constructor wiring through one composition
 root (no new framework), dev builds `1.3.0-dev.N`, everyone moves to
 proto 16 together at the 1.3.0 release. Rooms are out (no room id).
-Windows dev builds (P35) come in step 0, before proto 16 lands.
+No Windows dev builds: restructure testing happens on Linux; Windows
+friends stay on 1.2.x until the 1.3.0 release (Windows-only fixes like
+P30 reach them then).
 Rename to Starsync everywhere (repo, app id, data folder, updater URL
 migration) is its own step; proposed app id `ru.foxyz.starsync`. Auto
 sit-out: idle or minimised for a while sets you Away, activity sets you
