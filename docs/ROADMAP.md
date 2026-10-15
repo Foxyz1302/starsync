@@ -65,8 +65,10 @@ Problems are numbered; delete a line when its fix ships.
 - P30 Shaders don't work on Windows (our read-back check turns them off;
   dxva2-egl interop error).
 - P31 Software rendering on a friend's Linux; render mode not logged.
-- P32 The app freezes/segfaults on exit (NVIDIA EGL exit handler; mpv
-  players alive at teardown; Windows close order).
+- P32 The app freezes on exit, reported mostly by Windows users and
+  other friends; on the user's Linux/NVIDIA machine it shows only as
+  silent crash dumps after the window is gone (NVIDIA EGL exit handler;
+  mpv players alive at teardown; Windows close order).
 - P33 No volume readout when using the mouse wheel on the video.
 - P34 Local anime folders are opened as plain files (no banner, names,
   next episode, tracking); test library: the user's
