@@ -15,8 +15,9 @@ Problems are numbered; delete a line when its fix ships.
   chat and chosen notifications, system notifications in the background,
   not counted for the gate, ready counter or watched tracking), Gone
   (disconnected, held in a grace period).
-- D2 A joiner during playback holds it until everyone watching is ready,
-  like the start gate.
+- D2 A joiner during playback does not pause it: they load in the
+  background and join already in sync (a pause also works, no pause is
+  cleaner).
 - D3 Watched: at least as good as Jellyfin's own; a peek, skipping around
   or a screenshot visit never counts. Basis: time present while it played.
 - D4 Toasts above the control bar; toasts for joins/leaves, queue adds
@@ -34,8 +35,9 @@ Problems are numbered; delete a line when its fix ships.
 - D11 Login-only sites: error texts say which cookies were used.
 
 **Problems:**
-- P1 A reconnect makes you a new member: the relay, ready, sitting out and
-  your queue items are lost (log: Hoff m23 → m24 had to put ep 06 up again).
+- P1 A reconnect makes you a new member: the relay, ready, sitting out,
+  your queue items and even your avatar are gone (log: Hoff m23 → m24 had
+  to put ep 06 up again).
 - P2 Joining a relay whose source left serves broken leftovers; mpv loops
   on failed seeks; nobody is told the source is gone.
 - P3 A joiner during playback lands mid-scene (see D2).
@@ -116,15 +118,26 @@ integrations (Jellyfin played/resume, AniList list).
    P30 P31 P32 as a player-host sub-step; D6 client half, D11.
 Not in the restructure: P25 (ops).
 
-**Open decisions** (raised by the review):
-- Queue survival: does your own server keep the queue across an app
-  restart (conflicts with the "No server storage" decision)?
-- Transport for Android later: plain `ws://` needs a cleartext exception
-  on Android 9+; `wss://` behind a proxy changes the Invite format.
-- Auto-Away: suggest Away after a long minimise (client intent), or only
-  by hand?
-- Hold and grace lengths: D2 hold bound (e.g. 15 s), grace ~10 min; a
-  source in grace keeps its relay buffer.
+- P35 Windows friends can't get dev builds (Linux only), so Windows
+  fixes wait for a release: add a manual CI run that adds the Windows zip
+  to the dev prerelease.
+
+**Agreed since:** the queue stays in memory (no server storage). Auto
+sit-out: idle or minimised for a while sets you Away, activity sets you
+In; it replaces the 10-minute auto-unready.
+
+**Open decisions:**
+- Rooms: one server's users form several watch groups. Not built yet,
+  but proto 16 carries a room id: identity per server; presence, queue,
+  relay and chat per room.
+- Starting together: today someone has to stay unready so others can
+  join first. Ideas: a short "starting in 30 s, ready up" countdown;
+  waiting for everyone from the last session.
+- Transport: `wss://` everywhere, each server with its own self-signed
+  certificate whose fingerprint travels in the invite and is pinned
+  (no certificate authority needed, works for home and LAN servers and is
+  allowed on Android); a trusted certificate optional for a VPS domain.
+- Grace length: ~10 min; a source in grace keeps its relay buffer.
 - Platform decision: "Desktop + mpv only" becomes "mpv only, desktop
   first" if Android goes ahead.
 - D10 was dropped on purpose (preload/warm relay/fresh player are folded
