@@ -69,7 +69,8 @@ Problems are numbered; delete a line when its fix ships.
   players alive at teardown; Windows close order).
 - P33 No volume readout when using the mouse wheel on the video.
 - P34 Local anime folders are opened as plain files (no banner, names,
-  next episode, tracking).
+  next episode, tracking); test library: the user's
+  `/mnt/torrents/Torrents/Binux/` (several shows and a movie).
 
 **Restructure** (in order): identity + presence (D1 D2 D5 D6); notifier
 (toasts, sounds on `SoundEngine`, system notifications, activity log);
