@@ -44,6 +44,10 @@ abstract class RelayConstants {
 
   static const int stateHeartbeatSecs = 1;
   static const int pingIntervalSecs = 5;
+  /// Server liveness defaults ([Liveness]): a member silent this long is
+  /// stale, then removed.
+  static const int staleAfterSecs = 15;
+  static const int dropAfterSecs = 30;
 
   // Base64-char count of the avatar string, enforced at hello and
   // profile. 256 KiB leaves wide headroom over any 128x128 pipeline PNG

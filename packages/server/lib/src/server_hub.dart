@@ -519,7 +519,7 @@ void mountSyncRoute(
         ? '${req.url.host.contains(':') ? '[${req.url.host}]' : req.url.host}:${req.url.port}'
         : (req.url.host.contains(':') ? '[${req.url.host}]' : req.url.host);
     return WebSocketUpgrade((final ws) async {
-      ws.pingInterval = Duration(seconds: RelayConstants.pingIntervalSecs);
+      ws.pingInterval = hub.engine.liveness.pingInterval;
       final firstText = Completer<String>();
       String? token;
       var welcomed = false;
@@ -534,7 +534,7 @@ void mountSyncRoute(
       void handleIntent(String text) {
         final session = hub.session;
         final viewer = token == null ? null : session.tokens[token];
-        viewer?.touch();
+        viewer?.touch(hub.engine.now);
         Map<String, Object?> decoded;
         try {
           final parsed = jsonDecode(text);

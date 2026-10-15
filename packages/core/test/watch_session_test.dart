@@ -1,4 +1,4 @@
-// restructure: rewrite in step 5 (D3: the watched rule moves from position coverage to time present)
+// restructure: rewrite in step 6 (D3: the watched rule moves from position coverage to time present)
 import 'package:sync_relay_core/core.dart';
 import 'package:test/test.dart';
 

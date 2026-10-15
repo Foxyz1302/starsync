@@ -2,7 +2,7 @@
 // groups "sitting out", "membership + gate", "presence gate", "stale ready
 // rejoins" and the member rules of "swap" pin today's presence (out flag,
 // stale sweep, leave on drop); presence In/Away/Gone with grace replaces
-// them. The clock, correction, end-of-file and wire groups stay.
+// them ("liveness on the engine clock" then steps through the grace). The clock, correction, end-of-file and wire groups stay.
 import 'dart:convert';
 
 import 'package:sync_relay_core/core.dart';
@@ -615,6 +615,35 @@ void main() {
       join('b', 'bob');
       buffer('b', 6.0);
       expect(engine.members['b']!.inSet, isFalse);
+    });
+  });
+
+  group('liveness on the engine clock', () {
+    test('stale and drop follow Liveness and the fake clock, not wall time', () {
+      engine = SyncEngine(
+          clock: clock,
+          liveness: const Liveness(staleAfter: Duration(minutes: 5), dropAfter: Duration(minutes: 10)));
+      join('a', 'alice');
+      engine.applyReady('a', true);
+      engine.feed.drain();
+      t = t.add(const Duration(minutes: 5));
+      engine.tick();
+      expect(engine.members['a']!.inSet, isTrue, reason: 'not past staleAfter yet');
+      t = t.add(const Duration(seconds: 1));
+      engine.tick();
+      expect(engine.members['a']!.inSet, isFalse);
+      expect(engine.feed.drain().map((f) => f.action), ['stale']);
+      t = t.add(const Duration(minutes: 4, seconds: 59));
+      expect(engine.sweepDropped(), isEmpty, reason: 'exactly dropAfter is not past it');
+      t = t.add(const Duration(seconds: 1));
+      expect(engine.sweepDropped(), ['a']);
+      expect(engine.feed.drain().map((f) => f.action), ['leave']);
+    });
+
+    test('defaults are today\'s 15 s / 30 s', () {
+      expect(engine.staleAfter, const Duration(seconds: 15));
+      expect(engine.dropAfter, const Duration(seconds: 30));
+      expect(engine.liveness.pingInterval, const Duration(seconds: 5));
     });
   });
 

@@ -85,17 +85,12 @@ the automatic continuation and countdown, relay state), the device
 (client id, library and folders, match corrections, watch history,
 settings, notification prefs, what this app is sourcing) and the
 integrations (Jellyfin played/resume, AniList list).
-0. Safety net and seams, no visible change. Left: a `noticeFor` table
-   test; a flaky-link test harness (pure-Dart TCP proxy: pass, blackhole,
-   delay, reset, late frame); grace and silence through
-   the engine clock; an env override for client id and data folder (two
-   instances on one machine); the scenario list in DEVELOPMENT "Tests".
-   (Done: tests audited and tagged, P27, AppEvent + Notifier, ports,
-   protocol 16 planned, Connection extracted from the coordinator.)
 R. Rename (before step 1, so dev builds install side by side with 1.2.x):
    app id `dev.foxyz.starsync`, binary, Windows company `foxyz`; Hive out
    of `~/Documents` into the app's support folder, copied not moved;
-   a settings schema version with ordered migrations; an `AppDirs` port;
+   a settings schema version with ordered migrations; `AppDirs` (today
+   Hive and logs, and `STARSYNC_PROFILE`) becomes a port and the default
+   moves next to the profiles;
    the 1.3.0 archive still contains `watch_together(.exe)` so 1.2.x's
    self-update restart works; the old `.desktop` entry removed; the
    manifest kept at the old URL; VPS `ExecStart`/`update.sh` paths.
@@ -156,9 +151,9 @@ Not in the restructure: P25 (ops).
 **Agreed since:** the queue stays in memory (no server storage).
 Transport: `wss://` preferred when a server offers it, `ws://` still
 allowed (a cleartext exception on Android); it only carries sync.
-Tests: many pin behaviour the restructure drops; step 0 audits them
-(delete what no longer fits, keep a few scenario tests for the core
-flows). Open questions below are decided during the restructure.
+Tests: many pin behaviour the restructure drops; each is tagged with the
+step that rewrites it, and the safety-net scenarios (DEVELOPMENT "Tests")
+must keep passing through every step. Open questions below are decided during the restructure.
 How: incremental on `main` (one system extracted per step, every dev
 build usable), `signals` plus constructor wiring through one composition
 root (no new framework), dev builds `1.3.0-dev.N`, everyone moves to

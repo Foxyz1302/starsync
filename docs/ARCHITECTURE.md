@@ -7,7 +7,7 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 
 | Path | What | Rule |
 |---|---|---|
-| `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client, updater, watched rule (`WatchSession`) | pure Dart, no Flutter |
+| `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client, updater, watched rule (`WatchSession`); `testing.dart` (test support for all three packages, not in `core.dart`: `FlakyProxy`) | pure Dart, no Flutter |
 | `packages/server` | Relic HTTP + WebSocket server (`SyncServer`, `ServerHub`, `Session`, media endpoint, relay buffer, Jellyfin relay), the `serve()` entrypoint, `bin/server.dart` (dedicated server) | pure Dart, no Flutter |
 | `apps/desktop` | Flutter app: UI, `SyncClient`, `Connection`, `SessionCoordinator`, `PlaybackController` (media_kit/mpv), `ServerIsolate`, update UI (`UpdateController`) | ships with `watch-together-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
@@ -180,6 +180,12 @@ Loosely modeled on Syncplay, with a different readiness design.
   user is not seeking.
 - **Liveness**: WS ping every 5 s; silent over 15 s means stale (out of the
   gate, `stale` feed); over 30 s the socket is closed and the member removed.
+  The durations are a `Liveness` (core, `sync_engine.dart`; defaults
+  `RelayConstants.staleAfterSecs` / `dropAfterSecs` / `pingIntervalSecs`)
+  given to `SyncEngine(liveness:)` and `SyncServer(liveness:)`; stale and
+  drop are measured on the engine's clock (`SyncEngine.clock`,
+  `SyncServer(clock:)`) by the 1 s heartbeat sweep, so a test with a fake
+  clock steps through them; the ping is the socket's own real timer.
   A stale member goes back into the set with its next frame if it is ready
   (also one stale at a swap) or the server is not PLAYING.
   Closed sockets are polled with `isClosed` every second: Relic's server-side
@@ -228,7 +234,9 @@ the diagnostics tick, the silence check: `silenceLimit`, 5 s), the
 diagnostics uploader (`diag`, started with the session, stopped by
 `close` before the socket), "Stop reconnecting" (`cancelReconnect`),
 "Retry" (`retry`) and setup cancel (`cancelConnect`). The `hello` is
-built by an injectable `HelloBuilder` (`defaultHello`). The incoming
+built by an injectable `HelloBuilder` (`defaultHello`). The silence is
+measured on `Connection.now` (injectable, UTC wall clock by default); the
+heartbeat and the reconnect delay are real timers. The incoming
 streams (`states`, `feeds`, `nudges`, `errors`), the send methods, the
 `token`, `memberId` and `serverNow()` are read through it.
 
@@ -1494,7 +1502,12 @@ panel) and chat messages (Copy message, and a link in it).
 Settings persist in two Hive boxes: `connect_form` (last form, recent
 servers and links, the profile picture and colour; saved even when a join
 fails) and
-`settings`. Link media names are a web page's title (see "yt-dlp"), else
+`settings`. Where Hive and the logs live is `AppDirs`
+(`platform/app_dirs.dart`, resolved once in `main`): Hive's default folder
+(the documents folder) and `<app support>/logs`; with `STARSYNC_PROFILE`
+(DEVELOPMENT "Dev loop") `<app support>/profiles/<name>/hive` and `logs`,
+and the window title gets ` [<name>]`. yt-dlp, shaders and caches stay
+shared. Link media names are a web page's title (see "yt-dlp"), else
 derived from the URL path, never containing a query string.
 
 Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
@@ -1684,9 +1697,10 @@ dedicated server (`package:logging` loggers named by area: `relay`,
 `app`).
 
 - **Where**: the app writes `<app support>/logs/app-YYYY-MM-DD.log`
-  (Linux `~/.local/share/moe.senkochan.watch_together/logs`); its hosted
-  server's records arrive over the isolate's `events` port and go in the
-  same file as `server.<logger>` (`relogLine`). The dedicated server
+  (Linux `~/.local/share/moe.senkochan.watch_together/logs`; with a
+  profile `<app support>/profiles/<name>/logs`, see `AppDirs` under
+  "Desktop UI"); its hosted server's records arrive over the isolate's
+  `events` port and go in the same file as `server.<logger>` (`relogLine`). The dedicated server
   writes `server-YYYY-MM-DD.log` in `--log-dir`, else `logs` next to
   `--config`, else `logs` next to the binary (systemd:
   `$STATE_DIRECTORY/logs`), else `~/.cache/watch-together/logs`; it

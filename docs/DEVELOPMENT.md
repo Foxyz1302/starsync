@@ -49,6 +49,18 @@ effect with embedded video: media_kit forces `vo=libmpv`. `SYNC_RELAY_PRELOAD=0`
 turns Up next's preload player off; `SYNC_RELAY_TRACE_SWITCH=1` prints
 the timings of each media change (`SwitchTrace`).
 
+Two instances on one machine: `STARSYNC_PROFILE=<name>` (letters, digits,
+`-`, `_`; at most 32) gives an instance its own Hive boxes (settings,
+profile, connect form, window bounds, folders, Jellyfin sign-ins; the
+client id from restructure step 1 on) and logs under
+`<app support>/profiles/<name>/`, and ` [<name>]` in the window title;
+yt-dlp, shaders and caches stay shared (`AppDirs`, ARCHITECTURE "Desktop
+UI"). Without it nothing changes. Run one plain instance and one with
+`STARSYNC_PROFILE=b` (`flutter run -d linux` passes the environment on, or
+start the built binary twice); one hosts, the other joins
+`127.0.0.1:<port>`, or both join a `dart run` server. An unusable name is
+ignored with a warning in the log.
+
 Harnesses in `tool/` (own `pubspec.yaml`, `dart run tool/<name>.dart`):
 `range_logger` (serve a file and log every Range request), `shaper`
 (bandwidth cap, latency, `--kill-after` for outage tests), `fake_viewer`
@@ -94,6 +106,42 @@ track. Tests always log media_kit "S/W rendering" because they have no
 display; that says nothing about the app. `sound_device_e2e` opens the
 real audio device (flutter_soloud) and plays every sound of every preset
 quietly (`WT_SFX_VOLUME`, default 0.1).
+
+Bad links: `FlakyProxy` (`package:sync_relay_core/testing.dart`, so
+core, server and desktop tests share it; not part of `core.dart`) sits
+between a client and a server on loopback: `FlakyProxy.start(serverPort)`,
+the client dials `proxy.port`, and each accepted connection is a
+`FlakyLink` the test steers at any time: `pass()`, `blackhole()` (both
+sockets stay open, every byte and a closing end are dropped: a half-open
+link), `delay` (added latency each way, order kept), `holdNext(d, flow:)`
+(the next chunk, and what queues behind it, arrives `d` late),
+`cutAfter(n, flow:)` (n more bytes, then a reset) and `reset()` (RST via
+SO_LINGER 0). `onConnect` steers a link before its first byte (blackhole
+or refuse the next dial). It counts bytes each way and the dropped ones.
+It is TCP only: a "frame" is one chunk as read (on loopback usually one
+small WebSocket frame). Its own tests: core `flaky_proxy_test`; against
+the server: server `flaky_link_test`. For manual runs with real apps use
+`tool/shaper` instead.
+
+Long durations on a fake clock: `SyncServer(clock:, liveness:)` and
+`SyncEngine(clock:, liveness:)` take the engine clock and the server's
+silence limits (`Liveness`, ARCHITECTURE "Sync model"), so a test can
+pass short limits or step a fake clock through minutes (the 1 s heartbeat
+still ticks in real time and reads the clock); `Connection(now:,
+silenceLimit:, reconnectDelay:)` on the app side.
+
+Safety-net scenarios: the core flows every restructure step must keep
+working. What covers them today and which step adds the rest (steps as
+in [ROADMAP.md](ROADMAP.md)):
+
+| Scenario | Covered today | Missing, added in |
+|---|---|---|
+| Drop and reconnect while sharing a relay | server `relay_test` "source drops and comes back", `sync_wave_test` (resume after an unclean drop), `flaky_link_test` (blackhole, reset); desktop `relay_e2e` "the source drops uncleanly and resumes", `coord_presence` (dead server, reconnect restores ready) | step 1: the same member back after a closed socket (grace, P1), the source re-dialling its relay (D6), the player and state kept through the drop, through `FlakyProxy` and a fake clock |
+| Join mid-playback | core `sync_engine_test` "late joiner does not halt playback", "a joiner while playing never holds anyone back"; server `relay_test` "a late joiner gets its own /r/ URL" | step 1: `joining` until in sync, loading in the background while playing (D2, P3), the ~15 s hold while not playing |
+| Sit out / Away and back | core `sync_engine_test` "sitting out"; server `hardening_test` "anyone sits anyone out"; desktop `server_isolate_test` (host sat out), `notice_table_test` (sat you out) | step 1: presence `away`/`in`, the ready counter (P6), auto sit-out; step 2: notifications while away (P8); step 6: not tracked as watched (P7) |
+| Swap, also while someone is Away or gone | core `sync_engine_test` "swap" (a stale member stays out), `queue_test` (a swap takes its item); server `relay_test` (a swap drops the buffer); desktop `sync_playback_e2e` | step 1: a swap with a member `away` (stays away) or `gone` (in grace, its items wait); step 5: no commands reach a player mid-switch (P15) |
+| Up next advance | core `queue_test` (skip, play request timeout); server `queue_test`, `relay_test` "warm relay"; desktop `jellyfin_session_test` (auto-advance swapper, end card countdown), `queue_switch_e2e` | step 5: preparing it through the media pipeline; step 6: the continuation and the countdown as server state with a shared cancel |
+| Close the app cleanly, incl. `bye` | server `lifecycle_test` (clean close removes the member, server stop closes sockets); desktop `server_isolate_test` (stop frees the port), `coord_presence` (cancelled host setup releases the port) | step 1: `bye` leaves at once, any other close keeps the member in grace, update-and-restart sends no `bye`; step 5: the Windows close smoke job (P32) |
 
 A test file whose first line is `// restructure: rewrite in step N` pins
 behaviour that step of the restructure ([ROADMAP.md](ROADMAP.md)) changes;

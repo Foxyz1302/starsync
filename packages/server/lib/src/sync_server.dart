@@ -65,9 +65,13 @@ class SyncServer {
   /// The session log while running with a [logDir].
   SessionLog? get sessionLog => _sessionLog;
 
-  /// [ytDlp] replaces the server's own (tests).
-  SyncServer(this.config, {YtDlp? ytDlp, this.loopbackOnly = false, this.logDir}) {
+  /// [ytDlp] replaces the server's own (tests). [clock] and [liveness]
+  /// go to the engine: a test passes a fake clock to step through the
+  /// silence limits ([Liveness]) without waiting.
+  SyncServer(this.config,
+      {YtDlp? ytDlp, this.loopbackOnly = false, this.logDir, SyncClock? clock, Liveness liveness = const Liveness()}) {
     hub = ServerHub(sessions, config.secret,
+        engine: SyncEngine(clock: clock, liveness: liveness),
         hostKey: config.hostKey,
         jellyfin: config.jellyfin,
         ytDlp: ytDlp ?? YtDlp(serverYtDlpDir(config.ytDlpDir), enabled: config.ytDlp));

@@ -9,6 +9,25 @@ import 'queue.dart';
 
 typedef SyncClock = DateTime Function();
 
+/// How long the server bears a silent member. [staleAfter] and [dropAfter]
+/// are measured on the engine's clock ([SyncEngine.clock]) by its 1 s
+/// sweep, so a test with a fake clock steps through them without waiting;
+/// [pingInterval] is the WebSocket's own timer (real time).
+class Liveness {
+  /// No frame for longer than this: stale (out of the set, feed `stale`).
+  final Duration staleAfter;
+  /// No frame for longer than this: the member is removed (feed `leave`)
+  /// and its socket closed.
+  final Duration dropAfter;
+  /// WebSocket ping on every `/sync` socket.
+  final Duration pingInterval;
+  const Liveness({
+    this.staleAfter = const Duration(seconds: RelayConstants.staleAfterSecs),
+    this.dropAfter = const Duration(seconds: RelayConstants.dropAfterSecs),
+    this.pingInterval = const Duration(seconds: RelayConstants.pingIntervalSecs),
+  });
+}
+
 enum Transport { playing, held, finished }
 
 enum Correction { none, slowDown, seek }
@@ -141,8 +160,9 @@ class EngineFeed {
 
 class SyncEngine {
   final SyncClock clock;
-  final Duration staleAfter;
-  final Duration dropAfter;
+  final Liveness liveness;
+  Duration get staleAfter => liveness.staleAfter;
+  Duration get dropAfter => liveness.dropAfter;
   final EngineFeed feed = EngineFeed();
   final Map<String, EngineMember> members = {};
 
@@ -167,10 +187,8 @@ class SyncEngine {
   int _seekSeq = 0;
   int _seekEventId = -1;
 
-  SyncEngine({SyncClock? clock, Duration? staleAfter, Duration? dropAfter})
+  SyncEngine({SyncClock? clock, this.liveness = const Liveness()})
       : clock = clock ?? (() => DateTime.now().toUtc()),
-        staleAfter = staleAfter ?? const Duration(seconds: 15),
-        dropAfter = dropAfter ?? const Duration(seconds: 30),
         serverTime = (clock ?? (() => DateTime.now().toUtc()))();
 
   DateTime get now => clock();

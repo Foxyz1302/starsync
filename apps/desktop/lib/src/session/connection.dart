@@ -196,22 +196,29 @@ class Connection {
   final Duration reconnectDelay;
   /// No state broadcast for this long means the connection is lost.
   final Duration silenceLimit;
+  /// The clock [silenceLimit] is measured on (UTC; a test passes a fake
+  /// one). The heartbeat that checks it stays a real 1 s timer.
+  final DateTime Function() now;
 
   Connection(
       {void Function(AppEvent event)? notify,
       SyncClient? client,
       this.hello = defaultHello,
       this.reconnectDelay = const Duration(milliseconds: 1500),
-      this.silenceLimit = const Duration(seconds: 5)})
+      this.silenceLimit = const Duration(seconds: 5),
+      DateTime Function()? now})
       : _notify = notify ?? ((_) {}),
+        now = now ?? _utcNow,
         client = client ?? SyncClient() {
     _subs = [
       this.client.status.listen(_onStatus),
-      this.client.states.listen((_) => _lastStateAt = DateTime.now().toUtc()),
+      this.client.states.listen((_) => _lastStateAt = this.now()),
     ];
   }
 
   late final List<StreamSubscription> _subs;
+
+  static DateTime _utcNow() => DateTime.now().toUtc();
 
   final _state = signal<ConnState>(const ConnClosed());
   /// Every change is notified, a repeat too.
@@ -368,7 +375,7 @@ class Connection {
       _notify(const ConnectionBack());
     }
     _resumeToken = client.token;
-    _lastStateAt = DateTime.now().toUtc();
+    _lastStateAt = now();
     _set(const ConnOnline());
     _startHeartbeat();
   }
@@ -400,13 +407,13 @@ class Connection {
   /// Every second while connected: a clock sample, the diagnostics, and
   /// the silence check.
   void _beat() {
-    final now = DateTime.now().toUtc();
+    final t = now();
     if (client.token.isNotEmpty) client.sendPing();
     diag
       ..share = AppSettings.instance.shareDiagnostics.peek()
       ..tick();
     final last = _lastStateAt;
-    if (!_closed && last != null && now.difference(last) >= silenceLimit) {
+    if (!_closed && last != null && t.difference(last) >= silenceLimit) {
       _silence.add(null);
       if (!_state.peek().retrying) _dropped();
     }

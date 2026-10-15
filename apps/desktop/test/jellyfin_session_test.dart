@@ -1,4 +1,4 @@
-// restructure: rewrite in step 5 (What's next + Watch tracking): the
+// restructure: rewrite in step 6 (What's next + Watch tracking): the
 // "progress" and "episodes" groups (reporting, auto-advance swapper).
 import 'dart:convert';
 

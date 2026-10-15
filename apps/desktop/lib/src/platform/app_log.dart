@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:sync_relay_core/core.dart';
 
 import '../screens/home/ui.dart' show appName, displayVersion;
+import 'app_dirs.dart';
 import '../state/session_state.dart';
 
 // The app's log on disk (<app support>/logs/app-YYYY-MM-DD.log; core's
@@ -17,13 +17,11 @@ final _appLog = createLogger('app');
 /// The logs folder, once [startAppLogging] ran.
 String? appLogDir;
 
-/// Opens the log files and routes `debugPrint` and uncaught errors into
-/// the log. Needs Flutter's binding (path_provider).
-Future<void> startAppLogging() async {
+/// Opens the log files in [dirs]' log folder and routes `debugPrint` and
+/// uncaught errors into the log.
+Future<void> startAppLogging(AppDirs dirs) async {
   try {
-    final base = await getApplicationSupportDirectory();
-    final dir = '${base.path}${Platform.pathSeparator}logs';
-    if (startLogFiles(dir) != null) appLogDir = dir;
+    if (startLogFiles(dirs.logs) != null) appLogDir = dirs.logs;
   } catch (e) {
     _appLog.warning('no log files: $e');
   }
@@ -39,7 +37,10 @@ Future<void> startAppLogging() async {
     return false;
   };
   _appLog.info('$appName ${displayVersion()} on ${Platform.operatingSystem} '
-      '${Platform.operatingSystemVersion}, pid $pid, Dart ${Platform.version.split(' ').first}');
+      '${Platform.operatingSystemVersion}, pid $pid, Dart ${Platform.version.split(' ').first}'
+      '${dirs.profile == null ? '' : ', profile ${dirs.profile}'}');
+  final bad = AppDirs.invalidProfile(Platform.environment);
+  if (bad != null) _appLog.warning('$profileEnv="$bad" ignored: use letters, digits, - and _ (at most 32)');
 }
 
 /// The text "Copy diagnostics" gives: versions, then the last [since] of

@@ -1,4 +1,4 @@
-// restructure: rewrite in step 5 (What's next): who performs an item and
+// restructure: rewrite in step 6 (What's next): who performs an item and
 // the janitor become server state.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
