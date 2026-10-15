@@ -85,3 +85,11 @@ String shaderListSeparator({bool? windows}) =>
 /// The `glsl-shaders` value for [paths].
 String joinShaderPaths(List<String> paths, {bool? windows}) =>
     paths.join(shaderListSeparator(windows: windows));
+
+/// Whether mpv's read-back [got] of `glsl-shaders` is the list [paths].
+/// Recent mpv prints a path list joined with [shaderListSeparator]; older
+/// mpv (0.37 and before, the bundled Windows libmpv among them) joins it
+/// with ','. Matched against each joined form rather than split: a path
+/// may itself hold ':' (a Windows drive letter) or ','.
+bool shaderListMatches(List<String> paths, String? got) =>
+    got != null && const [',', ';', ':'].any((sep) => paths.join(sep) == got);

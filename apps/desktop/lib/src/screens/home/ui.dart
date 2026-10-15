@@ -22,6 +22,10 @@ String displayVersion({String version = appVersion, String pubspec = _pubspecVer
   return isDevBuild(version) && commit.isNotEmpty ? '$version · $commit' : version;
 }
 
+/// The version in a few characters, always on screen (under the strip's
+/// Settings tab): "1.2.1", "1.2.1-dev.2", "dev run".
+String shortVersion({String version = appVersion}) => version == '0.0.0-dev' ? 'dev run' : version;
+
 const kRadius = 12.0;
 const kGap = 16.0;
 

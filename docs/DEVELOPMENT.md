@@ -176,6 +176,19 @@ headers), `mpv:` (`cannot open the media` and ffmpeg's lines), `yt-dlp:`
 the headers sent). A viewer that got no bytes while the source was
 slow to come up shows mpv's error with "no HTTP error logged".
 
+For "the video is slow / shaders do nothing", grep `mpv: render` (what
+each line holds: "Render mode" in [ARCHITECTURE.md](ARCHITECTURE.md)).
+`render: gpu` with a real `GL_RENDERER` (not `llvmpipe` / `softpipe`) is
+the good case; `render: softwareGl` is OpenGL on the CPU (Mesa's software
+rasterizer: missing or blocked GPU drivers, `LIBGL_ALWAYS_SOFTWARE=1`);
+`render: software` with no GL lines is media_kit's own fallback (it found
+no usable EGL context: check `render env:` for an X11 session or a
+`GDK_BACKEND` / `FLUTTER_LINUX_RENDERER` override). Its reason is only on
+stderr: have the user start the app from a terminal
+(`watch-together 2>&1 | grep VideoOutput`). `hwdec-current=no` on the
+first-frame line means software decoding (no hwdec for that codec, or it
+is off), not software rendering.
+
 ## Gotchas
 
 - Relic gives Range as a typed `RangeHeader`; convert from unit + first range.

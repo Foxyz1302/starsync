@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:sync_relay_core/core.dart' show isDevBuild;
 
 import '../../update/update_controller.dart';
 import '../../widgets/update_banner.dart';
 import 'ui.dart';
 
-/// Compact "Update vX" pill for the party strip; hidden until there is
-/// something to install. Click opens the full [UpdateBanner].
-class UpdateIndicator extends StatelessWidget {
+/// The band across the top of the window while an update is up for
+/// grabs: "Starsync 1.2.1 is ready", its notes, Update and restart and
+/// Later (gone until the next check or start). The shell keeps it off
+/// the full player while a video is on ([AppShell]).
+class UpdateBar extends StatelessWidget {
   final UpdateController? controller;
-  const UpdateIndicator({super.key, this.controller});
+  const UpdateBar({super.key, this.controller});
 
   @override
   Widget build(BuildContext context) {
@@ -21,34 +24,102 @@ class UpdateIndicator extends StatelessWidget {
           return const SizedBox.shrink();
         }
         final scheme = Theme.of(context).colorScheme;
+        final alert = m.isRequired || s.phase == UpdatePhase.failed;
+        final fg = alert ? scheme.onErrorContainer : scheme.onPrimaryContainer;
+        final current = c.currentVersion;
+        // A release (not a test build) that is behind: say which it runs.
+        final behind = isDevBuild(current) ? null : 'You are running $current';
+        final String title;
+        String detail;
+        switch (s.phase) {
+          case UpdatePhase.downloading:
+            title = 'Downloading $appName ${m.version}… ${((s.progress ?? 0) * 100).round()}%';
+            detail = '';
+          case UpdatePhase.applying:
+            title = 'Installing $appName ${m.version}…';
+            detail = '';
+          case UpdatePhase.restarting:
+            title = 'Restarting into $appName ${m.version}…';
+            detail = '';
+          case UpdatePhase.failed:
+            title = 'Update to $appName ${m.version} failed';
+            detail = '${s.error}';
+          case UpdatePhase.available || UpdatePhase.idle:
+            if (!s.canInstall) {
+              title = 'This copy of $appName is older than the latest release (${m.version})';
+              detail = 'Download the new release and replace this folder by hand';
+            } else if (m.isRequired) {
+              title = '$appName ${m.version} is required to join servers on it';
+              detail = m.notes;
+            } else {
+              title = '$appName ${m.version} is ready';
+              detail = m.notes;
+            }
+            detail = [?behind, detail].where((t) => t.isNotEmpty).join(' · ');
+        }
         final busy = s.phase == UpdatePhase.downloading ||
             s.phase == UpdatePhase.applying ||
             s.phase == UpdatePhase.restarting;
-        final label = switch (s.phase) {
-          UpdatePhase.downloading =>
-            'Updating ${((s.progress ?? 0) * 100).round()}%',
-          UpdatePhase.applying => 'Installing…',
-          UpdatePhase.restarting => 'Restarting…',
-          UpdatePhase.failed => 'Update failed',
-          _ => m.isRequired ? 'Required update' : 'Update v${m.version}',
-        };
-        return Tooltip(
-          message: 'Show update',
-          child: FilledButton.tonalIcon(
-            style: FilledButton.styleFrom(
-              backgroundColor: m.isRequired || s.phase == UpdatePhase.failed
-                  ? scheme.errorContainer
-                  : null,
-              visualDensity: VisualDensity.compact,
+        return Material(
+          key: const ValueKey('update-bar'),
+          color: alert ? scheme.errorContainer : scheme.primaryContainer,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+            child: Row(
+              children: [
+                if (busy)
+                  SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: fg,
+                      value: s.phase == UpdatePhase.downloading ? s.progress : null,
+                    ),
+                  )
+                else
+                  Icon(Icons.system_update_alt, size: 20, color: fg),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: fg, fontWeight: FontWeight.w600)),
+                      if (detail.isNotEmpty)
+                        Tooltip(
+                          message: detail,
+                          waitDuration: const Duration(milliseconds: 600),
+                          child: Text(detail,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: fg.withValues(alpha: 0.8), fontSize: 12)),
+                        ),
+                    ],
+                  ),
+                ),
+                if (!busy) ...[
+                  const SizedBox(width: 12),
+                  if (!m.isRequired)
+                    TextButton(
+                      key: const ValueKey('update-later'),
+                      style: TextButton.styleFrom(foregroundColor: fg),
+                      onPressed: c.dismiss,
+                      child: const Text('Later'),
+                    ),
+                  if (s.canInstall) ...[
+                    const SizedBox(width: 4),
+                    FilledButton(
+                      key: const ValueKey('update-install'),
+                      onPressed: c.install,
+                      child: Text(s.phase == UpdatePhase.failed ? 'Retry' : 'Update and restart'),
+                    ),
+                  ],
+                ],
+              ],
             ),
-            onPressed: () => showUpdateDialog(context, controller: c),
-            icon: busy
-                ? const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.system_update_alt, size: 18),
-            label: Text(label),
           ),
         );
       },
@@ -84,6 +155,9 @@ Future<void> showUpdateDialog(BuildContext context, {UpdateController? controlle
     ),
   );
 }
+
+/// How often a running app looks again (auto-check on).
+const updateCheckEvery = Duration(hours: 4);
 
 enum UpdateCheck { notRun, checking, done }
 

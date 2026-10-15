@@ -32,10 +32,12 @@ From the Releases page of this repo:
   `watch_together.exe`. mpv is bundled. New and not yet tried on a real
   Windows desktop; reports welcome.
 
-Update from the app: when a newer version exists, an update indicator
-appears in the strip at the top of the window and opens the update card. "Update and restart" downloads,
-verifies, applies in place and restarts; the install folder must be writable
-by you. Settings has Check now and an auto-check toggle. From a terminal:
+Update from the app: the app looks for a new version at start and every
+few hours, and when one exists a band across the top of the window says so
+(never over a playing video). "Update and restart" downloads,
+verifies, applies in place and restarts; "Later" hides it until the next
+check; the install folder must be writable by you. The version you run is
+under the Settings tab. Settings has Check now and an auto-check toggle. From a terminal:
 `./watch-together-server --upgrade` (no display needed, so it works on a
 server box too), `watch_together --upgrade`, or the shipped `update.sh` /
 `update.bat` (which run the first). Each updates the whole folder, app and
@@ -93,8 +95,8 @@ right-click for Copy message and, with a link in it, Copy link / Open in
 browser), and its "Activity" toggle adds
 joins, ready, seeks and the like between them. Joins, leaves, chat and
 other news also pop up bottom left with the person's avatar; click a message to open the chat
-(Settings → Notifications → Chat messages: Only when paused by default,
-or All, or Off; messages always reach the chat). Unread chat shows as a count on the chat
+(Settings → Notifications → Chat messages: All by default, or Only when
+paused, or Off; messages always reach the chat, with their sound). Unread chat shows as a count on the chat
 buttons and, in fullscreen with the controls hidden and the video paused,
 as a small chip top right.
 
@@ -290,7 +292,8 @@ right of its controls, and Settings → Player has the same ones (plus the
 controls' layout and the custom shader files). Player design: Standard or
 Minimal (below); progress line when hidden (on by default: a thin line at
 the bottom of the video while the controls are hidden); upscaling shader
-(see below); hardware decoding (auto, off or custom; the env var
+(see below); hardware decoding (auto, off or custom; auto is mpv's
+`auto-copy` on Windows, `auto` elsewhere; the env var
 `SYNC_RELAY_HWDEC` overrides it); in the player also the subtitle and
 audio track. Settings → Player → Controls: time display (elapsed / total
 or remaining), controls size (normal or large), hide the controls after

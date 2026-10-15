@@ -1,5 +1,8 @@
 #include "my_application.h"
 
+#include <stdio.h>
+#include <unistd.h>
+
 #include <flutter_linux/flutter_linux.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
@@ -36,6 +39,28 @@ static void window_method_cb(FlMethodChannel* channel, FlMethodCall* call,
     response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
   }
   fl_method_call_respond(call, response, nullptr);
+}
+
+// Ends the process 15 s after the first close request whatever is still
+// running: the app's close (lib/src/platform/app_shutdown.dart) is bounded
+// to a few seconds, but a native teardown can block for good, and the
+// process must never stay behind a hidden window.
+static gpointer exit_watchdog(gpointer data) {
+  g_usleep(15 * G_USEC_PER_SEC);
+  fflush(stdout);
+  fflush(stderr);
+  _exit(0);
+  return nullptr;
+}
+
+static gboolean window_delete_cb(GtkWidget* widget, GdkEvent* event,
+                                 gpointer user_data) {
+  static gboolean armed = FALSE;
+  if (!armed) {
+    armed = TRUE;
+    g_thread_unref(g_thread_new("exit-watchdog", exit_watchdog, nullptr));
+  }
+  return FALSE;  // window_manager decides whether the window closes
 }
 
 static gboolean window_focus_in_cb(GtkWidget* widget, GdkEvent* event,
@@ -111,6 +136,10 @@ static void my_application_activate(GApplication* application) {
                            self);
   gtk_widget_realize(GTK_WIDGET(view));
 
+  // Before the plugins: window_manager's delete-event handler stops the
+  // emission while the app holds the close.
+  g_signal_connect(window, "delete-event", G_CALLBACK(window_delete_cb),
+                   nullptr);
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();

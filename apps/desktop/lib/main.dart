@@ -10,6 +10,7 @@ import 'package:window_manager/window_manager.dart';
 import 'app.dart';
 import 'src/playback/yt_dlp_app.dart';
 import 'src/platform/app_log.dart';
+import 'src/platform/app_shutdown.dart';
 import 'src/platform/desktop_entry.dart';
 import 'src/platform/window_memory.dart';
 import 'src/screens/home/ui.dart';
@@ -48,7 +49,8 @@ Future<void> main(List<String> args) async {
   await windowManager.ensureInitialized();
   await windowManager.setPreventClose(true);
   final memory = WindowMemory(Hive.isBoxOpen(settingsBoxName) ? Hive.box(settingsBoxName) : null);
-  windowManager.addListener(_CloseGuard(memory));
+  shutdownWindowMemory = memory;
+  windowManager.addListener(_CloseGuard());
   final windowOptions = WindowOptions(
     size: memory.size,
     minimumSize: const Size(160, 90),
@@ -77,29 +79,10 @@ Future<void> main(List<String> args) async {
   Future.delayed(const Duration(seconds: 2), SessionState.instance.sfx.warmUp);
 }
 
-/// Close button / Alt+F4: leave gracefully first (others see "left", a
-/// hosted server shuts down), bounded so a hung socket can't keep the
-/// window open.
+/// Close button / Alt+F4: the orderly close ([shutDownApp]), so others
+/// see "left", a hosted server shuts down and no player outlives the
+/// engine.
 class _CloseGuard with WindowListener {
-  final WindowMemory memory;
-  bool _closing = false;
-  _CloseGuard(this.memory);
-
   @override
-  Future<void> onWindowClose() async {
-    if (_closing) return;
-    _closing = true;
-    await memory.save();
-    try {
-      await SessionState.instance.sfx.dispose().timeout(const Duration(milliseconds: 500));
-    } catch (e) {
-      debugPrint('sound shutdown on close failed: $e');
-    }
-    try {
-      await SessionState.instance.leave().timeout(const Duration(seconds: 2));
-    } catch (e) {
-      debugPrint('leave on close failed: $e');
-    }
-    await windowManager.destroy();
-  }
+  void onWindowClose() => unawaited(shutDownApp());
 }

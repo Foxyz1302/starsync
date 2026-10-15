@@ -2242,6 +2242,17 @@ class SessionCoordinator {
     return 'connect failed: $e';
   }
 
+  /// App close, before [leave]: the players go first (no mpv may outlive
+  /// the engine). The Jellyfin stop report [leave] sends keeps the
+  /// position they had.
+  Future<void> releasePlayers() async {
+    if (_playerReady) _lastSnap = _snapNow();
+    _playerReady = false;
+    _ticker?.cancel();
+    _ticker = null;
+    await playback.disposeAll();
+  }
+
   Future<void> leave({bool silent = false}) async {
     _invalidateAttempts();
     await _teardown(silent: silent);

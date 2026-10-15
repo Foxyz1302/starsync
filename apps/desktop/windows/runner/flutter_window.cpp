@@ -1,10 +1,29 @@
 #include "flutter_window.h"
 
+#include <cstdio>
 #include <optional>
+#include <thread>
 
 #include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
+
+namespace {
+
+// Ends the process after |ms| whatever is still running: the app's close
+// (lib/src/platform/app_shutdown.dart) is bounded, but a native teardown
+// can block for good (media_kit_video's ~VideoOutput waits on a texture
+// callback the stopped engine never sends). The process must never stay
+// behind a hidden window.
+void ExitAfter(DWORD ms) {
+  std::thread([ms] {
+    ::Sleep(ms);
+    fflush(nullptr);
+    ::TerminateProcess(::GetCurrentProcess(), 0);
+  }).detach();
+}
+
+}  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -60,6 +79,8 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  // The engine and the plugins go now; the app released its players first.
+  ExitAfter(3000);
   window_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
@@ -72,6 +93,13 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  // A close request starts the app's close (players, leave), at most a
+  // few seconds; past 15 s the process ends anyway.
+  if (message == WM_CLOSE && !close_requested_) {
+    close_requested_ = true;
+    ExitAfter(15000);
+  }
+
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

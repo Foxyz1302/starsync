@@ -128,6 +128,14 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       SessionState.instance.route.value == AppRoute.session &&
       SessionState.instance.coordinator.serverState.value?.media != null);
 
+  /// A video is on in the session (not finished): the update bar stays
+  /// off the full player.
+  final _watching = computed(() {
+    final s = SessionState.instance;
+    final r = s.coordinator.serverState.value;
+    return s.route.value == AppRoute.session && r?.media != null && r?.transport != 'finished';
+  });
+
   PlayerMode get mode => _mode;
   PlayerMode get shownMode => _shown;
   bool get fullscreen => _fullscreen;
@@ -226,10 +234,12 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       stop();
     }
     HardwareKeyboard.instance.removeHandler(_onKey);
+    _updateTimer?.cancel();
     _fade.dispose();
     _online.dispose();
     _alone.dispose();
     _hasMedia.dispose();
+    _watching.dispose();
     _flow.dispose();
     _join.dispose();
     _host.dispose();
@@ -245,9 +255,17 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
         if (mounted) f();
       });
 
+  Timer? _updateTimer;
+
+  /// At start, then every [updateCheckEvery] while the app runs (when the
+  /// auto-check setting is on).
   Future<void> _autoCheck() async {
     final s = AppSettings.instance;
     await s.ensureLoaded();
+    if (!mounted) return;
+    _updateTimer = Timer.periodic(updateCheckEvery, (_) {
+      if (s.autoCheckUpdates.peek()) unawaited(runUpdateCheck(widget.updates, true));
+    });
     if (s.autoCheckUpdates.peek()) await runUpdateCheck(widget.updates);
   }
 
@@ -616,6 +634,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
           final online = _online.value;
           final alone = _alone.value;
           final hasMedia = _hasMedia.value;
+          final onPlayer = _shown == PlayerMode.full && _watching.value;
           return Column(
             children: [
               if (!_fullscreen)
@@ -632,9 +651,14 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
                   onInvite: () => _connect(ConnectMode.host),
                   onProfile: () => showProfileCard(context, onOpenSettings: _openSettings, updates: widget.updates),
                   onShowPlayer: hasMedia && _mode == PlayerMode.none ? () => _show(PlayerMode.mini) : null,
-                  updates: widget.updates,
                   windowControls: widget.windowControls,
                 ),
+              AnimatedSize(
+                duration: easeTime,
+                curve: ease,
+                alignment: Alignment.topCenter,
+                child: _fullscreen || onPlayer ? const SizedBox(width: double.infinity) : UpdateBar(controller: widget.updates),
+              ),
               Expanded(
                 key: const ValueKey('body'),
                 child: Row(

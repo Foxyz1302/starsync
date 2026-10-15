@@ -193,7 +193,7 @@ Loosely modeled on Syncplay, with a different readiness design.
   the server state and reconnect every 1.5 s until cancelled (an epoch counter makes
   a cancelled attempt stale). After a reconnect the ready flag is
   restored from the server's state. Cancel during setup aborts the join.
-  Closing the window leaves gracefully (2 s timeout).
+  Closing the window leaves gracefully (see "App close" under Desktop UI).
 - **Idle** (`IdleTracker`): measured from the later of the last input and the
   moment playback stopped. While HELD and self ready: warning at 8 min,
   auto-unready at 10 min, and never less than 2 min after the warning.
@@ -294,21 +294,29 @@ page yt-dlp knows", network errors → "Couldn't reach the site", anything
 else as is). It rides in `report.error` (see "Player error" in the sync
 model) until the media opens (a new duration) or the server's `mediaId`
 moves on; the pill shows "Can't play this: ..." with Retry (Reload
-video). The cache is in RAM:
-media_kit sets `cache-on-disk` without a `cache-dir`, and mpv falls back. mpv
+video). The cache is in RAM: `cache-on-disk=no` is pinned (media_kit
+sets it on without a `cache-dir`, so mpv fell back to RAM anyway, warning
+"Failed to create file cache." on every open). mpv
 ignores invalid values silently, so every pin is read back and a mismatch is
 logged and kept in `pinMismatches`. Measured against the `/m` endpoint
 (`readahead_e2e_test`): a paused player buffers ~147 s ahead (10 s before).
 media_kit has no public `setProperty`/`getProperty`; the code calls them
 through a guarded dynamic call on `player.platform`. Hardware decoding comes from Settings (auto, off, custom)
 and is passed to the `VideoController`; env `SYNC_RELAY_HWDEC` (e.g. `no`)
-overrides it. It is read per player, so a change applies on the next media,
+overrides it. Auto is mpv `auto` on Linux and `auto-copy` on Windows
+(`autoHwdec`, also for a blank custom value): media_kit renders through
+ANGLE there, where `auto` picks the dxva2 interop, which cannot create its
+EGL surface ("Failed to create EGL surface"); `auto-copy` decodes on the
+GPU (d3d11va-copy, dxva2-copy, ... whichever works) and copies frames
+back, needing no interop. It is read per player, so a change applies on the next media,
 join or Reload video.
 
 Shaders (per viewer, local only, no wire change): mpv `glsl-shaders`, set
 through the same dynamic `setProperty` and read back
 (`PlaybackController.applyShaders`). The value is the platform path list
-(`:` joined, `;` on Windows). One saved choice in `AppSettings`
+(`:` joined, `;` on Windows). The read-back is compared as a list
+(`shaderListMatches`): older mpv (0.37 and before, the bundled Windows
+libmpv among them) prints it `,` joined. One saved choice in `AppSettings`
 (`shaderPreset`, `shaderQuality`, `customShaders`): applied on every player
 creation (join, new media, Reload video) and live when changed from the session (the
 controls' ⚙ → Upscaling shader menu, Ctrl+0..6, both also save it). The Anime4K
@@ -330,7 +338,17 @@ mpv logs at `v` while the controller is created: OpenGL init logs
 (`RenderMode.gpu`; "suspected software renderer" means llvmpipe,
 `softwareGl`); none within 1.5 s of the controller being ready means the
 software path (`software`, where shaders do nothing; the shader toast, the
-menu and Settings say so). Otherwise the session player logs at `warn`
+menu and Settings say so). Into the app log (`mpv`, INFO, all starting
+`render`): once per app start on Linux `render env:` (`XDG_SESSION_TYPE`,
+`WAYLAND_DISPLAY`, `DISPLAY`, `GDK_BACKEND`, `FLUTTER_LINUX_RENDERER`,
+`LIBGL_ALWAYS_SOFTWARE`, `__EGL_VENDOR_LIBRARY_FILENAMES`, `-` when
+unset); from that `v` window only mpv's GL init lines (`GL_VENDOR`,
+`GL_RENDERER`, `GL_VERSION`, `GL_SHADING_LANGUAGE_VERSION`, `Detected
+...`); the mode decided at the end of it; and per player, at its first
+frame, `hwdec-current` and the `hwdec` asked for (the first one per app
+start also `mpv-version` and `ffmpeg-version`). Why media_kit fell back to
+software it only prints on stderr (`media_kit: VideoOutput: ...`), which
+the app does not capture. Otherwise the session player logs at `warn`
 (`PlaybackController.logLevel`, switched with `mpv_request_log_messages`
 on media_kit's handle): media_kit drains mpv's log on the UI thread, one
 message at a time, so a chatty level, or ffmpeg logging every retry of a
@@ -1105,7 +1123,8 @@ panel) and chat messages (Copy message, and a link in it).
 
 - **Party strip** (`party_strip.dart`, 60 px): your avatar (profile card; 42 px like the party's),
   the Library / Schedule / Settings tabs with a growing underline (an
-  `HScroll` when narrow), the update indicator, then offline a grey dot,
+  `HScroll` when narrow; the version in small text under Settings,
+  `shortVersion`, the full one in its tooltip), then offline a grey dot,
   "Offline", Join a friend and Host (connect cards; icon-less "Join" and
   "Host" under 1100 px), solo a "Solo · only you" chip, Invite friends
   (the Host card, titled "Invite friends", "Start hosting") and Stop (no
@@ -1270,7 +1289,7 @@ panel) and chat messages (Copy message, and a link in it).
   switched off in `soundsOff`. The device opens 2 s after startup
   (`warmUp`), so neither startup nor the first sound waits on it; if it
   can't open, the engine logs `no sounds: audio init failed` once and drops
-  every play. The close path disposes the engine (deinit, 500 ms bound)
+  every play. App close disposes the engine (deinit, 500 ms bound)
   before leaving the server. Settings → Notifications & sounds has the volume, the
   overall sound set (`soundPreset`), and per sound a preview, its own set
   (`soundPresetFor`, else the overall one) and a switch; a preview always
@@ -1376,8 +1395,10 @@ panel) and chat messages (Copy message, and a link in it).
   own have none); each
   slides in, stays 5 s, then slides out and collapses its gap. A click on
   a chat toast opens the chat; the others let clicks through. Chat toasts
-  follow `AppSettings.chatPopups` (Settings → Notifications: All, Only
-  when paused (default), Off); the message is in the chat either way.
+  follow `AppSettings.chatPopups` (Settings → Notifications: All
+  (default), Only when paused, Off); the message is in the chat either
+  way, and its sound plays whatever this setting (its own switch in
+  Sounds).
 
 Settings persist in two Hive boxes: `connect_form` (last form, recent
 servers and links, the profile picture and colour; saved even when a join
@@ -1533,6 +1554,36 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
 Window chrome is frameless (`window_manager`): the party strip is the drag
 area and holds the min/max/close buttons (`widgets/window_buttons.dart`);
 fullscreen has no drag area and shows the buttons in the player's top bar.
+
+App close (`platform/app_shutdown.dart`, `shutDownApp`; the close button,
+Alt+F4, and Update and restart): the window position is saved and the
+window hides at once. Then every mpv player goes, before the engine does
+(a live one calls its wakeup callback into a dead isolate): the session
+player, the preload and the player still retiring
+(`PlaybackController.disposeAll`, 1.5 s each, via
+`SessionCoordinator.releasePlayers`, which keeps the position for the
+Jellyfin stop report), the Files thumbnail jobs (`cancelAllThumbnails`)
+and the sound engine (500 ms), side by side; on Windows 300 ms more,
+since media_kit_video frees a video output on a thread of its own after
+dispose returns, and an output still up when the engine stops blocks the
+plugin's teardown (`~VideoOutput` waits on a texture callback that never
+comes). Then `SessionState.leave`
+(Jellyfin stop report, last diagnostics, the goodbye, so others see
+"left") and the hosted server's stop, 3 s in all; an update restart then
+closes Hive and starts the new binary. Last the window closes the normal
+way (`setPreventClose(false)` + `close`), so the engine and plugins are
+torn down inside the platform's main loop, and the runners end the
+process without `exit()`'s handlers: Linux `_exit` after
+`g_application_run` (NVIDIA's EGL exit handler segfaults inside `exit()`),
+Windows `TerminateProcess` after the message loop (no DLL detach
+handlers, which can hang on threads already gone). Every step is bounded
+and logs (`close: ...`) when it is slow or fails. Backstops, so no process
+stays behind a hidden window: 3 s after asking the window to close the
+app kills itself (`Process.killPid`, no exit handlers; it only gets there
+if the close did not go through); the runners end the process 15 s after
+the first close request (Linux: a `delete-event` handler connected before
+window_manager's; Windows: the first `WM_CLOSE`), and Windows also 3 s
+after the window is destroyed, while the engine and plugins go.
 
 ## Logging
 
@@ -1690,10 +1741,20 @@ defines for every build and run) with "dev run". CLI: `watch-together-server --u
 the shipped `update.sh` / `update.bat` run it), `--check-update` prints only;
 it ends with "restart the server to run <version>". `watch_together --upgrade`
 does the same from the app binary. In the app, `UpdateController`
-(`apps/desktop/lib/src/update/`) runs the same code for the strip's update
-indicator, which opens the update card, and restarts the app ("Update and
-restart", closing Hive first).
-Settings has Check now and an auto-check toggle. The manifest is `updates/manifest.json` in
+(`apps/desktop/lib/src/update/`) runs the same code for the update bar
+(`UpdateBar`, `screens/home/update_indicator.dart`): a band across the
+window under the strip while an update is available: "Starsync X.Y.Z is
+ready", the notes, Later (hidden until the next check or start) and
+"Update and restart" (download, apply, then the app close above with Hive
+closed and the new binary started), its progress in the band. A release
+that is behind also says which version it runs; a copy that is not a
+packaged install says to replace the folder by hand. The shell keeps the
+band off the full player while a video is on (not finished); it shows on
+the tabs, the mini player's views and once the video ends. A required
+update has no Later. Nothing downloads before the click. The app checks at
+start and every 4 hours while running (`updateCheckEvery`), both with the
+auto-check setting on; a re-check never touches an install under way.
+Settings has Check now and the auto-check toggle. The manifest is `updates/manifest.json` in
 this repo, written by `tool/release.sh`. Test builds (`X.Y.Z-dev.N`,
 `isDevBuild`) also read `devManifestUrl`, the `manifest.json` of the `dev`
 prerelease (`tool/dev_release.sh`), and take the newer of the two

@@ -34,6 +34,9 @@ class FlutterWindow : public Win32Window {
   // "starsync/window": `attention` flashes the taskbar entry while the
   // window is not in front (lib/src/platform/attention.dart).
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> window_channel_;
+
+  // The first WM_CLOSE arms the exit watchdog.
+  bool close_requested_ = false;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

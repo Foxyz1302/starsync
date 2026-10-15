@@ -2,6 +2,8 @@
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
 
+#include <cstdio>
+
 #include "flutter_window.h"
 #include "utils.h"
 
@@ -38,6 +40,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::DispatchMessage(&msg);
   }
 
+  // The window closed through WM_CLOSE (the app disposed its mpv players
+  // and left first), so the engine and plugins were torn down inside the
+  // loop. End here without the CRT exit and DLL_PROCESS_DETACH: a driver
+  // or libmpv detach handler can hang waiting on threads that are gone.
+  // Nothing is left to flush but stdio.
+  fflush(nullptr);
   ::CoUninitialize();
+  ::TerminateProcess(::GetCurrentProcess(), EXIT_SUCCESS);
   return EXIT_SUCCESS;
 }

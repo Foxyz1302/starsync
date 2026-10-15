@@ -5,11 +5,9 @@ import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '../screens/home/ui.dart' show appName, displayVersion;
-import '../screens/home/update_indicator.dart';
+import '../screens/home/ui.dart' show appName, displayVersion, shortVersion;
 import '../session/delivery.dart';
 import '../state/session_state.dart';
-import '../update/update_controller.dart';
 import '../widgets/app_keys.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/copy_open.dart';
@@ -56,7 +54,6 @@ class PartyStrip extends StatelessWidget {
 
   /// Online with something up but the player closed: brings it back.
   final VoidCallback? onShowPlayer;
-  final UpdateController? updates;
 
   /// Off in tests: the drag area and window buttons need window_manager.
   final bool windowControls;
@@ -73,7 +70,6 @@ class PartyStrip extends StatelessWidget {
     required this.onProfile,
     this.onInvite,
     this.onShowPlayer,
-    this.updates,
     this.windowControls = true,
   });
 
@@ -125,8 +121,10 @@ class PartyStrip extends StatelessWidget {
                             label: t.label,
                             selected: t == tab,
                             compact: compact,
-                            // The version, a rest of the mouse away.
+                            // The version: always in sight under Settings,
+                            // the full one a rest of the mouse away.
                             tooltip: t == ShellTab.settings ? '$appName ${displayVersion()}' : null,
+                            caption: t == ShellTab.settings ? shortVersion() : null,
                             onTap: () => onTab(t),
                           ),
                       ],
@@ -135,7 +133,6 @@ class PartyStrip extends StatelessWidget {
                 ),
               ),
             ),
-            UpdateIndicator(controller: updates),
             const SizedBox(width: 8),
             if (online && onShowPlayer != null)
               IconButton(
@@ -369,6 +366,8 @@ class StripTab extends StatelessWidget {
   final VoidCallback onTap;
   /// Shown after resting on the tab.
   final String? tooltip;
+  /// Small text under the tab (the version under Settings).
+  final String? caption;
   const StripTab({
     super.key,
     required this.label,
@@ -376,6 +375,7 @@ class StripTab extends StatelessWidget {
     required this.onTap,
     this.compact = false,
     this.tooltip,
+    this.caption,
   });
 
   @override
@@ -391,28 +391,55 @@ class StripTab extends StatelessWidget {
           padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 12),
           child: SizedBox(
             height: partyStripHeight,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+            child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.center,
               children: [
-                const SizedBox(height: 3),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    color: selected ? scheme.primary : scheme.onSurfaceVariant,
-                  ),
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const SizedBox(height: 3),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                        color: selected ? scheme.primary : scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    AnimatedContainer(
+                      duration: easeTime,
+                      curve: ease,
+                      height: 3,
+                      width: selected ? 22 : 0,
+                      decoration: BoxDecoration(
+                        color: scheme.primary,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 4),
-                AnimatedContainer(
-                  duration: easeTime,
-                  curve: ease,
-                  height: 3,
-                  width: selected ? 22 : 0,
-                  decoration: BoxDecoration(
-                    color: scheme.primary,
-                    borderRadius: BorderRadius.circular(2),
+                if (caption case final c?)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 2,
+                    height: 13,
+                    child: OverflowBox(
+                      maxWidth: 160,
+                      child: Text(
+                        c,
+                        key: const ValueKey('strip-version'),
+                        maxLines: 1,
+                        softWrap: false,
+                        style: TextStyle(
+                          fontSize: 10,
+                          height: 1.2,
+                          color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
               ],
             ),
           ),

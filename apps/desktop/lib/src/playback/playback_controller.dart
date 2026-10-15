@@ -30,7 +30,9 @@ class PlaybackController {
   static const readAheadSecs = 150;
   /// Forward demuxer cache. Holds [readAheadSecs] up to ~14 Mbit/s (a
   /// 1.4 GB / 24 min file is ~8); higher bitrates get less time. In RAM:
-  /// media_kit sets cache-on-disk but no cache-dir, so mpv falls back.
+  /// `cache-on-disk=no` (media_kit sets it on but no cache-dir, so mpv
+  /// fell back to RAM anyway, warning "Failed to create file cache." per
+  /// open).
   static const maxBytes = 256 * 1024 * 1024;
   /// Back buffer (media_kit sets it to bufferSize too): enough for a short
   /// seek back without holding another 256 MiB.
@@ -175,6 +177,7 @@ class PlaybackController {
     final existing = _video;
     if (existing != null) return existing;
     final hwdec = _hwdecOverride;
+    _logRenderEnv();
     _requestLog(player, 'v'); // back to [logLevel] by _detectRenderMode
     // media_kit's video output sets hwdec itself on attach ('auto' unless
     // configured), which used to override SYNC_RELAY_HWDEC.
@@ -253,6 +256,7 @@ class PlaybackController {
     await _pin('cache-secs', '$readAheadSecs', on);
     await _pin('demuxer-max-bytes', '$ahead', on);
     await _pin('demuxer-max-back-bytes', '$back', on);
+    await _pin('cache-on-disk', 'no', on);
     final hwdec = _hwdecOverride;
     if (hwdec != null) {
       await _pin('hwdec', hwdec, on);
@@ -310,13 +314,12 @@ class PlaybackController {
     }
     if (!identical(p, _player)) return;
     if (problem != null) paths = const [];
-    final value = joinShaderPaths(paths);
-    if (value != _shaders || problem != null) {
-      final got = await setShaderValue(value);
+    if (joinShaderPaths(paths) != _shaders || problem != null) {
+      final took = await setShaderPaths(paths);
       if (!identical(p, _player)) return;
-      if (problem == null && got != value) {
+      if (problem == null && !took) {
         problem = 'mpv did not take them';
-        await setShaderValue('');
+        await setShaderPaths(const []);
       }
     }
     if (problem != null) {
@@ -326,20 +329,23 @@ class PlaybackController {
     }
   }
 
-  /// Sets mpv `glsl-shaders` on the current player and returns the
-  /// read-back (null on error).
+  /// Sets mpv `glsl-shaders` to [paths] on the current player; true when
+  /// mpv's read-back is that list ([shaderListMatches]: old mpv prints it
+  /// joined with ',').
   @visibleForTesting
-  Future<String?> setShaderValue(String value) async {
+  Future<bool> setShaderPaths(List<String> paths) async {
+    final value = joinShaderPaths(paths);
     try {
       final dynamic platform = player.platform;
       await platform?.setProperty('glsl-shaders', value);
       final got = '${await platform?.getProperty('glsl-shaders')}';
-      _shaders = got;
-      if (got != value) debugPrint('glsl-shaders=$value not applied: "$got"');
-      return got;
+      final took = shaderListMatches(paths, got);
+      _shaders = took ? value : got;
+      if (!took) debugPrint('glsl-shaders=$value not applied: "$got"');
+      return took;
     } catch (e, st) {
       debugPrint('glsl-shaders=$value failed: $e\n$st');
-      return null;
+      return false;
     }
   }
 
@@ -390,6 +396,9 @@ class PlaybackController {
       return;
     }
     if (log.prefix != 'libmpv_render') return;
+    // Which GL the video output got (verbose, heard only during the
+    // render-mode probe): kept in the app log.
+    if (_glInfo.hasMatch(log.text)) _mpvLog.info('render: [libmpv_render] ${log.text.trim()}');
     if (log.text.contains('suspected software renderer')) {
       _setRenderMode(RenderMode.softwareGl);
     } else if (log.text.startsWith('GL_VERSION') &&
@@ -402,7 +411,7 @@ class PlaybackController {
       _shaders = '';
       _shaderOp = _shaderOp.then((_) async {
         if (!identical(p, _player)) return;
-        await setShaderValue('');
+        await setShaderPaths(const []);
         _turnShadersOff('Shaders failed in mpv (${log.text}) — turned off');
       });
     }
@@ -413,6 +422,52 @@ class PlaybackController {
   // time: a refused request makes ffmpeg retry and warn on every try.
   static final _mpvLog = createLogger('mpv');
   static final _mpvThrottle = LogThrottle(burst: 5);
+
+  // mpv's GL init lines (`GL_VENDOR='...'`, `Detected desktop OpenGL 4.6.`).
+  static final _glInfo =
+      RegExp(r'^\s*(GL_(VENDOR|RENDERER|VERSION|SHADING_LANGUAGE_VERSION)=|Detected (GLES|desktop OpenGL))');
+
+  // Once per app start: what decides how media_kit and mpv render (the
+  // display server, Flutter's and Mesa's overrides). Not secrets.
+  static bool _renderEnvLogged = false;
+  static void _logRenderEnv() {
+    if (_renderEnvLogged || !Platform.isLinux) return;
+    _renderEnvLogged = true;
+    const names = [
+      'XDG_SESSION_TYPE',
+      'WAYLAND_DISPLAY',
+      'DISPLAY',
+      'GDK_BACKEND',
+      'FLUTTER_LINUX_RENDERER',
+      'LIBGL_ALWAYS_SOFTWARE',
+      '__EGL_VENDOR_LIBRARY_FILENAMES',
+    ];
+    final env = Platform.environment;
+    _mpvLog.info('render env: ${[for (final n in names) '$n=${env[n] ?? '-'}'].join(' ')}');
+  }
+
+  // Once per player, after its first frame: the decoder mpv picked; the
+  // first time per app start also mpv's and ffmpeg's versions.
+  static bool _versionsLogged = false;
+  Player? _frameLoggedFor;
+  Future<void> _logFirstFrame(Player p, int? width) async {
+    if (width == null || width <= 0 || identical(p, _frameLoggedFor)) return;
+    _frameLoggedFor = p;
+    try {
+      final dynamic platform = p.platform;
+      final current = await platform?.getProperty('hwdec-current');
+      final wanted = await platform?.getProperty('hwdec');
+      _mpvLog.info('render: first frame ${p.state.width}x${p.state.height}, '
+          'hwdec-current=${'$current'.isEmpty ? 'no' : current} (hwdec=$wanted), mode ${renderMode.peek().name}');
+      if (!_versionsLogged) {
+        _versionsLogged = true;
+        _mpvLog.info('render: ${await platform?.getProperty('mpv-version')}, '
+            'ffmpeg ${await platform?.getProperty('ffmpeg-version')}');
+      }
+    } catch (e) {
+      debugPrint('first frame info: $e');
+    }
+  }
 
   static void _toAppLog(PlayerLog log, {String player = ''}) {
     final level = log.level;
@@ -451,11 +506,15 @@ class PlaybackController {
     } finally {
       if (identical(p, _player)) _requestLog(p, logLevel);
     }
-    if (!identical(p, _player) || renderMode.peek() != RenderMode.unknown) {
+    if (!identical(p, _player)) return;
+    final mode = renderMode.peek();
+    if (mode != RenderMode.unknown) {
+      _mpvLog.info('render: ${mode.name} (${mode == RenderMode.gpu ? 'OpenGL on the GPU' : 'OpenGL on the CPU'})');
       return;
     }
     _setRenderMode(RenderMode.software);
-    debugPrint('video output: software rendering (no GL init logged)');
+    _mpvLog.info("render: software (no GL init logged: media_kit's own fallback; "
+        'its reason is on stderr, "media_kit: VideoOutput: ..." when run from a terminal)');
     if (_shaders.isNotEmpty) {
       _notice('Shaders have no effect: video uses software rendering');
     }
@@ -525,6 +584,8 @@ class PlaybackController {
     _timeSubs.add(p.stream.completed.listen((done) {
       if (done && duration.value > Duration.zero) position.value = duration.value;
     }));
+    _timeSubs.add(p.stream.width.listen((w) => _logFirstFrame(p, w)));
+    unawaited(_logFirstFrame(p, p.state.width)); // a promoted preload has one already
     _timeSubs.add(p.stream.buffer.listen((d) {
       final ms = d.inMilliseconds;
       buffered.value = Duration(milliseconds: ms - ms % 250);
@@ -689,6 +750,24 @@ class PlaybackController {
     try {
       await p.dispose();
     } catch (_) {}
+  }
+
+  /// App close: every mpv this controller holds goes before the engine
+  /// does (a live one calls back into a dead isolate): the preload, the
+  /// session player and the one still retiring, each bounded by [each].
+  /// A player an open in flight brought up meanwhile goes too.
+  Future<void> disposeAll({Duration each = const Duration(milliseconds: 1500)}) async {
+    Future<void> bounded(Future<void> f) => f.timeout(each).catchError((Object _) {});
+    for (var round = 0; round < 2; round++) {
+      final pre = _pre;
+      _pre = null;
+      await Future.wait([
+        if (pre != null) bounded(_disposePreload(pre)),
+        bounded(_retiring),
+        bounded(dispose()),
+      ]);
+      if (_player == null && _pre == null) return;
+    }
   }
 
   // Two frames: one may already be mid-build when [alive] flips. Then

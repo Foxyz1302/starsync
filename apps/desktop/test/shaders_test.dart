@@ -70,6 +70,22 @@ void main() {
     expect(joinShaderPaths([], windows: false), '');
   });
 
+  test("mpv's read-back: the list in ',', ';' or ':' form", () {
+    const win = [r'C:\Users\a b\shaders\x.glsl', r'D:\y.glsl'];
+    expect(shaderListMatches(win, r'C:\Users\a b\shaders\x.glsl;D:\y.glsl'), isTrue, reason: 'new mpv, Windows');
+    expect(shaderListMatches(win, r'C:\Users\a b\shaders\x.glsl,D:\y.glsl'), isTrue, reason: 'old mpv, Windows');
+    const unix = ['/home/a/x.glsl', '/home/a/y.glsl'];
+    expect(shaderListMatches(unix, '/home/a/x.glsl:/home/a/y.glsl'), isTrue, reason: 'new mpv, Linux');
+    expect(shaderListMatches(unix, '/home/a/x.glsl,/home/a/y.glsl'), isTrue, reason: 'old mpv, Linux');
+    expect(shaderListMatches([r'C:\x.glsl'], r'C:\x.glsl'), isTrue, reason: 'one path');
+    expect(shaderListMatches(const [], ''), isTrue, reason: 'off');
+    expect(shaderListMatches(win, r'C:\Users\a b\shaders\x.glsl'), isFalse, reason: 'one dropped');
+    expect(shaderListMatches(unix, '/home/a/y.glsl:/home/a/x.glsl'), isFalse, reason: 'order matters');
+    expect(shaderListMatches(unix, ''), isFalse, reason: 'mpv kept none');
+    expect(shaderListMatches(const [], 'null'), isFalse);
+    expect(shaderListMatches(unix, null), isFalse, reason: 'read failed');
+  });
+
   test('path problems: missing file, separator inside a path', () {
     final d = _fresh('shaders_problem');
     final ok = File('${d.path}/ok.glsl')..writeAsStringSync('//');

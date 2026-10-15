@@ -4,7 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
-// In-app update flow behind the Home update indicator. Same code path as
+import '../platform/app_shutdown.dart';
+
+// In-app update flow behind the update bar (UpdateBar). Same code path as
 // `--upgrade` (core's updater, downloadAndApply); this adds state for the
 // UI and the restart. Check failures are logged only — the banner shows up just when
 // there is something to install.
@@ -28,26 +30,23 @@ class UpdateStatus {
 // Process args as main() received them — restart relaunches with these.
 List<String> launchArgs = const [];
 
-// Relaunch the (now replaced) binary detached with the same args, then
-// exit this process.
-Future<Never> restartApp(String executable, List<String> args) async {
-  final keep = args.where((a) => a != '--upgrade').toList();
-  await Process.start(executable, keep,
-      mode: ProcessStartMode.detached,
-      workingDirectory: Directory.current.path);
-  exit(0);
-}
-
 typedef RestartFn = Future<void> Function(String executable, List<String> args);
 
-// Release Hive's box locks before the new instance opens the same boxes.
+// The orderly close (players, leave), Hive's box locks released before
+// the new instance opens the same boxes, the (now replaced) binary
+// relaunched detached with the same args, then the window closes.
 Future<void> _closeAndRestart(String executable, List<String> args) async {
-  try {
-    await Hive.close();
-  } catch (e) {
-    _log.warning('closing hive before restart: $e');
-  }
-  await restartApp(executable, args);
+  final keep = args.where((a) => a != '--upgrade').toList();
+  await shutDownApp(beforeQuit: () async {
+    try {
+      await Hive.close();
+    } catch (e) {
+      _log.warning('closing hive before restart: $e');
+    }
+    await Process.start(executable, keep,
+        mode: ProcessStartMode.detached,
+        workingDirectory: Directory.current.path);
+  });
 }
 
 class UpdateController {
@@ -115,14 +114,21 @@ class UpdateController {
         return;
       }
       _log.info('update available: ${m.version} (proto ${m.protocol})');
+      lastCheck.value = 'Update v${m.version} available';
+      // A re-check never cuts into an install under way.
+      if (_installing) return;
       status.value = UpdateStatus(UpdatePhase.available,
           manifest: m, canInstall: root != null);
-      lastCheck.value = 'Update v${m.version} available';
     } catch (e) {
       _log.warning('update check failed: $e');
       lastCheck.value = 'Update check failed: $e';
     }
   }
+
+  bool get _installing => switch (status.value.phase) {
+        UpdatePhase.downloading || UpdatePhase.applying || UpdatePhase.restarting => true,
+        _ => false,
+      };
 
   void dismiss() {
     final s = status.value;

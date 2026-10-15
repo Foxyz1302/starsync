@@ -33,15 +33,36 @@ const _timeout = Duration(seconds: 20);
 int _running = 0;
 final _waiting = <Completer<void>>[];
 final _inFlight = <String, Future<Thumbnail?>>{};
+final _players = <Player>{};
+bool _closed = false;
+
+/// App close: no new thumbnails, running ones stop at their next check
+/// and dispose their player. Players still up after [deadline] are
+/// disposed here, so no mpv outlives the engine.
+Future<void> cancelAllThumbnails({
+  Duration deadline = const Duration(milliseconds: 800),
+}) async {
+  _closed = true;
+  try {
+    await Future.wait(_inFlight.values.toList()).timeout(deadline);
+  } catch (_) {}
+  for (final p in _players.toList()) {
+    _players.remove(p);
+    try {
+      await p.dispose().timeout(deadline);
+    } catch (_) {}
+  }
+}
 
 /// The cached or freshly made thumbnail of the video at [path], or null
 /// when it can't be made (not a video, unreadable, timed out, cancelled).
 /// Never throws. [cancelled] is checked while queued and before the
 /// expensive steps: a scrolled-away tile returns null without decoding.
 Future<Thumbnail?> thumbnailFor(String path, {bool Function()? cancelled}) {
+  if (_closed) return Future.value(null);
   final existing = _inFlight[path];
   if (existing != null) return existing;
-  final f = _thumbnailFor(path, cancelled ?? () => false).catchError((
+  final f = _thumbnailFor(path, () => _closed || (cancelled?.call() ?? false)).catchError((
     Object e,
     StackTrace st,
   ) {
@@ -136,6 +157,7 @@ Future<Thumbnail?> _generate(
       bufferSize: 4 << 20,
     ),
   );
+  _players.add(player);
   try {
     final mpv = player.platform as NativePlayer;
     for (final (k, v) in [
@@ -176,6 +198,7 @@ Future<Thumbnail?> _generate(
     }
     return null;
   } finally {
-    await player.dispose();
+    // [cancelAllThumbnails] may have taken it already.
+    if (_players.remove(player)) await player.dispose();
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +8,7 @@ import 'package:watch_together/src/schedule/ui/schedule_page.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:watch_together/src/screens/home/health_probe.dart';
 import 'package:watch_together/src/screens/home/media_picker.dart';
+import 'package:watch_together/src/screens/home/update_indicator.dart';
 import 'package:watch_together/src/shell/app_shell.dart';
 import 'package:watch_together/src/shell/library_link.dart' show soloPlayHint;
 import 'package:watch_together/src/state/session_state.dart';
@@ -58,13 +60,18 @@ void main() {
     });
   });
 
+  test('chat pop-ups default to All', () {
+    expect(AppSettings().chatPopups.value, ChatPopups.all);
+  });
+
   test('hwdec value follows mode', () {
     final s = AppSettings();
-    expect(s.hwdec.value, 'auto');
+    expect(s.hwdec.value, autoHwdec);
+    expect(autoHwdec, Platform.isWindows ? 'auto-copy' : 'auto');
     s.setHwdecMode(HwdecMode.off);
     expect(s.hwdec.value, 'no');
     s.setHwdecMode(HwdecMode.custom);
-    expect(s.hwdec.value, 'auto');
+    expect(s.hwdec.value, autoHwdec);
     s.setHwdecCustom(' vaapi ');
     expect(s.hwdec.value, 'vaapi');
   });
@@ -150,7 +157,7 @@ void main() {
     expect(find.text('Hardware decoding'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('settings-updates')));
     await tester.pumpAndSettle();
-    expect(find.text('Check for updates on start'), findsOneWidget);
+    expect(find.text('Check for updates automatically'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('settings-shortcuts')));
     await tester.pumpAndSettle();
     expect(find.text('Toggle ready'), findsOneWidget);
@@ -287,5 +294,54 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: source);
     }
+  });
+
+  group('update bar', () {
+    const m = UpdateManifest(
+        version: '1.2.1', protocol: 1, url: 'http://x/a.tgz', notes: 'Faster joins');
+    Future<UpdateController> pump(WidgetTester tester, UpdateStatus s,
+        {String current = '1.2.0'}) async {
+      final c = UpdateController(
+          currentVersion: current,
+          executablePath: '/nowhere/watch_together',
+          restart: (_, _) async {});
+      c.status.value = s;
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(body: Column(children: [UpdateBar(controller: c)]))));
+      return c;
+    }
+
+    testWidgets('says what is ready, the version running, Later hides it',
+        (tester) async {
+      await pump(tester,
+          const UpdateStatus(UpdatePhase.available, manifest: m, canInstall: true));
+      expect(find.text('Starsync 1.2.1 is ready'), findsOneWidget);
+      expect(find.text('You are running 1.2.0 · Faster joins'), findsOneWidget);
+      expect(find.text('Update and restart'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('update-later')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('update-bar')), findsNothing);
+    });
+
+    testWidgets('a copy that cannot update itself says it is older',
+        (tester) async {
+      await pump(tester, const UpdateStatus(UpdatePhase.available, manifest: m));
+      expect(find.text('This copy of Starsync is older than the latest release (1.2.1)'),
+          findsOneWidget);
+      expect(find.text('Update and restart'), findsNothing);
+    });
+
+    testWidgets('a test build is not told which version it runs',
+        (tester) async {
+      await pump(tester,
+          const UpdateStatus(UpdatePhase.available, manifest: m, canInstall: true),
+          current: '1.2.1-dev.2');
+      expect(find.text('Faster joins'), findsOneWidget);
+    });
+
+    testWidgets('nothing to install: no bar', (tester) async {
+      await pump(tester, const UpdateStatus(UpdatePhase.idle));
+      expect(find.byKey(const ValueKey('update-bar')), findsNothing);
+    });
   });
 }

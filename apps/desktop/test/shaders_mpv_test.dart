@@ -27,9 +27,9 @@ void main() {
       s.setShaderPreset(ShaderPreset.a);
       await p.init();
       final dynamic mpv = p.player.platform;
-      final modeA = joinShaderPaths(
-          await shaderPathsFor(ShaderPreset.a, ShaderQuality.hq, const []));
-      expect(await mpv.getProperty('glsl-shaders'), modeA);
+      final modeA =
+          await shaderPathsFor(ShaderPreset.a, ShaderQuality.hq, const []);
+      expect(shaderListMatches(modeA, await mpv.getProperty('glsl-shaders')), isTrue);
       expect(p.shaderNotice.value, isNull);
 
       // Live change, announced.
@@ -39,7 +39,7 @@ void main() {
       final caFast = await shaderPathsFor(
           ShaderPreset.ca, ShaderQuality.fast, const []);
       expect(caFast.first, startsWith(support.path));
-      expect(await mpv.getProperty('glsl-shaders'), joinShaderPaths(caFast));
+      expect(shaderListMatches(caFast, await mpv.getProperty('glsl-shaders')), isTrue);
       expect(p.shaderNotice.value?.text, 'Shaders: Mode C+A (Fast)');
 
       // A missing custom file: toast, off, nothing set.

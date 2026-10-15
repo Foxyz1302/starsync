@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:signals/signals_flutter.dart';
@@ -39,6 +41,12 @@ const _keyChatPopups = 'chatPopups';
 const _keyShareDiagnostics = 'shareDiagnostics';
 
 enum HwdecMode { auto, off, custom }
+
+/// The mpv `hwdec` of [HwdecMode.auto]. Windows: 'auto-copy' (decoded on
+/// the GPU, frames copied back): media_kit renders through ANGLE, where
+/// plain 'auto' picks the dxva2 interop, which cannot create its EGL
+/// surface there ("Failed to create EGL surface"). Elsewhere 'auto'.
+String get autoHwdec => Platform.isWindows ? 'auto-copy' : 'auto';
 
 /// When chat messages pop up as toasts (they always reach the chat).
 enum ChatPopups {
@@ -88,8 +96,8 @@ class AppSettings {
   /// Send this app's log lines to the server's session log while in a
   /// session (never chat). Off: nothing is sent but a note that it is off.
   final shareDiagnostics = signal(true);
-  /// Chat message toasts (default: only when paused). Applies live.
-  final chatPopups = signal(ChatPopups.paused);
+  /// Chat message toasts (default: all). Applies live.
+  final chatPopups = signal(ChatPopups.all);
   /// App sounds (`sfx/`): 0..1, 0 = silent.
   final soundVolume = signal(1.0);
   /// `SfxKind` names switched off one by one.
@@ -109,13 +117,13 @@ class AppSettings {
   /// .glsl files of [ShaderPreset.custom], in mpv order.
   final customShaders = signal<List<String>>(const []);
 
-  /// mpv `hwdec` value: 'auto', 'no', or the custom value ('auto' when
-  /// custom is blank).
+  /// mpv `hwdec` value: [autoHwdec], 'no', or the custom value
+  /// ([autoHwdec] when custom is blank).
   late final hwdec = computed(() => switch (hwdecMode.value) {
-        HwdecMode.auto => 'auto',
+        HwdecMode.auto => autoHwdec,
         HwdecMode.off => 'no',
         HwdecMode.custom =>
-          hwdecCustom.value.trim().isEmpty ? 'auto' : hwdecCustom.value.trim(),
+          hwdecCustom.value.trim().isEmpty ? autoHwdec : hwdecCustom.value.trim(),
       });
 
   Future<void>? _load;
@@ -160,7 +168,7 @@ class AppSettings {
       final share = box.get(_keyShareDiagnostics);
       if (share is bool) shareDiagnostics.value = share;
       final popups = box.get(_keyChatPopups);
-      chatPopups.value = ChatPopups.values.where((m) => m.name == popups).firstOrNull ?? ChatPopups.paused;
+      chatPopups.value = ChatPopups.values.where((m) => m.name == popups).firstOrNull ?? ChatPopups.all;
       final vol = box.get(_keySoundVolume);
       if (vol is num) soundVolume.value = vol.toDouble().clamp(0, 1);
       final off = box.get(_keySoundsOff);

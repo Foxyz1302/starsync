@@ -205,6 +205,26 @@ void main() {
       expect(dev.status.value.phase, UpdatePhase.idle);
     });
 
+    test('Later hides it until the next check; a check leaves an install be',
+        () async {
+      final c = UpdateController(
+          currentVersion: '0.1.0',
+          manifestUrl: server.manifestUrl,
+          executablePath: '${work.path}/stray-binary',
+          restart: (_, _) async {});
+      await c.checkOnce();
+      expect(c.status.value.phase, UpdatePhase.available);
+      c.dismiss();
+      expect(c.status.value.phase, UpdatePhase.idle);
+      await c.checkNow();
+      expect(c.status.value.phase, UpdatePhase.available);
+      final m = c.status.value.manifest;
+      c.status.value = UpdateStatus(UpdatePhase.downloading,
+          manifest: m, progress: 0.4, canInstall: true);
+      await c.checkNow();
+      expect(c.status.value.phase, UpdatePhase.downloading);
+    });
+
     test('failed install shows error, install untouched, retry works',
         () async {
       server.manifestExtra = {'sha256': '0' * 64};

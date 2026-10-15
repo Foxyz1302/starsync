@@ -68,14 +68,14 @@ void main() {
     coord.toasts.value = [];
   });
 
-  Future<void> pumpShell(WidgetTester tester, Size size) async {
+  Future<void> pumpShell(WidgetTester tester, Size size, {UpdateController? updates}) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(
       theme: ThemeData.dark(),
       home: AppShell(
-        updates: UpdateController(currentVersion: '0.0.0-dev'),
+        updates: updates ?? UpdateController(currentVersion: '0.0.0-dev'),
         autoUpdateCheck: false,
         windowControls: false,
         videoBuilder: (context, controls) => const FakeVideo(),
@@ -92,6 +92,36 @@ void main() {
     member('e', 'Eve', stale: true),
     member('f', 'Finn'),
   ];
+
+  group('version and update bar', () {
+    testWidgets('the version under Settings; the bar on the tabs, off the full player until the video ends',
+        (tester) async {
+      final updates = UpdateController(currentVersion: '0.0.0-dev');
+      await pumpShell(tester, const Size(1280, 800), updates: updates);
+      expect(find.text('dev run'), findsOneWidget);
+      expect(find.byKey(const ValueKey('update-bar')), findsNothing);
+      updates.status.value = const UpdateStatus(UpdatePhase.available,
+          manifest: UpdateManifest(version: '9.9.9', protocol: 1, url: 'http://x/a.tgz', notes: ''),
+          canInstall: true);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('update-bar')), findsOneWidget);
+      online(party);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('update-bar')), findsNothing);
+      final r = coord.serverState.value!;
+      coord.serverState.value = StateBroadcast(
+        eventId: 2,
+        transport: 'finished',
+        position: 0,
+        serverTime: r.serverTime,
+        mediaId: r.mediaId,
+        media: r.media,
+        members: r.members,
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('update-bar')), findsOneWidget);
+    });
+  });
 
   group('party strip', () {
     testWidgets('offline: Join and Host, no party', (tester) async {

@@ -52,8 +52,8 @@ Problems are numbered; delete a line when its fix ships.
   the player instead of being one media pipeline.
 - P18 Bilibili "no video formats" with browser cookies set; the hint
   wording misleads (D11).
-- P20 Version not visible. P21 Updates easy to miss. P22 Friends on
-  different versions (D8).
+- P22 Friends on different versions (D8). (P20 version visible and P21
+  update band: fixed in 1.2.1-dev.3; check the band in real use.)
 - P23 Solo mode you enter and leave; going hosted loses the queue (D9).
 - P24 The invite address list is unhelpful (shows the proxy's 198.18.x).
 - P25 ssh to Gitea blocked through the proxy (pushes go over https).
@@ -62,14 +62,19 @@ Problems are numbered; delete a line when its fix ships.
 - P28 Log noise: "Failed to create file cache"; an idle relay channel for
   Jellyfin items everyone has an account for.
 - P29 Relay start delay after a seek into an unbuffered part.
-- P30 Shaders don't work on Windows (our read-back check turns them off;
-  dxva2-egl interop error).
-- P31 Software rendering on a friend's Linux; render mode not logged.
-- P32 The app freezes on exit, reported mostly by Windows users and
-  other friends; on the user's Linux/NVIDIA machine it shows only as
-  silent crash dumps after the window is gone (NVIDIA EGL exit handler;
-  mpv players alive at teardown; Windows close order).
-- P33 No volume readout when using the mouse wheel on the video.
+- P30 Shaders don't work on Windows. Fix in 1.2.1-dev.3 (list read-back
+  check; Windows hwdec `auto-copy`): a Windows user must confirm shaders
+  stay on and the EGL-surface error is gone.
+- P31 Software rendering on a friend's Linux. 1.2.1-dev.3 logs it
+  (`mpv: render` lines); needs that friend's log, plus
+  `watch-together 2>&1 | grep VideoOutput` from a terminal if software.
+- P32 The app freezes on exit, mostly reported on Windows. 1.2.1-dev.3:
+  orderly close, Linux `_exit` (0 crashes in 41 closes vs 10/10 before),
+  Windows normal close + TerminateProcess + watchdogs, untested on
+  Windows; if it still hangs: Event Viewer 1000/1002, a Task Manager dump,
+  the `close:` log lines.
+- P33 No volume readout on wheel: likely fixed by the controls rework
+  (1.2.1-dev.1; a test covers both skins); confirm in real use.
 - P34 Local anime folders are opened as plain files (no banner, names,
   next episode, tracking); test library: the user's
   `/mnt/torrents/Torrents/Binux/` (several shows and a movie).

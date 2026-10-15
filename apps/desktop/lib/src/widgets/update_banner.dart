@@ -3,7 +3,7 @@ import 'package:sync_relay_core/core.dart';
 
 import '../update/update_controller.dart';
 
-// "Update available" card (Home update indicator dialog). Kicks off the one
+// "Update available" card (Settings → Show update dialog). Kicks off the one
 // background check on first build; renders nothing until there is an
 // update to offer. Never shown over playback.
 class UpdateBanner extends StatefulWidget {

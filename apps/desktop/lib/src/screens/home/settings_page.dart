@@ -198,8 +198,8 @@ class UpdateSettings extends StatelessWidget {
           builder: (context) => SwitchListTile(
             key: const ValueKey('auto-check-updates'),
             contentPadding: EdgeInsets.zero,
-            title: const Text('Check for updates on start'),
-            subtitle: const Text('Looks for a new version when the app opens; nothing installs without asking'),
+            title: const Text('Check for updates automatically'),
+            subtitle: const Text('When the app opens and every few hours; nothing installs without asking'),
             value: s.autoCheckUpdates.value,
             onChanged: s.setAutoCheckUpdates,
           ),
