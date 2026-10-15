@@ -190,6 +190,11 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
    CI builds (it downloads binaries in a build hook), and the upstream
    fixes it lacks. Until then we vendor upstream 2.0.1 with the X11/EGL
    patch in `third_party/media_kit_video`.
+   Upstream isn't merging outside work (20 open PRs, no release since
+   Dec 2025): no upstream PRs. Independent of the fork: the Windows
+   libmpv is a 2023 build fetched by `media_kit_libs_windows_video`;
+   vendoring that package with a current mpv-dev build (and checksum)
+   updates Windows' mpv on its own.
 
 1. **Auto-skip OP/ED** (undecided): who decides and how (shared for the
    server, personal, per show) is open. Constraint: a skip is a seek and
