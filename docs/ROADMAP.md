@@ -122,7 +122,12 @@ Not in the restructure: P25 (ops).
   fixes wait for a release: add a manual CI run that adds the Windows zip
   to the dev prerelease.
 
-**Agreed since:** the queue stays in memory (no server storage). Auto
+**Agreed since:** the queue stays in memory (no server storage).
+Transport: `wss://` preferred when a server offers it, `ws://` still
+allowed (a cleartext exception on Android); it only carries sync.
+Tests: many pin behaviour the restructure drops; step 0 audits them
+(delete what no longer fits, keep a few scenario tests for the core
+flows). Open questions below are decided during the restructure. Auto
 sit-out: idle or minimised for a while sets you Away, activity sets you
 In; it replaces the 10-minute auto-unready.
 
@@ -133,10 +138,7 @@ In; it replaces the 10-minute auto-unready.
 - Starting together: today someone has to stay unready so others can
   join first. Ideas: a short "starting in 30 s, ready up" countdown;
   waiting for everyone from the last session.
-- Transport: `wss://` everywhere, each server with its own self-signed
-  certificate whose fingerprint travels in the invite and is pinned
-  (no certificate authority needed, works for home and LAN servers and is
-  allowed on Android); a trusted certificate optional for a VPS domain.
+
 - Grace length: ~10 min; a source in grace keeps its relay buffer.
 - Platform decision: "Desktop + mpv only" becomes "mpv only, desktop
   first" if Android goes ahead.
