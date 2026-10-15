@@ -78,7 +78,7 @@ MemoryImage _memo(Object key, Uint8List bytes) {
 /// Callers rebuild on [SessionCoordinator.avatars] and [Profile.picture]
 /// (see [PartyWatch]).
 ImageProvider? memberAvatarImage(MemberView m, SessionCoordinator coord) {
-  if (m.id.isNotEmpty && m.id == coord.sync.memberId) {
+  if (m.id.isNotEmpty && m.id == coord.connection.memberId) {
     final own = Profile.instance.picture.value;
     if (own != null) return _memo('self', own);
   }
@@ -105,10 +105,10 @@ AvatarInfo selfAvatarInfo({bool ready = false, bool host = false, bool out = fal
 
 /// [m] as the party strip, toasts and the chat show it.
 AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator coord) {
-  final self = m.id.isNotEmpty && m.id == coord.sync.memberId;
+  final self = m.id.isNotEmpty && m.id == coord.connection.memberId;
   final relay = r == null ? null : stateMediaRelay(r);
   final playing = r?.media != null;
-  final delivery = r == null ? null : deliveryOf(r, selfId: coord.sync.memberId, names: coord.memberNames);
+  final delivery = r == null ? null : deliveryOf(r, selfId: coord.connection.memberId, names: coord.memberNames);
   return AvatarInfo(
     id: m.id,
     name: m.name,

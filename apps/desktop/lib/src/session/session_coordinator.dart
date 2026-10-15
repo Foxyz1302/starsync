@@ -17,15 +17,14 @@ import '../playback/playback_controller.dart';
 import '../platform/ports/link_resolver.dart';
 import '../playback/yt_dlp_app.dart' show AppYtDlp;
 import '../schedule/anilist.dart';
-import '../screens/home/ui.dart' show appName, displayVersion;
 import '../screens/home/picked_media.dart';
 import '../sfx/sfx.dart' show NoopSfxService, SfxService;
 import '../state/settings.dart';
 import '../sync/avatar_cache.dart';
 import '../sync/state_diff.dart';
-import '../sync/sync_client.dart';
 import '../sync/user_seek.dart';
 import '../queue/queue_controller.dart';
+import 'connection.dart';
 import 'delivery.dart';
 import 'health.dart';
 import 'idle.dart';
@@ -35,58 +34,14 @@ import 'now_playing.dart';
 import 'now_playing_info.dart';
 import 'switch_trace.dart';
 
+export 'connection.dart' show ConnectCancelled, ConnectParams;
 export 'notifier.dart' show ToastItem;
 
 final _log = createLogger('session');
 
-/// Thrown when a connect is superseded by cancel/leave before it finished.
-class ConnectCancelled implements Exception {
-  const ConnectCancelled();
-  @override
-  String toString() => 'connection cancelled';
-}
-
 /// Display name for a link: last path segment, decoded, never the query
 /// (Jellyfin-style links carry api_key there and names are broadcast).
 String linkDisplayName(String url) => linkName(url);
-
-class ConnectParams {
-  final String host;
-  final int port;
-  final String secret;
-  final String name;
-  final String avatar;
-  final String mediaPath;
-  final String linkUrl;
-  /// Sent in hello by the hosting app's own client (see AppConfig.hostKey).
-  final String hostKey;
-  /// Put up with a `swap` right after joining (a Jellyfin ref or a link);
-  /// wins over [linkUrl].
-  final HelloMedia? media;
-  const ConnectParams({
-    required this.host,
-    required this.port,
-    required this.secret,
-    required this.name,
-    this.avatar = '',
-    this.mediaPath = '',
-    this.linkUrl = '',
-    this.hostKey = '',
-    this.media,
-  });
-
-  ConnectParams withMedia(HelloMedia? media) => ConnectParams(
-        host: host,
-        port: port,
-        secret: secret,
-        name: name,
-        avatar: avatar,
-        mediaPath: mediaPath,
-        linkUrl: media == null ? linkUrl : '',
-        hostKey: hostKey,
-        media: media,
-      );
-}
 
 /// The end-of-episode countdown (auto-advance). Every client with the
 /// setting on shows it; only [swapper] puts the next episode up.
@@ -146,6 +101,17 @@ final class _JellyfinOrigin extends _RelayOrigin {
   const _JellyfinOrigin(this.link);
 }
 
+/// The health line a connection change writes; null writes none (closed:
+/// whoever closed says why).
+HealthStatus? connectionHealth(ConnState s) => switch (s) {
+      ConnConnecting() => const HealthStatus(HealthSeverity.info, 'connecting…'),
+      ConnOnline() => const HealthStatus(HealthSeverity.ok, 'connected'),
+      ConnLost() => const HealthStatus(HealthSeverity.warn, 'connection lost — retrying…'),
+      ConnReconnecting() => const HealthStatus(HealthSeverity.info, 'reconnecting…'),
+      ConnRefused(:final message) => HealthStatus(HealthSeverity.error, message),
+      ConnReplaced() || ConnClosed() => null,
+    };
+
 String? stateMediaUrl(StateBroadcast state) {
   final media = state.media;
   if (media == null) return null;
@@ -167,17 +133,11 @@ class SessionCoordinator {
   Future<({String name, int size})?> Function(String path)? hostFile;
   /// The app's yt-dlp and link probes (tests pass their own).
   final LinkResolver ytDlp;
-  final SyncClient sync = SyncClient();
-  /// This app's log lines to the server's session log (Settings: "Share
-  /// diagnostics with the server"), and "Mark a problem".
-  late final DiagUploader diag = DiagUploader(
-      target: _diagTarget, version: '$appName ${displayVersion()} on ${Platform.operatingSystem}');
-
-  DiagTarget? _diagTarget() {
-    final uri = sync.wsUri;
-    if (sync.token.isEmpty || uri == null || !sync.clockSync.hasSample) return null;
-    return (base: DiagUploader.baseOf(uri), token: sync.token, offsetMs: sync.clockSync.offsetMs);
-  }
+  /// The link to the server (socket, reconnects, clock offset, its
+  /// [ConnState]); made in the composition root.
+  final Connection connection;
+  /// This app's log lines to the server's session log ([Connection.diag]).
+  DiagUploader get diag => connection.diag;
 
   /// "Mark a problem": a marker with [note] in the server's session log
   /// (and this app's log). False when not in a session: then only this
@@ -197,11 +157,11 @@ class SessionCoordinator {
   /// Up next: the server's queue, adding to it, and putting items up.
   late final QueueController queue = QueueController(this);
   /// The server has a password (it fetches links only then).
-  bool get serverHasPassword => (_params?.secret ?? '').isNotEmpty;
+  bool get serverHasPassword => (connection.params?.secret ?? '').isNotEmpty;
   /// Member pictures by `avatarHash`, fetched from the server.
-  late final AvatarCache avatars = AvatarCache(sync);
+  late final AvatarCache avatars = AvatarCache(connection.client);
   /// The current media's poster and banner by `state.media.art` hash.
-  late final ArtCache art = ArtCache(sync);
+  late final ArtCache art = ArtCache(connection.client);
   final PlaybackController playback = PlaybackController();
   /// Timings of each media change here (see [SwitchTrace]).
   final SwitchTrace switchTrace = SwitchTrace();
@@ -214,7 +174,8 @@ class SessionCoordinator {
   Signal<List<FeedMessage>> get feedLog => notifier.feedLog;
   /// Toasts on screen ([Notifier.toasts]).
   Signal<List<ToastItem>> get toasts => notifier.toasts;
-  final reconnecting = signal(false);
+  /// The reconnect loop runs ([ConnState.retrying]).
+  late final Computed<bool> reconnecting = computed(() => connection.state.value.retrying);
   final starving = signal<String?>(null);
   /// Why this player cannot open the current media, in plain words
   /// ([playErrorText]); empty while it can. It rides in `report.error`, so
@@ -264,9 +225,9 @@ class SessionCoordinator {
 
   late final Computed<MemberView?> selfMember = computed(() {
     final r = serverState.value;
-    if (r == null || sync.memberId.isEmpty) return null;
+    if (r == null || connection.memberId.isEmpty) return null;
     for (final m in r.members) {
-      if (m.id == sync.memberId) return m;
+      if (m.id == connection.memberId) return m;
     }
     return null;
   });
@@ -279,9 +240,9 @@ class SessionCoordinator {
   StreamSubscription? _feedSub;
   StreamSubscription? _nudgeSub;
   StreamSubscription? _errSub;
-  StreamSubscription? _statusSub;
+  StreamSubscription? _silenceSub;
+  void Function()? _connectionHealth;
 
-  bool _manualClose = false;
   /// A solo session (set by SessionState): no idle unready / sit out,
   /// there is nobody to hold up.
   bool solo = false;
@@ -303,9 +264,6 @@ class SessionCoordinator {
   // Last mediaId seen in a state; unlike [_mediaId] it survives a
   // reconnect, so only a real swap counts as a new video.
   int _seenMediaId = -1;
-  // Bumped by every connect/leave/cancel/retry: stale attempts no-op.
-  int _epoch = 0;
-  Timer? _reconnectTimer;
   int _mediaId = -1;
   // The mediaId whose media the player holds (or is opening); -1 for none.
   // Unlike [_mediaId] it survives a lost connection, so a reconnect to the
@@ -350,14 +308,7 @@ class SessionCoordinator {
   // True while a media open is in flight: the player's duration may still
   // belong to the previous media then.
   bool _opening = false;
-  // Token of the current connection, offered as `resume` on reconnect.
-  String _resumeToken = '';
-  DateTime? _lastStateAt;
   final IdleTracker _idle = IdleTracker(DateTime.now().toUtc());
-  ConnectParams? _params;
-  bool _everConnected = false;
-  /// The connection-lost sound played; the reconnected one answers it once.
-  bool _lostSounded = false;
   Map<String, String>? _openHeaders;
 
   // Jellyfin: the resolved ref, the mediaId it belongs to, a generation
@@ -379,17 +330,33 @@ class SessionCoordinator {
   // Members' last `error`, by id, so a new one toasts once.
   Map<String, String> _memberErrors = const {};
 
-  /// [notifier] defaults to one playing [sfx] (tests).
-  SessionCoordinator(
+  /// [notifier] defaults to one playing [sfx], [connection] to one
+  /// telling that notifier (tests).
+  factory SessionCoordinator(
       {SfxService sfx = const NoopSfxService(),
       Notifier? notifier,
+      Connection? connection,
       JellyfinAccounts? jellyfin,
       TrackPrefs? trackPrefs,
-      LinkResolver? ytDlp})
-      : notifier = notifier ?? Notifier(sfx: sfx),
-        ytDlp = ytDlp ?? AppYtDlp.instance,
-        jellyfin = jellyfin ?? JellyfinAccounts.instance,
-        trackPrefs = trackPrefs ?? TrackPrefs();
+      LinkResolver? ytDlp}) {
+    final n = notifier ?? Notifier(sfx: sfx);
+    return SessionCoordinator._(
+      notifier: n,
+      connection: connection ?? Connection(notify: n.notify),
+      ytDlp: ytDlp ?? AppYtDlp.instance,
+      jellyfin: jellyfin ?? JellyfinAccounts.instance,
+      trackPrefs: trackPrefs ?? TrackPrefs(),
+    );
+  }
+
+  SessionCoordinator._(
+      {required this.notifier,
+      required this.connection,
+      required this.ytDlp,
+      required this.jellyfin,
+      required this.trackPrefs}) {
+    connection.onReconnect = _onReconnect;
+  }
 
   /// The session's first player: created here on connect, disposed by
   /// [leave]; each new media gets its own ([PlaybackController.openUrl]).
@@ -434,7 +401,7 @@ class SessionCoordinator {
     final now = {for (final m in r.members) if (m.error.isNotEmpty) m.id: m.error};
     for (final m in r.members) {
       final e = now[m.id];
-      if (e != null && m.id != sync.memberId && _memberErrors[m.id] != e) {
+      if (e != null && m.id != connection.memberId && _memberErrors[m.id] != e) {
         notify(MemberCantPlay(m.name, e));
       }
     }
@@ -446,7 +413,7 @@ class SessionCoordinator {
   void _warnSlowSource(StateBroadcast r) {
     memberNames.observe(r);
     if (_slowWarnedFor == r.mediaId) return;
-    final warning = slowSourceWarning(r, sync.memberId);
+    final warning = slowSourceWarning(r, connection.memberId);
     if (warning == null) return;
     _slowWarnedFor = r.mediaId;
     notify(SlowSource(warning));
@@ -462,7 +429,7 @@ class SessionCoordinator {
   /// edge). The ready flag is never touched.
   Future<void> reloadVideo() async {
     // Also allowed after a failed reload (player gone, session still on).
-    if (_params == null || _reloadingVideo) return;
+    if (connection.params == null || _reloadingVideo) return;
     _reloadingVideo = true;
     _playerReady = false;
     try {
@@ -486,11 +453,10 @@ class SessionCoordinator {
 
   Future<void> connect(ConnectParams params) async {
     // Own epoch first: a cancel during any await below makes this stale.
-    final epoch = ++_epoch;
+    final epoch = connection.invalidate();
     await _teardown(silent: true);
-    if (epoch != _epoch) throw const ConnectCancelled();
-    _params = params;
-    _manualClose = false;
+    if (!connection.isCurrent(epoch)) throw const ConnectCancelled();
+    connection.begin(params);
     _wsHost = params.host;
     _wsPort = params.port;
     diff.reset();
@@ -507,9 +473,6 @@ class SessionCoordinator {
     _joinBackAt = null;
     _seenMediaId = -1;
     _wasPlayAllowed = false;
-    _everConnected = false;
-    _lostSounded = false;
-    _resumeToken = '';
     _seekGate.reset();
     _clearPendingSeek();
     _lastEventId = -1;
@@ -522,30 +485,13 @@ class SessionCoordinator {
     }
     markInput();
     _subscribe();
-    diag
-      ..share = AppSettings.instance.shareDiagnostics.peek()
-      ..start();
     notifier.clear();
     await initPlayer();
-    if (epoch != _epoch) throw const ConnectCancelled();
-    health.value =
-        const HealthStatus(HealthSeverity.info, 'connecting…');
-    final wsUri = Uri.parse('ws://${params.host}:${params.port}/sync');
+    if (!connection.isCurrent(epoch)) throw const ConnectCancelled();
+    // Health follows the connection's state from here (connecting,
+    // connected; a failed dial leaves its reason).
+    final welcome = await connection.dial(epoch);
     try {
-      final welcome = await sync.connect(
-        wsUri: wsUri,
-        secret: params.secret,
-        name: params.name,
-        avatar: params.avatar,
-        hostKey: params.hostKey,
-      );
-      // Whoever bumped the epoch (cancel/leave) also closed the socket.
-      if (epoch != _epoch) throw const ConnectCancelled();
-      reconnecting.value = false;
-      _everConnected = true;
-      _resumeToken = sync.token;
-      health.value = const HealthStatus(HealthSeverity.ok, 'connected');
-      _lastStateAt = DateTime.now().toUtc();
       final url = welcome.mediaUrl;
       if (url != null && url.isNotEmpty) {
         await _openMedia(url);
@@ -555,35 +501,44 @@ class SessionCoordinator {
       }
       final media = params.media ??
           (params.linkUrl.isEmpty ? null : await mediaForLink(jellyfin, params.linkUrl));
-      if (epoch != _epoch) throw const ConnectCancelled();
+      if (!connection.isCurrent(epoch)) throw const ConnectCancelled();
       if (media != null) _swap(media);
       _startTicker();
     } catch (e) {
-      if (epoch != _epoch) throw const ConnectCancelled();
+      if (!connection.isCurrent(epoch)) throw const ConnectCancelled();
       debugPrint('connect failed: $e');
+      connection.scheduleReconnect();
       health.value =
-          HealthStatus(HealthSeverity.error, _friendlyError(e));
-      _scheduleReconnect();
+          HealthStatus(HealthSeverity.error, connectErrorText(e));
       rethrow;
     }
   }
 
   void _subscribe() {
     queue.attach();
-    _stateSub ??= sync.states.listen(_onState);
-    _feedSub ??= sync.feeds.listen(_onFeed);
-    _nudgeSub ??= sync.nudges.listen(_onNudge);
-    _errSub ??= sync.errors.listen((msg) {
+    _stateSub ??= connection.states.listen(_onState);
+    _feedSub ??= connection.feeds.listen(_onFeed);
+    _nudgeSub ??= connection.nudges.listen(_onNudge);
+    _errSub ??= connection.errors.listen((msg) {
       health.value = HealthStatus(HealthSeverity.warn, msg);
     });
-    _statusSub ??= sync.status.listen((s) {
-      if (s == SyncStatus.closed && !_manualClose) {
-        health.value = const HealthStatus(
-            HealthSeverity.warn, 'connection lost — retrying…');
-        _soundLost();
-        _scheduleReconnect();
-      }
+    _silenceSub ??= connection.silence.listen((_) => _onConnectionSilent());
+    _connectionHealth ??= connection.state.subscribe((s) {
+      final h = connectionHealth(s);
+      if (h != null) health.value = h;
     });
+  }
+
+  /// The drop handling: no state for [Connection.silenceLimit], so what
+  /// the server said is stale. (A closed socket keeps it until then.)
+  void _onConnectionSilent() {
+    if (serverState.peek() == null) return;
+    serverState.value = null;
+    starving.value = null;
+    _wasPlayAllowed = false;
+    _mediaId = -1;
+    _clearPendingSeek();
+    diff.reset();
   }
 
   /// Opens [url] (with [headers] on every request); false on failure. A
@@ -620,7 +575,7 @@ class SessionCoordinator {
     }
     // Tell the server at once (a preloaded media already has its buffer).
     final r = serverState.peek();
-    if (ok && r != null && r.mediaId == mediaId && url == _openUrl && sync.token.isNotEmpty && _playerReady) {
+    if (ok && r != null && r.mediaId == mediaId && url == _openUrl && connection.token.isNotEmpty && _playerReady) {
       _sendReport(r);
     }
     return ok;
@@ -635,7 +590,7 @@ class SessionCoordinator {
     final r = serverState.peek();
     if (r == null || r.transport != 'held' || _bufferReportedFor == r.mediaId) return;
     if (_lastOut || _opening || _openUrl == null || _playerMediaId != r.mediaId || !_playerReady) return;
-    if (sync.token.isEmpty || playback.bufferedSecsAhead < r.bufferNeed) return;
+    if (connection.token.isEmpty || playback.bufferedSecsAhead < r.bufferNeed) return;
     _bufferReportedFor = r.mediaId;
     _sendReport(r);
   }
@@ -715,7 +670,7 @@ class SessionCoordinator {
     final relay = stateMediaRelay(r);
     final waiting = relay != null &&
         relay.source.isNotEmpty &&
-        relay.source != sync.memberId &&
+        relay.source != connection.memberId &&
         !relay.live &&
         _openUrl != null &&
         jellyfinPlan.peek() is! OwnPlay;
@@ -737,7 +692,7 @@ class SessionCoordinator {
   /// queue id in the URL, so the preload of its warm relay matches.
   String _relayMediaUrlFor(String name, int mediaId,
           [List<RelayTrackSpec> tracks = const [], String queueId = '']) =>
-      relayViewerUrl('http://$_wsHost:$_wsPort/r/default/${sync.token}/${queueId.isEmpty ? mediaId : queueId}', name,
+      relayViewerUrl('http://$_wsHost:$_wsPort/r/default/${connection.token}/${queueId.isEmpty ? mediaId : queueId}', name,
           tracks: tracks);
 
   /// This viewer's URL of the warm relay of Up next's first [item]
@@ -762,7 +717,7 @@ class SessionCoordinator {
     }
     stopWarmSource();
     final src = RelaySource(
-        Uri.parse('ws://$_wsHost:$_wsPort/r/default/${sync.token}/source?q=${Uri.encodeQueryComponent(queueId)}'),
+        Uri.parse('ws://$_wsHost:$_wsPort/r/default/${connection.token}/source?q=${Uri.encodeQueryComponent(queueId)}'),
         media);
     _warmSource = (queueId: queueId, src: src);
     unawaited(() async {
@@ -813,7 +768,7 @@ class SessionCoordinator {
       return;
     }
     final src = RelaySource(
-        Uri.parse('ws://$_wsHost:$_wsPort/r/default/${sync.token}/source'), media);
+        Uri.parse('ws://$_wsHost:$_wsPort/r/default/${connection.token}/source'), media);
     _relaySource = src;
     _relaySourceMediaId = mediaId;
     relaying.value = true;
@@ -847,7 +802,7 @@ class SessionCoordinator {
   }
 
   String _fileUrlFor(String name) {
-    return 'http://$_wsHost:$_wsPort/m/default/${sync.token}/${Uri.encodeComponent(name)}';
+    return 'http://$_wsHost:$_wsPort/m/default/${connection.token}/${Uri.encodeComponent(name)}';
   }
 
   StateBroadcast? _queuedState;
@@ -858,7 +813,6 @@ class SessionCoordinator {
   /// three viewers readying at once). A state that arrives meanwhile
   /// replaces any still waiting.
   void _onState(StateBroadcast r) {
-    _lastStateAt = DateTime.now().toUtc();
     serverState.value = r;
     if (r.transport == 'playing') switchTrace.mark(r.mediaId, SwitchTrace.playing);
     _toastMemberErrors(r);
@@ -893,7 +847,7 @@ class SessionCoordinator {
       await _unloadForOut();
       return;
     }
-    _seekGate.observe(r, sync.memberId);
+    _seekGate.observe(r, connection.memberId);
     final newEvent = r.eventId != _lastEventId;
     _lastEventId = r.eventId;
     if (r.mediaId != _mediaId) {
@@ -907,7 +861,7 @@ class SessionCoordinator {
           sameJellyfinItem(ref, _jfRef) &&
           jellyfinPlan.peek() is OwnPlay;
       final relay = stateMediaRelay(r);
-      final mine = relay != null && relay.source.isNotEmpty && relay.source == sync.memberId;
+      final mine = relay != null && relay.source.isNotEmpty && relay.source == connection.memberId;
       _RelayOrigin? origin;
       if (mine) {
         final pending = _pendingOrigin;
@@ -956,7 +910,7 @@ class SessionCoordinator {
           }
         } else {
           var url = stateMediaUrl(r);
-          if ((url == null || url.isEmpty) && sync.token.isNotEmpty) {
+          if ((url == null || url.isEmpty) && connection.token.isNotEmpty) {
             final name = (r.media?['name'] as String?) ?? '';
             if (name.isNotEmpty) url = _fileUrlFor(name);
           }
@@ -984,8 +938,8 @@ class SessionCoordinator {
       return;
     }
     // Server clock: serverTime in the state is the server's.
-    final now = sync.serverNow();
-    final allowed = localPlayAllowed(r, sync.memberId);
+    final now = connection.serverNow();
+    final allowed = localPlayAllowed(r, connection.memberId);
     var actions = diff.diff(r, playback.positionSecs, now);
     if (r.transport == 'playing' && !allowed) {
       actions = [
@@ -1006,7 +960,7 @@ class SessionCoordinator {
     // echo of our own seek arriving: the player is where the user put it.
     // Later drift corrections within that event still apply.
     if (_seekGate.holdsPlayer(DateTime.now().toUtc()) ||
-        (newEvent && _seekGate.isOwnEcho(r, sync.memberId))) {
+        (newEvent && _seekGate.isOwnEcho(r, connection.memberId))) {
       actions = [for (final a in actions) if (a is! SeekAction) a];
     }
     if (actions.any((a) => a is SeekAction)) {
@@ -1044,7 +998,7 @@ class SessionCoordinator {
         ready: self.ready || _restoringReady)) {
       _lastReady = false;
       _restoringReady = false;
-      sync.sendReady(false, source: 'auto');
+      connection.sendReady(false, source: 'auto');
     }
   }
 
@@ -1163,7 +1117,7 @@ class SessionCoordinator {
     final error = playerError.peek();
     final buffered = holds ? playback.bufferedSecsAhead : 0.0;
     if (holds && buffered >= r.bufferNeed) switchTrace.mark(r.mediaId, SwitchTrace.buffered);
-    sync.sendReport(
+    connection.sendReport(
       position: _lastOut ? 0 : playback.positionSecs,
       buffered: buffered,
       eventId: r.eventId,
@@ -1178,33 +1132,11 @@ class SessionCoordinator {
     final now = DateTime.now().toUtc();
     notifier.expire(now);
     final r = serverState.peek();
-    if (sync.token.isNotEmpty) sync.sendPing();
-    diag
-      ..share = AppSettings.instance.shareDiagnostics.peek()
-      ..tick();
-    if (sync.token.isNotEmpty && r != null && _playerReady) {
+    if (connection.token.isNotEmpty && r != null && _playerReady) {
       _sendReport(r);
       if (!_lastOut) {
         _checkSeekLanded(r);
         unawaited(_tickJellyfin(r));
-      }
-    }
-    if (!_manualClose &&
-        _lastStateAt != null &&
-        now.difference(_lastStateAt!).inSeconds >= 5) {
-      if (serverState.peek() != null) {
-        serverState.value = null;
-        starving.value = null;
-        _wasPlayAllowed = false;
-        _mediaId = -1;
-        _clearPendingSeek();
-        diff.reset();
-      }
-      if (!reconnecting.peek()) {
-        health.value = const HealthStatus(
-            HealthSeverity.warn, 'connection lost — retrying…');
-        _soundLost();
-        _scheduleReconnect();
       }
     }
     // No warning when there is nothing to lose (unready), and none while
@@ -1225,7 +1157,7 @@ class SessionCoordinator {
         if (sitOutWhenIdle) {
           sitOut();
         } else {
-          sync.sendReady(false, source: 'auto');
+          connection.sendReady(false, source: 'auto');
         }
       case IdleEvent.none:
         break;
@@ -1249,7 +1181,7 @@ class SessionCoordinator {
       _joinBackAt = null;
       if (!self.ready) {
         _lastReady = true;
-        sync.sendReady(true, source: 'manual');
+        connection.sendReady(true, source: 'manual');
       }
     }
   }
@@ -1273,7 +1205,7 @@ class SessionCoordinator {
       return;
     }
     if (now.difference(at).inMilliseconds < 1500) return;
-    final target = serverPositionAt(r, sync.serverNow());
+    final target = serverPositionAt(r, connection.serverNow());
     if (seekLanded(ownPosition: playback.positionSecs, target: target)) {
       _clearPendingSeek();
       return;
@@ -1315,7 +1247,7 @@ class SessionCoordinator {
         (own - position).abs() < 2.0) {
       position = own;
     }
-    sync.sendSeek(position, seq: settled.seq);
+    connection.sendSeek(position, seq: settled.seq);
   }
 
   void toggleReady() {
@@ -1329,17 +1261,17 @@ class SessionCoordinator {
     final next = !((self?.ready ?? false) && (self?.inSet ?? false));
     markInput();
     _lastReady = next;
-    sync.sendReady(next, source: 'manual');
+    connection.sendReady(next, source: 'manual');
   }
 
   void forceTarget(String memberId, bool ready) {
     markInput();
-    sync.sendForce(memberId, ready);
+    connection.sendForce(memberId, ready);
   }
 
   void forcePlayAll() {
     markInput();
-    sync.sendForce('all', true);
+    connection.sendForce('all', true);
   }
 
   void seekTo(double position) => _userSeek(position);
@@ -1349,7 +1281,7 @@ class SessionCoordinator {
   void nudge(double deltaSecs) {
     final r = serverState.peek();
     if (r == null || _openUrl == null) return;
-    final base = _seekGate.target ?? serverPositionAt(r, sync.serverNow());
+    final base = _seekGate.target ?? serverPositionAt(r, connection.serverNow());
     final target = base + deltaSecs;
     if (target.isNaN) return;
     _userSeek(target < 0 ? 0 : target);
@@ -1388,36 +1320,22 @@ class SessionCoordinator {
     // second arrives empty. Drop blanks so at most one message ships.
     if (text.trim().isEmpty) return;
     markInput();
-    sync.sendChat(text);
+    connection.sendChat(text);
   }
 
   /// Name and/or picture (base64 PNG, empty removes it) change for
   /// everyone now; a later fresh join sends them too.
   void updateProfile({String? name, String? avatar}) {
-    final p = _params;
-    if (p != null) {
-      _params = ConnectParams(
-        host: p.host,
-        port: p.port,
-        secret: p.secret,
-        name: name ?? p.name,
-        avatar: avatar ?? p.avatar,
-        mediaPath: p.mediaPath,
-        linkUrl: p.linkUrl,
-        hostKey: p.hostKey,
-        media: p.media,
-      );
-    }
-    sync.sendProfile(name: name, avatar: avatar);
+    connection.updateProfile(name: name, avatar: avatar);
   }
 
   /// Sits [memberId] out (anyone, the host included), self when null.
   void sitOut([String? memberId]) {
-    final target = memberId ?? sync.memberId;
+    final target = memberId ?? connection.memberId;
     if (target.isEmpty) return;
     markInput();
-    if (target == sync.memberId) _joinBackAt = null;
-    sync.sendOut(target, true);
+    if (target == connection.memberId) _joinBackAt = null;
+    connection.sendOut(target, true);
   }
 
   /// Back from sitting out: the media opens at the server position and
@@ -1427,21 +1345,21 @@ class SessionCoordinator {
     final self = selfMember.peek();
     if (self == null || !self.out) return;
     markInput();
-    sync.sendOut(self.id, false);
+    connection.sendOut(self.id, false);
     if (serverState.peek()?.transport == 'playing') {
       _joinBackAt = DateTime.now().toUtc();
     } else {
       _joinBackAt = null;
       _lastReady = true;
-      sync.sendReady(true, source: 'manual');
+      connection.sendReady(true, source: 'manual');
     }
   }
 
   /// Pokes [memberId]: only they hear it (sitting out or not).
   void nudgeMember(String memberId) {
-    if (memberId.isEmpty || memberId == sync.memberId) return;
+    if (memberId.isEmpty || memberId == connection.memberId) return;
     markInput();
-    sync.sendNudge(memberId);
+    connection.sendNudge(memberId);
   }
 
   /// [queueId]: the Up next item this puts up (the server takes it off
@@ -1450,9 +1368,9 @@ class SessionCoordinator {
     // Putting something up means watching it: back first. Not for Up next
     // coming up by itself: whoever puts it up may be sitting out.
     final self = selfMember.peek();
-    if (self != null && self.out && queueId == null) sync.sendOut(self.id, false);
+    if (self != null && self.out && queueId == null) connection.sendOut(self.id, false);
     _pendingArt = (media: media, after: serverState.peek()?.mediaId ?? 0, link: link ?? media.url, art: art);
-    sync.sendSwap(media, queueId: queueId);
+    connection.sendSwap(media, queueId: queueId);
   }
 
   /// An Up next item put up as queued, for one this app cannot build
@@ -1466,7 +1384,7 @@ class SessionCoordinator {
   void _maybeSendArt(StateBroadcast r) {
     final pending = _pendingArt;
     if (pending == null || r.mediaId <= pending.after) return;
-    if (sync.memberId.isEmpty || r.media?['swapBy'] != sync.memberId) return;
+    if (connection.memberId.isEmpty || r.media?['swapBy'] != connection.memberId) return;
     _pendingArt = null;
     final link = pending.link;
     _ownLink = link == null || link.isEmpty ? null : (r.mediaId, link);
@@ -1514,7 +1432,7 @@ class SessionCoordinator {
       final poster = bytes?.poster, banner = bytes?.banner;
       if (poster == null && banner == null) return;
       if (serverState.peek()?.mediaId != mediaId) return;
-      sync.sendArt(mediaId,
+      connection.sendArt(mediaId,
           poster: poster == null ? null : base64Encode(poster),
           banner: banner == null ? null : base64Encode(banner));
     } catch (e) {
@@ -1749,14 +1667,14 @@ class SessionCoordinator {
   String? jellyfinRelayUrl(JellyfinRef ref) => _relayUrlFor(ref);
 
   String? _relayUrlFor(JellyfinRef ref) {
-    if (sync.token.isEmpty) return null;
-    final welcome = sync.relayUrl;
+    if (connection.token.isEmpty) return null;
+    final welcome = connection.relayUrl;
     if (welcome != null &&
-        welcome.contains('/${sync.token}/') &&
+        welcome.contains('/${connection.token}/') &&
         welcome.endsWith('/${Uri.encodeComponent(ref.itemId)}')) {
       return welcome;
     }
-    return relayUrlFor(_wsHost, _wsPort, sync.token, ref.itemId);
+    return relayUrlFor(_wsHost, _wsPort, connection.token, ref.itemId);
   }
 
   /// `report.jf`: every linked account that works (so a queued Jellyfin
@@ -1990,7 +1908,7 @@ class SessionCoordinator {
   }
 
   bool _isSwapper(StateBroadcast r, JellyfinRef ref) =>
-      autoAdvanceSwapper(r.members, ref.serverId) == sync.memberId;
+      autoAdvanceSwapper(r.members, ref.serverId) == connection.memberId;
 
   void _advanceTick() {
     final a = autoAdvance.peek();
@@ -2039,55 +1957,13 @@ class SessionCoordinator {
     unawaited(_playJellyfin(ref, r));
   }
 
-  void _scheduleReconnect({bool manual = false}) {
-    if (_manualClose || _params == null) return;
-    if (!manual && !_everConnected) return;
-    if (reconnecting.peek()) return;
-    reconnecting.value = true;
-    final epoch = _epoch;
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(
-        const Duration(milliseconds: 1500), () => _reconnect(epoch));
-  }
-
-  /// One reconnect attempt. Every cancel/retry/leave/connect bumps
-  /// [_epoch]; an attempt from an older epoch must not touch state (it
-  /// would kill the newer connection and leave a ghost member).
-  Future<void> _reconnect(int epoch) async {
-    _reconnectTimer = null;
-    bool stale() => epoch != _epoch;
-    final params = _params;
-    if (stale() || params == null) return;
-    if (_manualClose) {
-      reconnecting.value = false;
-      return;
-    }
+  /// A reconnect's part here (see [ReconnectHandler]): what to restore is
+  /// read before the attempt dials.
+  Future<void> Function(WelcomeMessage, bool Function()) _onReconnect() {
     final wasOut = _lastOut;
     var wantReady = _lastReady && !wasOut;
     final seenBefore = _seenMediaId;
-    try {
-      health.value = const HealthStatus(
-          HealthSeverity.info, 'reconnecting…');
-      final wsUri = Uri.parse('ws://${params.host}:${params.port}/sync');
-      final welcome = await sync.connect(
-        wsUri: wsUri,
-        secret: params.secret,
-        name: params.name,
-        avatar: params.avatar,
-        hostKey: params.hostKey,
-        resume: _resumeToken,
-      );
-      // Whoever bumped the epoch also closed (or replaced) the socket.
-      if (stale()) return;
-      reconnecting.value = false;
-      _everConnected = true;
-      if (_lostSounded) {
-        _lostSounded = false;
-        notify(const ConnectionBack());
-      }
-      _resumeToken = sync.token;
-      _lastStateAt = DateTime.now().toUtc();
-      health.value = const HealthStatus(HealthSeverity.ok, 'connected');
+    return (welcome, stale) async {
       final url = welcome.mediaUrl;
       if (url != null && url.isNotEmpty && url != _openUrl) {
         await _openMedia(url);
@@ -2099,77 +1975,36 @@ class SessionCoordinator {
       if (unreadyForNewMedia(
           enabled: AppSettings.instance.unreadyOnSwap.peek(),
           lastMediaId: seenBefore,
-          mediaId: sync.lastState?.mediaId ?? seenBefore,
+          mediaId: connection.lastState?.mediaId ?? seenBefore,
           ready: wantReady)) {
         wantReady = false;
         _lastReady = false;
       }
       // A new member (the server dropped the old one) sits out again; a
       // resumed one still does.
-      final selfNow = sync.lastState?.members.where((m) => m.id == sync.memberId).firstOrNull;
-      if (wasOut && !(selfNow?.out ?? false)) sync.sendOut(sync.memberId, true);
+      final selfNow = connection.lastState?.members.where((m) => m.id == connection.memberId).firstOrNull;
+      if (wasOut && !(selfNow?.out ?? false)) connection.sendOut(connection.memberId, true);
       if (wantReady) {
         _lastReady = true;
         _restoringReady = true;
-        sync.sendReady(true, source: 'manual');
+        connection.sendReady(true, source: 'manual');
       }
       _startTicker();
-    } catch (e) {
-      if (stale()) return;
-      debugPrint('reconnect failed: $e');
-      reconnecting.value = false;
-      _scheduleReconnect();
-    }
+    };
   }
 
-  void _soundLost() {
-    if (!_everConnected || _lostSounded) return;
-    _lostSounded = true;
-    notify(const ConnectionLost());
-  }
-
-  void _invalidateAttempts() {
-    _epoch++;
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
-  }
-
-  void cancelReconnect() {
-    _manualClose = true;
-    _invalidateAttempts();
-    reconnecting.value = false;
-    // Abort an attempt already dialling (no live session while retrying).
-    unawaited(sync.disconnect().catchError((_) {}));
-  }
+  /// "Stop reconnecting".
+  void cancelReconnect() => connection.cancelReconnect();
 
   Future<void> cancelConnect() async {
-    _manualClose = true;
-    _invalidateAttempts();
-    reconnecting.value = false;
-    try {
-      await sync.disconnect();
-    } catch (_) {}
+    await connection.cancelConnect();
     health.value = const HealthStatus(HealthSeverity.info, 'cancelled');
   }
 
   void retry() {
-    if (_params == null) return;
-    _invalidateAttempts();
-    _manualClose = false;
-    reconnecting.value = false;
+    if (!connection.retry()) return;
     health.value =
         const HealthStatus(HealthSeverity.info, 'retrying…');
-    _scheduleReconnect(manual: true);
-  }
-
-  String _friendlyError(Object e) {
-    final msg = '$e';
-    if (msg.contains('proto mismatch')) return 'host runs a different version — update the app';
-    if (msg.contains('wrong secret')) return 'wrong server password (401)';
-    if (msg.contains('SocketException') || msg.contains('Connection refused')) {
-      return 'host offline — check address and port';
-    }
-    return 'connect failed: $e';
   }
 
   /// App close, before [leave]: the players go first (no mpv may outlive
@@ -2184,20 +2019,17 @@ class SessionCoordinator {
   }
 
   Future<void> leave({bool silent = false}) async {
-    _invalidateAttempts();
+    connection.invalidate();
     await _teardown(silent: silent);
   }
 
   Future<void> _teardown({bool silent = false}) async {
-    _manualClose = true;
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
+    connection.stop();
     _ticker?.cancel();
     _ticker = null;
     _seekTimer?.cancel();
     _seekTimer = null;
     _seekGate.reset();
-    reconnecting.value = false;
     await _stopJellyfin();
     _stopRelaySource();
     stopWarmSource();
@@ -2210,10 +2042,7 @@ class SessionCoordinator {
       await playback.dispose();
     } catch (_) {}
     // The last lines go before the token does.
-    await diag.stop();
-    try {
-      await sync.disconnect();
-    } catch (_) {}
+    await connection.close();
     if (!silent) {
       serverState.value = null;
       starving.value = null;
@@ -2231,10 +2060,11 @@ class SessionCoordinator {
     await _feedSub?.cancel();
     await _nudgeSub?.cancel();
     await _errSub?.cancel();
-    await _statusSub?.cancel();
+    await _silenceSub?.cancel();
+    _connectionHealth?.call();
     _bufferSub?.call();
     _aniList?.close();
-    await sync.dispose();
+    await connection.dispose();
     await playback.dispose();
   }
 }

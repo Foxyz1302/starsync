@@ -344,7 +344,7 @@ class UpNextPreview extends StatelessWidget {
             const picture = _width - 2 * _pad;
             if (item != null) {
               final r = queue.coord.serverState.value;
-              final selfId = queue.coord.sync.memberId;
+              final selfId = queue.coord.connection.memberId;
               final more = queue.items.value.length - 1;
               final ready = warm?.id == item.id ? warm!.state : null;
               return Column(
@@ -449,7 +449,7 @@ class _KeyCap extends StatelessWidget {
 String? performerNote(QueueController queue, QueueItem item, StateBroadcast? r) {
   if (r == null) return null;
   final id = queuePerformer(item, r.members).id;
-  if (id == null || id == queue.coord.sync.memberId) return null;
+  if (id == null || id == queue.coord.connection.memberId) return null;
   final name = r.members.where((m) => m.id == id).firstOrNull?.name;
   return name == null ? null : '$name puts it up';
 }
@@ -841,7 +841,7 @@ class _QueuePanelState extends State<QueuePanel> {
                   final cont = _q.shownContinuation.value;
                   final warm = _q.warm.value;
                   final r = _q.coord.serverState.value;
-                  final selfId = _q.coord.sync.memberId;
+                  final selfId = _q.coord.connection.memberId;
                   return Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1558,7 +1558,7 @@ class UpNextCard extends StatelessWidget {
     final item = c.item;
     final left = c.secondsLeft;
     final r = queue.coord.serverState.value;
-    final selfId = queue.coord.sync.memberId;
+    final selfId = queue.coord.connection.memberId;
     final waiting = left == null ? performerNote(queue, item, r) : null;
     return AppGlass(
       key: const ValueKey('up-next-card'),

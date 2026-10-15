@@ -18,6 +18,7 @@ import '../sfx/sound_bank.dart';
 import '../sfx/synth_sfx.dart';
 import '../session/health.dart';
 import '../session/notifier.dart';
+import '../session/connection.dart' show Connection;
 import '../session/session_coordinator.dart';
 import '../widgets/avatar_pipeline.dart';
 import 'connect_prefs.dart';
@@ -173,7 +174,10 @@ class SessionState {
   final Ports ports = desktopPorts();
   /// Every toast, sound and activity-log line goes through it.
   late final Notifier notifier = Notifier(sfx: sfx, attention: ports.shell.requestAttention);
-  late final SessionCoordinator coordinator = SessionCoordinator(notifier: notifier, ytDlp: ports.links);
+  /// The link to the server; lost/back go to the notifier.
+  late final Connection connection = Connection(notify: notifier.notify);
+  late final SessionCoordinator coordinator =
+      SessionCoordinator(notifier: notifier, connection: connection, ytDlp: ports.links);
   final lastForm = ConnectForm();
   JellyfinAccounts get jellyfin => JellyfinAccounts.instance;
   /// Set when the hosted server died mid-session; Home shows it on the
@@ -348,7 +352,7 @@ class SessionState {
     });
     try {
       await landed.future.timeout(const Duration(seconds: 20));
-      coordinator.sync.sendSeek(carry.position);
+      coordinator.connection.sendSeek(carry.position);
     } on TimeoutException {
       debugPrint('resume: the media did not come up; not seeking');
     } finally {

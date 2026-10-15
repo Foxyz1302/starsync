@@ -85,15 +85,13 @@ the automatic continuation and countdown, relay state), the device
 (client id, library and folders, match corrections, watch history,
 settings, notification prefs, what this app is sourcing) and the
 integrations (Jellyfin played/resume, AniList list).
-0. Safety net and seams, no visible change. Left: Connection extracted
-   from the coordinator (one sealed connection state, hello built by a
-   factory, reconnect delay and silence threshold as parameters); a
-   `noticeFor` table test; a flaky-link test harness (pure-Dart TCP proxy:
-   pass, blackhole, delay, reset, late frame); grace and silence through
+0. Safety net and seams, no visible change. Left: a `noticeFor` table
+   test; a flaky-link test harness (pure-Dart TCP proxy: pass, blackhole,
+   delay, reset, late frame); grace and silence through
    the engine clock; an env override for client id and data folder (two
    instances on one machine); the scenario list in DEVELOPMENT "Tests".
    (Done: tests audited and tagged, P27, AppEvent + Notifier, ports,
-   protocol 16 planned.)
+   protocol 16 planned, Connection extracted from the coordinator.)
 R. Rename (before step 1, so dev builds install side by side with 1.2.x):
    app id `dev.foxyz.starsync`, binary, Windows company `foxyz`; Hive out
    of `~/Documents` into the app's support folder, copied not moved;

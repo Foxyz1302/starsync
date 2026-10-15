@@ -9,7 +9,7 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 |---|---|---|
 | `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client, updater, watched rule (`WatchSession`) | pure Dart, no Flutter |
 | `packages/server` | Relic HTTP + WebSocket server (`SyncServer`, `ServerHub`, `Session`, media endpoint, relay buffer, Jellyfin relay), the `serve()` entrypoint, `bin/server.dart` (dedicated server) | pure Dart, no Flutter |
-| `apps/desktop` | Flutter app: UI, `SyncClient`, `SessionCoordinator`, `PlaybackController` (media_kit/mpv), `ServerIsolate`, update UI (`UpdateController`) | ships with `watch-together-server` |
+| `apps/desktop` | Flutter app: UI, `SyncClient`, `Connection`, `SessionCoordinator`, `PlaybackController` (media_kit/mpv), `ServerIsolate`, update UI (`UpdateController`) | ships with `watch-together-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
 | `deploy` | systemd unit for the dedicated server | |
 
@@ -93,8 +93,9 @@ Loosely modeled on Syncplay, with a different readiness design.
   a `ping` with its clock every second and estimates the offset NTP style
   (`ClockSync`: `offset = s - (t0 + t3) / 2` of the sample with the smallest
   round trip among the last 16). All extrapolation uses
-  `SyncClient.serverNow()` (local clock plus offset), so a client whose clock
-  is off still lands on the server position.
+  `Connection.serverNow()` (= `SyncClient.serverNow()`: local clock plus
+  offset), so a client whose clock is off still lands on the server
+  position.
 - **Reports**: clients send `position`, `buffered`, `eventId` every 1 s, plus
   the media `duration` and its `mediaId` once the player knows it. The
   server stores `buffered` and liveness, and takes the first reported
@@ -191,9 +192,11 @@ Loosely modeled on Syncplay, with a different readiness design.
   as a new member.
 - **Client policies**: no state broadcast for 5 s means connection lost, clear
   the server state and reconnect every 1.5 s until cancelled (an epoch counter makes
-  a cancelled attempt stale). After a reconnect the ready flag is
+  a cancelled attempt stale). A closed socket means lost at once (the
+  server state stays until the 5 s pass). After a reconnect the ready flag is
   restored from the server's state. Cancel during setup aborts the join.
   Closing the window leaves gracefully (see "App close" under Desktop UI).
+  Where it lives: see "Connection" below.
 - **Idle** (`IdleTracker`): measured from the later of the last input and the
   moment playback stopped. While HELD and self ready: warning at 8 min,
   auto-unready at 10 min, and never less than 2 min after the warning.
@@ -212,6 +215,45 @@ Loosely modeled on Syncplay, with a different readiness design.
   the clock is server time (clients correct for their offset to it).
 
 Additive wire changes only; bump `proto` and PROTOCOL.md in the same commit.
+
+## Connection
+
+`Connection` (`session/connection.dart`) is the link to the server, made
+in the composition root (`SessionState.connection`) and passed to the
+`SessionCoordinator`. It owns the `SyncClient` socket, the first connect
+(`begin` + `dial`), reconnects (`reconnectDelay`, 1.5 s; the previous
+token as `hello.resume`), the epoch (`invalidate`, `isCurrent`) that makes
+a cancelled connect or attempt stale, the 1 s heartbeat (clock `ping`,
+the diagnostics tick, the silence check: `silenceLimit`, 5 s), the
+diagnostics uploader (`diag`, started with the session, stopped by
+`close` before the socket), "Stop reconnecting" (`cancelReconnect`),
+"Retry" (`retry`) and setup cancel (`cancelConnect`). The `hello` is
+built by an injectable `HelloBuilder` (`defaultHello`). The incoming
+streams (`states`, `feeds`, `nudges`, `errors`), the send methods, the
+`token`, `memberId` and `serverNow()` are read through it.
+
+`Connection.state` (a signal of the sealed `ConnState`): `ConnClosed`
+(before a connect, after leave or a cancel), `ConnConnecting` (the first
+dial), `ConnOnline` (welcome received), `ConnLost` (dropped: the socket
+closed or the silence limit passed; the next attempt is scheduled),
+`ConnReconnecting(attempt)` (an attempt dialling, and after it failed
+until the next one), `ConnRefused(code, message)` (the first dial failed:
+`version`, `secret` or empty, and the plain-words reason; nothing
+retries) and `ConnReplaced` (not produced yet). Every change notifies,
+a repeat too. The coordinator maps it to `health` (`connectionHealth`:
+"connecting…", "connected", "connection lost — retrying…",
+"reconnecting…", the reason; closed writes nothing, a cancel writes
+"cancelled", "Retry" "retrying…") and to `reconnecting` (lost or
+reconnecting). The first drop of a connection raises `ConnectionLost`,
+the reconnect that follows `ConnectionBack` (each once per drop, through
+the Notifier).
+
+The session's part of a reconnect is the coordinator's
+`onReconnect` handler: before an attempt dials it reads what to restore
+(ready, sat out, the media seen), once online it opens the media again
+if its URL changed, sends `out`/`ready` back and restarts the session's
+ticker. The silence (`Connection.silence`) clears the coordinator's
+server state (`_onConnectionSilent`).
 
 ## Media
 
@@ -1109,7 +1151,7 @@ tab's card errors are still its own snack bars.
 **Ports.** UI and session code reach the platform through interfaces
 (`platform/ports/`), made once in the composition root
 (`SessionState.ports`, `desktopPorts()` in `platform/desktop/`) and
-handed on from there (the coordinator gets its `Notifier` and
+handed on from there (the coordinator gets its `Notifier`, `Connection` and
 `LinkResolver` as constructor arguments):
 - `ShellPort` (`DesktopShell`): window start (remembered bounds, the
   close request routed to `shutDownApp`), fullscreen, minimize/maximize
@@ -1697,10 +1739,10 @@ dedicated server (`package:logging` loggers named by area: `relay`,
 - **The session log** (`packages/server/lib/src/session_log.dart`,
   `packages/core/lib/src/diag_share.dart`): one shared log per server so
   a problem can be read afterwards from every side. While in a session
-  the app (`DiagUploader`, owned by the coordinator) keeps its own
+  the app (`DiagUploader`, owned by the `Connection`) keeps its own
   records (not its hosted server's `server.*`, which the server logs
-  itself), redacted, and sends them every 10 s from the session's 1 s
-  ticker and when it leaves (before its token goes, at most 1.5 s), as
+  itself), redacted, and sends them every 10 s from the connection's 1 s
+  heartbeat and when it leaves (before its token goes, at most 1.5 s), as
   gzip batches to `POST /l/<sid>/<token>` (PROTOCOL
   "Diagnostics"), timestamps moved to the server's clock with the ping
   offset (`ClockSync`), the app version in every batch. Until it can

@@ -43,7 +43,7 @@ class QueueController {
   QueueController(this.coord);
 
   /// Queued items' pictures by hash, from `/i/`.
-  late final PictureCache thumbs = PictureCache(coord.sync,
+  late final PictureCache thumbs = PictureCache(coord.connection.client,
       route: 'i', keep: RelayConstants.maxQueueItems + 8, live: (s) => [for (final q in s.queue) q.thumb]);
 
   /// Up next, in order (empty when nothing is queued or not in a server).
@@ -77,12 +77,12 @@ class QueueController {
   String _continuationFor = '';
   final _random = Random.secure();
 
-  String get _me => coord.sync.memberId;
+  String get _me => coord.connection.memberId;
 
   void attach() {
     if (_attached) return;
     _attached = true;
-    coord.sync.states.listen(_onState);
+    coord.connection.states.listen(_onState);
     effect(() {
       final next = coord.nextEpisode.value;
       final plan = coord.jellyfinPlan.value;
@@ -121,7 +121,7 @@ class QueueController {
     final item = built.item;
     if (item.key.isNotEmpty) _local[item.key] = (pick: pick, at: DateTime.now());
     final thumb = built.thumb;
-    coord.sync.sendQueue(QueueIntent.add(item, next: next, thumb: thumb == null ? '' : base64Encode(thumb)));
+    coord.connection.sendQueue(QueueIntent.add(item, next: next, thumb: thumb == null ? '' : base64Encode(thumb)));
     coord.notify(AddedToUpNext(item.title));
     return null;
   }
@@ -288,12 +288,12 @@ class QueueController {
 
   void move(String id, int to) {
     coord.markInput();
-    coord.sync.sendQueue(QueueIntent.move(id, to));
+    coord.connection.sendQueue(QueueIntent.move(id, to));
   }
 
   void remove(String id) {
     coord.markInput();
-    coord.sync.sendQueue(QueueIntent.remove(id));
+    coord.connection.sendQueue(QueueIntent.remove(id));
   }
 
   /// Plays [id] now: this app puts it up when it is the one that can,
@@ -306,7 +306,7 @@ class QueueController {
     if (queuePerformer(item, r.members).id == _me) {
       _perform(item);
     } else {
-      coord.sync.sendQueue(QueueIntent.play(id));
+      coord.connection.sendQueue(QueueIntent.play(id));
     }
   }
 
@@ -388,7 +388,7 @@ class QueueController {
     if (perf.id == null) {
       final why = perf.why;
       if (why != null && queueJanitor(r.members) == _me && _skipped.add(item.id)) {
-        coord.sync.sendQueue(QueueIntent.remove(item.id, why: why));
+        coord.connection.sendQueue(QueueIntent.remove(item.id, why: why));
       }
       return;
     }
@@ -461,7 +461,7 @@ class QueueController {
       }
       if (error != null) {
         debugPrint('queue: ${item.id} cannot go up: $error');
-        coord.sync.sendQueue(QueueIntent.remove(item.id, why: "couldn't play it ($error)"));
+        coord.connection.sendQueue(QueueIntent.remove(item.id, why: "couldn't play it ($error)"));
       }
     }());
   }
@@ -615,7 +615,7 @@ class QueueController {
     final head = r?.queue.firstOrNull;
     final relay = head?.media.relay;
     if (r == null || head == null || relay == null || relay.fetch) return;
-    final key = '${head.id}|${coord.sync.token}';
+    final key = '${head.id}|${coord.connection.token}';
     if (key == _fedWarm) return;
     switch (head.how) {
       case QueueHow.through:

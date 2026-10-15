@@ -131,14 +131,14 @@ void main() {
     final alice = await member('alice');
     final bob = await member('bob');
     expect(await bob.swapPicked(FileMedia(file)), isNull);
-    await _poll(() => stateMediaRelay(alice.serverState.peek()!)?.source == bob.sync.memberId, 'relay state');
+    await _poll(() => stateMediaRelay(alice.serverState.peek()!)?.source == bob.connection.memberId, 'relay state');
     final state = alice.serverState.peek()!;
     expect(state.media!.containsKey('url'), isFalse);
     expect(bob.relaying.peek(), isTrue);
     await playTogether([alice, bob]);
     final relay = server.hub.relay!;
     expect(relay.buffers.single.bytesToViewers, greaterThan(0), reason: 'alice played through the relay');
-    expect(relay.sourceToken, bob.sync.token);
+    expect(relay.sourceToken, bob.connection.token);
 
     // The next swap retires bob's source and the buffer. Nothing answers
     // at that link, so its probe refuses it unless put up anyway.
@@ -156,7 +156,7 @@ void main() {
       final link = 'http://127.0.0.1:${origin.port}/private/ep.mkv?api_key=SECRET';
 
       expect(await bob.swapPicked(LinkMedia(link, relay: LinkRelay.me)), isNull);
-      await _poll(() => stateMediaRelay(alice.serverState.peek()!)?.source == bob.sync.memberId, 'me state');
+      await _poll(() => stateMediaRelay(alice.serverState.peek()!)?.source == bob.connection.memberId, 'me state');
       expect(alice.serverState.peek()!.toJson().toString(), isNot(contains('SECRET')));
       await playTogether([alice, bob]);
       expect(server.hub.relay!.buffers.single.bytesToViewers, greaterThan(0));
@@ -240,7 +240,7 @@ void main() {
       expect(await bob.swapPicked(FileMedia(file)), isNull);
       await _poll(() => server.hub.relay?.live == true, 'source live');
       await _poll(() => alice.playback.durationSecs > 19 && bob.playback.durationSecs > 19, 'both opened');
-      final token = bob.sync.token;
+      final token = bob.connection.token;
 
       // Bob's network goes silent (no FIN): states stop, he reconnects
       // with `resume`, the server still has him.
@@ -248,7 +248,7 @@ void main() {
       await _poll(() => bob.reconnecting.peek(), 'reconnect engaged', timeout: const Duration(seconds: 15));
       await _poll(() => !bob.reconnecting.peek() && bob.serverState.peek() != null, 'back',
           timeout: const Duration(seconds: 20));
-      expect(bob.sync.token, token, reason: 'resumed as the same member');
+      expect(bob.connection.token, token, reason: 'resumed as the same member');
       await _poll(() => server.hub.relay?.live == true, 'source redialled', timeout: const Duration(seconds: 15));
       expect(bob.relaying.peek(), isTrue);
       expect(bob.playback.durationSecs, greaterThan(19), reason: 'still his own copy');

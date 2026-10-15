@@ -53,7 +53,21 @@ class SyncClient {
     HelloMedia? media,
     String hostKey = '',
     String resume = '',
-  }) async {
+  }) =>
+      connectWith(
+        wsUri: wsUri,
+        hello: HelloMessage(
+          proto: RelayConstants.protoVersion,
+          secret: secret,
+          user: HelloUser(name: name, avatar: avatar),
+          media: media ?? const HelloMedia(name: '', size: 0, duration: 0),
+          hostKey: hostKey,
+          resume: resume,
+        ),
+      );
+
+  /// Dials [wsUri], sends [hello] and waits for the welcome (10 s).
+  Future<WelcomeMessage> connectWith({required Uri wsUri, required HelloMessage hello}) async {
     await disconnect();
     clockSync.reset();
     this.wsUri = wsUri;
@@ -77,14 +91,6 @@ class SyncClient {
         _status.add(SyncStatus.closed);
       },
       cancelOnError: false,
-    );
-    final hello = HelloMessage(
-      proto: RelayConstants.protoVersion,
-      secret: secret,
-      user: HelloUser(name: name, avatar: avatar),
-      media: media ?? const HelloMedia(name: '', size: 0, duration: 0),
-      hostKey: hostKey,
-      resume: resume,
     );
     ch.sink.add(jsonEncode(hello.toJson()));
     _pendingWelcome = welcomeCompleter;

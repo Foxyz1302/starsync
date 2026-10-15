@@ -114,7 +114,7 @@ void main() {
         a.seekTo(40);
         await _poll(() {
           final r = a.serverState.peek();
-          return r != null && r.seekBy == a.sync.memberId && (r.position - 40).abs() < 2;
+          return r != null && r.seekBy == a.connection.memberId && (r.position - 40).abs() < 2;
         }, 'server at 0:40');
         await _poll(() => a.skipOffer.peek()?.kind == SkipKind.opening, 'Skip OP offered');
         expect(a.skipOffer.peek()!.target, const Duration(minutes: 2));
@@ -125,9 +125,9 @@ void main() {
         await _poll(() {
           final r = a.serverState.peek();
           return r != null &&
-              r.seekBy == a.sync.memberId &&
-              serverPositionAt(r, a.sync.serverNow()) >= 120 &&
-              serverPositionAt(r, a.sync.serverNow()) < 125;
+              r.seekBy == a.connection.memberId &&
+              serverPositionAt(r, a.connection.serverNow()) >= 120 &&
+              serverPositionAt(r, a.connection.serverNow()) < 125;
         }, 'server at the OP end');
         await _poll(() => b.playback.positionSecs >= 119.5 && b.playback.positionSecs < 126, 'b follows');
         await _poll(() => seeks(b) == seeksBefore + 1, 'b saw the Skip OP seek');

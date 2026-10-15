@@ -516,7 +516,7 @@ class MembersCard extends StatelessWidget {
                 : '${session.lastForm.host}:${session.lastForm.port}';
             final delivery = r == null
                 ? null
-                : deliveryOf(r, selfId: coord.sync.memberId, names: coord.memberNames);
+                : deliveryOf(r, selfId: coord.connection.memberId, names: coord.memberNames);
             return Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -50,7 +50,7 @@ class _SitOutCardState extends State<SitOutCard> {
         final now = coord.nowPlaying.value;
         final playing = r?.transport == 'playing';
         final duration = (r?.media?['duration'] as num?)?.toDouble() ?? 0;
-        final at = r == null ? 0.0 : serverPositionAt(r, coord.sync.serverNow());
+        final at = r == null ? 0.0 : serverPositionAt(r, coord.connection.serverNow());
         Duration secs(double s) => Duration(milliseconds: (s * 1000).round());
         final where = r?.media == null
             ? 'Nothing is up'
