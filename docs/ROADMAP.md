@@ -4,6 +4,80 @@ Backlog and epics, in order. Done work lives in git history. Check an item
 off by deleting it in the same commit as the code. Wire changes also edit
 [PROTOCOL.md](PROTOCOL.md).
 
+## Stabilisation (feature freeze)
+
+No new systems or features until the app is stable on a proper
+architecture. The next release is the restructure (1.3.0, or 2.0.0).
+Problems are numbered; delete a line when its fix ships.
+
+**Decisions** (agreed):
+- D1 Presence: In (watching, full), Away (sat out: still in the server,
+  chat and chosen notifications, system notifications in the background,
+  not counted for the gate, ready counter or watched tracking), Gone
+  (disconnected, held in a grace period).
+- D2 A joiner during playback holds it until everyone watching is ready,
+  like the start gate.
+- D3 Watched: at least as good as Jellyfin's own; a peek, skipping around
+  or a screenshot visit never counts. Basis: time present while it played.
+- D4 Toasts above the control bar; toasts for joins/leaves, queue adds
+  (title, picture, who), swaps, problems; the rest in the activity log.
+  Chat pop-ups and their sound always on by default; only the unread badge
+  stays off the picture.
+- D5 A reconnect resumes the same member within a grace period (~10 min).
+- D6 The person passing a video on drops: others keep playing; on
+  reconnect the relay continues from where it was.
+- D7 One controls model, two skins (done in 1.2.1-dev.1); uosc credited.
+- D8 Always the latest version: automatic checks, a clear prompt (no
+  background download), never during playback.
+- D9 Watching alone is a full standalone player: no social sounds or
+  prompts; social parts appear when others are there; no solo mode.
+- D11 Login-only sites: error texts say which cookies were used.
+
+**Problems:**
+- P1 A reconnect makes you a new member: the relay, ready, sitting out and
+  your queue items are lost (log: Hoff m23 → m24 had to put ep 06 up again).
+- P2 Joining a relay whose source left serves broken leftovers; mpv loops
+  on failed seeks; nobody is told the source is gone.
+- P3 A joiner during playback lands mid-scene (see D2).
+- P4 Reconnects time out repeatedly on a bad link; no clear
+  "reconnecting" state.
+- P6 Sat-out people count in the ready counter.
+- P7 Sat-out people get tracked as watched on Jellyfin.
+- P8 Sat-out people get the normal notifications.
+- P9 The watched rule (position coverage) misses real watches (D3).
+- P11 Toasts cover the video controls.
+- P12 Queue additions don't show as toasts.
+- P15 Commands reach a player mid-switch (`seek 90.0`, `event:5` errors).
+- P17 Preload, warm relay and the fresh player per video are layered on
+  the player instead of being one media pipeline.
+- P18 Bilibili "no video formats" with browser cookies set; the hint
+  wording misleads (D11).
+- P20 Version not visible. P21 Updates easy to miss. P22 Friends on
+  different versions (D8).
+- P23 Solo mode you enter and leave; going hosted loses the queue (D9).
+- P24 The invite address list is unhelpful (shows the proxy's 198.18.x).
+- P25 ssh to Gitea blocked through the proxy (pushes go over https).
+- P27 Failing tests: shell "Ctrl+V outside a field", relay e2e "a guest
+  puts up a file", "links: through me".
+- P28 Log noise: "Failed to create file cache"; an idle relay channel for
+  Jellyfin items everyone has an account for.
+- P29 Relay start delay after a seek into an unbuffered part.
+- P30 Shaders don't work on Windows (our read-back check turns them off;
+  dxva2-egl interop error).
+- P31 Software rendering on a friend's Linux; render mode not logged.
+- P32 The app freezes/segfaults on exit (NVIDIA EGL exit handler; mpv
+  players alive at teardown; Windows close order).
+- P33 No volume readout when using the mouse wheel on the video.
+- P34 Local anime folders are opened as plain files (no banner, names,
+  next episode, tracking).
+
+**Restructure** (in order): identity + presence (D1 D2 D5 D6); notifier
+(toasts, sounds on `SoundEngine`, system notifications, activity log);
+what's next + watch tracking (D3); media pipeline + media identity
+(Jellyfin, local folders, links resolve to one show/episode identity);
+"your server" (D9). The plan with the current and target system maps is
+the "Starsync architecture" write-up.
+
 ## Backlog
 
 1. **Auto-skip OP/ED** (undecided): who decides and how (shared for the
