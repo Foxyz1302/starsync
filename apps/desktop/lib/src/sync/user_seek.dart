@@ -1,25 +1,4 @@
-import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
-
-/// A [Player] whose public [seek] belongs to the user. media_kit's seek bar
-/// (and anything else in the video controls) calls `player.seek`; with
-/// [onUserSeek] set those calls become explicit events for the sync layer
-/// instead of moving mpv behind its back. Sync-driven seeks use [syncSeek].
-class SyncPlayer extends Player {
-  SyncPlayer({super.configuration});
-
-  void Function(Duration position)? onUserSeek;
-
-  @override
-  Future<void> seek(Duration duration) async {
-    final hook = onUserSeek;
-    if (hook == null) return super.seek(duration);
-    hook(duration);
-  }
-
-  /// Seek mpv directly (preview while scrubbing, server corrections).
-  Future<void> syncSeek(Duration duration) => super.seek(duration);
-}
 
 /// Turns a burst of user seeks (a seek bar drag fires one per pointer move,
 /// arrow keys one per press) into one `seek` intent, and tells the

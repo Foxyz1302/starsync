@@ -9,7 +9,7 @@ abstract class RelayConstants {
   static const int protoMax = 16;
 
   // Relay (`/r/...`): a member's bytes through the server's buffer.
-  static const int relaySliceBytes = 1 << 20;
+  static const int relaySliceBytes = 256 * 1024;
   static const int relayFrameBytes = 64 * 1024;
   /// Defaults for the buffer; they mirror a viewer's mpv buffer (150 s /
   /// 256 MiB ahead, 64 MiB back), so whatever a viewer may seek to soon is

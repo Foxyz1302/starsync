@@ -121,7 +121,7 @@ class PlayerControlsModel {
 
   /// A seek bar's press or drag; through `player.seek`, the user-seek
   /// path, so everyone follows.
-  void seek(Duration to) => playback.player.seek(to);
+  void seek(Duration to) => playback.userSeek(to);
 
   /// Arrow keys: ±[secs], relative to a seek still in flight.
   void nudge(double secs) => coord.nudge(secs);
@@ -157,7 +157,7 @@ class PlayerControlsModel {
 
   void playNextEpisode() => coord.playNextEpisode();
 
-  void setVolume(double v) => playback.player.setVolume(v.clamp(0.0, vol.maxVolume));
+  void setVolume(double v) => playback.setVolume(v.clamp(0.0, vol.maxVolume));
 
   /// One volume step up (+1) or down (-1) from the wheel or ↑ / ↓;
   /// flashes the volume readout.

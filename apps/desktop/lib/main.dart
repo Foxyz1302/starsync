@@ -3,15 +3,16 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
 
 import 'app.dart';
 import 'src/app/app_graph.dart';
+import 'src/files/thumbnails.dart' show thumbnailPlayers;
 import 'src/platform/app_log.dart';
 import 'src/platform/app_shutdown.dart' show closeAppWith;
 import 'src/platform/desktop/desktop_app_dirs.dart';
 import 'src/platform/desktop_entry.dart';
+import 'src/platform/smoke.dart';
 import 'src/screens/home/ui.dart';
 import 'src/session/app_events.dart' show UpdateAvailable;
 import 'src/state/settings.dart';
@@ -67,7 +68,8 @@ Future<void> main(List<String> args) async {
   }
   // The library's matches, pins and offsets (device-owned).
   unawaited(graph.library.ensureLoaded());
-  MediaKit.ensureInitialized();
+  ports.players.init();
+  thumbnailPlayers = ports.players;
   // yt-dlp for web page links: downloaded on first run, kept current.
   ports.links.warmUp();
   // Linux: the launcher entry and icon Wayland needs (release installs).
@@ -82,6 +84,11 @@ Future<void> main(List<String> args) async {
     }
   });
   runApp(AppScope(graph: graph, child: const WatchTogetherApp()));
+  // CI's close smoke run: open a file, play, close (see smoke.dart).
+  final smoke = smokeMedia;
+  if (smoke != null) {
+    unawaited(WidgetsBinding.instance.endOfFrame.then((_) => runSmoke(graph, smoke)));
+  }
   // Home: your own server, quietly (only this app can reach it until
   // Invite).
   unawaited(graph.navigation.start());

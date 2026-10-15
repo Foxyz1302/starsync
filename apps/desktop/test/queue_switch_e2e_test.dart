@@ -1,30 +1,30 @@
-// restructure: rewrite in step 5 (Media pipeline): preload and the warm
-// relay become one pipeline; keep the timing per source.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
 import 'package:starsync/src/jellyfin/accounts.dart';
 import 'package:starsync/src/jellyfin/session_media.dart';
 import 'package:starsync/src/jellyfin/track_prefs.dart';
+import 'package:starsync/src/platform/desktop/media_kit_host.dart';
 import 'package:starsync/src/playback/yt_dlp_app.dart';
 import 'package:starsync/src/queue/queue_controller.dart' show WarmState;
 import 'package:starsync/src/screens/home/picked_media.dart';
 import 'package:starsync/src/session/session_coordinator.dart';
 import 'package:starsync/src/session/switch_trace.dart';
 
-// How long an Up next switch takes, end to end, over real mpv and a real
-// sync server: two Jellyfin account holders and a guest (through the
-// server's /j login) watch an episode, then ⏭ puts up the next episode,
-// then a direct link, then a link passed on "through" alice, then one the
-// server fetches (both relayed: the guests preload them from the server's
-// warm relay of the item). The fake Jellyfin and the link's host answer with a
-// delay and a capped rate, like a server elsewhere. Prints each client's
-// phases (SwitchTrace) and the wall time from ⏭ to the server playing.
+// How long an Up next switch takes through the media pipeline, end to
+// end, over real mpv and a real sync server: two Jellyfin account holders
+// and a guest (through the server's /j login) watch an episode, then ⏭ puts
+// up the next episode, then a direct link, then a link passed on "through"
+// alice, then one the server fetches (both relayed: the guests prepare
+// them from the server's warm relay of the item). Every client prepares
+// the next item in a hidden player (`MediaPipeline.prepare`) and the swap
+// promotes it. The fake Jellyfin and the link's host answer with a delay
+// and a capped rate, like a server elsewhere. Prints each client's phases
+// (SwitchTrace) and the wall time from ⏭ to the server playing.
 //
 // WT_SWITCH_PRELOAD=0 turns the preload off (the cold path, for comparison);
 // WT_SWITCH_DELAY_MS and WT_SWITCH_RATE_KBS set the remote's delay and rate.
@@ -202,7 +202,12 @@ void main() {
     'Up next: ⏭ to a Jellyfin episode, then to a direct link, timed per client',
     timeout: const Timeout(Duration(minutes: 4)),
     () async {
-      MediaKit.ensureInitialized();
+      // mpv's warnings, as the host writes them to the app log.
+      final mpvLines = <String>[];
+      // (The root's records, the app's logging not being hierarchical.)
+      final logSub = createLogger('mpv').onRecord.listen((r) {
+        if (r.loggerName == 'mpv') mpvLines.add(r.message);
+      });
       final preload = Platform.environment['WT_SWITCH_PRELOAD'] != '0';
       final file = await _media();
       final jelly = _FakeJellyfin(file);
@@ -236,9 +241,15 @@ void main() {
       final accC = await _account(jelly.base, 'CTOKEN', 'uc', 'C-PC');
       final accB = JellyfinAccounts(store: MemoryJellyfinStore());
       await accB.ensureLoaded(validate: false);
-      SessionCoordinator coord(JellyfinAccounts acc) => SessionCoordinator(
-          jellyfin: acc, trackPrefs: TrackPrefs(store: MemoryJellyfinStore()), ytDlp: ytDlp)
-        ..playback.preloadEnabled = preload;
+      final hosts = <SessionCoordinator, MediaKitHost>{};
+      SessionCoordinator coord(JellyfinAccounts acc) {
+        final host = MediaKitHost()..init();
+        final c = SessionCoordinator(
+            jellyfin: acc, trackPrefs: TrackPrefs(store: MemoryJellyfinStore()), ytDlp: ytDlp, players: host)
+          ..media.preloadEnabled = preload;
+        hosts[c] = host;
+        return c;
+      }
       final a = coord(accA), b = coord(accB), c = coord(accC);
       final all = {'alice': a, 'guest': b, 'carol': c};
       ConnectParams params(String name, [HelloMedia? media]) =>
@@ -252,7 +263,7 @@ void main() {
         if (preload) {
           for (final x in all.values) {
             expect(x.queue.warm.peek()?.state, WarmState.ready, reason: 'ready on every client before ⏭');
-            expect(x.playback.preloadUrl, isNotNull, reason: 'preloaded on every client');
+            expect(x.media.preloadUrl, isNotNull, reason: 'preloaded on every client');
           }
         }
         final clock = Stopwatch()..start();
@@ -269,11 +280,14 @@ void main() {
         }
         await _poll(() => all.values.every((x) => x.playback.player.state.playing), 'all play $what');
         // The promoted player is the session player: marks, tracks and
-        // the volume carried over, the clock moves.
+        // the volume carried over, the clock moves; the old one retired.
         for (final x in all.values) {
           expect(x.playback.durationSecs, greaterThan(59));
           expect(x.playback.player.state.volume, 0, reason: 'volume kept');
           await _poll(() => x.playback.tracks.peek().isNotEmpty, 'tracks listed');
+          final host = hosts[x]!;
+          await host.retiring;
+          expect(host.live, lessThanOrEqualTo(2), reason: 'the session player and at most the next prepared one');
         }
         final at = a.playback.positionSecs;
         await Future.delayed(const Duration(seconds: 1));
@@ -286,7 +300,7 @@ void main() {
         await b.connect(params('guest'));
         await c.connect(params('carol'));
         for (final x in all.values) {
-          await x.playback.player.setVolume(0);
+          await x.playback.setVolume(0);
         }
         await _poll(() => all.values.every((x) => x.playback.durationSecs > 59), 'all opened episode 1');
         expect(await a.queue.add(pickForRef(accA, const JellyfinRef(serverId: _sid, itemId: _ep2, title: 'Second'))!),
@@ -332,14 +346,17 @@ void main() {
         // ignore: avoid_print
         print(report.join('\n'));
         expect(serverErrors, isEmpty);
+        // No command reached a player still opening, and the
+        // cache is in RAM on every player (no "Failed to create file cache").
+        expect(mpvLines.where((l) => l.contains('error running command') || l.contains('file cache')), isEmpty);
 
         // Nothing queued: no preload. Queued and taken off again: dropped.
         if (preload) {
-          await _poll(() => all.values.every((x) => x.playback.preloadUrl == null), 'nothing preloaded');
+          await _poll(() => all.values.every((x) => x.media.preloadUrl == null), 'nothing preloaded');
           expect(await a.queue.add(LinkMedia(linkUrl, relay: LinkRelay.direct)), isNull);
-          await _poll(() => all.values.every((x) => x.playback.preloadUrl == linkUrl), 'preloaded again');
+          await _poll(() => all.values.every((x) => x.media.preloadUrl == linkUrl), 'preloaded again');
           a.queue.remove(a.serverState.peek()!.queue.first.id);
-          await _poll(() => all.values.every((x) => x.playback.preloadUrl == null), 'dropped when taken off');
+          await _poll(() => all.values.every((x) => x.media.preloadUrl == null), 'dropped when taken off');
         }
         // Preloaded everywhere: every client starts from its preload.
         if (preload) {
@@ -348,6 +365,7 @@ void main() {
           }
         }
       } finally {
+        await logSub.cancel();
         for (final x in all.values) {
           await x.dispose();
         }

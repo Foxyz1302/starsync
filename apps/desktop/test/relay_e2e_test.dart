@@ -35,13 +35,128 @@ Future<String> _media() async {
 }
 
 Future<void> _poll(FutureOr<bool> Function() cond, String what,
-    {Duration timeout = const Duration(seconds: 30)}) async {
+    {Duration timeout = const Duration(seconds: 30), Duration every = const Duration(milliseconds: 200)}) async {
   final deadline = DateTime.now().add(timeout);
   while (DateTime.now().isBefore(deadline)) {
     if (await cond()) return;
-    await Future.delayed(const Duration(milliseconds: 200));
+    await Future.delayed(every);
   }
   fail('timed out waiting for $what');
+}
+
+/// 60 s at about 3 Mbit/s: long enough that a slow source's relay holds
+/// only part of it. An mp4 with its index first: headless players have no
+/// video track selected (vid=no), and mkv's cues list only the video, so
+/// an mkv would be seeked by scanning from its start (an app's player,
+/// with its video output, uses the cues).
+Future<String> _longMedia() async {
+  final path = '$_tmp/relay_e2e_60s.mp4';
+  if (await File(path).exists()) return path;
+  final r = await Process.run('ffmpeg', [
+    '-y', '-v', 'error',
+    '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=24',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
+    '-t', '60', '-c:v', 'libx264', '-preset', 'ultrafast', '-b:v', '3M', '-minrate', '3M', '-maxrate', '3M',
+    '-bufsize', '2M', '-g', '24', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', path,
+  ]);
+  if (r.exitCode != 0) fail('ffmpeg failed: ${r.stderr}');
+  return path;
+}
+
+/// A file read at most [bytesPerSec] (a source's uplink).
+class _SlowFile implements RelayBytes {
+  final File file;
+  final int bytesPerSec;
+  _SlowFile(this.file, this.bytesPerSec);
+
+  @override
+  Future<int> size() => file.length();
+
+  @override
+  Stream<List<int>> read(int start, int end) async* {
+    const chunk = 32 * 1024;
+    final sw = Stopwatch()..start();
+    var sent = 0;
+    await for (final c in file.openRead(start, end + 1)) {
+      for (var o = 0; o < c.length; o += chunk) {
+        final part = c.sublist(o, o + chunk > c.length ? c.length : o + chunk);
+        sent += part.length;
+        final due = sent * 1000 ~/ bytesPerSec - sw.elapsedMilliseconds;
+        if (due > 0) await Future<void>.delayed(Duration(milliseconds: due));
+        yield part;
+      }
+    }
+  }
+
+  @override
+  Future<void> close() async {}
+}
+
+/// A member that is only a source: it sits out (out of the gate), puts
+/// [file] up relayed and feeds it at [bytesPerSec]. [drop] goes away
+/// without a `bye` (the member `gone`, the relay kept); [back] returns as
+/// the same member and feeds again.
+class _BareSource {
+  final int port;
+  final File file;
+  final String name;
+  static const _client = 'bareSourceClient01';
+  var _seq = 0;
+  WebSocket? ws;
+  String token = '';
+  RelaySource? src;
+  Timer? _alive;
+  _BareSource(this.port, this.file) : name = 'slow.mp4';
+
+  Future<void> join() async {
+    final w = ws = await WebSocket.connect('ws://127.0.0.1:$port/sync');
+    final welcome = Completer<Map>();
+    w.listen((f) {
+      final j = jsonDecode('$f') as Map;
+      if (j['t'] == 'welcome' && !welcome.isCompleted) welcome.complete(j);
+    }, onError: (_) {});
+    w.add(jsonEncode(HelloMessage(
+            secret: 'pw', user: const HelloUser(name: 'bob'), client: _client, seq: ++_seq)
+        .toJson()));
+    token = (await welcome.future.timeout(const Duration(seconds: 5)))['token'] as String;
+    w.add(jsonEncode(const PresenceIntent(state: Presence.away).toJson()));
+    // Not silent, like an app (a silent member goes gone).
+    _alive?.cancel();
+    _alive = Timer.periodic(const Duration(seconds: 1),
+        (_) => w.add(jsonEncode({'t': 'report', 'position': 0, 'buffered': 0, 'eventId': 0})));
+  }
+
+  Future<void> swap() async {
+    ws!.add(jsonEncode({
+      't': 'swap',
+      'media': {'name': name, 'size': await file.length(), 'duration': 0, 'relay': <String, Object?>{}},
+    }));
+  }
+
+  Future<void> feed(int bytesPerSec) async {
+    final s = src = RelaySource(Uri.parse('ws://127.0.0.1:$port/r/default/$token/source'),
+        RelayMedia.single(_SlowFile(file, bytesPerSec)),
+        name: name);
+    await s.start();
+  }
+
+  /// Gone without a word: the channel and the socket close, no `bye`.
+  Future<void> drop() async {
+    _alive?.cancel();
+    await src?.close();
+    await ws?.close();
+  }
+
+  Future<void> back(int bytesPerSec) async {
+    await join();
+    await feed(bytesPerSec);
+  }
+
+  Future<void> close() async {
+    _alive?.cancel();
+    await src?.close();
+    await ws?.close();
+  }
 }
 
 /// Serves one file with ranges; [requests] counts hits.
@@ -265,6 +380,115 @@ void main() {
       await _poll(() => (alice.playback.positionSecs - 17).abs() < 1.5, 'alice seeked');
     } finally {
       await proxy.close();
+    }
+  });
+
+  // A seek into a part the relay has not buffered yet. The source's
+  // uplink is about 3x the media's bitrate; the time from the seek to the
+  // player playing there again is printed and loosely bounded.
+  test('a seek past what a slow source has sent plays within a few seconds',
+      timeout: const Timeout(Duration(minutes: 2)), () async {
+    final file = File(await _longMedia());
+    final alice = await member('alice');
+    final bob = _BareSource(server.boundPort, file);
+    try {
+      await bob.join();
+      await bob.swap();
+      await _poll(() => stateMediaRelay(alice.serverState.peek()!)?.source.isNotEmpty ?? false, 'relay state');
+      await bob.feed(1200 * 1024);
+      await _poll(() => alice.playback.durationSecs > 59, 'alice opened it');
+      alice.toggleReady();
+      await _poll(() => alice.playback.playing && alice.playback.positionSecs > 2, 'playing');
+      final took = <int>[];
+      for (final to in [40.0, 52.0]) {
+        final sw = Stopwatch()..start();
+        alice.seekTo(to);
+        await _poll(() => alice.playback.playing && alice.playback.positionSecs > to + 0.5, 'played at $to',
+            every: const Duration(milliseconds: 20));
+        took.add(sw.elapsedMilliseconds);
+      }
+      // ignore: avoid_print
+      print('relay seek: seek to an unbuffered part until playing there: ${took.join(', ')} ms');
+      for (final t in took) {
+        expect(t, lessThan(5000), reason: "a seek into what the source has not sent yet (4 s of buffer at about 3x the bitrate)");
+      }
+    } finally {
+      await bob.close();
+    }
+  });
+
+  // D6, the viewer's side: the source goes, a seek lands past what
+  // the server got from it, and the buffer runs dry.
+  test('the source drops: what is buffered plays, a seek past it waits for the source, no seek loop, it resumes (D6)',
+      timeout: const Timeout(Duration(minutes: 3)), () async {
+    final file = File(await _longMedia());
+    final alice = await member('alice');
+    final carol = await member('carol');
+    final bob = _BareSource(server.boundPort, file);
+    final errors = <String>[];
+    final subs = <StreamSubscription<Object?>>[];
+    try {
+      await bob.join();
+      await bob.swap();
+      await _poll(() => stateMediaRelay(alice.serverState.peek()!)?.source.isNotEmpty ?? false, 'relay state');
+      // Just above the bitrate: the relay holds only a little ahead.
+      await bob.feed(560 * 1024);
+      await _poll(() => alice.playback.durationSecs > 59 && carol.playback.durationSecs > 59, 'both opened it');
+      for (final x in [alice, carol]) {
+        subs.add(x.playback.player.logs.listen((l) {
+          if (l.text.contains('error running command')) errors.add(l.text);
+        }));
+        x.toggleReady();
+      }
+      await _poll(() => alice.playback.playing && alice.playback.positionSecs > 4, 'playing');
+
+      await bob.drop();
+      await _poll(() => stateMediaRelay(alice.serverState.peek()!)?.sourceGone ?? false, 'source gone');
+      expect(alice.status.peek().line?.text, startsWith("bob's connection dropped"));
+      final seeks = [alice.playback.seeksSent, carol.playback.seeksSent];
+      // Carol skips to where the source never got to.
+      carol.seekTo(50);
+      await _poll(() => alice.serverState.peek()!.hold?.reason == HoldReason.source, 'held for the source',
+          timeout: const Duration(seconds: 60));
+      expect(alice.status.peek().line?.text, 'Waiting for bob');
+      expect(carol.status.peek().line?.text, 'Waiting for bob');
+      // Held for a while: no seek loop into bytes nobody sends.
+      await Future.delayed(const Duration(seconds: 12));
+      final sent = [alice.playback.seeksSent - seeks[0], carol.playback.seeksSent - seeks[1]];
+      expect(sent.every((n) => n <= 1), isTrue, reason: 'one try each, no loop: $sent');
+      expect(alice.serverState.peek()!.transport, 'held');
+      expect([alice.playerError.peek(), carol.playerError.peek()], everyElement(isEmpty), reason: 'not a broken player');
+      // Someone joins meanwhile: it opens what the server has and waits too.
+      final dave = await member('dave');
+      subs.add(dave.playback.player.logs.listen((l) {
+        if (l.text.contains('error running command')) errors.add(l.text);
+      }));
+      await _poll(() => dave.status.peek().line?.text == 'Waiting for bob', 'dave waits for bob');
+      dave.toggleReady();
+
+      await bob.back(4 * 1024 * 1024);
+      await _poll(() {
+        final relay = stateMediaRelay(alice.serverState.peek()!);
+        return relay != null && relay.live && !relay.sourceGone;
+      }, 'source back');
+      await _poll(
+          () =>
+              alice.serverState.peek()!.transport == 'playing' &&
+              alice.playback.playing &&
+              alice.playback.positionSecs > 50.5 &&
+              carol.playback.positionSecs > 50.5 &&
+              dave.playback.positionSecs > 50.5,
+          'all playing at 50 again',
+          timeout: const Duration(seconds: 40));
+      // ignore: avoid_print
+      print('D6: seeks while the source was gone $sent, held back '
+          '${alice.media.heldBackSeeks} + ${carol.media.heldBackSeeks}');
+      expect(errors, isEmpty, reason: 'no command reached a player without its media');
+    } finally {
+      for (final s in subs) {
+        await s.cancel();
+      }
+      await bob.close();
     }
   });
 }

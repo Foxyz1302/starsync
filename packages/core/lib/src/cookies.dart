@@ -164,6 +164,45 @@ Map<String, List<NetscapeCookie>> cookiesBySite(Iterable<NetscapeCookie> cookies
   return {for (final k in m.keys.toList()..sort()) k: m[k]!};
 }
 
+/// [parseCookies], or none for a file without any.
+List<NetscapeCookie> parseCookiesOrEmpty(String text) {
+  try {
+    return parseCookies(text);
+  } on FormatException {
+    return const [];
+  }
+}
+
+/// "Firefox", "Chrome", "Firefox (work)": a browser and its profile.
+String browserLabel(CookieBrowser b) {
+  final name = b.browser.isEmpty ? b.browser : '${b.browser[0].toUpperCase()}${b.browser.substring(1)}';
+  return b.profile.isEmpty ? name : '$name (${b.profile})';
+}
+
+/// The cookies part of a sign-in error (D11): which cookies were used and
+/// how many of them are for [site] ([count] -1: unknown; [read]: what
+/// reading a browser's gave).
+String cookieNoteText(CookieSource? source, String site, int count, {({int count, String? error})? read}) {
+  switch (source) {
+    case null:
+      return 'no cookies were used';
+    case CookieFile():
+      if (count < 0) return 'used the cookies file';
+      return count == 0
+          ? 'used the cookies file, which has none for $site'
+          : 'used the cookies file ($count for $site: signed out or expired?)';
+    case CookieBrowser():
+      final who = "${browserLabel(source)}'s cookies";
+      final error = read?.error;
+      if (error != null) return "used $who, but yt-dlp couldn't read them: $error";
+      final n = read?.count ?? count;
+      if (n < 0) return 'used $who';
+      return n == 0
+          ? 'used $who, which have none for $site: sign in to $site there'
+          : 'used $who ($n for $site: that account may not see it)';
+  }
+}
+
 /// Sites ticked by default after an import: those yt-dlp is usually given
 /// cookies for.
 const suggestedCookieSites = {'bilibili.com', 'youtube.com'};
@@ -232,17 +271,6 @@ class YtDlpCookies {
         CookieBrowser b => ['--cookies-from-browser', b.spec],
         null => const [],
       };
-
-  /// The same as mpv's `ytdl-raw-options` value ('' for none); each value
-  /// length-quoted (`%N%`) so commas and '=' in paths survive.
-  String mpvRawOptions([CookieSource? source]) {
-    String q(String v) => '%${utf8.encode(v).length}%$v';
-    return switch (source ?? read(count: false)) {
-      CookieFile(:final path) => 'cookies=${q(path)}',
-      CookieBrowser b => 'cookies-from-browser=${q(b.spec)}',
-      null => '',
-    };
-  }
 
   /// Keeps [cookies] as the private copy, replacing any browser setting.
   Future<CookieFile> saveFile(List<NetscapeCookie> cookies) async {

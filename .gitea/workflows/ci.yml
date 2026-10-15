@@ -41,7 +41,8 @@ jobs:
         working-directory: packages/server
 
   # The updater's Windows apply path (running exe parked as .old) only
-  # means something on real NTFS. Runner notes: see release.yml.
+  # means something on real NTFS, and the close smoke run needs the real
+  # build. Runner notes: see release.yml.
   updater-windows:
     # Not for a "Release v…" commit: release.yml builds it on the same
     # (only) Windows runner, which this job would hold up.
@@ -71,3 +72,11 @@ jobs:
       - name: Windows build
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tool/package_windows.ps1
+      # The close smoke run on that build (P32): start, open a short clip in
+      # a player with a video output, close; it must exit within 45 s and
+      # leave no process. A runner that cannot show a window skips with a
+      # warning. Here rather than in a job of its own: one build, one runner.
+      - name: Smoke (start, open, close)
+        shell: powershell
+        timeout-minutes: 3
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tool/smoke_windows.ps1 -Limit 45

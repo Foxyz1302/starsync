@@ -4,6 +4,7 @@ import 'desktop_folders.dart';
 import 'desktop_notifications.dart';
 import 'desktop_shell.dart';
 import 'desktop_urls.dart';
+import 'media_kit_host.dart';
 
 /// The desktop's [Ports].
 Ports desktopPorts() {
@@ -14,5 +15,6 @@ Ports desktopPorts() {
     folders: const DesktopFolders(urls),
     links: AppYtDlp.instance,
     notifications: DesktopNotifications(),
+    players: MediaKitHost(),
   );
 }

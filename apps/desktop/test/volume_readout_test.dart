@@ -27,7 +27,7 @@ void main() {
   // dispose would wait on them for ever; the test process ending ends it.
   setUpAll(() async {
     MediaKit.ensureInitialized();
-    await coord.playback.init();
+    await coord.media.start();
   });
 
   testWidgets('wheel over the video: readout for about a second', (tester) async {

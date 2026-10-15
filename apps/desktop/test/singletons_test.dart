@@ -12,7 +12,7 @@ const baseline = {
   'UpdateController': 8,
   'Profile': 8,
   'FolderStore': 6,
-  'AppYtDlp': 4,
+  'AppYtDlp': 2,
   'RecentLinks': 3,
 };
 

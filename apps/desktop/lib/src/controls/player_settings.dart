@@ -222,7 +222,9 @@ class ShaderPresetSetting extends StatelessWidget {
       final preset = s.shaderPreset.value;
       final quality = s.shaderQuality.value;
       final hasCustom = s.customShaders.value.isNotEmpty;
-      final mode = (renderMode ?? PlaybackController.lastRenderMode).value;
+      final mode = (renderMode ??
+              context.getInheritedWidgetOfExactType<AppScope>()?.graph.ports.players.renderMode)
+          ?.value;
       final warning = switch (mode) {
         RenderMode.software => 'Software rendering: shaders have no effect',
         RenderMode.softwareGl => 'OpenGL on the CPU: shaders will be slow',
@@ -267,10 +269,10 @@ class ShaderPresetSetting extends StatelessWidget {
 /// on the fly). `SYNC_RELAY_HWDEC` wins, as at player start.
 Future<void> applyHwdecLive(PlaybackController playback) async {
   if ((Platform.environment['SYNC_RELAY_HWDEC'] ?? '').isNotEmpty) return;
-  if (!playback.alive.peek()) return;
+  final p = playback.current;
+  if (p == null) return;
   try {
-    final dynamic platform = playback.player.platform;
-    await platform?.setProperty('hwdec', AppSettings.instance.hwdec.peek());
+    await p.setProperty('hwdec', AppSettings.instance.hwdec.peek());
   } catch (e) {
     debugPrint('live hwdec failed: $e');
   }

@@ -4,8 +4,10 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
+
+import '../platform/desktop/media_kit_host.dart' show MediaKitHost;
+import '../platform/ports/player_host.dart';
 
 // Poster frames for the Files source, made by mpv itself (no ffmpeg on
 // users' machines; Windows ships only libmpv). A hidden player per file
@@ -23,6 +25,9 @@ class Thumbnail {
 
 const thumbnailWidth = 480;
 
+/// The players thumbnails are made with (the app's host, set in `main`).
+PlayerHost thumbnailPlayers = MediaKitHost()..init();
+
 /// Where thumbnails are cached; swapped in tests.
 Future<Directory> Function() thumbnailCacheRoot = getApplicationCacheDirectory;
 
@@ -33,7 +38,7 @@ const _timeout = Duration(seconds: 20);
 int _running = 0;
 final _waiting = <Completer<void>>[];
 final _inFlight = <String, Future<Thumbnail?>>{};
-final _players = <Player>{};
+final _players = <HostedPlayer>{};
 bool _closed = false;
 
 /// App close: no new thumbnails, running ones stop at their next check
@@ -49,7 +54,7 @@ Future<void> cancelAllThumbnails({
   for (final p in _players.toList()) {
     _players.remove(p);
     try {
-      await p.dispose().timeout(deadline);
+      await thumbnailPlayers.dispose(p).timeout(deadline);
     } catch (_) {}
   }
 }
@@ -147,19 +152,10 @@ Future<Thumbnail?> _generate(
   String out,
   bool Function() cancelled,
 ) async {
-  final player = Player(
-    configuration: const PlayerConfiguration(
-      vo: 'null',
-      muted: true,
-      osc: false,
-      libass: false,
-      title: 'thumbnail',
-      bufferSize: 4 << 20,
-    ),
-  );
+  final player = await thumbnailPlayers.create(PlayerRole.thumbnail);
   _players.add(player);
   try {
-    final mpv = player.platform as NativePlayer;
+    final mpv = player;
     for (final (k, v) in [
       ('ao', 'null'),
       ('aid', 'no'),
@@ -176,7 +172,7 @@ Future<Thumbnail?> _generate(
     ]) {
       await mpv.setProperty(k, v);
     }
-    await player.open(Media(path), play: false);
+    await player.open(path);
     final target = File(out);
     final deadline = DateTime.now().add(_timeout);
     while (DateTime.now().isBefore(deadline)) {
@@ -199,6 +195,6 @@ Future<Thumbnail?> _generate(
     return null;
   } finally {
     // [cancelAllThumbnails] may have taken it already.
-    if (_players.remove(player)) await player.dispose();
+    if (_players.remove(player)) await thumbnailPlayers.dispose(player);
   }
 }

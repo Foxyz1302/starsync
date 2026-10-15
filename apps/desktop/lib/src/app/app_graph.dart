@@ -88,8 +88,8 @@ class AppGraph {
       prefs: () => AppSettings.instance.notifyPrefs,
     );
     final connection = Connection(notify: notifier.notify, identity: identity ?? ClientIdentity.stored());
-    final coordinator =
-        SessionCoordinator(notifier: notifier, connection: connection, ytDlp: p.links, jellyfin: jellyfin);
+    final coordinator = SessionCoordinator(
+        notifier: notifier, connection: connection, ytDlp: p.links, jellyfin: jellyfin, players: p.players);
     // Device-owned: the library box; AnimeFlow's runs when signed in.
     final matcher = library ??
         ShowMatcher(

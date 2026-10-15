@@ -78,6 +78,8 @@ and `e2e_check` (simulated viewers against a live server).
 Three suites, run from each package's folder:
 
 - `cd packages/core && dart test` (a few seconds): protocol round-trips,
+  what a player opens for a page (`YtDlpPlay`) and the cookie notes of a
+  failed resolve against a stand-in yt-dlp (`cookies_test`, D11),
   the sync engine (clock, gate, presence and grace, correction, end of
   file), the `PresencePolicy` table, queue model, the library's L1
   (release and folder names, `groupLocal` over a real anime folder's
@@ -95,7 +97,8 @@ Three suites, run from each package's folder:
   controls, settings, schedule), pure app logic (`StateDiff`, the library's L2 matching against a
   fake AniList (`show_matcher_test`), `media.ref` producers,
   shader list, sound engine with a fake backend, invite addresses, the
-  version gate), `singletons_test` (the `.instance` count, see
+  version gate, the media plan's table with the Jellyfin relay rule and
+  the "Waiting for" status (`media_plan_test`)), `singletons_test` (the `.instance` count, see
   ARCHITECTURE "Composition root"; lower its baseline when a use goes) and the real-mpv `*_e2e`
   tests plus `coord_presence`. The whole suite takes a couple of minutes;
   run it only before a restructure step lands, otherwise only the files
@@ -108,21 +111,34 @@ else is offline: Jellyfin and link hosts are local fakes.
 
 Real-mpv tests: `sync_playback_e2e`, `coord_presence` (drops through a
 `FlakyProxy`: a half-open link and return, 10 flaps, `replaced`, `bye`,
-a dead or restarted server), `video_reload_e2e`,
+a dead or restarted server), `video_reload_e2e` (a fresh player from the
+host, the old one retired, leave releases them all),
 `seek_drag_e2e`, `end_of_file_e2e`, `readahead_e2e`, `chapters_mpv_e2e`,
-`ytdl_headers_e2e`, `relay_e2e` (a dedicated server with no file of its
+`ytdl_headers_e2e` (a page through the app's own resolve against a
+stand-in yt-dlp and a Referer-checking CDN: the EDL, the headers and
+cookies, subtitles without danmaku, a 403, the D11 error),
+`media_switch_e2e` (commands during a switch wait and apply once, no mpv
+errors), `relay_e2e` (a dedicated server with no file of its
 own: a guest's file, links passed on or fetched by the server, a late
-source, a source that drops and resumes), `jellyfin_e2e`,
-`queue_switch_e2e` (times Up next switches against a delayed, rate-capped
-fake Jellyfin and link host: an episode, a direct link, a link passed on
-and a server-fetched one; `WT_SWITCH_PRELOAD=0` for the cold path,
+source, a source that drops and resumes; a seek past what a slow source
+has sent, timed; a source that drops while a viewer seeks past
+the buffer and another joins: no seek loop, "Waiting for", all resume
+(D6)), `jellyfin_e2e`, `queue_switch_e2e` (times Up next switches
+through the media pipeline against a delayed, rate-capped fake Jellyfin
+and link host: an episode, a direct link, a link passed on and a
+server-fetched one, each prepared and promoted; no mpv "error running
+command" or "file cache" lines; `WT_SWITCH_PRELOAD=0` for the cold path,
 `WT_SWITCH_DELAY_MS` / `WT_SWITCH_RATE_KBS` for the link). The sync,
 reload and end-of-file ones expect `~/Videos/chiyo.mp4`; the others
 generate media with ffmpeg into `WT_TEST_TMP` (default: system temp; all
 desktop tests that write files use it). Headless mpv (no video output
 attached) won't open video-only files, so test media needs an audio
 track. Tests always log media_kit "S/W rendering" because they have no
-display; that says nothing about the app. `sound_device_e2e` opens the
+display; that says nothing about the app. A headless player has no video
+track selected (`vid=no`), and an mkv's cues list only the video, so
+seek tests over a relay or HTTP use an mp4 with its index first
+(`+faststart`); setting `vid=auto` on a headless player crashes mpv when
+it is disposed. `sound_device_e2e` opens the
 real audio device (flutter_soloud) and plays every sound of every preset
 quietly (`WT_SFX_VOLUME`, default 0.1).
 
@@ -163,9 +179,9 @@ in [ROADMAP.md](ROADMAP.md)):
 | Drop and reconnect while sharing a relay | server `flaky_link_test` (blackhole: `gone` with ready, queue item and relay kept, the same member back; reset), `sync_wave_test` (takeover by client id, `replaced`, `stale`), `presence_test` (grace on a fake clock, restart), `relay_test` "the source drops (D6)" (`sourceGone`, buffer served, same `info` continues, another 4002, a second channel 4003, leave ends it); desktop `relay_e2e` "the source drops uncleanly and comes back" (gone past the server's silence, the relay kept, the source re-dials and continues), `coord_presence` (a half-open drop while playing: same member, no reopen, the state kept; 10 flaps: at most one lost/back sound; `replaced` is terminal; a restarted server gets the ready again), `connection_test` (the hello's id, `seq`, caps, `feedAfter`) | |
 | Join mid-playback | core `sync_engine_test` "D2: joiners" (never changes the transport while playing, at most 15 s while held, joining ends on error or timeout), `presence_test` (the table); server `relay_test` "a late joiner gets its own /r/ URL"; desktop `coord_presence` (the returning member plays on in sync) | |
 | Sit out / Away and back | core `sync_engine_test` "away" (only oneself comes back, through joining), "return" (away survives a drop), `presence_test` (`isAlone`); server `hardening_test` (anyone sets anyone away, `forbidden`); desktop `server_isolate_test` (the host sat out through `presence` on your shared server), `notice_table_test` (the feed actions one-to-one, matched by id; sitting out gets only chat, nudges, "starting now", Up next and the chosen joins and leaves; alone no social sounds), `session_logic_test` (auto sit-out on a fake clock: never alone, a manual away stays), `player_status_test` / `shell_test` (the ready counter leaves away and gone out) | step 6: not tracked as watched (P7) |
-| Swap, also while someone is Away or gone | core `sync_engine_test` "swap" (a gone member stays out of the gate, comes back joining), "away" (a swap leaves it away), `queue_test` (a swap takes its item, drops the `auto` one); server `queue_test` (a gone adder's item waits), `relay_test` (a swap drops the buffer); desktop `sync_playback_e2e` | step 5: no commands reach a player mid-switch (P15) |
-| Up next advance | core `queue_test` (skip, play request timeout, `auto` and `cancel`); server `queue_test`, `relay_test` "warm relay"; desktop `jellyfin_session_test` (auto-advance swapper, end card countdown), `queue_switch_e2e` | step 5: preparing it through the media pipeline; step 6: the countdown as server state (`state.advance`) |
-| Close the app cleanly, incl. `bye` | server `lifecycle_test` (a close keeps the member `gone`, `bye` leaves at once, server stop closes sockets); desktop `server_isolate_test` (stop frees the port; Stop sharing tells guests with 4016 and keeps you and Up next; a friend's server and back keeps yours), `coord_presence` (Stop sharing and your server's stop release their ports; leave sends `bye` and others see "left" at once, leaving for a restart keeps the member `gone`) | step 5: the Windows close smoke job (P32) |
+| Swap, also while someone is Away or gone | core `sync_engine_test` "swap" (a gone member stays out of the gate, comes back joining), "away" (a swap leaves it away), `queue_test` (a swap takes its item, drops the `auto` one); server `queue_test` (a gone adder's item waits), `relay_test` (a swap drops the buffer); desktop `sync_playback_e2e`, `media_switch_e2e` (no command reaches a player mid-switch) | |
+| Up next advance | core `queue_test` (skip, play request timeout, `auto` and `cancel`); server `queue_test`, `relay_test` "warm relay"; desktop `jellyfin_session_test` (auto-advance swapper, end card countdown), `queue_switch_e2e` (prepared and promoted through the media pipeline) | step 6: the countdown as server state (`state.advance`) |
+| Close the app cleanly, incl. `bye` | server `lifecycle_test` (a close keeps the member `gone`, `bye` leaves at once, server stop closes sockets); desktop `server_isolate_test` (stop frees the port; Stop sharing tells guests with 4016 and keeps you and Up next; a friend's server and back keeps yours), `coord_presence` (Stop sharing and your server's stop release their ports; leave sends `bye` and others see "left" at once, leaving for a restart keeps the member `gone`), `video_reload_e2e` (leave releases every player); the close smoke run on the built app (`tool/smoke_windows.ps1` in CI, `tool/smoke_linux.sh` by hand) | |
 
 A test file whose first line is `// restructure: rewrite in step N` pins
 behaviour that step of the restructure ([ROADMAP.md](ROADMAP.md)) changes;
@@ -174,7 +190,20 @@ before.
 
 CI (`.gitea/workflows/ci.yml`): analyze + test for core and server, plus
 `dart compile exe` of the dedicated server (fails if Flutter creeps into
-`packages/server`). Desktop tests are not in CI.
+`packages/server`). Desktop tests are not in CI. The Windows job runs the
+updater tests, the release build and the close smoke run on that build
+(`tool/smoke_windows.ps1`, P32): the app starts with
+`STARSYNC_SMOKE=<clip>` (a 5 s clip from ffmpeg, else a WAV the script
+writes) under its own profile (`STARSYNC_PROFILE=smoke`), opens the clip
+in a player with a video output through the media pipeline
+(`platform/smoke.dart`), plays a second and closes the normal way; the
+steps go to `STARSYNC_SMOKE_OUT` (`start`, `opened <ms> render=<mode>`,
+`closing`, or `skip` / `fail` with why). It fails when the app does not
+exit within 45 s or leaves a `starsync` process, skips with a warning
+when the runner cannot bring the app or its video output up, and prints
+the `smoke:`, `close:` and `mpv: render` lines of the app log.
+`tool/smoke_linux.sh` is the same on Linux (needs a display; after
+`flutter build linux --release`).
 
 Traps:
 - Never pump media_kit's `Video` in `flutter test`: the runner hangs (kill
@@ -302,8 +331,10 @@ is off), not software rendering.
 - `web_socket_channel` 3.x: `channel.ready` errors are unhandled on refused
   connections; swallow them and report through the stream's `onError`.
   Streams are single-subscription: one listener per socket.
-- media_kit has no public `Player.setProperty`; the code reaches mpv through a
-  dynamic call on `player.platform`. Cache size goes through
+- media_kit has no public `Player.setProperty`; the player host
+  (`MediaKitHost`) reaches mpv through a dynamic call on
+  `player.platform`, and nothing outside it imports media_kit except the
+  `Video` widget glue. Cache size goes through
   `PlayerConfiguration(bufferSize:)`.
 - Hot restart with any media_kit `Player` alive (session, thumbnails)
   used to SIGSEGV on mpv's `core` thread: each mpv handle's wakeup callback

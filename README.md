@@ -533,7 +533,11 @@ export (picked or dropped; every site in it is kept). They stay on this
 computer and are used by its yt-dlp only (your own playback, "through
 me", and a server you host). Cookies log yt-dlp in as you on those
 sites: keep the file private, and for YouTube consider a throwaway
-account (Google may flag accounts used with yt-dlp).
+account (Google may flag accounts used with yt-dlp). When a page shows
+no video, the message says which cookies were used: none, your file
+(and whether it has any for that site), or your browser's (and how many
+it has for that site), so you know whether to sign in there or add
+cookies.
 YouTube works in all three too, and so do pages and links that only
 offer streaming playlists (HLS `.m3u8`, DASH `.mpd`, the HLS of X videos).
 Through me and Server fetches it never show the link to anyone; they can't pass on live

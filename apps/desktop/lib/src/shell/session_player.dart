@@ -11,6 +11,7 @@ import '../controls/controls_probe.dart';
 import '../controls/model/controls_model.dart';
 import '../controls/session_controls.dart';
 import '../controls/volume.dart';
+import '../platform/desktop/media_kit_host.dart' show videoControllerOf;
 import '../queue/queue_ui.dart';
 import '../playback/media_marks.dart' show SkipKind, SkipOffer, formatClock;
 import '../screens/session/jellyfin_widgets.dart';
@@ -321,7 +322,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
 
   Widget _video(VideoControlsBuilder? controls) => Video(
         key: _videoKey,
-        controller: _coord.playback.video,
+        controller: videoControllerOf(_coord.playback.video),
         subtitleViewConfiguration: const SubtitleViewConfiguration(visible: false),
         controls: controls,
       );
@@ -653,7 +654,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                         ],
                       );
                     }),
-                    _MiniSeekBar(onSeek: (d) => playback.player.seek(d)),
+                    _MiniSeekBar(onSeek: playback.userSeek),
                   ],
                 ),
               ),

@@ -261,4 +261,46 @@ void main() {
     expect(pick(['avc1.640033', 'vp09.00.40.08', 'av01.0.08M.08']), 'v2');
     expect(pick(['avc1.640033', 'vp09.00.40.08']), 'v1');
   });
+
+  test('what a player opens: yt-dlp\'s pick, an EDL for video + audio, headers with the cookies, subtitles but danmaku', () {
+    final split = YtDlpInfo.parse({
+      'title': 'Page',
+      'formats': <Object>[],
+      'requested_formats': [
+        {
+          'format_id': 'v', 'url': 'https://cdn/v.m4s', 'protocol': 'https',
+          'http_headers': {'Referer': 'https://www.bilibili.com/', 'User-Agent': 'UA'},
+          'cookies': 'SESSDATA=abc; Domain=.bilibili.com; Path=/; Secure; Expires=1999999999; buvid3=xyz; Domain=.bilibili.com',
+        },
+        {'format_id': 'a', 'url': 'https://cdn/a.m4s', 'protocol': 'https', 'http_headers': {'Referer': 'other'}},
+      ],
+      'requested_subtitles': {
+        'zh-CN': {'url': 'https://subs/zh.vtt', 'ext': 'vtt', 'name': 'Chinese'},
+        'danmaku': {'url': 'https://comment/1.xml', 'ext': 'xml'},
+      },
+    }).play!;
+    expect(split.urls, ['https://cdn/v.m4s', 'https://cdn/a.m4s']);
+    expect(split.mpvUrl, mpvEdl(['https://cdn/v.m4s', 'https://cdn/a.m4s']));
+    expect(split.headers, {'Referer': 'https://www.bilibili.com/', 'User-Agent': 'UA', 'Cookie': 'SESSDATA=abc; buvid3=xyz'});
+    expect([for (final s in split.subtitles) '${s.lang} ${s.name} ${s.url}'], ['zh-CN Chinese https://subs/zh.vtt']);
+
+    final single = YtDlpInfo.parse({
+      'title': 'Tweet', 'url': 'https://video.twimg.com/v.mp4', 'protocol': 'https', 'ext': 'mp4',
+      'http_headers': {'User-Agent': 'UA'},
+    }).play!;
+    expect(single.mpvUrl, 'https://video.twimg.com/v.mp4');
+    expect(single.headers, {'User-Agent': 'UA'});
+
+    final hls = YtDlpInfo.parse({
+      'title': 'Live', 'is_live': true,
+      'requested_formats': [{'url': 'https://x/live.m3u8', 'protocol': 'm3u8_native'}],
+    }).play!;
+    expect(hls.mpvUrl, 'https://x/live.m3u8', reason: 'a live stream plays, it is only not relayed');
+    expect(YtDlpInfo.parse({'title': 'DASH', 'requested_formats': [{'url': 'https://x/f', 'protocol': 'http_dash_segments', 'manifest_url': 'https://x/m.mpd'}]}).play?.mpvUrl,
+        'https://x/m.mpd');
+    expect(YtDlpInfo.parse({'title': 'none', 'formats': <Object>[]}).play, isNull);
+    expect(YtDlpInfo.parse({'title': 'rtmp', 'url': 'rtmp://x/y', 'protocol': 'rtmp'}).play, isNull);
+    expect(cookieHeaderOf(null), '');
+    expect(cookieHeaderOf('a=1; Path=/; HttpOnly; b=2=3'), 'a=1; b=2=3');
+  });
 }

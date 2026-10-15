@@ -15,7 +15,9 @@ import '../jellyfin/track_prefs.dart';
 import '../library/media_refs.dart';
 import '../playback/media_marks.dart';
 import '../playback/playback_controller.dart';
+import '../platform/desktop/media_kit_host.dart' show MediaKitHost;
 import '../platform/ports/link_resolver.dart';
+import '../platform/ports/player_host.dart';
 import '../playback/yt_dlp_app.dart' show AppYtDlp;
 import '../schedule/anilist.dart';
 import '../screens/home/picked_media.dart';
@@ -30,6 +32,7 @@ import 'auto_sit_out.dart';
 import 'connection.dart';
 import 'delivery.dart';
 import 'media_art.dart';
+import 'media_pipeline.dart';
 import 'notifier.dart';
 import 'now_playing.dart';
 import 'now_playing_info.dart';
@@ -41,6 +44,7 @@ export 'connection.dart' show ConnectCancelled, ConnectParams;
 export 'notifier.dart' show ToastItem;
 export 'delivery.dart' show stateMediaRelay;
 export 'status.dart';
+export 'media_pipeline.dart' show MediaPipeline;
 
 final _log = createLogger('session');
 
@@ -73,32 +77,6 @@ bool unreadyForNewMedia(
         required int mediaId,
         required bool ready}) =>
     enabled && lastMediaId >= 0 && mediaId != lastMediaId && ready;
-
-/// What this member serves when its own swap is relayed: set at swap time,
-/// claimed by the state that names this member as the source.
-sealed class _RelayOrigin {
-  const _RelayOrigin();
-}
-
-final class _FileOrigin extends _RelayOrigin {
-  final String path;
-  const _FileOrigin(this.path);
-}
-
-final class _LinkOrigin extends _RelayOrigin {
-  final String url;
-  /// What the link is (a page goes through [ytDlp]).
-  final LinkProbe probe;
-  final YtDlp ytDlp;
-  const _LinkOrigin(this.url, this.probe, this.ytDlp);
-}
-
-/// A Jellyfin item: served with this install's account, else with the
-/// pasted [link] (its api_key stays on this machine).
-final class _JellyfinOrigin extends _RelayOrigin {
-  final String? link;
-  const _JellyfinOrigin(this.link);
-}
 
 String? stateMediaUrl(StateBroadcast state) {
   final media = state.media;
@@ -153,9 +131,13 @@ class SessionCoordinator {
   late final AvatarCache avatars = AvatarCache(connection.client);
   /// The current media's poster and banner by `state.media.art` hash.
   late final ArtCache art = ArtCache(connection.client);
-  final PlaybackController playback = PlaybackController();
+  /// The one way to open media: plan → resolve → open → ready, the
+  /// players, Up next's prepared one, being a relay source.
+  final MediaPipeline media;
+  /// The session player's marks and commands.
+  PlaybackController get playback => media.playback;
   /// Timings of each media change here (see [SwitchTrace]).
-  final SwitchTrace switchTrace = SwitchTrace();
+  SwitchTrace get switchTrace => media.trace;
   final StateDiff diff = StateDiff();
 
   /// The server's latest state. A drop keeps it (with the player, the
@@ -297,28 +279,15 @@ class SessionCoordinator {
   // out, so only a real swap counts as a new video.
   int _seenMediaId = -1;
   int _mediaId = -1;
-  // The mediaId whose media the player holds (or is opening); -1 for none.
-  // A swap stops the previous media.
-  int _playerMediaId = -1;
-  // [_playerMediaId] at the last open: the same media again (a reconnect,
-  // joining back) keeps the player, any other gets a fresh one (see
-  // [_openMedia]).
-  int _openedFor = -1;
-  String? _openUrl;
   String _wsHost = '';
   int _wsPort = 0;
-  _RelayOrigin? _pendingOrigin;
   // This client's last swap, until a state shows it landed (a newer
   // mediaId than [after] with this member as `swapBy`): its art goes up then.
   // [link]: the web link it came from (a relayed one has no `url`).
   ({HelloMedia media, int after, String? link, Uint8List? art})? _pendingArt;
   AniListClient? _aniList;
-  // What this member serves for media [$1].
-  (int, _RelayOrigin)? _activeOrigin;
-  RelaySource? _relaySource;
-  int _relaySourceMediaId = -1;
   /// This member serves the current media's bytes through the server.
-  final relaying = signal<bool>(false);
+  Signal<bool> get relaying => media.feeder.relaying;
   /// Names by member id, kept after they leave (a relay source that left).
   final memberNames = MemberNames();
   // The media this member was told its upload is too slow for.
@@ -331,13 +300,14 @@ class SessionCoordinator {
   int _lastEventId = -1;
   final UserSeekGate _seekGate = UserSeekGate();
   Timer? _seekTimer;
+  // The media is open here (or opening).
+  String? get _openUrl => media.openUrl;
   // True while a media open is in flight: the player's duration may still
   // belong to the previous media then.
-  bool _opening = false;
+  bool get _opening => media.opening;
   /// Auto sit-out (Settings: "Auto sit-out"): idle or minimised for a
   /// while sets this member away, coming back sets it in again.
   final AutoSitOut autoSitOut = AutoSitOut(DateTime.now().toUtc());
-  Map<String, String>? _openHeaders;
 
   // Jellyfin: the resolved ref, the mediaId it belongs to, a generation
   // that stale resolutions check, and the progress reporter.
@@ -366,14 +336,17 @@ class SessionCoordinator {
       Connection? connection,
       JellyfinAccounts? jellyfin,
       TrackPrefs? trackPrefs,
-      LinkResolver? ytDlp}) {
+      LinkResolver? ytDlp,
+      PlayerHost? players}) {
     final n = notifier ?? Notifier(sfx: sfx);
+    final links = ytDlp ?? AppYtDlp.instance;
     return SessionCoordinator._(
       notifier: n,
       connection: connection ?? Connection(notify: n.notify),
-      ytDlp: ytDlp ?? AppYtDlp.instance,
+      ytDlp: links,
       jellyfin: jellyfin ?? JellyfinAccounts.instance,
       trackPrefs: trackPrefs ?? TrackPrefs(),
+      media: MediaPipeline(host: players ?? (MediaKitHost()..init()), links: links),
     );
   }
 
@@ -382,10 +355,22 @@ class SessionCoordinator {
       required this.connection,
       required this.ytDlp,
       required this.jellyfin,
-      required this.trackPrefs}) {
+      required this.trackPrefs,
+      required this.media}) {
     connection
       ..onWelcome = _onWelcome
       ..caps = () => caps;
+    media
+      ..session = MediaSession(
+          server: () => ServerAddress(_wsHost, _wsPort, connection.token),
+          selfId: () => connection.memberId,
+          // What this app can open itself: pages through the link
+          // resolver (desktop: always), Jellyfin with its accounts.
+          caps: () => ClientCaps(source: true, resolve: ytDlp.resolvesLinks, jellyfin: caps.jellyfin),
+          jellyfin: jellyfin)
+      ..notify = notify
+      ..onError = _setPlayerError
+      ..onOpened = _onOpened;
     // The Notifier's view of the session (Status → Notifier, never back).
     notifier.session = () {
       final r = serverState.peek();
@@ -427,17 +412,16 @@ class SessionCoordinator {
   }
 
   /// The session's first player: created here on connect, disposed by
-  /// [leave]; each new media gets its own ([PlaybackController.openUrl]).
-  /// Never reused across sessions or media (a GPU-side video freeze sticks
-  /// to the player).
+  /// [leave]; each new media gets its own (the [media] pipeline). Never
+  /// reused across sessions or media (a GPU-side video freeze sticks to
+  /// the player).
   Future<void> initPlayer() async {
     if (_playerReady) return;
     try {
-      playback.onYtdlError = _setPlayerError;
       playback.onLoadError = _setPlayerError;
       playback.onUserSeek = (d) => _userSeek(d.inMicroseconds / 1e6);
       _bufferSub ??= playback.buffered.subscribe((_) => _onBuffered());
-      await playback.init();
+      await media.start();
       _playerReady = true;
     } catch (e, st) {
       debugPrint('player init failed: $e\n$st');
@@ -445,11 +429,13 @@ class SessionCoordinator {
     }
   }
 
-  void _setPlayerError(String raw) {
-    _log.warning('player cannot open media $_mediaId: $raw');
+  /// [raw]: why this player cannot open the current media; [cookies]:
+  /// which cookies a page's resolve used (D11), said with a sign-in error.
+  void _setPlayerError(String raw, {String? cookies}) {
+    _log.warning('player cannot open media $_mediaId: $raw${cookies == null ? '' : ' ($cookies)'}');
     _playerErrorFor = _mediaId;
     _playerErrorDuration = playback.duration.peek();
-    playerError.value = playErrorText(raw);
+    playerError.value = withCookieNote(playErrorText(raw), cookies);
   }
 
   /// Clears [playerError] once the media opened (a new duration) or the
@@ -500,12 +486,9 @@ class SessionCoordinator {
     _playerReady = false;
     playerFault.value = '';
     try {
-      await playback.recreate();
-      final url = _openUrl;
-      final headers = _openHeaders;
-      _openUrl = null;
       _clearPendingSeek();
-      if (url != null) await _openMedia(url, headers: headers);
+      diff.reset();
+      await media.reload();
     } catch (e, st) {
       debugPrint('video reload failed: $e\n$st');
       playerFault.value = 'video reload failed: $e';
@@ -532,10 +515,7 @@ class SessionCoordinator {
     _wsPort = params.port;
     diff.reset();
     _mediaId = -1;
-    _playerMediaId = -1;
-    _openedFor = -1;
-    settledMediaId.value = -1;
-    _openUrl = null;
+    media.reset();
     playerError.value = '';
     playerFault.value = '';
     fetchFailedFor.value = -1;
@@ -571,7 +551,7 @@ class SessionCoordinator {
     _startTicker();
     try {
       final url = welcome.mediaUrl;
-      if (url != null && url.isNotEmpty) await _openMedia(url);
+      if (url != null && url.isNotEmpty) await this.media.open(url);
       final media = params.media ??
           (params.linkUrl.isEmpty ? null : await mediaForLink(jellyfin, params.linkUrl));
       if (!connection.isCurrent(epoch)) throw const ConnectCancelled();
@@ -593,50 +573,19 @@ class SessionCoordinator {
     _errSub ??= connection.errors.listen((msg) => notify(ServerRefused(_sentenceCase(msg))));
   }
 
-  /// Opens [url] (with [headers] on every request); false on failure. A
-  /// new media gets a fresh player (or the preload holding it); the media
-  /// the player held before (back from sitting out, a reload) keeps it.
-  Future<bool> _openMedia(String url, {Map<String, String>? headers}) async {
-    if (url == _openUrl) return true;
-    _opens++;
-    _log.info('media $_mediaId: open ${_urlKind(url, headers)}: ${logUrl(url)}'
-        '${headers == null || headers.isEmpty ? '' : ' (headers: ${headers.keys.join(', ')})'}');
-    final keepPlayer = _playerMediaId == _openedFor;
-    _openedFor = _playerMediaId;
-    _openUrl = url;
-    _openHeaders = headers;
+  /// A media opened (the pipeline's open step): the server hears at once
+  /// (a prepared media already has its buffer).
+  void _onOpened(int mediaId, String url) {
     diff.reset();
-    _opening = true;
-    final mediaId = _mediaId;
-    var ok = false;
-    try {
-      await _prepareYtDlp(url);
-      switchTrace.mark(mediaId, SwitchTrace.open);
-      final promoted = await playback.openUrl(url,
-          headers: headers,
-          keepPlayer: keepPlayer,
-          onFreshPlayer: () => switchTrace.mark(mediaId, SwitchTrace.player));
-      switchTrace.mark(mediaId, promoted ? SwitchTrace.preloaded : SwitchTrace.opened);
-      ok = true;
-    } catch (e) {
-      debugPrint('open media failed: $e');
-      _setPlayerError('$e');
-    } finally {
-      _opening = false;
-    }
-    // Tell the server at once (a preloaded media already has its buffer).
     final r = serverState.peek();
-    if (ok && r != null && r.mediaId == mediaId && url == _openUrl && connection.token.isNotEmpty && _playerReady) {
+    if (r != null && r.mediaId == mediaId && url == _openUrl && connection.token.isNotEmpty && _playerReady) {
       _sendReport(r);
     }
-    return ok;
   }
-
-  int _opens = 0;
 
   /// How many times this session opened a media in the player (a drop
   /// and return must not add one).
-  int get opens => _opens;
+  int get opens => media.opens;
 
   // The media whose buffer reached the gate's need was reported at once.
   int _bufferReportedFor = -1;
@@ -646,202 +595,16 @@ class SessionCoordinator {
   void _onBuffered() {
     final r = serverState.peek();
     if (r == null || r.transport != 'held' || _bufferReportedFor == r.mediaId) return;
-    if (_lastAway || _opening || _openUrl == null || _playerMediaId != r.mediaId || !_playerReady) return;
+    if (_lastAway || _opening || _openUrl == null || media.playerMediaId != r.mediaId || !_playerReady) return;
     if (connection.token.isEmpty || playback.bufferedSecsAhead < r.bufferNeed) return;
     _bufferReportedFor = r.mediaId;
     _sendReport(r);
   }
 
-  /// What [url] is, for the log.
-  String _urlKind(String url, Map<String, String>? headers) {
-    if (url.startsWith('edl://')) return 'relay (tracks)';
-    final u = Uri.tryParse(url);
-    if (u == null || !(u.isScheme('http') || u.isScheme('https'))) return 'local file';
-    if (u.host == _wsHost && u.port == _wsPort && u.pathSegments.isNotEmpty) {
-      return switch (u.pathSegments.first) {
-        'r' => 'relay',
-        'm' => "the host's file",
-        'j' => "Jellyfin through the server's login",
-        _ => 'server URL',
-      };
-    }
-    if (headers != null && headers.isNotEmpty) return 'Jellyfin, own sign-in';
-    return 'link, fetched here';
-  }
-
-  /// A web link (not this server's): mpv's yt-dlp hook gets the app's
-  /// managed yt-dlp, downloaded first if needed; a media file name does
-  /// not wait for that.
-  Future<void> _prepareYtDlp(String url) async {
-    final path = await _ytDlpPathFor(url);
-    if (path != null) await playback.useYtDlp(path);
-  }
-
-  /// The yt-dlp mpv's hook needs for [url] (null: none, not a web link).
-  Future<String?> _ytDlpPathFor(String url) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) return null;
-    if (uri.host == _wsHost && uri.port == _wsPort) return null;
-    try {
-      final y = await ytDlp.ytDlp;
-      final ready = y.ensure();
-      return hasMediaExtension(uri)
-          ? y.path
-          : await ready.timeout(const Duration(seconds: 90), onTimeout: () => null);
-    } catch (e) {
-      debugPrint('yt-dlp not ready: $e');
-      return null;
-    }
-  }
-
   /// The media of the latest `state` is open here (or has nothing to
   /// open, could not, or waits for the server): its mediaId. Up next
-  /// preloads what comes next only then, so the two never compete, and a
-  /// preload a swap is about to take is never replaced first.
-  final settledMediaId = signal(-1);
-
-  /// Opens [url] in the hidden preload player ([PlaybackController.preload]);
-  /// [openUrl] for the same URL and headers then starts from it. True
-  /// once its first seconds are in.
-  Future<bool> preloadMedia(String url, {Map<String, String>? headers, bool fresh = false}) async {
-    if (!_playerReady) return false;
-    final path = await _ytDlpPathFor(url);
-    if (!_playerReady) return false;
-    return playback.preload(url, headers: headers, ytdlPath: path, fresh: fresh);
-  }
-
-  /// The server-fetched media this viewer opens once it is live.
-  int _awaitLiveFor = -1;
-
-  /// A relay nobody feeds yet: the server's fetch before it is read, or a
-  /// member's before its channel is up while that member is still here
-  /// (once it is gone or left, the server's buffer is all there is: open
-  /// that).
-  bool _waitForSource(StateBroadcast r, MediaRelay relay) =>
-      !relay.live && !relay.sourceGone && (relay.fetch || r.members.any((m) => m.id == relay.source));
-
-  /// This viewer's `/r/` URL; with tracks, a pieces track's playlist, or
-  /// an mpv EDL of every track when there are several (a page's separate
-  /// video and audio). A relay started in Up next ([queueId]) keeps its
-  /// queue id in the URL, so the preload of its warm relay matches.
-  String _relayMediaUrlFor(String name, int mediaId,
-          [List<RelayTrackSpec> tracks = const [], String queueId = '']) =>
-      relayViewerUrl('http://$_wsHost:$_wsPort/r/default/${connection.token}/${queueId.isEmpty ? mediaId : queueId}', name,
-          tracks: tracks);
-
-  /// This viewer's URL of the warm relay of Up next's first [item]
-  /// (`queue[0].media.relay`, see ARCHITECTURE "Getting ready"): the same
-  /// URL the media has once the item goes up, so the preload is promoted.
-  String warmRelayUrl(QueueItem item, MediaRelay relay) =>
-      _relayMediaUrlFor(item.media.name.isEmpty ? item.title : item.media.name, -1, relay.tracks, item.id);
-
-  // This member feeds the warm relay of Up next item `queueId` (its
-  // link, file or Jellyfin stream) before the item goes up; the swap
-  // that puts it up takes the source over.
-  ({String queueId, RelaySource src})? _warmSource;
-
-  /// Feeds the warm relay of Up next item [queueId] from here with
-  /// [media]; one already feeding it is kept. The server pulls only while
-  /// someone preloads it, and closes the channel once the item is no
-  /// longer first (the source then stops).
-  void feedWarm(String queueId, RelayMedia media) {
-    if (_warmSource?.queueId == queueId) {
-      unawaited(media.close());
-      return;
-    }
-    stopWarmSource();
-    final src = RelaySource(
-        Uri.parse('ws://$_wsHost:$_wsPort/r/default/${connection.token}/source?q=${Uri.encodeQueryComponent(queueId)}'),
-        media);
-    _warmSource = (queueId: queueId, src: src);
-    unawaited(() async {
-      try {
-        await src.start();
-      } catch (e) {
-        debugPrint('warm relay source of $queueId failed: $e');
-        if (identical(_warmSource?.src, src)) _warmSource = null;
-        return;
-      }
-      await src.done;
-      if (identical(_warmSource?.src, src)) _warmSource = null;
-    }());
-  }
-
-  void stopWarmSource() {
-    final w = _warmSource;
-    _warmSource = null;
-    if (w != null) unawaited(w.src.close());
-  }
-
-  /// Serves [media] for media [mediaId] on this member's relay channel.
-  /// The server only pulls while someone watches through it. When the
-  /// media came from Up next item [queueId] whose warm relay this member
-  /// feeds, that source carries on instead.
-  void _startRelaySource(int mediaId, RelayMedia media,
-      {bool announce = false, String queueId = '', String name = '', double duration = 0}) {
-    // Already serving this media (it redials by itself through a drop and
-    // goes on once this member is back).
-    if (_relaySource != null && _relaySourceMediaId == mediaId) {
-      unawaited(media.close());
-      return;
-    }
-    _stopRelaySource();
-    final warm = _warmSource;
-    if (queueId.isNotEmpty && warm != null && warm.queueId == queueId) {
-      _warmSource = null;
-      unawaited(media.close());
-      _relaySource = warm.src;
-      _relaySourceMediaId = mediaId;
-      relaying.value = true;
-      if (announce) notify(const RelayStarted());
-      unawaited(warm.src.done.then((_) {
-        if (identical(_relaySource, warm.src)) {
-          _relaySource = null;
-          relaying.value = false;
-        }
-      }));
-      return;
-    }
-    // The same `info` on every dial (name and length included), so the
-    // server knows a re-dial after a drop as the same media and continues.
-    final src = RelaySource(
-        Uri.parse('ws://$_wsHost:$_wsPort/r/default/${connection.token}/source'), media,
-        name: name, duration: duration);
-    _relaySource = src;
-    _relaySourceMediaId = mediaId;
-    relaying.value = true;
-    if (announce) notify(const RelayStarted());
-    unawaited(() async {
-      try {
-        await src.start();
-      } catch (e) {
-        debugPrint('relay source failed: $e');
-        if (identical(_relaySource, src)) {
-          _relaySource = null;
-          relaying.value = false;
-          notify(RelayFailed('$e'));
-        }
-        return;
-      }
-      await src.done;
-      if (identical(_relaySource, src)) {
-        _relaySource = null;
-        relaying.value = false;
-      }
-    }());
-  }
-
-  void _stopRelaySource() {
-    final src = _relaySource;
-    _relaySource = null;
-    _relaySourceMediaId = -1;
-    relaying.value = false;
-    if (src != null) unawaited(src.close());
-  }
-
-  String _fileUrlFor(String name) {
-    return 'http://$_wsHost:$_wsPort/m/default/${connection.token}/${Uri.encodeComponent(name)}';
-  }
+  /// prepares what comes next only then.
+  Signal<int> get settledMediaId => media.settledMediaId;
 
   StateBroadcast? _queuedState;
   bool _applying = false;
@@ -881,7 +644,7 @@ class SessionCoordinator {
     _trackSelfReady(r);
     if (_lastAway) {
       // A newer media than the one this member serves: that relay ended.
-      if (_relaySourceMediaId != -1 && _relaySourceMediaId != r.mediaId) _stopRelaySource();
+      if (media.feeder.mediaId != -1 && media.feeder.mediaId != r.mediaId) media.feeder.stop();
       await _unloadForOut();
       return;
     }
@@ -898,73 +661,21 @@ class SessionCoordinator {
           r.mediaId == _jfMediaId &&
           sameJellyfinItem(ref, _jfRef) &&
           jellyfinPlan.peek() is OwnPlay;
-      final relay = stateMediaRelay(r);
-      final mine = relay != null && relay.source.isNotEmpty && relay.source == connection.memberId;
-      _RelayOrigin? origin;
-      if (mine) {
-        final pending = _pendingOrigin;
-        if (pending != null) {
-          _pendingOrigin = null;
-          _activeOrigin = (r.mediaId, pending);
-        }
-        origin = _activeOrigin?.$1 == r.mediaId ? _activeOrigin!.$2 : null;
-      }
-      if (_relaySourceMediaId != r.mediaId) _stopRelaySource();
-      if (!same) {
+      if (same) {
+        media.plan(r);
+      } else {
         _seekGate.reset();
         _clearPendingSeek();
         _leaveJellyfinItem();
-        await _leavePreviousMedia(r.mediaId);
-        final name = (r.media?['name'] as String?) ?? '';
-        if (ref != null) {
-          await _playJellyfin(ref, r,
-              origin: origin is _JellyfinOrigin ? origin : null,
-              memberRelayUrl:
-                  relay != null && !mine ? _relayMediaUrlFor(name, r.mediaId, const [], relay.queueId) : null);
-        } else if (origin is _FileOrigin) {
-          // The source first: viewers wait on it, not on this player.
-          _startRelaySource(r.mediaId, RelayMedia.single(FileRelayBytes(File(origin.path))),
-              announce: true, queueId: relay?.queueId ?? '', name: name, duration: _durationOf(r));
-          await _openMedia(origin.path);
-        } else if (origin is _LinkOrigin) {
-          _startRelaySource(
-              r.mediaId, LinkRelayMedia(Uri.parse(origin.url), ytDlp: origin.ytDlp, probe: origin.probe),
-              announce: true, queueId: relay?.queueId ?? '', name: name, duration: _durationOf(r));
-          await _openMedia(origin.url);
-        } else if (relay != null && !mine) {
-          if (_waitForSource(r, relay)) {
-            // The server is still getting it (yt-dlp takes seconds), or the
-            // member passing it on has not dialled in yet (its app opens the
-            // link first): mpv gives up on a silent request after 5 s, so
-            // open once it is live.
-            _openUrl = null;
-            _awaitLiveFor = r.mediaId;
-            final who = r.members.where((m) => m.id == relay.source).firstOrNull?.name;
-            _log.info('media ${r.mediaId}: waiting for ${relay.fetch ? 'the server' : who} before opening the relay');
-          } else {
-            await _openMedia(_relayMediaUrlFor(name, r.mediaId, relay.tracks, relay.queueId));
-          }
-        } else {
-          var url = stateMediaUrl(r);
-          if ((url == null || url.isEmpty) && connection.token.isNotEmpty) {
-            final name = (r.media?['name'] as String?) ?? '';
-            if (name.isNotEmpty) url = _fileUrlFor(name);
-          }
-          if (url != null && url.isNotEmpty) {
-            await _openMedia(url);
-          } else {
-            _openUrl = null;
-          }
-        }
+        diff.reset();
+        final next = await media.switchTo(r);
+        if (next is SwitchJellyfin) await _playJellyfin(next.source, r);
       }
       _seekGate.reset();
       _clearPendingSeek();
-      if (_mediaId == r.mediaId) settledMediaId.value = r.mediaId;
-    } else if (_awaitLiveFor == r.mediaId && stateMediaRelay(r) != null && !_waitForSource(r, stateMediaRelay(r)!)) {
-      _awaitLiveFor = -1;
-      final relay = stateMediaRelay(r)!;
-      await _openMedia(
-          _relayMediaUrlFor((r.media?['name'] as String?) ?? '', r.mediaId, relay.tracks, relay.queueId));
+      if (_mediaId == r.mediaId) media.settled(r.mediaId);
+    } else {
+      await media.onState(r);
     }
     _jellyfinTransport(r);
     if (!_playerReady || _openUrl == null) {
@@ -990,6 +701,9 @@ class SessionCoordinator {
       ];
     }
     _wasPlayAllowed = allowed;
+    // A relay without its source: what is buffered plays, nothing seeks
+    // past it; one seek resumes when the source is back (D6).
+    actions = media.recover(r, actions, serverPosition: serverPositionAt(r, now));
     // The user is seeking (or our seek has not echoed yet), or this is the
     // echo of our own seek arriving: the player is where the user put it.
     // Later drift corrections within that event still apply.
@@ -1038,38 +752,13 @@ class SessionCoordinator {
   /// [joinBack] opens the media as new.
   Future<void> _unloadForOut() async {
     _wasPlayAllowed = false;
-    _awaitLiveFor = -1;
     if (_mediaId == -1 && _openUrl == null) return;
     _mediaId = -1;
-    _playerMediaId = -1;
-    _openUrl = null;
-    _openHeaders = null;
     _seekGate.reset();
     _clearPendingSeek();
     diff.reset();
     _leaveJellyfinItem();
-    if (!_playerReady) return;
-    try {
-      await playback.stop();
-    } catch (_) {}
-  }
-
-  /// A new media [mediaId]: the previous one leaves the player at once, so
-  /// nobody sees or hears it while the new one resolves, is fetched by the
-  /// server or opens. A reconnect to the media the player holds keeps it.
-  Future<void> _leavePreviousMedia(int mediaId) async {
-    final held = _playerMediaId;
-    _playerMediaId = mediaId;
-    // Opened from the welcome, before any state: that was this media.
-    if (held == -1 && _openedFor == -1 && _openUrl != null) _openedFor = mediaId;
-    if (held == -1 || held == mediaId) return;
-    _openUrl = null;
-    _openHeaders = null;
-    diff.reset();
-    if (!_playerReady) return;
-    try {
-      await playback.stop();
-    } catch (_) {}
+    await media.unload();
   }
 
   void _onFeed(FeedMessage f) {
@@ -1114,10 +803,13 @@ class SessionCoordinator {
     // The buffer counts only while the player holds the server's current
     // media: before a swap's media is open it is the previous one's (or
     // none), and the start must wait for this member.
-    final holds = !_lastAway && !_opening && _openUrl != null && _playerMediaId == r.mediaId;
+    final holds = !_lastAway && !_opening && _openUrl != null && media.playerMediaId == r.mediaId;
     _checkPlayerError(r.mediaId);
     final error = playerError.peek();
-    final buffered = holds ? playback.bufferedSecsAhead : 0.0;
+    // A relay without its source this player cannot follow: nothing
+    // buffered, so the server waits for the source (D6).
+    final starved = holds && media.starved(serverPositionAt(r, connection.serverNow()));
+    final buffered = holds && !starved ? playback.bufferedSecsAhead : 0.0;
     if (holds && buffered >= r.bufferNeed) switchTrace.mark(r.mediaId, SwitchTrace.buffered);
     connection.sendReport(
       position: _lastAway ? 0 : playback.positionSecs,
@@ -1204,7 +896,8 @@ class SessionCoordinator {
     final at = _pendingSeekAt;
     if (event == null || at == null) return;
     final now = DateTime.now().toUtc();
-    if (event != r.eventId || _seekGate.holdsPlayer(now)) {
+    // A relay without its source: never asked again (the seek loop).
+    if (event != r.eventId || _seekGate.holdsPlayer(now) || media.sourceDown) {
       _clearPendingSeek();
       return;
     }
@@ -1234,6 +927,7 @@ class SessionCoordinator {
     _seekGate.request(position, now);
     _clearPendingSeek();
     unawaited(playback.apply([SeekAction(position)]));
+    media.noteUserSeek(position);
     _seekTimer?.cancel();
     _seekTimer = Timer(_seekGate.debounce, _flushUserSeek);
   }
@@ -1246,9 +940,7 @@ class SessionCoordinator {
     // Playing on since the request: send where the player is now, so the
     // server's clock and ours agree when the echo comes back.
     final own = playback.positionSecs;
-    if (_playerReady &&
-        playback.player.state.playing &&
-        (own - position).abs() < 2.0) {
+    if (_playerReady && playback.playing && (own - position).abs() < 2.0) {
       position = own;
     }
     connection.sendSeek(position, seq: settled.seq);
@@ -1482,7 +1174,7 @@ class SessionCoordinator {
     markInput();
     final media = await mediaForLink(jellyfin, url);
     if (media.jellyfin != null) {
-      _pendingOrigin = _JellyfinOrigin(url);
+      this.media.expectOrigin(JellyfinOrigin(url));
       _swap(media.copyWith(relay: const MediaRelay()), queueId: queueId);
       return null;
     }
@@ -1511,13 +1203,13 @@ class SessionCoordinator {
       if (relayProblem != null) return relayProblem;
       final y = await ytDlp.ytDlp;
       // Up next's item this app already feeds (its warm relay): read.
-      final warm = _warmSource;
-      final fed = queueId != null && warm != null && warm.queueId == queueId && warm.src.tracks.isNotEmpty;
+      final warm = queueId == null ? const <RelayTrack>[] : this.media.feeder.warmTracks(queueId);
+      final fed = warm.isNotEmpty;
       final check = fed ? null : LinkRelayMedia(uri, ytDlp: y, probe: probe);
       var size = 0;
       final List<RelayTrackSpec> specs;
       try {
-        final tracks = fed ? warm.src.tracks : await check!.open().timeout(const Duration(seconds: 15));
+        final tracks = fed ? warm : await check!.open().timeout(const Duration(seconds: 15));
         for (final t in tracks) {
           // A playlist is read (DRM and live refused) but has no size.
           final pieces = t.pieces;
@@ -1533,7 +1225,7 @@ class SessionCoordinator {
       } finally {
         await check?.close();
       }
-      _pendingOrigin = _LinkOrigin(url, probe, y);
+      this.media.expectOrigin(LinkOrigin(url, probe, y));
       _swap(HelloMedia(name: name, size: size, duration: 0, relay: MediaRelay(tracks: specs), ref: what),
           link: url, queueId: queueId);
       return null;
@@ -1567,7 +1259,7 @@ class SessionCoordinator {
   /// relayed by this member for viewers without an account.
   void swapJellyfin(JellyfinMedia media, {String? queueId}) {
     markInput();
-    _pendingOrigin = const _JellyfinOrigin(null);
+    this.media.expectOrigin(const JellyfinOrigin(null));
     _swap(mediaForPick(media).copyWith(relay: const MediaRelay()), queueId: queueId);
   }
 
@@ -1586,7 +1278,7 @@ class SessionCoordinator {
     }
     final file = File(path);
     if (!await file.exists()) return 'file not found — check the path';
-    _pendingOrigin = _FileOrigin(path);
+    media.expectOrigin(FileOrigin(path));
     _swap(HelloMedia(
         name: file.uri.pathSegments.last,
         size: await file.length(),
@@ -1642,7 +1334,6 @@ class SessionCoordinator {
     _jfMediaId = -1;
     _reporter = null;
     _lastSnap = null;
-    _openHeaders = null;
     _blockedKey = '';
     currentRef.value = null;
     jellyfinPlan.value = null;
@@ -1683,7 +1374,7 @@ class SessionCoordinator {
     final last = _lastSnap;
     return PlayerSnapshot(
       position: playback.positionSecs,
-      paused: !playback.player.state.playing,
+      paused: !playback.playing,
       aid: last?.aid,
       sid: last?.sid,
     );
@@ -1695,25 +1386,15 @@ class SessionCoordinator {
     if (!_playerReady) return null;
     return _lastSnap = PlayerSnapshot(
       position: playback.positionSecs,
-      paused: !playback.player.state.playing,
+      paused: !playback.playing,
       aid: ids.aid,
       sid: ids.sid,
     );
   }
 
   /// This member's `/j/` URL for [ref] (the server's Jellyfin login).
-  String? jellyfinRelayUrl(JellyfinRef ref) => _relayUrlFor(ref);
-
-  String? _relayUrlFor(JellyfinRef ref) {
-    if (connection.token.isEmpty) return null;
-    final welcome = connection.relayUrl;
-    if (welcome != null &&
-        welcome.contains('/${connection.token}/') &&
-        welcome.endsWith('/${Uri.encodeComponent(ref.itemId)}')) {
-      return welcome;
-    }
-    return relayUrlFor(_wsHost, _wsPort, connection.token, ref.itemId);
-  }
+  String? jellyfinRelayUrl(JellyfinRef ref) =>
+      connection.token.isEmpty ? null : ServerAddress(_wsHost, _wsPort, connection.token).jellyfinUrl(ref);
 
   /// `report.jf`: every linked account that works (so a queued Jellyfin
   /// item finds someone to put it up while other media plays), then how
@@ -1729,67 +1410,31 @@ class SessionCoordinator {
     return {...linked, ref.serverId: access};
   }
 
-  /// Resolves [ref] for this viewer and opens it: own account (direct
-  /// play, progress reports, neighbouring episodes), the relay, or the
-  /// blocked state. Then carries the audio/subtitle choice over.
-  Future<void> _playJellyfin(JellyfinRef ref, StateBroadcast r,
-      {_JellyfinOrigin? origin, String? memberRelayUrl}) async {
+  /// Resolves [source]'s item for this viewer and opens it (the media
+  /// pipeline: own account, the server's login, the member passing it on,
+  /// or blocked), then this item's own work: progress reports and
+  /// neighbouring episodes with an own account, the audio/subtitle choice
+  /// carried over.
+  Future<void> _playJellyfin(JellyfinSource source, StateBroadcast r) async {
+    final ref = source.ref;
     final gen = ++_jfGen;
     _jfRef = ref;
     _jfMediaId = r.mediaId;
     currentRef.value = ref;
-    // Until it resolves nothing is open: no syncing the previous media.
-    final prevUrl = _openUrl;
-    _openUrl = null;
-    _opening = true;
-    if (_playerReady) {
-      try {
-        await playback.player.pause();
-      } catch (_) {}
-    }
-    JellyfinPlan plan;
-    try {
-      plan = _takeWarmJellyfin(ref) ??
-          await resolveJellyfinRef(jellyfin, ref,
-              relay: r.relay, relayUrl: _relayUrlFor(ref), memberRelayUrl: memberRelayUrl);
-    } finally {
-      if (gen == _jfGen) _opening = false;
-    }
-    if (gen != _jfGen) return;
-    switchTrace.mark(r.mediaId, SwitchTrace.resolved);
-    // This member put it up: serve it to viewers without an account, with
-    // its own sign-in, else the pasted link (played directly here too).
-    if (origin != null) {
-      final name = (r.media?['name'] as String?) ?? '';
-      if (plan is OwnPlay) {
-        _startRelaySource(r.mediaId, RelayMedia.single(HttpRelayBytes(Uri.parse(plan.url), headers: plan.headers)),
-            queueId: stateMediaRelay(r)?.queueId ?? '', name: name, duration: _durationOf(r));
-      } else if (origin.link != null) {
-        plan = RelayPlay(origin.link!);
-        _startRelaySource(r.mediaId, RelayMedia.single(HttpRelayBytes(Uri.parse(origin.link!))),
-            name: name, duration: _durationOf(r));
-      }
-    }
+    final plan = await media.openJellyfin(source, r, warm: _takeWarmJellyfin(ref), current: () => gen == _jfGen);
+    if (plan == null || gen != _jfGen) return;
     jellyfinPlan.value = plan;
     switch (plan) {
       case BlockedPlay():
         jellyfinBlocked.value = plan;
         _blockedKey = _accountKey(ref.serverId);
-        try {
-          await playback.stop();
-        } catch (_) {}
         return;
-      case RelayPlay(:final url):
+      case RelayPlay():
         jellyfinBlocked.value = null;
-        // Same relay URL (resumed member): the player still has it.
-        if (url == prevUrl) {
-          _openUrl = url;
-          return;
-        }
-        if (!await _openMedia(url) || gen != _jfGen) return;
-      case OwnPlay(:final url, :final headers):
+        if (_openUrl == null) return;
+      case OwnPlay():
         jellyfinBlocked.value = null;
-        if (!await _openMedia(url, headers: headers) || gen != _jfGen) return;
+        if (_openUrl == null) return;
         // Played before and the resume point, fresh (a warmed plan's item
         // is older): the watched rule never unmarks a played item.
         final known = plan.item?.userData;
@@ -1992,9 +1637,9 @@ class SessionCoordinator {
   /// "Try again" on the blocked card (and after linking an account).
   void retryJellyfin() {
     final r = serverState.peek();
-    final ref = refOfStateMedia(r?.media);
-    if (r == null || ref == null) return;
-    unawaited(_playJellyfin(ref, r));
+    if (r == null) return;
+    final source = media.plan(r);
+    if (source is JellyfinSource) unawaited(_playJellyfin(source, r));
   }
 
   /// A welcome's part here (see [WelcomeHandler]), before its state is
@@ -2027,7 +1672,8 @@ class SessionCoordinator {
     } else if (!rejoin.sameServer && _mediaId != -1) {
       // The same media under a restarted server's numbering: the player
       // keeps it.
-      _mediaId = _playerMediaId = _openedFor = now.mediaId;
+      _mediaId = now.mediaId;
+      media.renumber(now.mediaId);
       _seenMediaId = now.mediaId;
     }
     // The intent the server lost: ready (unless the video changed and the
@@ -2060,20 +1706,11 @@ class SessionCoordinator {
   /// scratch (a relay this member served for the old one stops).
   void _forgetMedia() {
     _mediaId = -1;
-    _playerMediaId = -1;
-    _openUrl = null;
-    _openHeaders = null;
-    _awaitLiveFor = -1;
     _wasPlayAllowed = false;
     diff.reset();
     _clearPendingSeek();
-    _stopRelaySource();
-    stopWarmSource();
-    _activeOrigin = null;
+    media.forget();
   }
-
-  /// The media's length from a state (0 unknown).
-  static double _durationOf(StateBroadcast r) => (r.media?['duration'] as num?)?.toDouble() ?? 0;
 
   /// "Stop reconnecting".
   void cancelReconnect() => connection.cancelReconnect();
@@ -2090,7 +1727,7 @@ class SessionCoordinator {
     _playerReady = false;
     _ticker?.cancel();
     _ticker = null;
-    await playback.disposeAll();
+    await media.disposeAll();
   }
 
   /// Out of the session: with [bye] (Leave, closing the app) the member
@@ -2110,15 +1747,12 @@ class SessionCoordinator {
     _seekTimer = null;
     _seekGate.reset();
     await _stopJellyfin();
-    _stopRelaySource();
-    stopWarmSource();
-    _pendingOrigin = null;
+    media.reset();
     _pendingArt = null;
     _ownLink = null;
-    _activeOrigin = null;
     _playerReady = false;
     try {
-      await playback.dispose();
+      await media.release();
     } catch (_) {}
     // The last lines go before the token does, then the bye.
     await connection.close(bye: bye);
@@ -2139,6 +1773,6 @@ class SessionCoordinator {
     _bufferSub?.call();
     _aniList?.close();
     await connection.dispose();
-    await playback.dispose();
+    await media.dispose();
   }
 }

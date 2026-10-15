@@ -35,19 +35,9 @@ Problems are numbered; delete a line when its fix ships.
 - D11 Login-only sites: error texts say which cookies were used.
 
 **Problems:**
-- P2 Viewers of a relay whose source is gone: mpv loops on failed seeks
-  past what the server buffered (viewer-side recovery, step 5).
 - P7 Sat-out people get tracked as watched on Jellyfin.
 - P9 The watched rule (position coverage) misses real watches (D3).
-- P15 Commands reach a player mid-switch (`seek 90.0`, `event:5` errors).
-- P17 Preload, warm relay and the fresh player per video are layered on
-  the player instead of being one media pipeline.
-- P18 Bilibili "no video formats" with browser cookies set; the hint
-  wording misleads (D11).
 - P25 ssh to Gitea blocked through the proxy (pushes go over https).
-- P28 Log noise: "Failed to create file cache"; an idle relay channel for
-  Jellyfin items everyone has an account for.
-- P29 Relay start delay after a seek into an unbuffered part.
 - P30 Shaders don't work on Windows. Fix in 1.2.1-dev.3 (list read-back
   check; Windows hwdec `auto-copy`): a Windows user must confirm shaders
   stay on and the EGL-surface error is gone.
@@ -56,8 +46,11 @@ Problems are numbered; delete a line when its fix ships.
   `watch-together 2>&1 | grep VideoOutput` from a terminal if software.
 - P32 The app freezes on exit, mostly reported on Windows. 1.2.1-dev.3:
   orderly close, Linux `_exit` (0 crashes in 41 closes vs 10/10 before),
-  Windows normal close + TerminateProcess + watchdogs, untested on
-  Windows; if it still hangs: Event Viewer 1000/1002, a Task Manager dump,
+  Windows normal close + TerminateProcess + watchdogs; the player host
+  now owns the disposal order. CI's Windows job runs a close smoke run on
+  every build (`tool/smoke_windows.ps1`); its first runs on the runner
+  must show whether it passes or skips there (no interactive desktop). If
+  a real close still hangs: Event Viewer 1000/1002, a Task Manager dump,
   the `close:` log lines.
 - P33 No volume readout on wheel: likely fixed by the controls rework
   (1.2.1-dev.1; a test covers both skins); confirm in real use.
@@ -68,12 +61,6 @@ the automatic continuation and countdown, relay state), the device
 (client id, library and folders, match corrections, watch history,
 settings, notification prefs, what this app is sourcing) and the
 integrations (Jellyfin played/resume, AniList list).
-5. Media pipeline + player host port: plan → resolve → open → ready,
-   commands queued during a switch, viewer-side recovery when a source
-   drops (no mpv seek loops, play what's buffered), resolver and source
-   chosen by capability; a Windows CI smoke job (start, open, close
-   within N s, no orphan process). Fixes P2 P15 P17 P18 P28 P29, P30–P32;
-   D11.
 6. What's next (decides which/when, asks the pipeline to prepare;
    continuation and countdown as server state, shared cancel) + Watch
    tracking (time In from the presence history, device history, Jellyfin
@@ -85,7 +72,7 @@ Composition root (in place, ARCHITECTURE "Composition root"): the
 remaining `.instance` singletons move into `AppGraph` as the steps touch
 them; `singletons_test` holds the count (today: AppSettings 55,
 JellyfinAccounts 10, UpdateController 8, Profile 8, FolderStore 6,
-AppYtDlp 4, RecentLinks 3).
+AppYtDlp 2, RecentLinks 3).
 Not in the restructure: P25 (ops).
 
 
@@ -126,6 +113,24 @@ your server leaves them there without you, unwarned; a join refused
 after dialling (wrong password) costs your own member there (`bye`, back
 as a new member). Your server writes its session log even when you are
 alone.
+Left of step 5 (media pipeline): a human check, on Linux now and on
+Windows at 1.3.0, of a page link in "Everyone fetches it" through the
+app's own resolve (YouTube's 1080p video + audio EDL, Bilibili with its
+Referer and cookies, X's HLS) and of its subtitles, and of the D11 text
+with browser cookies (Bilibili without a login there); a relay viewer
+during a real source drop (the bytes run out, "Waiting for <name>", the
+return); the first Windows CI runs of the close smoke step. Not built:
+a viewer cannot tell what the server's relay buffer holds, so a seek
+past its own mpv buffer while the source is away is tried once and then
+waits for the source even when the server had it; `Unresolvable` (a
+device without yt-dlp) only says who could pass the link on, nothing
+routes it there by itself (Android); a page's stream URLs come from the
+probe cache (10 minutes, 35 for Up next's first item) and are resolved
+again only at Reload video and the 30-minute refresh; a format whose
+CDN wants per-track headers that differ gets the first track's (as
+mpv's hook did); Bilibili's danmaku is dropped, not shown. The Jellyfin
+item this member put up re-feeds its relay after an app restart (the
+state still names it the source).
 Left of step 4 (library): a human check of the Files library on the
 real folder (`/mnt/torrents/Torrents/Binux/`: Bleach over three folders
 with 66–107 missing, SAO S3 Alicization with OP/ED, Re.Zero S04E17, the
@@ -186,7 +191,8 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
    behind upstream) with native D3D11 on Windows (no ANGLE: may fix P30
    and the dxva2-egl error), a bundled libmpv on Linux, triple-buffered
    Linux rendering, patched FFmpeg. Check: Windows shaders, whether its
-   libmpv keeps Lua/ytdl_hook (link mode "everyone fetches it"), offline
+   it plays `edl://` URLs with `http-header-fields` (pages resolve in
+   the app since step 5, so mpv's Lua and ytdl_hook are not needed), offline
    CI builds (it downloads binaries in a build hook), and the upstream
    fixes it lacks. Until then we vendor upstream 2.0.1 with the X11/EGL
    patch in `third_party/media_kit_video`.
@@ -207,10 +213,9 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
    step 6.
 
 3. **yt-dlp follow-ups** (see ARCHITECTURE "yt-dlp"): check that the
-   bundled Windows libmpv has the ytdl hook (Lua) and plays `edl://` URLs
-   through media_kit; if not, resolve in the app and open the relay
-   tracks' formats. YouTube: yt-dlp wants a JS runtime (deno) for full
-   extraction. Formats that need yt-dlp's cookies.
+   bundled Windows libmpv plays the app's `edl://` URLs (video + audio
+   with headers) through media_kit. YouTube: yt-dlp wants a JS runtime
+   (deno) for full extraction.
    - Live streams through the relay (today refused: the sync model needs a
      fixed duration and seeking).
    - `tool/relay_e2e.dart`: a two-track case (bytes and pieces) over a

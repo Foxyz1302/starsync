@@ -47,6 +47,8 @@ Future<void> shutDownApp({Future<void> Function()? beforeQuit, bool restart = fa
     _step('thumbnails', cancelAllThumbnails(), const Duration(milliseconds: 1500)),
     _step('sounds', graph.sfx.dispose(), const Duration(milliseconds: 500)),
   ]);
+  // The host owns the disposal order: anything still alive goes now.
+  await _step('all players', graph.ports.players.disposeAll(), const Duration(milliseconds: 1500));
   // Windows: media_kit_video frees a player's video output on a thread of
   // its own after dispose returns; it must be done before the engine
   // stops, or the plugin's teardown waits on it for good.

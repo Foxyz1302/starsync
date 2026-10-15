@@ -4,7 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
-import 'package:starsync/src/playback/playback_controller.dart';
+import 'package:starsync/src/platform/desktop/media_kit_host.dart';
+import 'package:starsync/src/session/media_pipeline.dart';
 
 final _tmp = Platform.environment['WT_TEST_TMP'] ?? Directory.systemTemp.path;
 
@@ -42,13 +43,15 @@ void main() {
       final server = SyncServer(AppConfig(
           port: 0, secret: '', name: 'readahead', mediaPath: media));
       await server.start();
-      final p = PlaybackController();
+      final host = MediaKitHost();
+      final m = MediaPipeline(host: host);
+      final p = m.playback;
       try {
-        await p.init();
-        expect(p.pinMismatches, isEmpty,
+        await m.start();
+        expect(host.pinMismatches, isEmpty,
             reason: 'every pinned mpv property took effect');
         final token = server.session.issueToken('probe', '');
-        await p.openUrl(
+        await m.open(
             'http://127.0.0.1:${server.boundPort}/m/default/$token/readahead.mp4');
         var best = 0.0;
         final end = DateTime.now().add(const Duration(seconds: 30));
@@ -62,7 +65,7 @@ void main() {
         expect(best, greaterThan(120),
             reason: 'paused player reads ahead about two minutes');
       } finally {
-        await p.dispose();
+        await m.dispose();
         await server.stop();
       }
     },

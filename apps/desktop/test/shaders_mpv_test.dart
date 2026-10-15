@@ -2,7 +2,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:starsync/src/playback/playback_controller.dart';
+import 'package:starsync/src/platform/desktop/media_kit_host.dart';
+import 'package:starsync/src/session/media_pipeline.dart';
 import 'package:starsync/src/shaders/shader_assets.dart';
 import 'package:starsync/src/shaders/shader_presets.dart';
 import 'package:starsync/src/state/settings.dart';
@@ -21,12 +22,14 @@ void main() {
     support.createSync(recursive: true);
     shaderSupportDir = () async => support;
     final s = AppSettings.instance;
-    final p = PlaybackController();
+    final m = MediaPipeline(host: MediaKitHost());
+    final p = m.playback;
     try {
       // The saved choice goes on at player creation.
       s.setShaderPreset(ShaderPreset.a);
-      await p.init();
-      final dynamic mpv = p.player.platform;
+      await m.start();
+      await p.applyShaders();
+      final mpv = p.player;
       final modeA =
           await shaderPathsFor(ShaderPreset.a, ShaderQuality.hq, const []);
       expect(shaderListMatches(modeA, await mpv.getProperty('glsl-shaders')), isTrue);
@@ -59,17 +62,16 @@ void main() {
       expect(await mpv.getProperty('glsl-shaders'), good.path);
 
       // A recreated player (Reload video) gets the choice again.
-      await p.recreate();
-      expect(await (p.player.platform as dynamic).getProperty('glsl-shaders'),
-          good.path);
+      await m.reload();
+      await p.applyShaders();
+      expect(await p.player.getProperty('glsl-shaders'), good.path);
 
       s.setShaderPreset(ShaderPreset.off);
       await p.applyShaders(announce: true);
-      expect(await (p.player.platform as dynamic).getProperty('glsl-shaders'),
-          '');
+      expect(await p.player.getProperty('glsl-shaders'), '');
       expect(p.shaderNotice.value?.text, 'Shaders: Off');
     } finally {
-      await p.dispose();
+      await m.dispose();
     }
   });
 }

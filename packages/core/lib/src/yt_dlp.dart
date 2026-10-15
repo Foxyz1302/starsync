@@ -8,7 +8,9 @@ import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
 import 'cookies.dart';
+import 'link_probe.dart' show mayNeedSignIn;
 import 'logging.dart';
+import 'relay.dart' show mpvEdl;
 
 // yt-dlp: turns a web page (YouTube, Twitter/X, ...) into media URLs. The
 // app and the server each keep their own copy, the official standalone
@@ -19,7 +21,11 @@ final _log = createLogger('yt-dlp');
 
 class YtDlpException implements Exception {
   final String message;
-  const YtDlpException(this.message);
+
+  /// Which cookies the run used and what they hold for the site, when the
+  /// failure may be about signing in ([YtDlp.cookieNote], D11).
+  final String? cookies;
+  const YtDlpException(this.message, {this.cookies});
   @override
   String toString() => message;
 }
@@ -121,6 +127,10 @@ class YtDlpInfo {
   /// Every relayable format by id, to find [tracks] again after a
   /// re-resolve.
   final Map<String, YtDlpFormat> formats;
+
+  /// What a player opens for this page ([playFormat]); null when yt-dlp
+  /// picked nothing a player can open.
+  final YtDlpPlay? play;
   const YtDlpInfo({
     required this.title,
     this.uploader = '',
@@ -131,6 +141,7 @@ class YtDlpInfo {
     this.isLive = false,
     this.tracks = const [],
     this.formats = const {},
+    this.play,
   });
 
   /// One line for the log: extractor, duration, live, and each picked
@@ -163,6 +174,7 @@ class YtDlpInfo {
       duration: j['duration'] is num ? (j['duration'] as num).toDouble() : null,
       thumbnail: str('thumbnail').isEmpty ? null : str('thumbnail'),
       isLive: isLive,
+      play: YtDlpPlay.parse(j),
       tracks: isLive ? const [] : pickTracks(formats),
       formats: {
         for (final f in formats)
@@ -340,6 +352,100 @@ Map<String, String> parseSha256Sums(String text) => {
         if (RegExp(r'^([0-9a-fA-F]{64})\s+\*?(\S+)\s*$').firstMatch(line) case final m?)
           m.group(2)!: m.group(1)!.toLowerCase(),
     };
+
+/// The formats a player opens for a page: the best video up to 1080p with
+/// the best audio, else the best single file (yt-dlp's `-f`).
+const playFormat = 'bv*[height<=1080]+ba/b';
+
+/// The subtitles a player gets: every language but Bilibili's danmaku.
+const playSubLangs = 'all,-danmaku';
+
+/// A page's subtitle track for a player (`requested_subtitles`).
+class YtDlpSubtitle {
+  final String lang;
+  final String name;
+  final String url;
+  final String ext;
+  const YtDlpSubtitle(this.lang, this.url, {this.name = '', this.ext = ''});
+}
+
+/// What a player opens for a page, as yt-dlp resolved it ([playFormat]):
+/// one file, or a video and an audio stream played together, with the
+/// headers its CDN wants (the first format's `http_headers`, plus its
+/// `cookies` as a Cookie header) and the subtitles ([playSubLangs]).
+/// URLs are bound to the resolving machine (its address, its cookies).
+class YtDlpPlay {
+  final List<String> urls;
+  final Map<String, String> headers;
+  final List<YtDlpSubtitle> subtitles;
+  const YtDlpPlay(this.urls, {this.headers = const {}, this.subtitles = const []});
+
+  /// The URL mpv opens: the file, or an EDL of the streams.
+  String get mpvUrl => urls.length == 1 ? urls.single : mpvEdl(urls);
+
+  /// From `yt-dlp -J`: its `requested_formats`, else the top-level format;
+  /// null when none of them is something a player can open.
+  static YtDlpPlay? parse(Map<String, Object?> j) {
+    final picked = j['requested_formats'] is List
+        ? [for (final f in j['requested_formats'] as List) if (f is Map) Map<String, Object?>.from(f)]
+        : [if (j['url'] is String) j];
+    if (picked.isEmpty) return null;
+    final urls = <String>[];
+    for (final f in picked) {
+      final url = _playUrl(f);
+      if (url == null) return null;
+      urls.add(url);
+    }
+    final first = picked.first;
+    final headers = <String, String>{
+      if (first['http_headers'] is Map)
+        for (final e in (first['http_headers'] as Map).entries)
+          if (e.key is String && e.value is String) e.key as String: e.value as String,
+    };
+    final cookie = cookieHeaderOf(first['cookies']);
+    if (cookie.isNotEmpty) headers['Cookie'] = cookie;
+    final subs = <YtDlpSubtitle>[];
+    final requested = j['requested_subtitles'];
+    if (requested is Map) {
+      for (final e in requested.entries) {
+        final lang = '${e.key}', v = e.value;
+        if (lang == 'danmaku' || v is! Map || v['url'] is! String) continue;
+        final ext = v['ext'] is String ? v['ext'] as String : '';
+        if (ext == 'xml' || ext == 'json') continue;
+        subs.add(YtDlpSubtitle(lang, v['url'] as String,
+            name: v['name'] is String ? v['name'] as String : '', ext: ext));
+      }
+    }
+    return YtDlpPlay(urls, headers: headers, subtitles: subs);
+  }
+
+  static String? _playUrl(Map<String, Object?> f) {
+    final protocol = f['protocol'] is String ? f['protocol'] as String : 'https';
+    if (protocol.startsWith('http_dash')) {
+      final manifest = f['manifest_url'];
+      return manifest is String && manifest.startsWith('http') ? manifest : null;
+    }
+    final url = f['url'];
+    if (url is! String || !(url.startsWith('http://') || url.startsWith('https://'))) return null;
+    return const {'http', 'https', 'm3u8', 'm3u8_native'}.contains(protocol) ? url : null;
+  }
+}
+
+/// A Cookie header from yt-dlp's `cookies` field (`name=value; Domain=...;
+/// Path=/; name2=value2; ...`): the name=value pairs, attributes dropped.
+String cookieHeaderOf(Object? cookies) {
+  if (cookies is! String || cookies.trim().isEmpty) return '';
+  const attributes = {'domain', 'path', 'expires', 'max-age', 'secure', 'httponly', 'samesite', 'comment', 'version'};
+  final pairs = <String>[];
+  for (final part in cookies.split(';')) {
+    final t = part.trim();
+    final i = t.indexOf('=');
+    final name = (i < 0 ? t : t.substring(0, i)).trim();
+    if (i <= 0 || attributes.contains(name.toLowerCase())) continue;
+    pairs.add('$name=${t.substring(i + 1).trim()}');
+  }
+  return pairs.join('; ');
+}
 
 /// The last `ERROR:` line of yt-dlp's stderr without its prefixes
 /// (`ERROR: [twitter] 123: No video` -> `No video`), else the last line.
@@ -602,7 +708,11 @@ class YtDlp {
       final e = await err;
       _log.warning('resolve ${logUrl(url)}: exit $code after ${sw.elapsedMilliseconds} ms; stderr tail:\n'
           '${_tail(e)}');
-      throw YtDlpException(ytDlpErrorText(e));
+      final text = ytDlpErrorText(e);
+      // A site that hides the video from guests: say which cookies went.
+      final note = mayNeedSignIn(text) ? await cookieNote(url) : null;
+      if (note != null) _log.info('resolve ${logUrl(url)}: $note');
+      throw YtDlpException(text, cookies: note);
     }
     try {
       final j = jsonDecode(await out);
@@ -613,6 +723,59 @@ class YtDlp {
     } on FormatException catch (e) {
       _log.warning('resolve ${logUrl(url)}: unreadable output (${e.message})');
       throw YtDlpException('unreadable yt-dlp output: ${e.message}');
+    }
+  }
+
+  /// Which cookies a run for [url] uses and what they hold for its site
+  /// ([cookieSite]), in plain words (D11): none; the private file and how
+  /// many of its cookies are for the site; a browser, and how many cookies
+  /// for the site yt-dlp could read from it (one run of yt-dlp that writes
+  /// the browser's cookies to a private file in [dir], counted and deleted
+  /// at once; values are never logged).
+  Future<String> cookieNote(String url) async {
+    final site = cookieSite(Uri.tryParse(url)?.host ?? '');
+    final source = cookies.read(count: false);
+    switch (source) {
+      case null:
+        return 'no cookies were used';
+      case CookieFile(:final path):
+        try {
+          final n = parseCookies(await File(path).readAsString()).where((c) => cookieSite(c.host) == site).length;
+          return cookieNoteText(source, site, n);
+        } catch (_) {
+          return cookieNoteText(source, site, -1);
+        }
+      case CookieBrowser():
+        return cookieNoteText(source, site, -1, read: await _browserCookies(source, site));
+    }
+  }
+
+  /// How many cookies for [site] yt-dlp reads from [browser], or why it
+  /// cannot.
+  Future<({int count, String? error})> _browserCookies(CookieBrowser browser, String site) async {
+    final exe = await ensure();
+    if (exe == null) return (count: -1, error: lastError ?? 'yt-dlp is not available');
+    final jar = File(p.join(dir, '.cookie-check-$pid.txt'));
+    try {
+      // Private before yt-dlp writes into it (it keeps the mode).
+      await jar.writeAsString('# Netscape HTTP Cookie File\n');
+      if (!Platform.isWindows) await Process.run('chmod', ['600', jar.path]);
+      // No URL: yt-dlp loads the browser's cookies, saves the jar and stops.
+      final r = await Process.run(
+              exe, ['--ignore-config', '--cookies-from-browser', browser.spec, '--cookies', jar.path])
+          .timeout(const Duration(seconds: 30));
+      final cookies = parseCookiesOrEmpty(await jar.readAsString());
+      final err = '${r.stderr}';
+      if (cookies.isEmpty && err.contains('ERROR:') && !err.contains('provide at least one URL')) {
+        return (count: -1, error: ytDlpErrorText(err));
+      }
+      return (count: cookies.where((c) => cookieSite(c.host) == site).length, error: null);
+    } on TimeoutException {
+      return (count: -1, error: 'yt-dlp took longer than 30 s reading them');
+    } catch (e) {
+      return (count: -1, error: '$e');
+    } finally {
+      if (await jar.exists()) await jar.delete().catchError((_) => jar);
     }
   }
 
@@ -640,8 +803,14 @@ class YtDlp {
   }
 
   /// The command line [resolve] runs.
-  List<String> resolveArgs(String url) =>
-      ['-J', '--no-playlist', '--no-warnings', '--ignore-config', ...cookies.args(), '--', url];
+  List<String> resolveArgs(String url) => [
+        '-J', '--no-playlist', '--no-warnings', '--ignore-config',
+        // What a player opens ([YtDlpPlay]): yt-dlp's own pick at most
+        // 1080p, and the page's subtitles but Bilibili's danmaku (an XML
+        // comment feed, not subtitles).
+        '-f', playFormat, '--write-subs', '--sub-langs', playSubLangs,
+        ...cookies.args(), '--', url,
+      ];
 
   Future<void> close() => _changes.close();
 }

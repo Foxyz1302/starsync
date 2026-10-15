@@ -9,7 +9,7 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 |---|---|---|
 | `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client, updater, watched rule (`WatchSession`), the library's L1 (`library/`: release and folder names, `groupLocal`); `testing.dart` (test support for all three packages, not in `core.dart`: `FlakyProxy`) | pure Dart, no Flutter |
 | `packages/server` | Relic HTTP + WebSocket server (`SyncServer`, `ServerHub`, `Session`, media endpoint, relay buffer, Jellyfin relay), the `serve()` entrypoint, `bin/server.dart` (dedicated server) | pure Dart, no Flutter |
-| `apps/desktop` | Flutter app: UI, `AppGraph` (composition root), `SyncClient`, `Connection`, `SessionCoordinator`, `Navigation`, `YourServer` (`ServerIsolate`), `PlaybackController` (media_kit/mpv), update UI (`UpdateController`) | ships with `starsync-server` |
+| `apps/desktop` | Flutter app: UI, `AppGraph` (composition root), `SyncClient`, `Connection`, `SessionCoordinator`, `Navigation`, `YourServer` (`ServerIsolate`), `MediaPipeline` (opening media), `PlaybackController` (the session player's marks and commands), the player host (`PlayerHost`, `MediaKitHost`: the only media_kit user besides the `Video` widget glue), update UI (`UpdateController`) | ships with `starsync-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
 | `deploy` | systemd unit for the dedicated server | |
 
@@ -132,7 +132,7 @@ only stopping sharing sends guests out.
 
 `AppGraph` (`app/app_graph.dart`) is built once in `main.dart`
 (`AppGraph.build`) and constructs and disposes the app's systems: the
-`Ports`, the sounds (`SynthSfx`), the `Notifier`, the `Connection`, the
+`Ports` (the player host among them, handed to the coordinator), the sounds (`SynthSfx`), the `Notifier`, the `Connection`, the
 `SessionCoordinator`, the connect form and recents (`ConnectStore`,
 `state/connect_prefs.dart`), `YourServer`, `Navigation` and the library's
 matches (`ShowMatcher`, "Library", whose `refForPath` it hands the
@@ -264,8 +264,8 @@ Loosely modeled on Syncplay, with a different readiness design.
   pause after a newer play. Between events: drift
   over 5 s for more than 2 s seeks, ahead by more than 1.5 s sets rate 0.95
   until level, otherwise nothing.
-- **User seeks**: the player is a `SyncPlayer` whose public `seek` is the
-  user's: the session's seek bar (`ChapterSeekBar`, one `seek` per pointer
+- **User seeks**: a hosted player's public `seek` is the user's (its
+  `syncSeek` moves mpv): the session's seek bar (`ChapterSeekBar`, one `seek` per pointer
   move while dragging and one on release, like media_kit's), the arrow
   keys, skips, chapter jumps and `seekTo` all become explicit events. The player moves at
   once (scrub preview); `UserSeekGate` sends one `seek` intent with a fresh
@@ -274,8 +274,9 @@ Loosely modeled on Syncplay, with a different readiness design.
   most), server seeks never touch the player; the echo of our own seek is not
   applied either (the player is already there). A server seek that has not
   landed after 1.5 s is re-applied once (`_checkSeekLanded`), to the server
-  position recomputed now, and only while its event is still current and the
-  user is not seeking.
+  position recomputed now, and only while its event is still current, the
+  user is not seeking and the relay it reads has its source ("Viewer
+  recovery" under "Media pipeline").
 - **Liveness**: WS ping every 5 s; a socket without any frame for 15 s
   (`silence`) is closed (4015) and its member goes `gone`; the grace, the
   `gone` notice, the joiner bound and the joining timeout follow. The
@@ -406,8 +407,8 @@ Three sources, same sync. Any of them can also go through the relay
 
 - **Link**: the media field holds an http(s) URL. It travels as `media.url`
   in `swap` and `state`, and as `mediaUrl` in `welcome`. Each app plays it
-  directly (a web page through mpv's yt-dlp hook, see "yt-dlp"); the
-  server is only the clock. A pasted link that
+  directly (a web page through its own yt-dlp, see "yt-dlp"); the server
+  is only the clock. A pasted link that
   `parseJellyfinLink` recognises goes up as a Jellyfin ref instead when the
   ServerId is known (in the link, else `/System/Info/Public`), so its
   `api_key` is never shared (`mediaForLink`, host and swap alike).
@@ -452,7 +453,8 @@ open-ended), then every seek is a fresh `bytes=N-` connection. A server
 outage of a few seconds is ridden out from mpv's cache with no error. Longer
 outages exhaust the cache and rely on reconnect (not chaos-tested yet).
 
-mpv settings (`PlaybackController`): `Player` with `bufferSize` 256 MiB
+mpv settings (the player host, `platform/desktop/media_kit_host.dart`,
+set on every player before its first open): `Player` with `bufferSize` 256 MiB
 (media_kit's `bufferSize` sets both `demuxer-max-bytes` and
 `demuxer-max-back-bytes`), `libass` on; pinned via runtime property:
 `demuxer-readahead-secs=150`, `cache-secs=150` (about two minutes of
@@ -463,21 +465,25 @@ file is ~8), `demuxer-max-back-bytes=67108864`,
 (comma form; this mpv build rejects colon-joined): a dropped connection
 or a 5xx is retried, at most 3 times per read and 4 s apart at most; a
 4xx (a CDN refusing a request) fails at once instead of being retried
-(older ffmpeg ignores `reconnect_max_retries`). A load that fails (mpv's
+(older ffmpeg ignores `reconnect_max_retries`), `ytdl=no` (pages are
+resolved by the app, never by mpv's Lua hook). A load that fails (mpv's
 fatal "No video or audio streams selected", or an EDL track that cannot
 be opened) before a duration is known is reported once per open
 (`onLoadError`), with ffmpeg's HTTP status when this player gets
 ffmpeg's log (ffmpeg logs through one mpv instance per process: the
-first one, and once that is disposed the next one created; the preload
-player passes the HTTP errors it gets on to the session player). Since
-every media gets its own player, the session player is often not that
-instance: the status is a bonus, load errors are detected either way. That, a yt-dlp hook error and a failed `openUrl` become
-the coordinator's `playerError` in plain words (`playErrorText`, core
+first one, and once that is disposed the next one created; the host
+passes the HTTP errors any player gets on as `httpErrors`). Since every
+media gets its own player, the session player is often not that
+instance: the status is a bonus, load errors are detected either way.
+That, a page's resolve error (yt-dlp's words and the cookies it used,
+D11, see "yt-dlp") and a failed open become the coordinator's
+`playerError` in plain words (`playErrorText`, core
 `link_probe.dart`: 412/precondition/login/cookies/sign in → "This site
 needs cookies — Settings → Player → yt-dlp → Cookies", 403 → "Not allowed
 (403)", 404/410 → "Not found (404)", "Unsupported URL" → "Not a video
 page yt-dlp knows", network errors → "Couldn't reach the site", anything
-else as is). It rides in `report.error` (see "Player error" in the sync
+else as is; `withCookieNote` adds the cookies to the two sign-in texts).
+It rides in `report.error` (see "Player error" in the sync
 model) until the media opens (a new duration) or the server's `mediaId`
 moves on; the pill shows "Can't play this: ..." with Retry (Reload
 video). The cache is in RAM: `cache-on-disk=no` is pinned (media_kit
@@ -486,8 +492,8 @@ sets it on without a `cache-dir`, so mpv fell back to RAM anyway, warning
 ignores invalid values silently, so every pin is read back and a mismatch is
 logged and kept in `pinMismatches`. Measured against the `/m` endpoint
 (`readahead_e2e_test`): a paused player buffers ~147 s ahead (10 s before).
-media_kit has no public `setProperty`/`getProperty`; the code calls them
-through a guarded dynamic call on `player.platform`. Hardware decoding comes from Settings (auto, off, custom)
+media_kit has no public `setProperty`/`getProperty`; the host calls them
+through a guarded dynamic call on `player.platform` (`HostedPlayer`). Hardware decoding comes from Settings (auto, off, custom)
 and is passed to the `VideoController`; env `SYNC_RELAY_HWDEC` (e.g. `no`)
 overrides it. Auto is mpv `auto` on Linux and `auto-copy` on Windows
 (`autoHwdec`, also for a blank custom value): media_kit renders through
@@ -518,8 +524,9 @@ turns shaders off (saved) with a toast.
 
 Render mode: media_kit's Linux/Windows video output creates mpv's render
 context (OpenGL, else its software renderer) when the `VideoController` is
-created, and nothing in its API says which. The player therefore requests
-mpv logs at `v` while the controller is created: OpenGL init logs
+created, and nothing in its API says which. The host therefore requests
+mpv logs at `v` while the first output of an app start is created
+(`PlayerHost.video(probe: true)`): OpenGL init logs
 `GL_VERSION` under `libmpv_render`
 (`RenderMode.gpu`; "suspected software renderer" means llvmpipe,
 `softwareGl`); none within 1.5 s of the controller being ready means the
@@ -534,48 +541,121 @@ unset); from that `v` window only mpv's GL init lines (`GL_VENDOR`,
 frame, `hwdec-current` and the `hwdec` asked for (the first one per app
 start also `mpv-version` and `ffmpeg-version`). Why media_kit fell back to
 software it only prints on stderr (`media_kit: VideoOutput: ...`), which
-the app does not capture. Otherwise the session player logs at `warn`
-(`PlaybackController.logLevel`, switched with `mpv_request_log_messages`
-on media_kit's handle): media_kit drains mpv's log on the UI thread, one
-message at a time, so a chatty level, or ffmpeg logging every retry of a
-refused request, could starve the UI. Shader and yt-dlp hook errors are
-`error` lines and still arrive. The thumbnail players keep
-media_kit's default (`error`) and nothing listens to their log. The hardware path is
+the app does not capture. Otherwise a session player logs at `warn`
+(`sessionLogLevel`; the host switches levels with
+`mpv_request_log_messages` on media_kit's handle, the only raw mpv call
+in the app): media_kit drains mpv's log on the UI thread, one message at
+a time, so a chatty level, or ffmpeg logging every retry of a refused
+request, could starve the UI. Shader errors are `error` lines and still
+arrive. The host writes every session and preload player's warnings and
+errors to the app log (`mpv`, a few per kind at a time, `preload `
+before the prepared player's). Thumbnail players log nothing. The hardware path is
 fragile: media_kit borrows whatever EGL context GDK left current on the main
 thread (upstream media-kit#1404), so an X11 session or a Flutter/GDK change
 can silently fall back to software.
 
-Player lifecycle: a `Player` and its `VideoController` live for one
-media: created on join, disposed on leave, replaced by `recreate()` for
-"Reload video" (button or Ctrl+R; volume kept), and replaced on every
-media change, so nothing a player went through (a stuck video output, a
-frozen frame) carries over to the next media. `openUrl` promotes the
-preload when it holds the new media (see "Getting ready" under "Up
-next"); otherwise, when the player already held media, it creates a fresh
-one first, set up as on join (pins, hwdec, yt-dlp hook, shaders, log
-level, observers) and, with the view up and the render mode known, its
-`VideoController` created and ready before the view swaps to it (else the
-view creates it and the render-mode probe runs on it). Both go through
-one hand-over (`_adopt`): observers move over, the view swaps to the new
-output (`generation`), volume (and so mute) and shaders carry over, and
-the old player is paused and disposed once the view let go of its
-texture (as on leave). A fresh player waits for the previous old one to
-be gone, so at most one old player lingers. The first open after join or
-Reload video uses the player just created; joining back to the media the
-player held keeps it (`_openedFor`); a dropped connection never touches
-the player. Cost (`SwitchTrace`
-`player`, headless, so without the `VideoController`): 45 to 65 ms per
-swap for one app in the process (mpv created and initialised, then
-pinned), about 150 ms with three in one process
-(`queue_switch_e2e_test` with `WT_SWITCH_PRELOAD=0`), against a cold
-switch of about 1.5 s. `openUrl` opens with `play: false`; play/pause/seek/rate come only from
-`StateDiff` actions, the play gate (`localPlayAllowed`: self in-set and
-ready) or the user's own seeks (see Sync model). A server seek within 0.5 s of the current position is skipped. `leave()`
-stops the player (otherwise audio keeps playing). On media change
-(`mediaId` bump) the coordinator stops the previous media at once (no old
-picture or sound while the new one resolves, is fetched or opens), then opens the new URL
-(or promotes the preload holding it) and `StateDiff` seeks to 0, holds
-and resets rate.
+**Player host** (`PlayerHost`, `platform/ports/player_host.dart`; the
+desktop's `MediaKitHost`, one per app in `Ports.players`, tests make
+their own): creates players by role (`session`: the full cache, `warn`;
+`preload`: the prepared one, 48 MiB ahead, muted, `error`; `thumbnail`:
+no outputs, no cache, no log) with every pin set before the caller's
+first command (`pinMismatches` lists the read-backs that differ), gives
+a player its video output (`HostedVideo`, with the hwdec policy:
+`SYNC_RELAY_HWDEC`, else the setting, `auto-copy` on Windows), runs the
+render-mode probe and its diagnostics (`renderMode`, also after leaving),
+routes mpv's log, and owns the order players go in: `retire` (pause, let
+the view drop the texture: two frames and a route pop, then dispose; a
+new session player waits for the last one, so at most one old player
+lingers), `dispose` (one no view showed) and `disposeAll` (app close:
+every live player, each bounded). A `HostedPlayer` is one mpv: state and
+streams (position, duration, buffer, volume, completed, width, log),
+open, play/pause/stop, `seek` (the user's, see "User seeks") and
+`syncSeek`, rate, volume, properties, commands, `pin` (set and read
+back), its log level. Nothing else in the app imports media_kit except
+the `Video` widget glue (`session_player.dart`, `videoControllerOf`).
+
+**Media pipeline** (`MediaPipeline`, `session/media_pipeline.dart`, owned
+by the coordinator): the one way to open media, plan → resolve → open →
+ready.
+- Plan (`planMedia`, `session/media_plan.dart`, pure; `media_plan_test`
+  holds the table): from `state.media`, what this member serves (its
+  `MediaOrigin`: a file or a link it passes on, a Jellyfin item it put
+  up; set at its swap, claimed by the state that names it the relay's
+  source), its own capabilities and who is present, where this app reads
+  the media from (`SourcePlan`): your server's file (`/m`), a link
+  everyone opens (`DirectLink`; a page is resolved here), another
+  member's relay or the server's fetch (`/r`, `waiting` until it is fed:
+  `relayWaitsForSource`), its own file or link (it plays its own copy and
+  feeds the relay), a Jellyfin item (`JellyfinSource`: own account, the
+  server's login `/j`, the member passing it on `/r`), or `Unresolvable`
+  (a page on a device that cannot resolve: `LinkResolver.resolvesLinks`
+  false; who can is read from `members[].caps.resolve`; desktop always
+  can, so this is Android's plug-in point).
+- Resolve: a Jellyfin item through this app's account (or the plan
+  resolved ahead for Up next, `warmJellyfin`), else the server's login,
+  else the member passing it on, else blocked (`openJellyfin`); a web
+  page through the app's own yt-dlp (`LinkResolver.probe`: yt-dlp's
+  stream URLs, an EDL of video and audio, the CDN's headers with its
+  cookies, the subtitles; see "yt-dlp"), failing in plain words with the
+  cookies that were used (`ResolveFailure`, D11); a relay not fed yet is
+  opened once `relay.live`.
+- Open: a player per media through the host. The prepared player
+  (Up next's, see "Getting ready") is promoted when it holds the same URL
+  and headers; else, when the session player already held media, a fresh
+  one takes over (pins, volume, shaders; with the view up and the render
+  mode known, its video output ready before the view swaps to it, else
+  the view makes it and the probe runs on it); the same media again (a
+  reconnect, joining back) keeps the player. Every hand-over is
+  `PlaybackController.attach`: log, marks and track observers move over,
+  the view swaps to the new output (`generation`), volume and shaders
+  carry over, the old player is retired. The first open after join or
+  Reload video uses the player just created; a dropped connection never
+  touches the player. "Reload video" (button or Ctrl+R) retires the
+  player, starts a fresh one and opens the media again (a page resolved
+  afresh: its stream URLs may have expired). Cost (`SwitchTrace` `player`,
+  headless, without the video output): 45 to 65 ms per swap for one app
+  in the process, about 150 ms with three in one process
+  (`queue_switch_e2e_test` with `WT_SWITCH_PRELOAD=0`), against a cold
+  switch of about 1.6 s.
+- Ready: the coordinator reports at once after an open (`onOpened`) and
+  when the buffer reaches the gate's need while held, not on the next
+  tick.
+- Commands: play/pause/seek/rate come only from `StateDiff` actions, the
+  play gate (`localPlayAllowed`: self in-set and ready) or the user's
+  own seeks (see Sync model); a server seek within 0.5 s of the current
+  position is skipped. They go through `PlaybackController.apply`: while
+  a switch is under way (no player, or its media has no duration yet)
+  they wait, the latest seek, transport and rate apply once to the new
+  player when its media is in; mpv never gets a seek it cannot run
+  (media_kit logged "error running command seek" / `event:5` for each).
+  The volume is the controller's (`setVolume`), on every next player.
+  Opens are paused (`play: false`). On media change (`mediaId` bump) the
+  previous media stops at once (no old picture or sound while the new
+  one resolves, is fetched or opens) and `StateDiff` seeks to 0, holds
+  and resets rate. Leaving stops and releases the players.
+- Being a relay source (`RelayFeeder`, `session/relay_feeder.dart`): the
+  current media's channel and Up next's warm relay (see "Relay"), with
+  the step-1 re-dial (a source rides through this app's own drop). A
+  Jellyfin item this member put up is passed on only once someone
+  present needs it (`jellyfinRelayNeeded`: the server's login does not
+  cover it and a present member does not play that server with its own
+  account; one whose `caps` say Jellyfin but whose `jf` is not reported
+  yet is asked again with the next state), so a session where everyone
+  has an account opens no relay channel.
+- Viewer recovery (D6): while the relay this app reads has no source
+  (`sourceGone`, or not live with the source away), it plays what is
+  buffered. A seek past that (a server seek, a drift correction) is
+  tried once; more wait, the seek check does not re-apply, and the
+  report says nothing is buffered once this player cannot be where the
+  server is (`starved`), so the server holds everyone with the reason
+  `source` ("Waiting for Bob"; see "App events and platform ports").
+  When the source is back, one seek to the server position resumes the
+  player, and a player that never loaded meanwhile (it opened while the
+  source was gone and its first bytes never came) opens again in a fresh
+  player. Measured (`relay_e2e`, a source just above the bitrate that
+  drops, a seek past what the server got, a member joining meanwhile):
+  at most one seek per viewer while it is gone, nobody's player broken,
+  all play from the seek once it is back.
 
 Chapters, segments, tracks (`PlaybackController` signals, values from
 `playback/media_marks.dart`, no widgets; any controls UI reads them):
@@ -716,7 +796,7 @@ and URL, played together by viewers as an mpv EDL
 (it writes it to a playlist and `loadlist`s it) and mpv keeps both
 streams in sync across seeks; one URL keeps the app's "one media URL"
 path (sync, swap, reopen) as is. The source member plays the page
-itself (yt-dlp hook) like any other link.
+itself (its own resolve, see "yt-dlp") like any other link.
 
 A page with only segmented streams (HLS `m3u8_native`, DASH
 `http_dash_segments`, e.g. X's HLS, generic `.m3u8`/`.mpd`) is relayed as
@@ -757,11 +837,11 @@ How bytes move:
   6.6 s unchunked) and even beats mpv reading YouTube directly, since the
   buffer reads ahead at full speed.
 - The server keeps one buffer per track of a relayed media (one for a
-  file), a `RelayBuffer` for bytes: 1 MiB slices in
-  memory, filled by one sequential pull at a time. Kept: the first and
+  file), a `RelayBuffer` for bytes: 256 KiB slices in
+  memory (`relaySliceBytes`), filled by one sequential pull at a time. Kept: the first and
   last 2 MiB (container indexes; mpv reads both on open and on seeks),
   64 MiB behind the slowest viewer and 256 MiB past the furthest, the
-  same as each viewer's mpv buffer (`PlaybackController`), so a skip
+  same as each viewer's mpv buffer (the player host's pins), so a skip
   inside the viewers' buffer window is served from memory. Evicted by
   distance from the viewers, never LRU. With 2+ viewers the source sends
   each byte about once. Several tracks split the ahead and behind budgets
@@ -789,12 +869,21 @@ How bytes move:
   opened in 0.02 s from the buffer.
 - Filling a byte buffer: a viewer blocked on a slice first (oldest wait
   first, handing the source over at slice boundaries), then the pinned
-  slices, then read-ahead from the slowest viewer. Nothing is fetched while nobody
-  watches through the relay (a Jellyfin source with only account holders
-  uploads nothing).
+  slices, then read-ahead from the slowest viewer. A viewer reads the
+  slice being filled as its bytes arrive, not once it is whole (mpv's
+  demuxer, blocked in a read, takes a seek only once that read returns).
+  Nothing is fetched while nobody watches through the relay (a Jellyfin
+  source with only account holders uploads nothing).
 - mpv leaves superseded requests open but unread after a seek: only a
   viewer's newest request moves its position or asks the source for
-  anything; older ones still get bytes that are already buffered.
+  anything; older ones still get bytes that are already buffered, and a
+  request a newer one superseded stops holding the pull at once, so a
+  seek's pull starts without waiting for the old slice to finish.
+  Measured (`relay_e2e` "a seek past what a slow source has sent", a
+  source at about 3x a 3 Mbit/s mp4, the gate's 4 s of buffer): a seek
+  into what the source has not sent plays there after 2.8 to 2.9 s (4.0
+  to 4.3 s with 1 MiB slices served whole and the superseded request
+  holding the pull).
 - Flow control on the source (`RelayWindow`): one in-flight budget per
   connection, 2 x delivery rate x min RTT (rate max-filtered over 2 s),
   clamped 256 KiB to 8 MiB; the server acks bytes as they arrive. A
@@ -834,20 +923,21 @@ How bytes move:
   media_kit's mpv gives up on a silent request after 5 s
   (`network-timeout`) with "could not be opened". So viewers open a
   member relay's `/r/` URL only once `relay.live` is set, as for a
-  server fetch (`_waitForSource`; "waiting for <name> to pass the video
-  on…" meanwhile), unless the source already left (then they open what
-  the server has); Up next preloads wait the same way. The putter starts
+  server fetch (`relayWaitsForSource` in the media plan; "waiting for
+  <name> to pass the video on…" meanwhile), unless the source already
+  left (then they open what the server has); Up next preloads wait the
+  same way. The putter starts
   its source before opening its own player, and the source reads its
   tracks' sizes at once.
 - Source away (D6): viewers keep playing from the buffer; a request
   waits up to 60 s for missing bytes. The source member going `gone`
   does not end the relay: it lives through the source's grace
   (`media.relay.sourceGone`, `ServerHub.refreshRelaySource`). The source
-  (`RelaySource`, kept by the coordinator through the app's own drop)
-  reconnects its channel with backoff (its token lasts through the
-  grace; a half-open channel is caught by its 5 s WebSocket ping) and
-  sends its `info` again, the same on every dial (the coordinator passes
-  the media's `name` and `duration`): the same as its first (sizes, piece
+  (`RelaySource`, kept by the media pipeline's `RelayFeeder` through the
+  app's own drop) reconnects its channel with backoff (its token lasts
+  through the grace; a half-open channel is caught by its 5 s WebSocket
+  ping) and sends its `info` again, the same on every dial (the feeder
+  passes the media's `name` and `duration`): the same as its first (sizes, piece
   shapes, kinds, and name and duration when given) carries on, the
   buffer filler pulling what is missing; another one is closed with
   4002 and ends the relay (`ServerHub.relayOtherMedia`); a second channel
@@ -860,6 +950,10 @@ How bytes move:
   a viewer opening then opens the buffer instead of waiting) and "<name>
   left — playing what the server has" once it left the server; the source
   gone for 5 s (`sourceDropNotice`) or leaving is also a toast, once each.
+  A viewer's buffer running dry holds everyone (`state.hold.reason`
+  `source`: "Waiting for <name>"); the viewer's side, never seeking past
+  what it has and resuming when the source is back, is "Viewer recovery"
+  under "Media pipeline".
 - Stats (`relay_stats.dart`, `ServerHub.sampleRates` on the 1 s
   heartbeat; wire in [PROTOCOL.md](PROTOCOL.md)): the source's rate is
   its bytes over the time a pull is in flight (`FeedClock`, one per media
@@ -942,18 +1036,32 @@ all three link modes. Nothing is bundled or installed by hand.
   → Player → yt-dlp → Cookies (a browser and profile, or a file picked or
   dropped, kept whole: every site in it; "Remove cookies"; the shell's
   own drop target is off on Settings so only this box takes the file); your server shares the folder,
-  so it uses them too. mpv's hook gets the same as `ytdl-raw-options`
-  (`cookies=%N%<path>` / `cookies-from-browser=%N%<spec>`, length-quoted),
-  re-set before each external link when it changed, after
-  `sub-langs=all,-danmaku` (Bilibili's danmaku XML is served raw-deflate:
-  ffmpeg warns on every read and the video waits on the track). The dedicated
+  so it uses them too. A player gets them through the app's resolve
+  (the format's cookies as its Cookie header), never on its own. The dedicated
   server: `--yt-dlp-cookies <file>` / `ytDlpCookies` converted into its
   folder at start; without it the copy and browser setting are removed.
   Values are never logged and never leave the machine.
+  A resolve that fails in a way that may be about signing in (cookies,
+  log in, "No video formats found") says which cookies it used (D11,
+  `YtDlp.cookieNote`, `YtDlpException.cookies`, `LinkProbe.cookies`,
+  `withCookieNote`): none; the file and how many of its cookies are for
+  the site (`cookieSite`); a browser and how many cookies for the site
+  yt-dlp reads from it (one run without a URL, `--cookies-from-browser
+  <spec> --cookies <private file>`, which writes the browser's jar to a
+  0600 file in the yt-dlp folder, counted and deleted at once), or that
+  it could not read them. "No video found: it may need signing in (used
+  Firefox's cookies, which have none for bilibili.com: sign in to
+  bilibili.com there)".
 - **Resolve** (`YtDlp.resolve`, `resolveArgs`): `yt-dlp -J --no-playlist --no-warnings
-  --ignore-config` plus the cookies, 25 s timeout: title, uploader, duration, thumbnail,
-  live or not, and what a relay reads (`pickTracks`), each format with
-  its URL, `http_headers` and `http_chunk_size`. Only plain http(s)
+  --ignore-config -f bv*[height<=1080]+ba/b --write-subs --sub-langs
+  all,-danmaku` plus the cookies, 25 s timeout: title, uploader, duration,
+  thumbnail, live or not; what a player opens (`YtDlpPlay`: yt-dlp's
+  `requested_formats`, else the top-level format; http(s), HLS, or a DASH
+  manifest; one URL, or an mpv EDL of the video and the audio; the first
+  format's `http_headers` plus its `cookies` as a Cookie header; the
+  requested subtitles but Bilibili's danmaku, an XML comment feed); and
+  what a relay reads (`pickTracks`), each format with its URL,
+  `http_headers` and `http_chunk_size`. For a relay only plain http(s)
   formats without DRM count:
   - the best single file (`pickSingleFile`: video and audio not `none`, a
     video container, tallest up to 1080p, else the shortest above), unless
@@ -986,18 +1094,19 @@ all three link modes. Nothing is bundled or installed by hand.
   under the button) and offers "Put it up anyway" (`LinkMedia.anyway`),
   for when the server or a friend with cookies may still open it;
   `swapLink` refuses it the same way for any other caller.
-- **Everyone fetches it**: the swap sends the page URL. Before opening an
-  external link every app points mpv's hook at its managed copy
-  (`script-opts=ytdl_hook-ytdl_path=...`, `ytdl-format=bv*[height<=1080]+ba/b`,
-  once per player), waiting for the download unless the URL names a media
-  file. A hook error is a player error (see the mpv settings under "Media"). The hook (mpv
-  0.41) gives mpv the first requested format's `http_headers` (User-Agent
-  as `user-agent`; Referer, Cookie, X-Forwarded-For as file-local
-  `http-header-fields`, which win over the empty list media_kit sets on
-  load) and its `cookies` (`stream-lavf-o`), for every track of its EDL:
-  Bilibili's CDN answers 403 without the Referer. The app never opens a
-  resolved format URL in mpv itself (the putter of "Through me" plays the
-  page through the hook too); relays read them with yt-dlp's headers.
+- **Everyone fetches it**: the swap sends the page URL. Every app
+  resolves it with its own yt-dlp (the media pipeline's resolve step,
+  `LinkResolver.probe`, waiting for the download on first use) and opens
+  what yt-dlp picked (`YtDlpPlay.mpvUrl`) with its headers as mpv's
+  `http-header-fields` (media_kit's `Media.httpHeaders`), for every
+  track of the EDL: Bilibili's CDN answers 403 without the Referer. Its
+  subtitles are added once the media is in (`sub-add <url> auto`). mpv's
+  own Lua yt-dlp hook is off (`ytdl=no`): one resolve path for every mode,
+  cookies and headers always the app's, and a libmpv without Lua plays
+  links the same. A resolve that fails is a player error in plain words,
+  with the cookies it used. Stream URLs are bound to the resolving
+  machine, so each app resolves its own; a page is resolved again at
+  Reload video and for Up next's 30-minute refresh (they expire).
 - **Through me**: the putter's probe must give tracks, and a pieces
   track's playlist must be readable, else the swap is refused ("Live
   streams can't be passed on", DRM, or nothing a relay can read) with a
@@ -1174,8 +1283,9 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   of a link this app puts up (its swap reads it). Per
   kind: a Jellyfin item is resolved with this app's account
   (`resolveJellyfinRef`: PlaybackInfo and the item) into
-  `SessionCoordinator.warmJellyfin`, which `_playJellyfin` takes instead
-  of resolving when the same ref goes up within 35 minutes and the
+  `SessionCoordinator.warmJellyfin`, which the media pipeline's resolve
+  (`openJellyfin`) takes instead of asking again when the same ref goes
+  up within 35 minutes and the
   account is unchanged; without an account it is the server's `/j` URL
   when `state.relayNext` says the server's login passes it on (see
   "Jellyfin relay"). A link everyone opens is that link; the app that
@@ -1184,35 +1294,36 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   read it from there). A link passed on "through me" and a file on
   their adder's app (the link, the path; not the host's own file, which
   plays from `/m`), which also feeds the server's warm relay of it
-  (`QueueController._feedWarm`, `SessionCoordinator.feedWarm`; a
+  (`QueueController._feedWarm`, `RelayFeeder.feedWarm`; a
   Jellyfin item's from the member who puts it up, with its resolved
   stream, when the server asks for one); everyone else, and everyone
   for a server-fetched link, preloads that warm relay's URL
-  (`SessionCoordinator.warmRelayUrl`) once `queue[0].media.relay.live`
+  (`MediaPipeline.warmRelayUrl`) once `queue[0].media.relay.live`
   says bytes can flow (see "Relay"). At the swap the adder's app skips
   re-reading the link's sizes (its warm source has them) and that
   source carries on as the media's. It
   is resolved as soon as it is first there, again every 30 minutes, and
   dropped when it stops being first.
-  **Preload**: once resolved, the stream is opened in a second, hidden
-  mpv player (`PlaybackController.preload`, through
-  `SessionCoordinator.preloadMedia`): paused at the start, muted, with
-  its own video output when the session view is up (media_kit starts a
-  player with `vid=no`; the output decodes the first frame), the same
-  pins, hwdec and yt-dlp hook as the session player but a 48 MiB forward
-  and 8 MiB back cache (`preloadBytes`), mpv log at `error`. One at a
-  time; it waits until the media playing has started here
-  (`SessionCoordinator.settledMediaId`: opened, failed or nothing to
+  **Preload**: once resolved, the stream is opened early by the media
+  pipeline (`MediaPipeline.prepare`, a page through the same resolve as
+  any open) in a second, hidden player (the host's `preload` role):
+  paused at the start, muted, with its own video output when the
+  session view is up (media_kit starts a player with `vid=no`; the
+  output decodes the first frame), the same pins and hwdec as the
+  session player but a 48 MiB forward and 8 MiB back cache
+  (`preloadAheadBytes`), mpv log at `error`. One at a time; it waits
+  until the media playing has started here
+  (`MediaPipeline.settledMediaId`: opened, failed or nothing to
   open), so it never competes with that open and a preload a swap is
   about to take is never replaced first; a removed, reordered or replaced
   first item swaps or drops it then, a manual swap to something else
   keeps it (still next). A link is opened again at the 30-minute refresh
   (stream URLs expire); a failed preload is not retried until then and
-  changes nothing (the usual open follows). When the coordinator opens
-  the same URL and headers (`openUrl`), the preload is promoted instead
-  of a fresh player: it becomes the session player through the same
-  hand-over (see "Player lifecycle" under "Media"), unmuted and with the
-  full cache pins. Its buffer comes along,
+  changes nothing (the usual open follows). When the pipeline opens the
+  same URL and headers, the preload is promoted instead of a fresh
+  player: it becomes the session player through the same hand-over (see
+  "Media pipeline" under "Media"), unmuted and with the full cache pins
+  (`PlayerHost.promote`), its subtitles added. Its buffer comes along,
   so the report sent right after the open already passes the gate: the
   start no longer waits for anyone's open. A promoted player is no
   longer the first mpv of the process, so ffmpeg's HTTP status reaches
@@ -1220,15 +1331,15 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   errors themselves are still detected; see "Media"). Off with env
   `SYNC_RELAY_PRELOAD=0`. Measured (`queue_switch_e2e_test`, a fake
   Jellyfin and link host answering after 120 ms at 24 Mbit/s, two
-  account holders and a `/j` guest): ⏭ to the server playing 59 to
-  86 ms for the next episode and 35 ms for a direct link, against about
-  1.5 s cold; at 300 ms and 12 Mbit/s 52 and 103 ms against about 2.9 s.
-  Relayed, from the warm relay (same setup, loopback server): a link
-  passed on 21 to 22 ms, a server-fetched link 35 to 37 ms, against
+  account holders and a `/j` guest): ⏭ to the server playing 74 to
+  87 ms for the next episode and 35 ms for a direct link, against about
+  1.6 to 1.8 s cold; at 300 ms and 12 Mbit/s 52 and 103 ms against about
+  2.9 s. Relayed, from the warm relay (same setup, loopback server): a
+  link passed on 36 to 38 ms, a server-fetched link 46 to 53 ms, against
   about 1.6 s cold.
   `SwitchTrace` (env `SYNC_RELAY_TRACE_SWITCH=1` prints it) times each
   phase of a media change: state, resolved, open, player (a fresh
-  player is up; see "Player lifecycle" under "Media"), opened or
+  player is up; see "Media pipeline" under "Media"), opened or
   preloaded, buffered, playing.
   The row of the item shows a dot on its picture's corner (a tooltip
   says which): hollow waiting, pulsing getting ready (resolving, then
@@ -1369,8 +1480,10 @@ Jellyfin item with its own account, so the relay is not its concern),
 that moves by the minute. `Status.line` is the player's pill (most
 pressing first: reconnecting with Cancel, unstable, refused or replaced
 with Retry, connecting, your player's fault or error with Reload, the
-server getting the video, the relay's source dropped / left / not
-passing it on yet, finished, someone loading, someone who cannot play
+server getting the video, everyone held for the relay's source
+("Waiting for <name>": `state.hold.reason` `source`, a viewer's buffer
+ran dry while it is gone; for everyone, own-account viewers too), the
+relay's source dropped / left / not passing it on yet, finished, someone loading, someone who cannot play
 it, you not ready, who everyone waits for; nothing while it plays and
 everyone is fine, and only connection lines while you sit out), each
 with a `StatusLevel` (ok and info never colour anything, warn amber,
@@ -1466,8 +1579,12 @@ handed on from there (the coordinator gets its `Notifier`, `Connection` and
 - `FolderAccess` (`DesktopFolders`): folder and file dialogs
   (file_picker), the Files scan, folder exists, file stat, showing a
   folder in the file manager. Paths for now.
-- `LinkResolver` (`AppYtDlp`): the app's yt-dlp, link probes, mpv's raw
-  options, warm-up.
+- `LinkResolver` (`AppYtDlp`): the app's yt-dlp, link probes (what a
+  page plays, see "yt-dlp"), whether this device resolves pages
+  (`resolvesLinks`, the media plan's capability), warm-up.
+- `PlayerHost` (`MediaKitHost`): the media players ("Player host" under
+  "Media"); Files' thumbnails make theirs with it too
+  (`thumbnailPlayers`, set in `main`).
 - `SystemNotifications` (`DesktopNotifications`,
   `platform/desktop/desktop_notifications.dart`): `show(title, body, tag,
   payload)` and `onClick(payload)`, through flutter_local_notifications'
@@ -1481,8 +1598,7 @@ handed on from there (the coordinator gets its `Notifier`, `Connection` and
   (`AppDirs`, "Desktop UI"), and the copy of the data from before the
   rename; resolved in `main` before the composition root exists, so not a
   `Ports` field.
-Still direct: the player (`PlaybackController`, media_kit, and its
-`AppYtDlp.instance.mpvRawOptions`), the updater's restart
+Still direct: the updater's restart
 (`Process.start`), the session's own file reads for what it plays or
 relays (`QueueController`, thumbnails, cookies import), app-private
 caches.
@@ -2016,8 +2132,9 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   `shown`) or the mouse is on it (which holds the controls up too), and
   Skip OP / Skip 1:30 also for 5 s when an offer of a new kind appears
   (Skip ED and Next episode never without the controls).
-- Volume: mpv's `volume-max` is pinned to `PlaybackController.maxVolume`
-  (150) per player; `VolumeBar` runs 0..150 with a tick at 100 and the
+- Volume: mpv's `volume-max` is pinned to 150 per player by the host
+  (`PlaybackController.maxVolume`); the volume is the controller's and
+  goes to every next player; `VolumeBar` runs 0..150 with a tick at 100 and the
   part above in amber; the wheel and ↑ / ↓ step 5 % (`volumeStep`),
   clamped. The wheel works anywhere on the full player (`VolumeWheel`
   around the player's stack): `WheelSteps` makes a mouse notch one step
@@ -2040,10 +2157,11 @@ Alt+F4, and Update and restart): the window position is saved and the
 window hides at once. Then every mpv player goes, before the engine does
 (a live one calls its wakeup callback into a dead isolate): the session
 player, the preload and the player still retiring
-(`PlaybackController.disposeAll`, 1.5 s each, via
+(`MediaPipeline.disposeAll` → `PlayerHost.disposeAll`, 1.5 s each, via
 `SessionCoordinator.releasePlayers`, which keeps the position for the
 Jellyfin stop report), the Files thumbnail jobs (`cancelAllThumbnails`)
-and the sound engine (500 ms), side by side; on Windows 300 ms more,
+and the sound engine (500 ms), side by side, then anything the host
+still holds (the host owns the disposal order); on Windows 300 ms more,
 since media_kit_video frees a video output on a thread of its own after
 dispose returns, and an output still up when the engine stops blocks the
 plugin's teardown (`~VideoOutput` waits on a texture callback that never

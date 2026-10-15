@@ -10,8 +10,10 @@ abstract interface class LinkResolver {
   /// Gets it ready in the background (download on first run, updates).
   void warmUp();
 
-  /// mpv's `ytdl-raw-options` (sub languages, cookies).
-  Future<String> mpvRawOptions();
+  /// This device opens web pages itself (the media plan's `resolve`
+  /// capability). Desktop: always (yt-dlp is downloaded when first
+  /// needed); a device without it gets pages passed on by someone else.
+  bool get resolvesLinks;
 
   /// What [url] is, remembered for a while ([keep]); [fresh] asks again.
   Future<LinkProbe> probe(String url, {Duration keep, bool fresh});

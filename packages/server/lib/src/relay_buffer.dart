@@ -112,14 +112,41 @@ class ChannelRelayFeed extends RelayFeed {
 class _Pull {
   final int id, start, end;
   int pos;
-  final buf = BytesBuilder(copy: false);
+  // The slice being filled: its chunks so far (readers take them as they
+  // come, see [RelayBuffer.read]).
+  final parts = <Uint8List>[];
+  int filled = 0;
   _Pull(this.id, this.start, this.end) : pos = start;
+
+  /// Bytes of the slice being filled from [from] (offset in the slice).
+  Uint8List? partFrom(int from) {
+    if (from >= filled) return null;
+    final out = BytesBuilder(copy: false);
+    var at = 0;
+    for (final p in parts) {
+      final end = at + p.length;
+      if (end > from) out.add(at >= from ? p : Uint8List.sublistView(p, from - at));
+      at = end;
+    }
+    return out.takeBytes();
+  }
+
+  Uint8List takeSlice() {
+    final out = BytesBuilder(copy: false);
+    for (final p in parts) {
+      out.add(p);
+    }
+    parts.clear();
+    filled = 0;
+    return out.takeBytes();
+  }
 }
 
 class _Viewer {
   int pos = 0;
   int open = 0; // requests in flight
   int newest = 0; // sequence of its newest request
+  (int slice, int req)? blocking; // where its newest request waits
   DateTime lastActive = DateTime.now();
 }
 
@@ -134,9 +161,11 @@ class _Viewer {
 ///   slowest and [ahead] past the furthest viewer. Evicted by distance from
 ///   the viewers, never LRU.
 /// - Filled only while someone watches: a viewer blocked on a slice comes
-///   first (oldest wait first); then read-ahead.
+///   first (oldest wait first); then read-ahead. A blocked viewer reads the
+///   slice being filled as its bytes arrive, not once it is whole.
 /// - Only a viewer's newest request moves its position or asks the feed
-///   for anything; older ones still get bytes once they are buffered.
+///   for anything; older ones still get bytes once they are buffered, and
+///   stop holding the feed once superseded (a seek elsewhere).
 /// Everything lives in memory: dropping the buffer is the cleanup.
 class RelayBuffer implements TrackBuffer {
   /// Set by the relay when a media's tracks share the budget.
@@ -166,6 +195,8 @@ class RelayBuffer implements TrackBuffer {
   final _slices = <int, Uint8List>{};
   final _waiters = <int, List<Completer<void>>>{};
   final _blocked = <int, int>{}; // slice -> wait start (us)
+  // The driving requests waiting on each blocked slice.
+  final _blockedBy = <int, Set<int>>{};
   final _viewers = <String, _Viewer>{};
   @override
   FeedClock clock = FeedClock();
@@ -256,18 +287,19 @@ class RelayBuffer implements TrackBuffer {
         _endPull(pl);
         return;
       }
-      pl.buf.add(Uint8List.sublistView(data, off, off + take));
+      pl.parts.add(Uint8List.sublistView(data, off, off + take));
+      pl.filled += take;
       off += take;
       pl.pos += take;
-      if (pl.pos == _sliceEnd(s) + 1) {
-        _slices[s] = pl.buf.takeBytes();
-        for (final c in _waiters.remove(s) ?? const <Completer<void>>[]) {
-          c.complete();
-        }
-        if (_shouldStop(pl, s)) {
-          _endPull(pl);
-          return;
-        }
+      final done = pl.pos == _sliceEnd(s) + 1;
+      if (done) _slices[s] = pl.takeSlice();
+      // Whole, or more of it: whoever waits on it reads on.
+      for (final c in _waiters.remove(s) ?? const <Completer<void>>[]) {
+        c.complete();
+      }
+      if (done && _shouldStop(pl, s)) {
+        _endPull(pl);
+        return;
       }
     }
   }
@@ -405,25 +437,54 @@ class RelayBuffer implements TrackBuffer {
     await _kick.future.timeout(const Duration(seconds: 5), onTimeout: () {});
   }
 
-  Future<bool> _waitSlice(int s, bool drives) async {
+  /// The bytes of slice [s] from [from] (offset in the slice) as soon as
+  /// there are any: the whole slice's rest, or what the pull filling it has
+  /// so far. Null when they did not come within [waitLimit]. [drives]: the
+  /// request is its viewer's newest ([driving] says while it still is), so
+  /// it may move the feed.
+  Future<Uint8List?> _waitBytes(_Viewer v, int s, int from, int req, bool Function() driving) async {
     final deadline = DateTime.now().add(waitLimit);
-    while (!_slices.containsKey(s)) {
-      if (_disposed || DateTime.now().isAfter(deadline)) return false;
-      if (drives) {
-        _blocked.putIfAbsent(s, () => DateTime.now().microsecondsSinceEpoch);
-        // A pull nobody waits on gives way at once; one serving another
-        // blocked viewer hands over at its next slice boundary.
+    try {
+      while (true) {
+        final whole = _slices[s];
+        if (whole != null) return from == 0 ? whole : Uint8List.sublistView(whole, from);
         final pl = _pull;
-        final at = pl == null ? -1 : pl.pos ~/ slice;
-        if (pl != null && at != s && !_blocked.containsKey(at)) _endPull(pl);
-        _wake();
+        if (pl != null && pl.pos ~/ slice == s && pl.start <= s * slice) {
+          final part = pl.partFrom(from);
+          if (part != null) return part;
+        }
+        if (_disposed || DateTime.now().isAfter(deadline)) return null;
+        if (driving()) {
+          _blocked.putIfAbsent(s, () => DateTime.now().microsecondsSinceEpoch);
+          _blockedBy.putIfAbsent(s, () => {}).add(req);
+          v.blocking = (s, req);
+          // A pull nobody waits on gives way at once; one serving another
+          // blocked viewer hands over at its next slice boundary.
+          final at = pl == null ? -1 : pl.pos ~/ slice;
+          if (pl != null && at != s && !_blocked.containsKey(at)) _endPull(pl);
+          _wake();
+        } else {
+          _unblock(s, req);
+        }
+        final c = Completer<void>();
+        _waiters.putIfAbsent(s, () => []).add(c);
+        await c.future.timeout(const Duration(seconds: 2), onTimeout: () {});
       }
-      final c = Completer<void>();
-      _waiters.putIfAbsent(s, () => []).add(c);
-      await c.future.timeout(const Duration(seconds: 2), onTimeout: () {});
+    } finally {
+      _unblock(s, req);
     }
-    _blocked.remove(s);
-    return true;
+  }
+
+  // [req] no longer waits on slice [s]; the slice stops counting as
+  // blocked once nobody driving does.
+  void _unblock(int s, int req) {
+    final by = _blockedBy[s];
+    if (by == null || !by.remove(req)) return;
+    if (by.isEmpty) {
+      _blockedBy.remove(s);
+      _blocked.remove(s);
+      _wake();
+    }
   }
 
   // ---------------------------------------------------------------- viewers
@@ -444,6 +505,10 @@ class RelayBuffer implements TrackBuffer {
     final tail = start >= size - pin;
     final me = ++_reqSeq;
     if (!tail) {
+      // A seek: the request it supersedes stops holding the feed at once.
+      final was = v.blocking;
+      if (was != null) _unblock(was.$1, was.$2);
+      v.blocking = null;
       v.newest = me;
       v.pos = start;
     }
@@ -454,16 +519,14 @@ class RelayBuffer implements TrackBuffer {
       var off = start;
       while (off <= end) {
         final s = off ~/ slice;
-        if (!await _waitSlice(s, tail || v.newest == me)) {
-          throw StateError('relay: bytes at $off did not arrive');
-        }
-        final data = _slices[s];
-        if (data == null) continue; // evicted between wake and read
-        final from = off - s * slice, to = min(data.length, end - s * slice + 1);
-        yield Uint8List.sublistView(data, from, to);
-        bytesToViewers += to - from;
-        onSent?.call(to - from);
-        off += to - from;
+        final data = await _waitBytes(v, s, off - s * slice, me, () => tail || v.newest == me);
+        if (data == null) throw StateError('relay: bytes at $off did not arrive');
+        final n = min(data.length, end - off + 1);
+        if (n <= 0) continue;
+        yield n == data.length ? data : Uint8List.sublistView(data, 0, n);
+        bytesToViewers += n;
+        onSent?.call(n);
+        off += n;
         v.lastActive = DateTime.now();
         if (!tail && v.newest == me) v.pos = off;
         _wake();

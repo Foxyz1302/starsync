@@ -550,7 +550,7 @@ class QueueController {
       // The server's warm relay of the item, once bytes can flow: what
       // everyone without their own copy preloads.
       final relay = head.media.relay;
-      final warmUrl = relay != null && relay.live ? coord.warmRelayUrl(head, relay) : null;
+      final warmUrl = relay != null && relay.live ? coord.media.warmRelayUrl(head, relay) : null;
       switch (head.how) {
         case QueueHow.jellyfin:
           final ref = head.media.jellyfin;
@@ -589,7 +589,7 @@ class QueueController {
   /// puts it up (`AppYtDlp.probe`, kept while it stays first), a Jellyfin
   /// item resolved with this app's account
   /// ([SessionCoordinator.warmJellyfin]), and then opened in the hidden
-  /// preload player ([SessionCoordinator.preloadMedia]) once the media
+  /// preload player ([MediaPipeline.prepare]) once the media
   /// playing has started. Done as soon as it is first, again before that
   /// runs out, dropped when it is no longer first.
   void _warm(StateBroadcast? r) {
@@ -617,7 +617,7 @@ class QueueController {
   /// Feeds the server's warm relay of Up next's first item from here when
   /// it names this member as its source (a link passed on, a file), or a
   /// Jellyfin item this app puts up with its own account when the server
-  /// asks for a source; see [SessionCoordinator.feedWarm]. The server
+  /// asks for a source; see [RelayFeeder.feedWarm]. The server
   /// drops the relay (and with it the source) once the item is no longer
   /// first.
   void _feedWarm(StateBroadcast? r) {
@@ -633,7 +633,7 @@ class QueueController {
         final pick = _local[head.key]?.pick;
         if (pick is FileMedia) {
           _fedWarm = key;
-          coord.feedWarm(head.id, RelayMedia.single(FileRelayBytes(File(pick.path))));
+          coord.media.feeder.feedWarm(head.id, RelayMedia.single(FileRelayBytes(File(pick.path))));
         } else if (pick is LinkMedia) {
           _fedWarm = key;
           unawaited(() async {
@@ -642,7 +642,7 @@ class QueueController {
               final probe = await coord.ytDlp.probe(pick.url, keep: _warmKeep).timeout(const Duration(seconds: 60));
               final y = await coord.ytDlp.ytDlp;
               if (_fedWarm != key) return;
-              coord.feedWarm(head.id, LinkRelayMedia(Uri.parse(pick.url), ytDlp: y, probe: probe));
+              coord.media.feeder.feedWarm(head.id, LinkRelayMedia(Uri.parse(pick.url), ytDlp: y, probe: probe));
             } catch (e) {
               debugPrint('queue: feeding ${head.id}: $e');
             }
@@ -656,7 +656,7 @@ class QueueController {
         final w = coord.warmJellyfin;
         if (w == null || !sameJellyfinItem(w.ref, ref)) return;
         _fedWarm = key;
-        coord.feedWarm(
+        coord.media.feeder.feedWarm(
             head.id, RelayMedia.single(HttpRelayBytes(Uri.parse(w.plan.url), headers: w.plan.headers)));
       case QueueHow.direct:
       case QueueHow.server:
@@ -710,7 +710,7 @@ class QueueController {
       // A refresh opens a link again (a page's stream URLs expire); the
       // same Jellyfin stream stays as it is.
       _preloadFresh = fresh && ok && t.ref == null && open != null;
-      final waits = ok && open != null && coord.playback.preloadEnabled;
+      final waits = ok && open != null && coord.media.preloadEnabled;
       warm.value = (id: t.id, state: !ok ? WarmState.failed : (waits ? WarmState.warming : WarmState.ready));
       _syncPreload(coord.serverState.peek());
       _warmTimer = Timer(ok ? _warmRefresh : _warmRetry, () => _resolveWarm(t, fresh: true));
@@ -730,25 +730,25 @@ class QueueController {
     final out = coord.selfAway.peek();
     if (!out && r.media != null && coord.settledMediaId.peek() != r.mediaId) return;
     final want = out ? null : _preloadWant;
-    final playback = coord.playback;
+    final media = coord.media;
     if (want == null) {
       _preloadKey = '';
       _preloadGen++;
-      if (playback.preloadUrl != null) unawaited(playback.dropPreload());
+      if (media.preloadUrl != null) unawaited(media.dropPrepared());
       return;
     }
-    if (!playback.preloadEnabled) return;
+    if (!media.preloadEnabled) return;
     final key = '${want.url}|${want.headers}';
     final fresh = _preloadFresh;
     // Asked for already: in flight, there, or failed (tried again with the
     // next refresh). One that went away (Reload video) is asked again.
-    if (!fresh && key == _preloadKey && (_preloadBusy || !_preloadOk || playback.preloadUrl == want.url)) return;
+    if (!fresh && key == _preloadKey && (_preloadBusy || !_preloadOk || media.preloadUrl == want.url)) return;
     _preloadFresh = false;
     _preloadKey = key;
     _preloadBusy = true;
     final gen = ++_preloadGen;
     final id = warm.peek()?.id;
-    unawaited(coord.preloadMedia(want.url, headers: want.headers, fresh: fresh).then((ok) {
+    unawaited(coord.media.prepare(want.url, headers: want.headers, fresh: fresh).then((ok) {
       if (gen != _preloadGen) return;
       _preloadBusy = false;
       _preloadOk = ok;

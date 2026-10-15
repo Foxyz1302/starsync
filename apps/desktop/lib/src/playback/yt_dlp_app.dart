@@ -6,15 +6,6 @@ import 'package:sync_relay_core/core.dart';
 
 import '../platform/ports/link_resolver.dart';
 
-/// mpv's `ytdl-format` for links every player opens itself.
-const ytdlFormat = 'bv*[height<=1080]+ba/b';
-
-/// yt-dlp's `--sub-langs` for mpv's hook (its default is `all`), without
-/// Bilibili's danmaku: an XML comment feed served raw-deflate, which
-/// ffmpeg fails to inflate on every read (a warning each time) while the
-/// video waits on it.
-const ytdlSubLangs = 'all,-danmaku';
-
 /// The app's yt-dlp (see [YtDlp]): in the app-support folder, shared with
 /// the hosted server. [probe] remembers what pasted links are for a while,
 /// so the Link preview and the swap ask once.
@@ -36,20 +27,10 @@ class AppYtDlp implements LinkResolver {
   /// Gets yt-dlp ready in the background (download on first run, a daily
   /// update check afterwards).
   @override
-  void warmUp() => unawaited(ytDlp.then((y) => y.ensure()).catchError((_) => null));
+  bool get resolvesLinks => true;
 
-  /// mpv's `ytdl-raw-options`: [ytdlSubLangs] and the cookies in the
-  /// yt-dlp folder (see [YtDlpCookies]).
   @override
-  Future<String> mpvRawOptions() async {
-    const subs = 'sub-langs=%${ytdlSubLangs.length}%$ytdlSubLangs';
-    try {
-      final cookies = (await ytDlp).cookies.mpvRawOptions();
-      return cookies.isEmpty ? subs : '$subs,$cookies';
-    } catch (_) {
-      return subs;
-    }
-  }
+  void warmUp() => unawaited(ytDlp.then((y) => y.ensure()).catchError((_) => null));
 
   final _probes = <String, ({DateTime at, DateTime until, Future<LinkProbe> f})>{};
   static const _probeTtl = Duration(minutes: 10);

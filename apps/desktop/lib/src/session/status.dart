@@ -210,6 +210,20 @@ StatusLine? _line(StatusFacts f, StateBroadcast? r, MemberView? self, SourceTrou
     return StatusLine(StatusKind.problem, "Can't play this: ${f.playerError}",
         level: StatusLevel.error, action: StatusAction.reload, short: "Can't play this");
   }
+  // The server holds everyone for the relay's source (D6): a viewer's
+  // buffer ran dry while it is gone.
+  if (r.transport == 'held' && r.hold?.reason == HoldReason.source) {
+    final relayed = stateMediaRelay(r);
+    final id = relayed?.source ?? '';
+    final name = source?.name ??
+        r.members.where((m) => m.id == id).firstOrNull?.name ??
+        f.names?[id] ??
+        'the member passing it on';
+    return StatusLine(StatusKind.waiting, 'Waiting for $name',
+        detail: "$name's connection dropped; what the server had has played",
+        level: StatusLevel.warn,
+        short: 'Waiting for $name');
+  }
   // The relay: what everyone reads comes through the server.
   final relay = f.ownPlan ? null : stateMediaRelay(r);
   if (relay != null && relay.source != f.selfId) {

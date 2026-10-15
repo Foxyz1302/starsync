@@ -95,6 +95,22 @@ final _unreachable = RegExp(
     r'network is unreachable|no route to host|name or service not known|getaddrinfo|unable to download webpage',
     caseSensitive: false);
 
+/// yt-dlp's [error] (plain words or raw) may be about signing in: worth
+/// saying which cookies were used (D11).
+bool mayNeedSignIn(String error) {
+  final t = playErrorText(error);
+  return t == needsCookiesText || t == noFormatsText;
+}
+
+/// [plain] ([playErrorText]) with the cookies [note] (D11), for the two
+/// texts about signing in; anything else as is.
+String withCookieNote(String plain, String? note) {
+  if (note == null || note.isEmpty) return plain;
+  if (plain == needsCookiesText) return 'This site needs cookies ($note) — Settings → Player → yt-dlp → Cookies';
+  if (plain == noFormatsText) return 'No video found: it may need signing in ($note)';
+  return plain;
+}
+
 /// Why a link or media cannot be played, in plain words, from the raw
 /// error of yt-dlp, ffmpeg/mpv or the link probe; anything it does not
 /// know comes back as is (one line, at most 100 characters).
@@ -131,6 +147,10 @@ class LinkProbe {
   final String? pageTitle;
   /// Why yt-dlp could not read the page.
   final String? ytDlpError;
+
+  /// Which cookies that run used ([YtDlp.cookieNote]), when it may be about
+  /// signing in.
+  final String? cookies;
   /// The HTTP status of the probe's GET; 0 when unknown.
   final int status;
   const LinkProbe.file(this.url, this.size)
@@ -138,8 +158,9 @@ class LinkProbe {
         info = null,
         pageTitle = null,
         ytDlpError = null,
+        cookies = null,
         status = 0;
-  const LinkProbe.page(this.url, {this.info, this.pageTitle, this.ytDlpError, this.status = 0})
+  const LinkProbe.page(this.url, {this.info, this.pageTitle, this.ytDlpError, this.cookies, this.status = 0})
       : isPage = true,
         size = -1;
 
@@ -152,7 +173,7 @@ class LinkProbe {
     // A 4xx says more than yt-dlp's words it has no plain text for.
     final known = err != null && _plainTexts.contains(err);
     if (!known && status >= 400 && status < 500) return playErrorText('HTTP Error $status');
-    return err;
+    return err == null ? null : withCookieNote(err, cookies);
   }
 
   /// The name to show: yt-dlp's title, the page's, else the host; null
@@ -219,12 +240,13 @@ Future<LinkProbe> _probeLink(Uri url, {YtDlp? ytDlp, HttpClient? client}) async 
     } catch (e) {
       getError = e;
     }
-    String? ytErr;
+    String? ytErr, cookies;
     if (ytDlp != null) {
       try {
         return LinkProbe.page(url, info: await ytDlp.resolve(url.toString()), status: status);
       } catch (e) {
         ytErr = '$e';
+        if (e is YtDlpException) cookies = e.cookies;
       }
     }
     if (getError != null) {
@@ -238,7 +260,8 @@ Future<LinkProbe> _probeLink(Uri url, {YtDlp? ytDlp, HttpClient? client}) async 
         body = await _readText(await req.close().timeout(const Duration(seconds: 15)));
       } catch (_) {}
     }
-    return LinkProbe.page(url, pageTitle: body == null ? null : htmlTitle(body), ytDlpError: ytErr, status: status);
+    return LinkProbe.page(url,
+        pageTitle: body == null ? null : htmlTitle(body), ytDlpError: ytErr, cookies: cookies, status: status);
   } finally {
     if (client == null) c.close(force: true);
   }

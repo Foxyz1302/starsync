@@ -26,8 +26,7 @@ Future<void> _poll(
 Future<void> _quiet(SessionCoordinator c) async {
   await c.playback.player.setVolume(0);
   try {
-    final dynamic platform = c.playback.player.platform;
-    await platform?.setProperty('loop-file', 'inf');
+    await c.playback.player.setProperty('loop-file', 'inf');
   } catch (_) {}
 }
 
