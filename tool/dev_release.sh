@@ -62,7 +62,7 @@ NOTES="$(git -C "$ROOT" log -1 --format=%s)"
 [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ]] && NOTES="$NOTES (+ uncommitted changes)"
 MANIFEST="$ROOT/dist/manifest.json"
 MANIFEST_VER="$VERSION" \
-MANIFEST_PROTO="$(sed -n 's/.*protoVersion = \([0-9]*\).*/\1/p' "$ROOT/packages/core/lib/src/constants.dart")" \
+MANIFEST_PROTO="$(sed -n 's/.*protoMax = \([0-9]*\).*/\1/p' "$ROOT/packages/core/lib/src/constants.dart")" \
 MANIFEST_URL="$BASE_URL/$(basename "$TARBALL")" \
 MANIFEST_SHA="$(sha256sum "$TARBALL" | cut -d' ' -f1)" \
 MANIFEST_NOTES="Test build: $NOTES" \

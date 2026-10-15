@@ -51,7 +51,7 @@ done
 ORIGIN="$(git -C "$ROOT" remote get-url origin)"
 SERVER="$(echo "$ORIGIN" | sed -E 's#(https?://[^/]+)/.*#\1#')"
 REPO="$(echo "${ORIGIN%.git}" | sed -E 's#.*[:/]([^/]+/[^/]+)$#\1#')"
-PROTO="$(sed -n 's/.*protoVersion = \([0-9]*\).*/\1/p' "$ROOT/packages/core/lib/src/constants.dart")"
+PROTO="$(sed -n 's/.*protoMax = \([0-9]*\).*/\1/p' "$ROOT/packages/core/lib/src/constants.dart")"
 if [[ -n "$LATEST" && "$LATEST" != "v$VER" ]]; then
   NOTES="$(git -C "$ROOT" log -n 20 "$LATEST..HEAD" --format='- %s')"
 else
