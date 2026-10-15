@@ -61,7 +61,12 @@ Future<void> serve(Map<String, Object?> config, {SendPort? events}) async {
         final port = await server.share(
             port: (msg['port'] as num?)?.toInt() ?? 0,
             secret: (msg['secret'] as String?) ?? '',
-            jellyfin: JellyfinCredential.fromMap(msg['jellyfin']));
+            jellyfin: msg['jellyfin'] is List
+                ? [
+                    for (final c in msg['jellyfin'] as List)
+                      if (JellyfinCredential.fromMap(c) case final cred?) cred,
+                  ]
+                : null);
         reply.send({'ok': true, 'port': port});
       } catch (e) {
         reply.send({'ok': false, 'message': '$e'});

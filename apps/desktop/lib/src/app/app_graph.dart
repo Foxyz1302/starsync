@@ -1,9 +1,13 @@
 import 'package:flutter/widgets.dart';
 
 import '../jellyfin/accounts.dart';
+import '../library/library_store.dart';
+import '../library/show_matcher.dart';
 import '../platform/app_log.dart' show appLogDir;
 import '../platform/desktop/desktop_ports.dart';
 import '../platform/ports/ports.dart';
+import '../schedule/anilist.dart';
+import '../schedule/animeflow.dart';
 import '../screens/home/health_probe.dart';
 import '../session/connection.dart' show Connection;
 import '../session/identity.dart' show ClientIdentity, Profile;
@@ -44,6 +48,9 @@ class AppGraph {
   /// Home (your server) or a friend's.
   final Navigation navigation;
 
+  /// The library's matches (L2): local shows to AniList, pins, offsets.
+  final ShowMatcher library;
+
   AppGraph._({
     required this.ports,
     required this.sfx,
@@ -53,6 +60,7 @@ class AppGraph {
     required this.forms,
     required this.yourServer,
     required this.navigation,
+    required this.library,
   });
 
   /// The desktop app's graph. Tests pass their own [ports], [identity]
@@ -63,6 +71,7 @@ class AppGraph {
     HealthGetter healthGet = defaultHealthGet,
     ServerStarter? serverStarter,
     JellyfinAccounts? jellyfin,
+    ShowMatcher? library,
   }) {
     final p = ports ?? desktopPorts();
     final sfx = SynthSfx(
@@ -81,6 +90,14 @@ class AppGraph {
     final connection = Connection(notify: notifier.notify, identity: identity ?? ClientIdentity.stored());
     final coordinator =
         SessionCoordinator(notifier: notifier, connection: connection, ytDlp: p.links, jellyfin: jellyfin);
+    // Device-owned: the library box; AnimeFlow's runs when signed in.
+    final matcher = library ??
+        ShowMatcher(
+          store: HiveLibraryStore(),
+          aniList: AniListClient(),
+          flow: AnimeFlowLookup(AnimeFlowClient.fromAccounts(coordinator.jellyfin)),
+        );
+    coordinator.fileRef = matcher.refForPath;
     final forms = ConnectStore();
     final yourServer = YourServer(
       forms: forms,
@@ -119,6 +136,7 @@ class AppGraph {
       forms: forms,
       yourServer: yourServer,
       navigation: navigation,
+      library: matcher,
     );
   }
 

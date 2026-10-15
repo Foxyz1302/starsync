@@ -7,6 +7,7 @@ import '../screens/home/picked_media.dart';
 import '../session/party.dart' show isPresent;
 import 'accounts.dart';
 import 'format.dart';
+import '../library/media_refs.dart';
 
 // Jellyfin media in a session: turning picks and pasted links into refs
 // (the wire carries only `{serverId, itemId, ...}`), the hosted server's
@@ -28,7 +29,8 @@ HelloMedia mediaForPick(JellyfinMedia m) => HelloMedia(
     name: m.title.isEmpty ? 'Jellyfin item' : m.title,
     size: 0,
     duration: 0,
-    jellyfin: refForPick(m));
+    jellyfin: refForPick(m),
+    ref: m.ref ?? jellyfinPickRef(m.title, m.subtitle));
 
 /// The pick a ref stands for on a linked server (for highlighting it in
 /// the browser); null when this install has no account there.
@@ -78,7 +80,8 @@ final _sourceId = RegExp(r'^[A-Za-z0-9-]{1,64}$');
 /// is one.
 Future<HelloMedia> mediaForLink(JellyfinAccounts accounts, String url,
     {Duration timeout = const Duration(seconds: 6)}) async {
-  final plain = HelloMedia(name: linkName(url), size: 0, duration: 0, url: url);
+  final name = linkName(url);
+  final plain = HelloMedia(name: name, size: 0, duration: 0, url: url, ref: linkMediaRef(name));
   final link = parseJellyfinLink(url);
   if (link == null) return plain;
   await accounts.ensureLoaded();
@@ -103,9 +106,11 @@ Future<HelloMedia> mediaForLink(JellyfinAccounts accounts, String url,
   );
   final account = accounts.account(serverId);
   final client = accounts.clientFor(serverId);
+  MediaRef? what;
   if (account != null && client != null) {
     try {
       final pick = pickFor(account, await client.item(link.itemId).timeout(timeout));
+      what = pick.ref;
       ref = refForPick(JellyfinMedia(
         serverId: serverId,
         baseUrl: account.baseUrl,
@@ -120,7 +125,11 @@ Future<HelloMedia> mediaForLink(JellyfinAccounts accounts, String url,
     }
   }
   return HelloMedia(
-      name: ref.title.isEmpty ? 'Jellyfin item' : ref.title, size: 0, duration: 0, jellyfin: ref);
+      name: ref.title.isEmpty ? 'Jellyfin item' : ref.title,
+      size: 0,
+      duration: 0,
+      jellyfin: ref,
+      ref: what ?? jellyfinPickRef(ref.title, ref.subtitle ?? ''));
 }
 
 /// Display name for a link: last path segment, decoded, never the query
@@ -139,27 +148,28 @@ String linkName(String url) {
   return uri.host.isNotEmpty ? uri.host : 'link';
 }
 
-/// The hosted server's relay login: the account for [serverId] (the
-/// hosted item's server), else the default account, when its token is not
-/// known to be expired. The device fields are exactly the ones this app
-/// sends with that token ([JellyfinAccounts.clientInfo]): Jellyfin rewrites
-/// a token's device from the request header, so the relay must not differ.
-JellyfinCredential? relayCredentialFor(JellyfinAccounts accounts, {String? serverId}) {
-  bool usable(JellyfinAccount? a) =>
-      a != null && accounts.statusOf(a.serverId) != JellyfinAccountStatus.expired;
-  var a = serverId == null ? null : accounts.account(serverId);
-  if (!usable(a)) a = accounts.defaultAccount;
-  if (!usable(a)) return null;
+/// The hosted server's relay logins: one per linked Jellyfin account
+/// whose token is not known to be expired (the default account first),
+/// so `/j` relays an item with its own server's login. The device fields
+/// are exactly the ones this app sends with those tokens
+/// ([JellyfinAccounts.clientInfo]): Jellyfin rewrites a token's device
+/// from the request header, so the relay must not differ.
+List<JellyfinCredential> relayCredentialsFor(JellyfinAccounts accounts) {
   final info = accounts.clientInfo;
-  return JellyfinCredential(
-    baseUrl: a!.baseUrl,
-    serverId: a.serverId,
-    token: a.token,
-    client: info.client,
-    device: info.device,
-    deviceId: info.deviceId,
-    version: info.version,
-  );
+  final first = accounts.defaultAccount;
+  return [
+    for (final a in [?first, ...accounts.accounts.where((a) => a.serverId != first?.serverId)])
+      if (accounts.statusOf(a.serverId) != JellyfinAccountStatus.expired)
+        JellyfinCredential(
+          baseUrl: a.baseUrl,
+          serverId: a.serverId,
+          token: a.token,
+          client: info.client,
+          device: info.device,
+          deviceId: info.deviceId,
+          version: info.version,
+        ),
+  ];
 }
 
 /// `/j/...` URL of the current Jellyfin media on the host this client

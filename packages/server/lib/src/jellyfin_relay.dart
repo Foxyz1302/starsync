@@ -24,9 +24,10 @@ bool _sameItemId(String a, String b) => (normalizeItemId(a) ?? a) == (normalizeI
 Response _plain(int status) => Response(status, body: Body.fromString('status $status'));
 
 /// `GET /j/<sid>/<token>/<itemId>`: relays byte ranges of the current
-/// Jellyfin media from [credential]'s server to a viewer, for guests without
+/// Jellyfin media from its Jellyfin server to a viewer, with the server's
+/// login there ([credentialFor] the ref's `serverId`), for guests without
 /// their own access. Only the active ref's item, or Up next's first one
-/// ([next], so viewers can get it ready), on the credential's server, only
+/// ([next], so viewers can get it ready), on a server with a login, only
 /// for a valid viewer token: no open proxy. Range goes up as sent;
 /// status, Content-Range, Content-Length, Content-Type and Accept-Ranges
 /// come back as Jellyfin sent them (a 401/403 from Jellyfin is the server's
@@ -38,7 +39,7 @@ Response _plain(int status) => Response(status, body: Body.fromString('status $s
 void mountJellyfinRelayRoute(
   RelicApp app,
   SessionMap sessions,
-  JellyfinCredential? Function() credential,
+  JellyfinCredential? Function(String serverId) credentialFor,
   HttpClient Function() client, {
   JellyfinRef? Function()? next,
   String pattern = '/j/:sid/:token/:itemId',
@@ -58,14 +59,13 @@ void mountJellyfinRelayRoute(
       default:
         return _plain(401);
     }
-    final cred = credential();
-    if (cred == null || cred.serverId.isEmpty) return _plain(404);
-    JellyfinRef? onLogin(JellyfinRef? r) => r != null && cred.serverId == r.serverId ? r : null;
+    JellyfinRef? onLogin(JellyfinRef? r) => r != null && credentialFor(r.serverId) != null ? r : null;
     final current = onLogin(session.media?.jellyfin);
     final upNext = onLogin(next?.call());
     if (current == null && upNext == null) return _plain(404);
     final ref = [current, upNext].firstWhere((r) => r != null && _sameItemId(itemId, r.itemId), orElse: () => null);
     if (ref == null) return _plain(403);
+    final cred = credentialFor(ref.serverId)!;
 
     final range = req.headers['range']?.join(',');
     final HttpClientRequest upReq;

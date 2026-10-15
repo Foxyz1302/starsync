@@ -1,6 +1,6 @@
-import 'package:sync_relay_core/core.dart' show hasMediaExtension;
+import 'package:sync_relay_core/core.dart' show MediaRef, hasMediaExtension, parseReleaseName;
 
-import '../files/name_parser.dart';
+import '../library/media_refs.dart' show refEpisodeLine;
 import '../jellyfin/session_media.dart';
 import 'now_playing.dart';
 
@@ -26,11 +26,28 @@ NowPlaying? nowPlayingOf(Map<String, Object?>? media) {
   if (web) {
     return NowPlaying(title: name, posterHash: poster, bannerHash: banner, thumbnail: true);
   }
+  final what = _mediaRef(media['ref']);
   final (title, episode) = ref != null
       ? jellyfinTitle(ref.title.isNotEmpty ? ref.title : name, ref.subtitle)
-      : fileTitle(name);
+      : what != null && what.title.isNotEmpty
+          ? refTitle(what, name)
+          : fileTitle(name);
   return NowPlaying(title: title, episode: episode, posterHash: poster, bannerHash: banner);
 }
+
+MediaRef? _mediaRef(Object? j) {
+  try {
+    return MediaRef.fromJson(j);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Files and links that say what they are (`media.ref`, from the
+/// sender's library): its proper title and `S3 E13` / `E108`; an extra
+/// keeps the name's own marker (OP1, NCED2).
+(String, String?) refTitle(MediaRef ref, String name) =>
+    (ref.title, refEpisodeLine(ref) ?? (ref.kind == 'extra' ? fileTitle(name).$2 : null));
 
 /// [media] (`state.media`, not Jellyfin) is a web page's video, whose art
 /// will be its thumbnail: a shared http(s) link that is no media file (the

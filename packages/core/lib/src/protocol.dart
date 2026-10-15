@@ -103,8 +103,9 @@ class JellyfinRef {
 /// What a media is, independent of where its bytes come from (`media.ref`):
 /// an episode, a movie or an extra, by AniList and/or TVDB ids. Carried
 /// as is in `swap.media`, `state.media` and `queue[].media` (the server
-/// keeps it, at most [RelayConstants.maxMediaRefBytes] of JSON); nothing
-/// produces it yet (step 4).
+/// keeps it, at most [RelayConstants.maxMediaRefBytes] of JSON). The app
+/// makes it from its library (files), Jellyfin's provider ids and a
+/// link's name.
 class MediaRef {
   static const kinds = {'episode', 'movie', 'extra'};
 

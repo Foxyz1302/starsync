@@ -1,3 +1,5 @@
+import 'package:sync_relay_core/core.dart' show MediaRef;
+
 /// What the media picker selected. Null selection = nothing (hosting
 /// without media is allowed).
 sealed class PickedMedia {
@@ -72,6 +74,9 @@ final class JellyfinMedia extends PickedMedia {
   /// "Series · S1E6" for episodes, the year for movies; may be empty.
   final String subtitle;
   final Duration? runtime;
+  /// What it is (`media.ref`), when it was picked from the item itself
+  /// (with its provider ids); not stored, not part of equality.
+  final MediaRef? ref;
   const JellyfinMedia({
     required this.serverId,
     required this.baseUrl,
@@ -80,6 +85,7 @@ final class JellyfinMedia extends PickedMedia {
     required this.title,
     this.subtitle = '',
     this.runtime,
+    this.ref,
   });
 
   @override

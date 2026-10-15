@@ -23,16 +23,31 @@ class ServerHub {
   /// The `/sync` socket of each member that has one, by token; a `gone`
   /// member has none.
   final Map<String, RelicWebSocket> sockets = {};
-  /// The server's Jellyfin login for the `/j/...` relay; null = no relay.
-  JellyfinCredential? jellyfin;
+  /// The server's Jellyfin logins for the `/j/...` relay, at most one per
+  /// Jellyfin server (`serverId`); empty = no relay. The dedicated
+  /// server has its configured one; the app's own server one for each
+  /// linked account, so an item is relayed with its own server's login.
+  List<JellyfinCredential> jellyfinLogins;
+
+  /// The first login (the dedicated server's only one); null = none.
+  JellyfinCredential? get jellyfin => jellyfinLogins.isEmpty ? null : jellyfinLogins.first;
+
+  /// The login on Jellyfin server [serverId]; null when there is none.
+  JellyfinCredential? loginFor(String serverId) {
+    for (final c in jellyfinLogins) {
+      if (c.serverId.isNotEmpty && c.serverId == serverId) return c;
+    }
+    return null;
+  }
   /// Reads web pages for "the server fetches it"; null = files only.
   final YtDlp? ytDlp;
   /// Random per server boot (`welcome.instance`).
   final String instance = _randomId();
 
   ServerHub(this.sessions, this.expectedSecret,
-      {SyncEngine? engine, this.hostKey = '', this.jellyfin, this.ytDlp})
-      : engine = engine ?? SyncEngine() {
+      {SyncEngine? engine, this.hostKey = '', JellyfinCredential? jellyfin, this.ytDlp})
+      : jellyfinLogins = [if (jellyfin != null) jellyfin],
+        engine = engine ?? SyncEngine() {
     this.engine
       ..onGone = _memberGone
       ..onLeft = _memberLeft;
@@ -106,20 +121,18 @@ class ServerHub {
 
   bool get _sourceGone => engine.media?.relay?.sourceGone ?? false;
 
-  /// The current media is a Jellyfin ref on the server [jellyfin] logs in to.
+  /// The current media is a Jellyfin ref on a server one of
+  /// [jellyfinLogins] logs in to.
   bool get relayAvailable => _onLogin(session.media?.jellyfin);
 
-  /// Up next's first item is a Jellyfin ref on that server: `/j` serves it
-  /// too, so viewers without access get it ready.
+  /// Up next's first item is a Jellyfin ref on such a server: `/j` serves
+  /// it too, so viewers without access get it ready.
   bool get relayNextAvailable => _onLogin(nextJellyfinRef);
 
   /// Up next's first item's Jellyfin ref (null: none, or not a ref).
   JellyfinRef? get nextJellyfinRef => engine.queue.items.firstOrNull?.media.jellyfin;
 
-  bool _onLogin(JellyfinRef? ref) {
-    final cred = jellyfin;
-    return ref != null && cred != null && cred.serverId.isNotEmpty && cred.serverId == ref.serverId;
-  }
+  bool _onLogin(JellyfinRef? ref) => ref != null && loginFor(ref.serverId) != null;
 
   /// What the swapper reads when the server cannot fetch a link ([why]
   /// from the relay). A yt-dlp failure on a server without cookies says

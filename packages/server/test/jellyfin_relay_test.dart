@@ -422,6 +422,31 @@ void main() {
     });
   });
 
+  test('several logins (your server shared): an item goes through its own server\'s login', () async {
+    await startServer(null);
+    // Two linked accounts; the default one is on another Jellyfin.
+    const other = JellyfinCredential(
+      baseUrl: 'http://127.0.0.1:1',
+      serverId: 'otherserver',
+      token: 'OTHER-TOKEN',
+      client: 'Watch Together',
+      device: 'host pc',
+      deviceId: 'dev-1',
+      version: '0.9.0',
+    );
+    await server.share(port: 0, secret: '', jellyfin: [other, cred()]);
+    expect(server.hub.jellyfinLogins.map((c) => c.serverId), ['otherserver', _serverId]);
+    final (a, _) = await join('alice');
+    final state = jsonDecode(await swapToRef(a, _item)) as Map;
+    expect(state['relay'], true);
+    final (_, w) = await join('bob');
+    final r = await relayGet(w.token, _item, range: 'bytes=0-9');
+    expect(r.statusCode, 206);
+    expect(await readAll(r), bytes.sublist(0, 10));
+    expect(jf.auth.single, contains('Token="$_token"'));
+    expect(jf.auth.single, isNot(contains('OTHER-TOKEN')));
+  });
+
   test('a credential without serverId looks it up at start', () async {
     await startServer(cred(serverId: ''));
     expect(server.hub.jellyfin!.serverId, _serverId);

@@ -79,7 +79,9 @@ Three suites, run from each package's folder:
 
 - `cd packages/core && dart test` (a few seconds): protocol round-trips,
   the sync engine (clock, gate, presence and grace, correction, end of
-  file), the `PresencePolicy` table, queue model,
+  file), the `PresencePolicy` table, queue model, the library's L1
+  (release and folder names, `groupLocal` over a real anime folder's
+  names: shows across folders, holes, extras, a movie),
   relay pieces, updater, logging redaction, watch rule, yt-dlp and
   Jellyfin client parsing against captured fixtures.
 - `cd packages/server && dart test` (well under a minute): live servers
@@ -90,7 +92,8 @@ Three suites, run from each package's folder:
   under the same members and Up next, the host key standing in for the
   password).
 - `cd apps/desktop && flutter test test/<file>`: widgets (shell, library,
-  controls, settings, schedule), pure app logic (`StateDiff`, name parser,
+  controls, settings, schedule), pure app logic (`StateDiff`, the library's L2 matching against a
+  fake AniList (`show_matcher_test`), `media.ref` producers,
   shader list, sound engine with a fake backend, invite addresses, the
   version gate), `singletons_test` (the `.instance` count, see
   ARCHITECTURE "Composition root"; lower its baseline when a use goes) and the real-mpv `*_e2e`

@@ -61,9 +61,6 @@ Problems are numbered; delete a line when its fix ships.
   the `close:` log lines.
 - P33 No volume readout on wheel: likely fixed by the controls rework
   (1.2.1-dev.1; a test covers both skins); confirm in real use.
-- P34 Local anime folders are opened as plain files (no banner, names,
-  next episode, tracking); test library: the user's
-  `/mnt/torrents/Torrents/Binux/` (several shows and a movie).
 
 **Restructure** (in order; reviewed against the code). Truth lives in
 three places: the server (members, presence, gate, transport, queue incl.
@@ -71,9 +68,6 @@ the automatic continuation and countdown, relay state), the device
 (client id, library and folders, match corrections, watch history,
 settings, notification prefs, what this app is sourcing) and the
 integrations (Jellyfin played/resume, AniList list).
-4. Library + Media identity: L1 local grouping (kinds, folder hints,
-   gaps, merge across folders) and L2 match (AniList/TVDB, art, names,
-   manual pin, cache); `MediaRef` in swap/queue media. Fixes P34.
 5. Media pipeline + player host port: plan → resolve → open → ready,
    commands queued during a switch, viewer-side recovery when a source
    drops (no mpv seek loops, play what's buffered), resolver and source
@@ -127,12 +121,26 @@ that the invite skips the proxy's 198.18.x here) and of the update band
 from 1.2.1-dev.3 in real use. No public address lookup or UPnP: the
 members card only says friends elsewhere need the port forwarded. Your
 server's `/health` name is the profile name at start (a rename shows
-after a restart). Guests' Jellyfin relay uses the default account (no
-longer the put-up item's server). Joining a friend while others are on
+after a restart). Joining a friend while others are on
 your server leaves them there without you, unwarned; a join refused
 after dialling (wrong password) costs your own member there (`bye`, back
 as a new member). Your server writes its session log even when you are
 alone.
+Left of step 4 (library): a human check of the Files library on the
+real folder (`/mnt/torrents/Torrents/Binux/`: Bleach over three folders
+with 66–107 missing, SAO S3 Alicization with OP/ED, Re.Zero S04E17, the
+Kimetsu movie) and of the AniList matches it gets. A Jellyfin swap
+carries AniList/TVDB ids only when the picked item has them (movies); an
+episode's show ids need its series item, which picks do not fetch.
+Receivers name the media by `media.ref` but still get art only as the
+swapper's bytes (now chosen by the ref's AniList id). Relay logins are
+sent at Invite: an account linked or signed in again later relays only
+after Stop sharing and Invite. "Season N" without a name walks AniList's
+sequels, which can land on the wrong cour where AniList splits seasons;
+Wrong show? fixes it. The next episode of a local show lives on its page
+(from Recent); no countdown or "Continues with" for files yet (backlog
+2). The `library` box keeps every AniList entry seen (no pruning);
+AniList's episode titles exist only where it lists streaming episodes.
 Left of step 2: system notifications need a human check (Linux: the
 notification shows and a click brings the window up, also on Wayland,
 where focus may be refused without an activation token; Windows: toasts
@@ -164,7 +172,6 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
   holds it while the item's performer or source is `gone`. Today it is
   parsed and broadcast but never started; `auto` items and `cancel` are
   live.
-- `media.ref` producers (step 4); the server carries it already.
 - `hello.client` optionally derived per server (HMAC of an install
   secret and the dialled host:port).
 - TLS: `/health.tls` is always false; `wss://` only with a CA-valid
@@ -178,9 +185,10 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
    seeks are shared, and only real ranges (segments, OP/ED chapters) should
    ever be skipped.
 
-2. **Files**: next episode from Files (by parsed episode, with the
-   countdown, and under Up next's "Continues with"). Later: tracking for
-   file series.
+2. **Files**: the next episode of a local show (the library's
+   `nextAfter`, gaps included) at the end of one, with the countdown, and
+   under Up next's "Continues with". Tracking for file series comes with
+   step 6.
 
 3. **yt-dlp follow-ups** (see ARCHITECTURE "yt-dlp"): check that the
    bundled Windows libmpv has the ytdl hook (Lua) and plays `edl://` URLs

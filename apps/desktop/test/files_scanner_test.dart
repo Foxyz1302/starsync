@@ -1,10 +1,14 @@
-// restructure: rewrite in step 4 (Library + Media identity): groupBySeries
-// becomes L1 local grouping; the scan and classify tests stay.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:starsync/src/files/name_parser.dart';
 import 'package:starsync/src/files/scanner.dart';
+import 'package:sync_relay_core/core.dart' show groupLocal, readLocalFile, EpisodeGap, LocalKind;
+
+// The Files scan on a real (generated) tree, and the library's L1
+// grouping over what it found (core's own tests cover the grouping
+// rules on paths alone).
+
+final _tmp = Platform.environment['WT_TEST_TMP'] ?? Directory.systemTemp.path;
 
 late Directory _root;
 
@@ -19,11 +23,8 @@ void _file(String rel, {int size = 10}) {
   }
 }
 
-VideoFile _v(String name) =>
-    VideoFile('/x/$name', 1, parseReleaseName(name), DateTime(2020));
-
 void main() {
-  setUp(() => _root = Directory.systemTemp.createTempSync('files_scan_'));
+  setUp(() => _root = Directory(_tmp).createTempSync('files_scan_'));
   tearDown(() => _root.deleteSync(recursive: true));
 
   test('classifies, skips hidden and samples, pairs sidecar subtitles',
@@ -69,7 +70,7 @@ void main() {
         isFalse);
 
     final ep = scan.videos.firstWhere((v) => v.name.contains('- 02'));
-    expect(ep.parsed.episode, 2);
+    expect(readLocalFile(ep).episode, 2);
     expect(ep.size, 10);
     expect(ep.modified.year, DateTime.now().year);
   });
@@ -115,38 +116,45 @@ void main() {
     expect(kindOf('mkv'), FileKind.other);
   });
 
-  group('groupBySeries', () {
-    test('groups across spellings, sorts by season then episode', () {
-      final g = groupBySeries([
-        _v('[A] Re:Zero S2 - 02 [1080p].mkv'),
-        _v('[A] Re:Zero - 10 [1080p].mkv'),
-        _v('[B] Re Zero - 02 [720p].mkv'),
-        _v('[A] Re:Zero S2 - 01 [1080p].mkv'),
-        _v('[A] Re:Zero - NCOP1 [1080p].mkv'),
-        _v('Other Show - 03.mkv'),
-        _v('Other Show - 01.mkv'),
-        _v('Movie.2020.1080p.mkv'),
-        _v('vid_2024_final.mp4'),
-        _v('[A] Lonely - OVA.mkv'),
-      ]);
-      expect(g.series.map((s) => s.title), ['Other Show', 'Re:Zero']);
-      final re = g.series[1];
-      expect(re.episodes.map((v) => v.parsed.label),
-          ['E02', 'E10', 'S02E01', 'S02E02']);
-      expect(re.seasons, [1, 2]);
-      expect(re.extras.single.parsed.extra, 'NCOP1');
-      expect(g.series[0].episodes.map((v) => v.parsed.episode), [1, 3]);
-      expect(g.loose.map((v) => v.name), [
-        '[A] Lonely - OVA.mkv',
-        'Movie.2020.1080p.mkv',
-        'vid_2024_final.mp4',
-      ]);
-    });
+  test('a generated tree of the Binux names, scanned and grouped (L1)', () async {
+    const b1 = '[Judas] Bleach 001-055 [BD 1080p][HEVC x265 10bit]';
+    const b2 = '[Judas] Bleach 056-111 [BD 1080p][HEVC x265 10bit]';
+    const b3 = '[Judas] Bleach 112-139 [BD 1080p][HEVC x265 10bit][Dual-Audio][Eng-Subs]';
+    const sao = '[Judas] Sword Art Online (Season 3 - Alicization) [BD 1080p][HEVC x265 10bit][Eng-Subs]';
+    String n3(int n) => n.toString().padLeft(3, '0');
+    // The first Bleach folder holds 1-byte shortcuts only.
+    for (final j in ['Amine', 'App', 'Audio', 'Data', 'Document', 'Download', 'Image', 'Internal storage', 'Recent', 'Video']) {
+      _file('$b1/$j#D4aIyEEtZEWR9gBorzBWiMh_.lnk', size: 1);
+    }
+    for (final n in [56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 108, 109, 110, 111]) {
+      _file('$b2/[Judas] Bleach - ${n3(n)}.mkv');
+    }
+    for (var n = 112; n <= 139; n++) {
+      _file('$b3/[Judas] Bleach - ${n3(n)}.mkv');
+    }
+    for (var n = 1; n <= 24; n++) {
+      _file('$sao/[Judas] Sword Art Online S3 - ${n.toString().padLeft(2, '0')}.mkv');
+    }
+    for (final x in ['Opening 1', 'Opening 2', 'Opening 3', 'Ending 1', 'Ending 2']) {
+      _file('$sao/[Judas] Sword Art Online S3 - $x.mkv');
+    }
+    _file('[Judas] Re.Zero - S04E17.mkv');
+    _file('[Erai-raws] Kimetsu no Yaiba - Mugenjou Hen - Movie 01 [1080p CR WEBRip HEVC AAC][MultiSub][8E47462C].mkv');
 
-    test('empty input', () {
-      final g = groupBySeries(const []);
-      expect(g.series, isEmpty);
-      expect(g.loose, isEmpty);
-    });
+    final scan = await scanFolder(_root.path);
+    expect(scan.videos, hasLength(14 + 28 + 24 + 5 + 2));
+    expect(scan.hiddenCount, 10, reason: 'the shortcuts are not videos');
+    final lib = groupLocal(scan.videos, roots: [_root.path]);
+    expect(lib.shows.map((s) => s.title), ['Bleach', 'Re.Zero', 'Sword Art Online']);
+    final bleach = lib.show('bleach')!;
+    expect(bleach.folders, [_p(b2), _p(b3)]);
+    expect(bleach.seasons.single.gaps, const [EpisodeGap(1, 55), EpisodeGap(66, 107)]);
+    final s = lib.show('sword art online')!;
+    expect([s.seasons.single.number, s.seasons.single.name], [3, 'Alicization']);
+    expect(s.extras.map((e) => e.label), ['OP1', 'OP2', 'OP3', 'ED1', 'ED2']);
+    expect(lib.show('re zero')!.seasons.single.number, 4);
+    expect(lib.movies.single.kind, LocalKind.movie);
+    expect(lib.movies.single.title, 'Kimetsu no Yaiba - Mugenjou Hen');
+    expect(lib.other, isEmpty);
   });
 }

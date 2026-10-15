@@ -12,6 +12,7 @@ import '../jellyfin/accounts.dart';
 import '../jellyfin/progress.dart';
 import '../jellyfin/session_media.dart';
 import '../jellyfin/track_prefs.dart';
+import '../library/media_refs.dart';
 import '../playback/media_marks.dart';
 import '../playback/playback_controller.dart';
 import '../platform/ports/link_resolver.dart';
@@ -118,6 +119,9 @@ class SessionCoordinator {
   /// Set by the hosting app: makes a local file the hosted one (File swap);
   /// null when this app is not the host.
   Future<({String name, int size})?> Function(String path)? hostFile;
+  /// What a local file is (`media.ref`, from the library: `ShowMatcher`),
+  /// set by the composition root; null: files go up without one.
+  MediaRef? Function(String path)? fileRef;
   /// The app's yt-dlp and link probes (tests pass their own).
   final LinkResolver ytDlp;
   /// The link to the server (socket, reconnects, clock offset, its
@@ -1449,8 +1453,11 @@ class SessionCoordinator {
         final uri = thumb == null ? null : Uri.tryParse(thumb);
         bytes = uri == null ? null : await thumbnailArt(uri);
       } else {
+        // The library's match names the AniList entry; else a title search.
+        final known = ref == null ? media.ref?.anilistId : null;
         final name = ref == null ? media.name : jellyfinTitle(ref.title, ref.subtitle).$1;
-        bytes = await aniListArt(_aniList ??= AniListClient(), name);
+        final aniList = _aniList ??= AniListClient();
+        bytes = await (known != null ? aniListArtById(aniList, known) : null) ?? await aniListArt(aniList, name);
       }
       final poster = bytes?.poster, banner = bytes?.banner;
       if (poster == null && banner == null) return;
@@ -1491,8 +1498,9 @@ class SessionCoordinator {
     // A page is named by its title, never its URL tail ("1", "watch").
     final uri = Uri.tryParse(url) ?? Uri();
     final name = probe?.title ?? (probe != null || hasMediaExtension(uri) || uri.host.isEmpty ? media.name : uri.host);
+    final what = linkMediaRef(name);
     if (relay == LinkRelay.direct) {
-      _swap(HelloMedia(name: name, size: 0, duration: 0, url: url), queueId: queueId);
+      _swap(HelloMedia(name: name, size: 0, duration: 0, url: url, ref: what), queueId: queueId);
       return null;
     }
     if (relay == LinkRelay.me) {
@@ -1526,8 +1534,8 @@ class SessionCoordinator {
         await check?.close();
       }
       _pendingOrigin = _LinkOrigin(url, probe, y);
-      _swap(HelloMedia(
-          name: name, size: size, duration: 0, relay: MediaRelay(tracks: specs)), link: url, queueId: queueId);
+      _swap(HelloMedia(name: name, size: size, duration: 0, relay: MediaRelay(tracks: specs), ref: what),
+          link: url, queueId: queueId);
       return null;
     }
     // The server reads it with its own yt-dlp; only a page this app knows
@@ -1537,7 +1545,12 @@ class SessionCoordinator {
       return probe.relayProblem;
     }
     _swap(HelloMedia(
-        name: name, size: max(0, probe?.size ?? 0), duration: 0, url: url, relay: const MediaRelay(fetch: true)),
+        name: name,
+        size: max(0, probe?.size ?? 0),
+        duration: 0,
+        url: url,
+        relay: const MediaRelay(fetch: true),
+        ref: what),
         queueId: queueId);
     return null;
   }
@@ -1563,18 +1576,23 @@ class SessionCoordinator {
   /// when sent.
   Future<String?> swapFile(String path, {String? queueId}) async {
     markInput();
+    final what = fileRef?.call(path);
     final host = hostFile;
     if (host != null) {
       final file = await host(path);
       if (file == null) return 'file not found — check the path';
-      _swap(HelloMedia(name: file.name, size: file.size, duration: 0), queueId: queueId);
+      _swap(HelloMedia(name: file.name, size: file.size, duration: 0, ref: what), queueId: queueId);
       return null;
     }
     final file = File(path);
     if (!await file.exists()) return 'file not found — check the path';
     _pendingOrigin = _FileOrigin(path);
     _swap(HelloMedia(
-        name: file.uri.pathSegments.last, size: await file.length(), duration: 0, relay: const MediaRelay()),
+        name: file.uri.pathSegments.last,
+        size: await file.length(),
+        duration: 0,
+        relay: const MediaRelay(),
+        ref: what),
         queueId: queueId);
     return null;
   }

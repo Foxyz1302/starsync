@@ -1,5 +1,6 @@
 import 'package:sync_relay_core/core.dart';
 
+import '../library/media_refs.dart';
 import '../screens/home/picked_media.dart';
 import 'accounts.dart';
 
@@ -89,5 +90,6 @@ JellyfinMedia pickFor(JellyfinAccount account, JellyfinItem item) {
     title: item.name,
     subtitle: subtitle,
     runtime: item.runTime,
+    ref: jellyfinMediaRef(item),
   );
 }

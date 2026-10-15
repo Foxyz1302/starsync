@@ -2,13 +2,13 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'package:sync_relay_core/core.dart';
+
 import '../../shell/avatar.dart';
-import '../name_parser.dart';
-import '../scanner.dart';
 import 'thumb.dart';
 
-// The Files page's rows and cards: a series header, an episode row (also
-// used for Recent), a loose-video card, and the empty states.
+// The Files page's rows and cards: an episode row (also used for Recent),
+// a loose-video card, and the empty states.
 
 /// What a play control is doing right now.
 enum PlayState { idle, starting, playing }
@@ -25,76 +25,8 @@ String parentName(String path) => baseName(File(path).parent.path);
 /// Cleaned title of a loose video: `Title (2019)`.
 String cleanTitle(ParsedName p) => p.year == null ? p.series : '${p.series} (${p.year})';
 
-class SeriesHeader extends StatelessWidget {
-  final SeriesGroup group;
-  final ThumbCache thumbs;
-  /// Its episodes are listed below; [onTap] opens or closes them.
-  final bool expanded;
-  final VoidCallback? onTap;
-  const SeriesHeader(
-      {super.key, required this.group, required this.thumbs, this.expanded = true, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final first = group.episodes.first;
-    final n = group.episodes.length;
-    final extras = group.extras.length;
-    final detail = [
-      '$n ${n == 1 ? 'episode' : 'episodes'}',
-      if (extras > 0) '$extras ${extras == 1 ? 'extra' : 'extras'}',
-      ?first.parsed.group,
-    ].join(' · ');
-    return Padding(
-      padding: const EdgeInsets.only(top: 14),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: ThumbBuilder(
-                  cache: thumbs,
-                  path: first.path,
-                  builder: (context, t, _) => ThumbImage(t, width: 96, height: 54),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(group.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium),
-                    Text(detail,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
-                  ],
-                ),
-              ),
-              if (onTap != null)
-                AnimatedRotation(
-                  turns: expanded ? 0.5 : 0,
-                  duration: const Duration(milliseconds: 200),
-                  child: Icon(Icons.expand_more, color: scheme.onSurfaceVariant),
-                ),
-              const SizedBox(width: 8),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// One file as a row: an episode under its series header, or a Recent
-/// entry ([title] given, [indent] off).
+/// One file as a row: an episode on a show's page, or a Recent entry
+/// ([indent] off).
 class FileRow extends StatelessWidget {
   final String path;
   final String title;
@@ -207,7 +139,7 @@ const videoCardTextHeight = 66.0;
 /// A loose video (movie, clip): 16:9 frame with its duration, then the
 /// cleaned title and size.
 class VideoCard extends StatelessWidget {
-  final VideoFile video;
+  final LocalEpisode video;
   final PlayState state;
   final ThumbCache thumbs;
   final VoidCallback? onTap;
@@ -281,7 +213,7 @@ class VideoCard extends StatelessWidget {
                   ),
                 ),
               ),
-              Text(formatSize(video.size),
+              Text(formatSize(video.file.size),
                   style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
             ],
           ),

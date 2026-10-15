@@ -216,8 +216,21 @@ Up next, add the folder to Files, or fill Link).
   open here (needs cookies, 403, 404, not a video) says why and goes up
   only with "Put it up anyway"; in the player, whoever cannot play it is
   named ("Bob can't play this: Not allowed (403)") and nobody waits for them.
-- **Files**: video folders you add on this computer, grouped by series
-  (click a series to list its episodes), or any file through Browse. The others stream it from you.
+- **Files**: your own library from the video folders you add on this
+  computer (the **Library** shows them all together, each folder on its
+  own too), or any file through Browse. Files are sorted into shows and
+  movies by their names and folders: one show split over several folders
+  is one show, OP/ED and specials go under its **Extras**, a folder like
+  "Show (Season 3 - Alicization)" gives the season and its name. Shows
+  are looked up on AniList for their proper name, cover and banner. A
+  show's page has its seasons and episodes and a button for the next one
+  after what you last played here; when episodes are missing on the way
+  it says so ("66–107 aren't in your folders — skip to 108?"). Matched
+  the wrong show? **Wrong show?** searches AniList and pins the right one
+  for the show everywhere or just one folder; **Episode numbers…** says
+  which episode the first file is when the files count differently. Both
+  stay through rescans. The others stream what you put up from you, and
+  see its proper name too.
 
 Put it up and the player opens. With nobody else in the server, the
 buttons say Play and a link plays straight from the site.
@@ -467,8 +480,9 @@ Watching:
 - Friends without an account watch through the server: whoever put the
   item up passes it on automatically, with their own sign-in, which never
   leaves their computer (only the current item, only to people in the
-  session). They show "via server" in the member list (click the avatars). When the app hosts,
-  or a dedicated server has its own login (`--jellyfin <file>`, see
+  session). They show "via server" in the member list (click the avatars). On your
+  own server (with your sign-in on that item's Jellyfin, whichever of
+  your linked servers it is), or a dedicated server with its own login (`--jellyfin <file>`, see
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), Jellyfin relay), the server
   fetches it itself instead.
 - If nobody can pass it on (the person who put it up left), the app says

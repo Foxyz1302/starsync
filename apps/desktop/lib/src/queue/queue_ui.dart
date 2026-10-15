@@ -9,7 +9,6 @@ import 'package:sync_relay_core/core.dart';
 
 import '../controls/controls_probe.dart' show ControlsHold;
 import '../controls/minimal/style.dart';
-import '../files/scanner.dart' show FileKind, kindOf;
 import '../jellyfin/images.dart';
 import '../jellyfin/session_media.dart' show EpisodeLink;
 import '../screens/home/picked_media.dart';

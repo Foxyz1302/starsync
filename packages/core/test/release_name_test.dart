@@ -1,5 +1,5 @@
-import 'package:flutter_test/flutter_test.dart';
-import 'package:starsync/src/files/name_parser.dart';
+import 'package:test/test.dart';
+import 'package:sync_relay_core/core.dart';
 
 void _expect(
   String name,
@@ -96,6 +96,16 @@ void main() {
       _expect('Show - OP1 [1080p].mkv', 'Show', extra: 'OP1');
       _expect('Show - ED.mkv', 'Show', extra: 'ED');
     });
+    test('Opening / Ending, creditless, PV, Menu, numbered', () {
+      _expect('[Judas] Sword Art Online S3 - Opening 1.mkv', 'Sword Art Online',
+          season: 3, group: 'Judas', extra: 'OP1', label: 'OP1');
+      _expect('[Judas] Sword Art Online S3 - Ending 2.mkv', 'Sword Art Online',
+          season: 3, group: 'Judas', extra: 'ED2');
+      _expect('Show - Creditless Opening 2.mkv', 'Show', extra: 'NCOP2');
+      _expect('Show - PV 3.mkv', 'Show', extra: 'PV3');
+      _expect('Show - Menu 1.mkv', 'Show', extra: 'Menu 1');
+      expect(parseReleaseName('Show - Opening 1.mkv').kind, ReleaseKind.extra);
+    });
     test('"Special" inside a title is a title', () {
       _expect('Special Operations Unit - 04.mkv', 'Special Operations Unit',
           episode: 4);
@@ -142,6 +152,19 @@ void main() {
     test('WEB-DL at the end is not a group', () {
       _expect('Some.Movie.2021.1080p.WEB-DL.mkv', 'Some Movie', year: 2021);
     });
+    test('Movie N, The Movie, Gekijouban', () {
+      final k = parseReleaseName(
+          '[Erai-raws] Kimetsu no Yaiba - Mugenjou Hen - Movie 01 [1080p CR WEBRip HEVC AAC][MultiSub][8E47462C].mkv');
+      expect([k.series, k.movie, k.movieNumber, k.episode, k.group, k.kind, k.label],
+          ['Kimetsu no Yaiba - Mugenjou Hen', true, 1, null, 'Erai-raws', ReleaseKind.movie, 'Movie 1']);
+      final t = parseReleaseName('Show - The Movie [BD].mkv');
+      expect([t.series, t.movie, t.movieNumber], ['Show', true, null]);
+      final g = parseReleaseName('Gekijouban Bleach Fade to Black.mkv');
+      expect([g.series, g.movie, g.kind], ['Bleach Fade to Black', true, ReleaseKind.movie]);
+      // A title with the word in it is still a title.
+      final s = parseReleaseName('Some Movie (2019).mkv');
+      expect([s.series, s.movie, s.year, s.kind], ['Some Movie', false, 2019, ReleaseKind.movie]);
+    });
     test('hyphen in the title', () {
       _expect('Spider-Man.2002.1080p.BluRay.mkv', 'Spider-Man', year: 2002);
     });
@@ -157,6 +180,43 @@ void main() {
       expect(parseReleaseName('[Grp].mkv').series, isNotEmpty);
       expect(parseReleaseName('1080p.mkv').series, '1080p');
       expect(parseReleaseName('').series, '');
+    });
+  });
+
+  test('a name that is only the number has no title (the folder gives one)', () {
+    final p = parseReleaseName('01.mkv');
+    expect([p.series, p.episode, p.kind], ['', 1, ReleaseKind.episode]);
+    expect(parseReleaseName('Episode 07.mkv').series, '');
+    expect(parseReleaseName('2019.mkv').episode, isNull, reason: 'a year, not an episode');
+    expect(parseReleaseName('vid.mp4').kind, ReleaseKind.other);
+  });
+
+  test('parenthetical season and its name', () {
+    final p = parseReleaseName('Sword Art Online (Season 3 - Alicization) - 05.mkv');
+    expect([p.series, p.season, p.subtitle, p.episode], ['Sword Art Online', 3, 'Alicization', 5]);
+  });
+
+  group('folder names', () {
+    test('ranges, groups and tags', () {
+      final b = parseFolderName('[Judas] Bleach 056-111 [BD 1080p][HEVC x265 10bit]');
+      expect([b.title, b.firstEpisode, b.lastEpisode, b.group, b.season], ['Bleach', 56, 111, 'Judas', null]);
+      final c = parseFolderName('[Judas] Bleach 112-139 [BD 1080p][HEVC x265 10bit][Dual-Audio][Eng-Subs]');
+      expect([c.title, c.firstEpisode, c.lastEpisode], ['Bleach', 112, 139]);
+    });
+    test('a parenthetical season with its name, read before brackets go', () {
+      final s = parseFolderName('[Judas] Sword Art Online (Season 3 - Alicization) [BD 1080p][HEVC x265 10bit][Eng-Subs]');
+      expect([s.title, s.season, s.subtitle, s.group], ['Sword Art Online', 3, 'Alicization', 'Judas']);
+    });
+    test('season-only and extras folders, years', () {
+      expect(parseFolderName('Season 2').season, 2);
+      expect(parseFolderName('Season 2').title, '');
+      expect(parseFolderName('S03').season, 3);
+      expect(parseFolderName('Extras').extras, isTrue);
+      expect(parseFolderName('NCOP').extras, isTrue);
+      final y = parseFolderName('Show (2019)');
+      expect([y.title, y.year], ['Show', 2019]);
+      expect(parseFolderName('Show 2nd Season').season, 2);
+      expect(parseFolderName('Show 2nd Season').title, 'Show');
     });
   });
 

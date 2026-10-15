@@ -159,9 +159,10 @@ class ServerIsolate {
 
   /// Opens the server to the network ([SyncServer.share]): a listener on
   /// every interface at [port], the password [secret], the Jellyfin relay
-  /// login [jellyfin]. Returns the bound port; throws a [StateError] with
+  /// logins [jellyfin] (one per Jellyfin server). Returns the bound port;
+  /// throws a [StateError] with
   /// the server's reason (a port in use) when it cannot.
-  Future<int> share({required int port, required String secret, JellyfinCredential? jellyfin,
+  Future<int> share({required int port, required String secret, List<JellyfinCredential>? jellyfin,
       Duration timeout = const Duration(seconds: 10)}) async {
     if (_exited.isCompleted) throw StateError('the server is not running');
     final reply = ReceivePort('server share');
@@ -170,7 +171,7 @@ class ServerIsolate {
         't': 'share',
         'port': port,
         'secret': secret,
-        'jellyfin': ?jellyfin?.toMap(),
+        if (jellyfin != null) 'jellyfin': [for (final c in jellyfin) c.toMap()],
         'reply': reply.sendPort,
       });
       final msg = await reply.first.timeout(timeout);

@@ -7,7 +7,6 @@ import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import 'package:sync_relay_core/core.dart';
 
-import '../files/name_parser.dart';
 import '../schedule/anilist.dart';
 
 // Art for media this client swapped in (`art`, see PROTOCOL.md "Media
@@ -58,6 +57,11 @@ Future<ArtBytes?> aniListArt(AniListClient aniList, String name,
   if (!RegExp(r'\p{L}', unicode: true).hasMatch(series)) return null;
   final match = await aniList.searchMedia(series);
   if (match == null) return null;
+  return _artOf(match, fetch);
+}
+
+Future<ArtBytes> _artOf(AniListMedia match,
+    Future<Uint8List?> Function(Uri url, Map<String, String> headers, int maxBytes) fetch) async {
   Future<Uint8List?> get(String? url, int maxBytes) async {
     final uri = url == null ? null : Uri.tryParse(url);
     return uri == null ? null : fetch(uri, const {}, maxBytes);
@@ -69,6 +73,14 @@ Future<ArtBytes?> aniListArt(AniListClient aniList, String name,
   ).wait;
   final poster = cover ?? (match.coverSmall == match.cover ? null : await get(match.coverSmall, RelayConstants.maxPosterBytes));
   return (poster: poster, banner: banner);
+}
+
+/// Cover and banner of AniList entry [id] (a file the library matched);
+/// null when AniList has none.
+Future<ArtBytes?> aniListArtById(AniListClient aniList, int id,
+    {Future<Uint8List?> Function(Uri url, Map<String, String> headers, int maxBytes) fetch = fetchImage}) async {
+  final match = await aniList.mediaById(id);
+  return match == null ? null : _artOf(match, fetch);
 }
 
 /// A web video's thumbnail at [url] as both cover and banner (the same

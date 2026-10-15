@@ -354,8 +354,10 @@ media.ref = {"kind":"episode","title":"Show","anilistId":1,"anilistEp":6,
   is (the server drops non-integer ids and cuts `title` to 200
   characters). `kind` `episode`, `movie` or `extra` (else no ref); every
   other field optional; `season` absent for absolute numbering. At most
-  2 KiB of JSON, else `err` `bad`. **Reserved**: nothing produces it yet
-  (step 4).
+  2 KiB of JSON, else `err` `bad`. Apps send it with swaps and Up next
+  adds of files (the sender's library match), Jellyfin items (their
+  provider ids) and links (kind and title only); receivers name the
+  media by it (ARCHITECTURE.md "Library").
 
 ## Avatars
 

@@ -8,8 +8,10 @@ import 'package:sync_relay_core/core.dart';
 
 
 // AniList airing schedule (public GraphQL, no login): every episode airing
-// in a time range, with covers, banners and popularity; and a title search
-// (cover + banner of a show, for the media art of files and links).
+// in a time range, with covers, banners and popularity; a title search
+// (cover + banner of a show, for the media art of files and links); and
+// the library's lookups (search with synonyms and relations, one entry by
+// id; see ARCHITECTURE.md "Media identity").
 //
 // AniList allows ~90 requests/min (sometimes degraded to 30), so the raw
 // pages are cached: in memory for 10 min (tab switches) and on disk for an
@@ -105,6 +107,177 @@ class AniListMedia {
   }
 }
 
+/// An anime as the library matches it ([AniListClient.searchAnime],
+/// [AniListClient.anime]): titles and synonyms to match on, its format
+/// and length, art, and the next TV entry of its run ([sequel]) to number
+/// across split seasons and cours. JSON round-trips for the library's
+/// cache ([toJson]).
+class AniListEntry {
+  final int id;
+  final String romaji;
+  final String english;
+  final String native;
+  final List<String> synonyms;
+  /// `TV`, `TV_SHORT`, `MOVIE`, `OVA`, `ONA`, `SPECIAL`, `MUSIC`; '' unknown.
+  final String format;
+  /// Null while it airs with no announced count.
+  final int? episodes;
+  final int? year;
+  final String? cover;
+  final String? coverSmall;
+  final String? banner;
+  /// The next TV / TV_SHORT / ONA entry (`SEQUEL` relation).
+  final int? sequel;
+  final int? prequel;
+  /// Episode titles AniList knows (its streaming episodes), by number.
+  final Map<int, String> episodeTitles;
+
+  const AniListEntry({
+    required this.id,
+    this.romaji = '',
+    this.english = '',
+    this.native = '',
+    this.synonyms = const [],
+    this.format = '',
+    this.episodes,
+    this.year,
+    this.cover,
+    this.coverSmall,
+    this.banner,
+    this.sequel,
+    this.prequel,
+    this.episodeTitles = const {},
+  });
+
+  /// English title, else romaji.
+  String get title => english.isNotEmpty ? english : (romaji.isNotEmpty ? romaji : native);
+
+  /// Every name it goes by, for matching.
+  List<String> get names => [
+        for (final t in [english, romaji, native, ...synonyms])
+          if (t.trim().isNotEmpty) t,
+      ];
+
+  bool get isMovie => format == 'MOVIE';
+
+  /// A run of episodes a season or cour is made of.
+  bool get isSeries => format == 'TV' || format == 'TV_SHORT' || format == 'ONA';
+
+  static const graphQLFields = 'id title{romaji english native} synonyms format episodes seasonYear '
+      'coverImage{extraLarge large} bannerImage '
+      'relations{edges{relationType node{id format type}}} streamingEpisodes{title}';
+
+  static final _streamingTitle = RegExp(r'^\s*(?:Episode|Ep\.?)\s*(\d{1,4})\s*[-–:]\s*(.+)$', caseSensitive: false);
+
+  /// From an AniList `Media` object; null when it has no id.
+  static AniListEntry? fromGraphQL(Object? m) {
+    if (m is! Map || m['id'] is! int) return null;
+    String str(Object? v) => v is String ? v : '';
+    final t = m['title'] is Map ? m['title'] as Map : const {};
+    final cov = m['coverImage'] is Map ? m['coverImage'] as Map : const {};
+    final large = cov['large'] is String ? cov['large'] as String : null;
+    int? related(String type) {
+      final edges = m['relations'] is Map ? (m['relations'] as Map)['edges'] : null;
+      if (edges is! List) return null;
+      for (final e in edges) {
+        if (e is! Map || e['relationType'] != type) continue;
+        final node = e['node'];
+        if (node is Map && node['id'] is int && node['type'] != 'MANGA' &&
+            const {'TV', 'TV_SHORT', 'ONA'}.contains(node['format'])) {
+          return node['id'] as int;
+        }
+      }
+      return null;
+    }
+
+    final titles = <int, String>{};
+    final streaming = m['streamingEpisodes'];
+    if (streaming is List) {
+      for (final s in streaming) {
+        final match = s is Map && s['title'] is String ? _streamingTitle.firstMatch(s['title'] as String) : null;
+        if (match != null) titles.putIfAbsent(int.parse(match.group(1)!), () => match.group(2)!.trim());
+      }
+    }
+    return AniListEntry(
+      id: m['id'] as int,
+      romaji: str(t['romaji']),
+      english: str(t['english']),
+      native: str(t['native']),
+      synonyms: [
+        if (m['synonyms'] is List)
+          for (final s in m['synonyms'] as List)
+            if (s is String && s.trim().isNotEmpty) s.trim(),
+      ],
+      format: str(m['format']),
+      episodes: m['episodes'] is int ? m['episodes'] as int : null,
+      year: m['seasonYear'] is int ? m['seasonYear'] as int : null,
+      cover: cov['extraLarge'] is String ? cov['extraLarge'] as String : large,
+      coverSmall: large,
+      banner: m['bannerImage'] is String ? m['bannerImage'] as String : null,
+      sequel: related('SEQUEL'),
+      prequel: related('PREQUEL'),
+      episodeTitles: titles,
+    );
+  }
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'romaji': romaji,
+        'english': english,
+        'native': native,
+        'synonyms': synonyms,
+        'format': format,
+        'episodes': episodes,
+        'year': year,
+        'cover': cover,
+        'coverSmall': coverSmall,
+        'banner': banner,
+        'sequel': sequel,
+        'prequel': prequel,
+        'episodeTitles': {for (final e in episodeTitles.entries) '${e.key}': e.value},
+      };
+
+  static AniListEntry? fromJson(Object? j) {
+    if (j is! Map || j['id'] is! int) return null;
+    String str(Object? v) => v is String ? v : '';
+    String? opt(Object? v) => v is String ? v : null;
+    int? n(Object? v) => v is int ? v : null;
+    final titles = j['episodeTitles'];
+    return AniListEntry(
+      id: j['id'] as int,
+      romaji: str(j['romaji']),
+      english: str(j['english']),
+      native: str(j['native']),
+      synonyms: [if (j['synonyms'] is List) ...(j['synonyms'] as List).whereType<String>()],
+      format: str(j['format']),
+      episodes: n(j['episodes']),
+      year: n(j['year']),
+      cover: opt(j['cover']),
+      coverSmall: opt(j['coverSmall']),
+      banner: opt(j['banner']),
+      sequel: n(j['sequel']),
+      prequel: n(j['prequel']),
+      episodeTitles: {
+        if (titles is Map)
+          for (final e in titles.entries)
+            if (int.tryParse('${e.key}') case final k? when e.value is String) k: e.value as String,
+      },
+    );
+  }
+
+  @override
+  String toString() => 'AniListEntry($id "$title" $format ${episodes ?? '?'} eps)';
+}
+
+/// What the library asks AniList ([AniListClient]; tests fake it).
+abstract interface class AniListLookup {
+  /// Anime matching [query], AniList's best first.
+  Future<List<AniListEntry>> searchAnime(String query);
+
+  /// One anime by id; null when AniList has none.
+  Future<AniListEntry?> anime(int id);
+}
+
 /// "#e4a15d" -> opaque [Color]; anything else -> null.
 Color? parseHexColor(Object? s) {
   if (s is! String || s.length != 7 || !s.startsWith('#')) return null;
@@ -142,7 +315,7 @@ class _Cached {
   const _Cached(this.fetched, this.from, this.to, this.raw);
 }
 
-class AniListClient {
+class AniListClient implements AniListLookup {
   AniListClient({
     String url = aniListDefaultUrl,
     HttpClient? http,
@@ -301,6 +474,49 @@ coverImage{extraLarge large} bannerImage}}''';
       return AniListMedia.fromJson(data?['Media']);
     } on AniListException catch (e) {
       // No match is a 404 with "Not Found." in errors.
+      if (e.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+
+  static final _listQuery = 'query(\$search:String){Page(perPage:8){media(search:\$search,type:ANIME,'
+      'isAdult:false,sort:SEARCH_MATCH){${AniListEntry.graphQLFields}}}}';
+  static final _byIdQuery = 'query(\$id:Int){Media(id:\$id,type:ANIME){${AniListEntry.graphQLFields}}}';
+
+  /// Up to 8 anime matching [query], AniList's best first (the library's
+  /// matching and its "Wrong show?" search). Not cached here: the library
+  /// keeps what it needs.
+  @override
+  Future<List<AniListEntry>> searchAnime(String query) async {
+    final q = query.trim();
+    if (q.isEmpty) return const [];
+    final (data, _, _) = await _graphql(_listQuery, {'search': q});
+    final page = data?['Page'];
+    final media = page is Map ? page['media'] : null;
+    return [if (media is List) for (final m in media) ?AniListEntry.fromGraphQL(m)];
+  }
+
+  @override
+  Future<AniListEntry?> anime(int id) async {
+    try {
+      final (data, _, _) = await _graphql(_byIdQuery, {'id': id});
+      return AniListEntry.fromGraphQL(data?['Media']);
+    } on AniListException catch (e) {
+      if (e.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+
+  static const byIdArtQuery = r'''
+query($id:Int){Media(id:$id,type:ANIME){id title{romaji english} coverImage{extraLarge large} bannerImage}}''';
+
+  /// Cover and banner of AniList entry [id] (the media art of a file the
+  /// library matched); null when there is none.
+  Future<AniListMedia?> mediaById(int id) async {
+    try {
+      final (data, _, _) = await _graphql(byIdArtQuery, {'id': id});
+      return AniListMedia.fromJson(data?['Media']);
+    } on AniListException catch (e) {
       if (e.statusCode == 404) return null;
       rethrow;
     }

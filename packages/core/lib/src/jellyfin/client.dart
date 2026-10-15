@@ -183,7 +183,7 @@ class JellyfinClient {
 
   /// Fields requested for list items: enough for cards and detail headers.
   static const listFields =
-      'PrimaryImageAspectRatio,Overview,ChildCount,RecursiveItemCount,DateCreated';
+      'PrimaryImageAspectRatio,Overview,ChildCount,RecursiveItemCount,DateCreated,ProviderIds';
   static const _imageParams = {
     'enableImageTypes': 'Primary,Backdrop,Thumb,Logo',
     'imageTypeLimit': '1',

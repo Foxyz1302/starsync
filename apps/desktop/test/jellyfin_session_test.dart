@@ -193,9 +193,10 @@ void main() {
       expect(plain.name, 'movie.mkv');
     });
 
-    test('relay credential: the account token with exactly its own device fields', () async {
+    test('relay credentials: each account token with exactly its own device fields', () async {
       final (accounts, _) = await linkedAccounts();
-      final cred = relayCredentialFor(accounts, serverId: fixtureServerId)!;
+      final creds = relayCredentialsFor(accounts);
+      final cred = creds.single;
       final info = accounts.clientInfo;
       expect(cred.token, 'TEST_ACCESS_TOKEN');
       expect(cred.serverId, fixtureServerId);
@@ -203,13 +204,11 @@ void main() {
       expect([cred.client, cred.device, cred.deviceId, cred.version],
           [info.client, info.device, info.deviceId, info.version]);
       expect(cred.device, 'Test PC');
-      // Another server's item: the default account still relays its own.
-      expect(relayCredentialFor(accounts, serverId: 'other')!.serverId, fixtureServerId);
       accounts.markExpired(fixtureServerId);
-      expect(relayCredentialFor(accounts, serverId: fixtureServerId), isNull);
+      expect(relayCredentialsFor(accounts), isEmpty);
       final none = JellyfinAccounts(store: MemoryJellyfinStore());
       await none.ensureLoaded(validate: false);
-      expect(relayCredentialFor(none), isNull);
+      expect(relayCredentialsFor(none), isEmpty);
     });
   });
 

@@ -65,6 +65,8 @@ Future<void> main(List<String> args) async {
   } catch (e, st) {
     debugPrint('load connect form failed: $e\n$st');
   }
+  // The library's matches, pins and offsets (device-owned).
+  unawaited(graph.library.ensureLoaded());
   MediaKit.ensureInitialized();
   // yt-dlp for web page links: downloaded on first run, kept current.
   ports.links.warmUp();

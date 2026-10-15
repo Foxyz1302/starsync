@@ -7,11 +7,11 @@ import 'package:flutter/foundation.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
-import '../files/name_parser.dart';
 import '../files/thumbnails.dart';
 import '../jellyfin/accounts.dart';
 import '../jellyfin/format.dart' show pickFor;
 import '../jellyfin/session_media.dart';
+import '../library/media_refs.dart';
 import '../screens/home/picked_media.dart';
 import '../session/app_events.dart' show AddedToUpNext;
 import '../session/media_art.dart';
@@ -164,15 +164,22 @@ class QueueController {
             if (bytes.length <= RelayConstants.maxPosterBytes) thumb = bytes;
           } catch (_) {}
         }
-        final ep = [
-          if (parsed.season != null) 'S${parsed.season}',
-          if (parsed.episode != null) 'E${parsed.episode}',
-        ].join();
+        // The library's name for it when it knows the show (what friends
+        // see in Up next), else the release name's.
+        final what = coord.fileRef?.call(path);
+        final ep = what != null && what.kind == 'episode'
+            ? (refEpisodeLine(what) ?? '').replaceAll(' ', '')
+            : [
+                if (parsed.season != null) 'S${parsed.season}',
+                if (parsed.episode != null) 'E${parsed.episode}',
+                if (parsed.episode == null) ?parsed.extra,
+              ].join();
+        final title = what != null && what.title.isNotEmpty ? what.title : parsed.series.trim();
         return (
           item: QueueItem(
-            media: HelloMedia(name: name, size: await file.length(), duration: 0),
+            media: HelloMedia(name: name, size: await file.length(), duration: 0, ref: what),
             how: QueueHow.file,
-            title: parsed.series.trim().isEmpty ? name : parsed.series.trim(),
+            title: title.isEmpty ? name : title,
             sub: ep,
             duration: (shot?.duration.inMilliseconds ?? 0) / 1000,
             key: _newKey(),
@@ -187,7 +194,7 @@ class QueueController {
         if (ref != null) {
           return (
             item: QueueItem(
-                media: HelloMedia(name: linked.name, size: 0, duration: 0, jellyfin: ref),
+                media: linked,
                 how: QueueHow.jellyfin,
                 title: ref.title.isEmpty ? linked.name : ref.title,
                 sub: ref.subtitle ?? '',
@@ -234,7 +241,8 @@ class QueueController {
                 size: 0,
                 duration: 0,
                 url: how == QueueHow.through ? null : url,
-                relay: how == QueueHow.server ? const MediaRelay(fetch: true) : null),
+                relay: how == QueueHow.server ? const MediaRelay(fetch: true) : null,
+                ref: linkMediaRef(title)),
             how: how,
             title: title,
             sub: site,

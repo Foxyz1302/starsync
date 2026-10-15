@@ -7,7 +7,7 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 
 | Path | What | Rule |
 |---|---|---|
-| `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client, updater, watched rule (`WatchSession`); `testing.dart` (test support for all three packages, not in `core.dart`: `FlakyProxy`) | pure Dart, no Flutter |
+| `packages/core` | protocol messages, sync engine (`SyncEngine`), constants, config, Range parsing, logging, Jellyfin client, updater, watched rule (`WatchSession`), the library's L1 (`library/`: release and folder names, `groupLocal`); `testing.dart` (test support for all three packages, not in `core.dart`: `FlakyProxy`) | pure Dart, no Flutter |
 | `packages/server` | Relic HTTP + WebSocket server (`SyncServer`, `ServerHub`, `Session`, media endpoint, relay buffer, Jellyfin relay), the `serve()` entrypoint, `bin/server.dart` (dedicated server) | pure Dart, no Flutter |
 | `apps/desktop` | Flutter app: UI, `AppGraph` (composition root), `SyncClient`, `Connection`, `SessionCoordinator`, `Navigation`, `YourServer` (`ServerIsolate`), `PlaybackController` (media_kit/mpv), update UI (`UpdateController`) | ships with `starsync-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
@@ -48,9 +48,10 @@ attach and detach the network listener (below).
 - **Listeners**: `SyncServer.share(port, secret, jellyfin)` attaches a
   second listener on every IPv4 interface at the port from Settings →
   Party & network (default 8080) to the running server (Relic serves the
-  same routes on both), sets the password and the Jellyfin relay login
-  (the default account's, so guests without an account watch Jellyfin
-  items through the server); `unshare` closes it. Nothing restarts for
+  same routes on both), sets the password and the Jellyfin relay logins
+  (one per linked account, `relayCredentialsFor`, so guests without an
+  account watch Jellyfin items through the server with your sign-in on
+  the item's own Jellyfin); `unshare` closes it. Nothing restarts for
   either: members on the loopback listener keep their sockets, the media
   and Up next stay. Unsharing sends everyone but the host out: each
   leaves at once (feed `leave`, reason `closed`) and its socket closes
@@ -133,7 +134,9 @@ only stopping sharing sends guests out.
 (`AppGraph.build`) and constructs and disposes the app's systems: the
 `Ports`, the sounds (`SynthSfx`), the `Notifier`, the `Connection`, the
 `SessionCoordinator`, the connect form and recents (`ConnectStore`,
-`state/connect_prefs.dart`), `YourServer` and `Navigation`; it wires them
+`state/connect_prefs.dart`), `YourServer`, `Navigation` and the library's
+matches (`ShowMatcher`, "Library", whose `refForPath` it hands the
+coordinator as `fileRef`); it wires them
 through their constructors (and gives `Profile` the form and the push) and
 has no logic or signals of its own. Widgets reach it through one
 `AppScope` InheritedWidget (`AppScope.of(context)`, readable in
@@ -653,20 +656,22 @@ Gotchas (Jellyfin 10.11):
 ## Jellyfin relay
 
 For viewers without an account on the item's Jellyfin
-(`packages/server/lib/src/jellyfin_relay.dart`). The server may hold one
-`JellyfinCredential` (config key `jellyfin`: `baseUrl`, `serverId`, `token`,
-`client`, `device`, `deviceId`, `version`; primitives, so it crosses the
-isolate boundary in the `serve()` map). The app sends it when your server
-is shared (`share`): its own app-obtained token and that token's device
-fields; the dedicated server
-reads it from `--jellyfin <file>` (YAML/JSON with those keys, keeps the
+(`packages/server/lib/src/jellyfin_relay.dart`). The server holds its
+logins as `JellyfinCredential`s (`ServerHub.jellyfinLogins`, at most one
+per Jellyfin `serverId`; each: `baseUrl`, `serverId`, `token`, `client`,
+`device`, `deviceId`, `version`; primitives, so they cross the isolate
+boundary). The app sends one per linked account (not known expired, the
+default first) when your server is shared (`share`): its own
+app-obtained tokens and their device fields; the dedicated server has one,
+read from `--jellyfin <file>` (YAML/JSON with those keys, keeps the
 token off the command line) or a `jellyfin:` map in `--config`. An empty
-`serverId` is looked up at start (`/System/Info/Public`); if that fails the
-relay stays off. The token is never logged (`toString` and config parse
-errors leave it out).
+`serverId` is looked up at start (`/System/Info/Public`); if that fails
+that login stays unused. Tokens are never logged (`toString` and config
+parse errors leave them out).
 
-- Available (`state.relay`) only while the current media is a ref whose
-  `serverId` equals the credential's; `state.relayNext` likewise for Up
+- Available (`state.relay`) only while the current media is a ref on a
+  server one of the logins is for (`loginFor(serverId)`, which `/j` then
+  uses); `state.relayNext` likewise for Up
   next's first item, which `/j` also serves so guests can preload it
   (see "Getting ready" under "Up next"). Only those two items are
   relayed, only to a valid viewer token: no open proxy.
@@ -1282,6 +1287,73 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   in order, a link in the Link page's mode). All go through
   `QueueController.add`. None of it offline.
 
+## Library
+
+Local videos as shows, device-owned (the three-way truth: library, match
+corrections and watch history live on the device). Two layers:
+
+**L1, local identity** (`packages/core/lib/src/library/`, pure and
+offline): `parseReleaseName` reads a file name (title, group, season,
+episode, year, extras: OP/ED, Opening/Ending, NCOP/NCED, OVA, specials,
+PV, Menu, numbered; movies: `Movie N`, `The Movie`, `Gekijouban`, a
+title with a year), `parseFolderName` a folder name (title, season and
+its name from a parenthetical read before brackets go, `(Season 3 -
+Alicization)`, an episode range `001-055`, a season-only or extras
+folder). `groupLocal(files, roots:)` keeps the videos (anything else,
+`.lnk` shortcuts included, is counted as ignored) and reads each
+(`readLocalFile`): the file's own name wins, the folders between it and
+its watched folder are hints, nearest first (a bare `01.mkv` takes the
+folder's title, a file under `Season 2` its season). Files group into a
+`LocalShow` by `normalizeSeries` of their title, across folders (Bleach
+in three folders is one show), with `LocalSeason`s as numbered (a null
+number is an absolute run, kept as found), extras and the show's movies;
+a movie of no show here stands alone, anything else is "other". Each
+season knows its holes (`EpisodeGap`: before the first episode, between
+episodes, and up to a folder range's end), so `LocalShow.nextAfter(key)`
+gives the next episode and the numbers skipped on the way. Keys are
+stable across rescans (`show|s<season>|e<n>`, extras and movies alike);
+ordering is deterministic (titles, then numbers, then names). The app's
+scan (`files/scanner.dart`, `FolderAccess.scan`) only walks and pairs
+subtitles; the Files page groups its `LocalFile`s.
+
+**L2, match** (`apps/desktop/lib/src/library/`, `ShowMatcher`, made by
+the composition root, cached in the Hive box `library`, `LibraryStore`):
+a show's season (by show key, season and season name) is searched once
+on AniList (`AniListClient.searchAnime`: titles, synonyms, format,
+episodes, art, the SEQUEL / PREQUEL TV entries and episode titles) with
+the season's name or "season N" as hints; `scoreMatch` weighs titles and
+synonyms (`Re.Zero` finds `Re:ZERO -Starting Life in Another World-`),
+the season marker in a name (`4th Season`), the format (TV for episodes,
+MOVIE for movies) and AniList's own order; below a threshold nothing is
+kept ("none", asked again after 3 days). A season the search misses is
+the show's first entry walked along its sequels. Episode numbers
+(plus the user's offset) map onto AniList along the run: past an
+entry's episode count, its sequel's (a TVDB season AniList splits into
+cours, SAO S3 25 = War of Underworld 1), or, when signed in to
+AnimeFlow, its `anilist_map` runs for that season (which also give the
+TVDB id). Corrections win over everything and survive rescans: a pin of
+the show everywhere (`pin:show:<key>`) or of a folder and what is below
+it (`pin:folder:<path>`, more specific), and an episode offset per show
+and season ("these files are episodes N.."). Requests are lazy (cards
+and pages on screen ask, `want`), one at a time, 800 ms apart, paused a
+minute after a 429; failures are retried after 5 minutes; everything
+answers from the cache offline. Episode and show names, cover and banner
+come from the matched entry.
+
+**Media identity** (`media.ref`, [PROTOCOL.md](PROTOCOL.md) "Media
+identity"): what a media is, independent of where its bytes come from.
+Producers: a local file, `ShowMatcher.refFor` (L1 kind and numbers, the
+match's title, AniList entry and episode, the TVDB id from AnimeFlow;
+L1 only before a match); a Jellyfin item, `jellyfinMediaRef` (kind,
+series title, season and episode, the AniList / Tvdb provider ids of the
+show or movie, `ProviderIds` in the item fields; from a pick's lines,
+`jellyfinPickRef`, when the item was not at hand); a link,
+`linkMediaRef` (its name read as a release name, else a movie of that
+title). Swaps (`swapFile`, `swapJellyfin`, `swapLink`) and Up next adds
+carry it; Up next names a file item by it. Consumers: receivers' now
+playing title and episode line (`refTitle`), the swapper's art (by the
+AniList id); later the watch tracking keys on it.
+
 ## App events and platform ports
 
 **Status.** What the session is like right now is one computed value,
@@ -1558,10 +1630,24 @@ panel) and chat messages (Copy message, and a link in it).
   that fails although the kept preview looked fine, the preview is
   probed again and shows why, with "Put it up anyway" when it is a
   problem. Files
-  is `FilesPage` (`files/`): watched folders (`FolderStore`) scanned in
-  an isolate, videos grouped by series; series start collapsed, a header
-  click opens one and open ones stay open for the app session
-  (`showFilesFolder` opens a folder from outside). With nobody else
+  is `FilesPage` (`files/`), a library over the watched folders
+  (`FolderStore`, each scanned in an isolate when first needed): places
+  on the left (chips when narrow): Library (every folder together, the
+  default), Recent, then each folder (`showFilesFolder` opens one from
+  outside). A place is poster cards (2:3, like the Jellyfin browser's;
+  the AniList cover, else a frame of the first episode) for its Shows and
+  Movies, then the Other videos as 16:9 cards; a show card says how many
+  episodes, or the next one after the last played here. A click on a show
+  opens its page (`files/ui/library_view.dart`, kept open per place for
+  the app session, Back returns): a banner header (AniList banner, else a
+  frame) with the proper name, what the files are (seasons, episodes,
+  extras, group, folders), the match ("AniList: …", "files say …",
+  pinned), the gap prompt ("66–107 aren't in your folders — skip to
+  108?") above the next-episode button, Wrong show? and Episode
+  numbers…; then season chips (more than one season), the season's
+  episodes as rows ("12. Name" with AniList's episode title, else
+  "Episode 12"; one click plays, right-click queues) with the holes as
+  muted rows, Extras and the show's Movies. With nobody else
   in the server (`alone` on the Library, Files and Schedule, D9) the
   buttons say Play, Link has no relay modes and a link goes up direct,
   Files has no relay notice; a put-up before your server is up waits for
@@ -2220,10 +2306,13 @@ testers land back on stable. `0.0.0-dev` (a dev run) checks nothing.
   shows its swap landed (`media_art.dart`: Jellyfin series/item images with
   its own account; a web link's yt-dlp thumbnail, the one the Library's
   Recent grid shows, as poster and banner both, shrunk to a JPEG under the
-  poster cap when larger; else an AniList title search on the parsed
+  poster cap when larger; else the AniList entry `media.ref` names (a
+  matched local file), else an AniList title search on the parsed
   release name) and sends `art`, so guests without Jellyfin get covers too.
   `coordinator.nowPlaying` derives title, episode line and art hashes from
-  `state.media` (`now_playing_info.dart`). A web video
+  `state.media` (`now_playing_info.dart`); a non-Jellyfin media with a
+  `media.ref` is named by it (its title, `S3 E13` / `E108`, an extra's
+  own marker), see "Library". A web video
   (`NowPlaying.thumbnail`) shows the media name as is, no episode line, a
   16:9 cover in the controls (a neutral placeholder until the art is up)
   and none on the start card. Art up: poster and banner of one hash mark

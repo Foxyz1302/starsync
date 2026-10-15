@@ -22,3 +22,5 @@ export 'src/jellyfin/http.dart';
 export 'src/jellyfin/links.dart';
 export 'src/jellyfin/models.dart';
 export 'src/jellyfin/track_match.dart';
+export 'src/library/local_library.dart';
+export 'src/library/release_name.dart';

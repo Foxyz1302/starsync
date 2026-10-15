@@ -130,7 +130,7 @@ class SyncServer {
     mountArtRoute(_app, hub);
     mountSessionLogRoutes(_app, hub, () => _sessionLog);
     mountJellyfinRelayRoute(
-        _app, sessions, () => hub.jellyfin, () => _relayClient ??= HttpClient(),
+        _app, sessions, hub.loginFor, () => _relayClient ??= HttpClient(),
         next: () => hub.nextJellyfinRef, onLog: logRequest);
     // advertiseHost is only an explicit override; otherwise echo what the client dialled.
     String authority(String dialledHost) => config.advertiseHost.isNotEmpty
@@ -193,32 +193,39 @@ class SyncServer {
   }
 
   /// A configured credential without a ServerId gets it from
-  /// `/System/Info/Public` (unauthenticated). On failure the relay stays off.
+  /// `/System/Info/Public` (unauthenticated). On failure that login stays
+  /// unused.
   Future<void> _resolveJellyfinServerId() async {
-    final cred = hub.jellyfin;
-    if (cred == null) return;
-    if (cred.serverId.isEmpty) {
-      final client = JellyfinClient(baseUrl: cred.baseUrl, clientInfo: cred.clientInfo);
-      try {
-        final info = await client.publicInfo().timeout(const Duration(seconds: 10));
-        hub.jellyfin = cred.withServerId(info.id);
-      } catch (e) {
-        _log.warning('jellyfin relay off: server id lookup failed: $e');
-        return;
-      } finally {
-        client.close();
+    final logins = <JellyfinCredential>[];
+    for (final cred in hub.jellyfinLogins) {
+      var c = cred;
+      if (c.serverId.isEmpty) {
+        final client = JellyfinClient(baseUrl: c.baseUrl, clientInfo: c.clientInfo);
+        try {
+          final info = await client.publicInfo().timeout(const Duration(seconds: 10));
+          c = c.withServerId(info.id);
+        } catch (e) {
+          _log.warning('jellyfin relay off for ${c.baseUrl}: server id lookup failed: $e');
+        } finally {
+          client.close();
+        }
+      }
+      if (c.serverId.isNotEmpty && !logins.any((l) => l.serverId == c.serverId)) {
+        logins.add(c);
+        _log.info('jellyfin relay on for server ${c.serverId}');
       }
     }
-    _log.info('jellyfin relay on for server ${hub.jellyfin!.serverId}');
+    hub.jellyfinLogins = logins;
   }
 
   /// Opens the running server to the network: a second listener on
   /// every IPv4 interface at [port] (0: a free one), the password
-  /// [secret] ('' : open) and the Jellyfin relay login [jellyfin]. Members
+  /// [secret] ('' : open) and the Jellyfin relay logins [jellyfin] (one
+  /// per Jellyfin server; null keeps the ones it has). Members
   /// already in (on the first listener) stay connected; nothing restarts.
   /// Shared already: the listener moves to [port] when it differs. Returns
   /// the bound port; throws when it cannot bind.
-  Future<int> share({required int port, required String secret, JellyfinCredential? jellyfin}) async {
+  Future<int> share({required int port, required String secret, List<JellyfinCredential>? jellyfin}) async {
     if (_server == null) throw StateError('the server is not running');
     final was = _shared;
     if (was != null && (port == 0 || port == was.port)) {
@@ -247,9 +254,9 @@ class SyncServer {
     return listener.port;
   }
 
-  void _applyShareSettings(String secret, JellyfinCredential? jellyfin) {
+  void _applyShareSettings(String secret, List<JellyfinCredential>? jellyfin) {
     session.secret = secret;
-    if (jellyfin != null) hub.jellyfin = jellyfin;
+    if (jellyfin != null) hub.jellyfinLogins = [...jellyfin];
   }
 
   /// Closes the network listener [share] opened: everyone but the host

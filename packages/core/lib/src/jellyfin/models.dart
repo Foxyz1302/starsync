@@ -232,6 +232,10 @@ class JellyfinItem {
   final String? parentLogoItemId;
   final String? parentLogoImageTag;
 
+  /// Ids on other databases (`AniList`, `Tvdb`, `Imdb`...), as Jellyfin's
+  /// metadata plugins set them; empty when none or not requested.
+  final Map<String, String> providerIds;
+
   /// Present on full item responses (`getItem`) for playable items.
   final List<JellyfinMediaSource> mediaSources;
   /// Streams of the default source; present on `getItem` and when
@@ -273,6 +277,7 @@ class JellyfinItem {
     this.parentThumbImageTag,
     this.parentLogoItemId,
     this.parentLogoImageTag,
+    this.providerIds = const {},
     this.mediaSources = const [],
     this.mediaStreams = const [],
   });
@@ -314,11 +319,25 @@ class JellyfinItem {
         parentThumbImageTag: _str(j['ParentThumbImageTag']),
         parentLogoItemId: _str(j['ParentLogoItemId']),
         parentLogoImageTag: _str(j['ParentLogoImageTag']),
+        providerIds: {
+          for (final e in (j['ProviderIds'] as Map? ?? const {}).entries)
+            if (e.value is String && (e.value as String).isNotEmpty) e.key.toString(): e.value as String,
+        },
         mediaSources: _list(j['MediaSources']).map(JellyfinMediaSource.fromJson).toList(),
         mediaStreams: _list(j['MediaStreams']).map(JellyfinMediaStream.fromJson).toList(),
       );
 
   JellyfinItemKind get kind => JellyfinItemKind.parse(type);
+
+  /// A provider id as a number (`providerId('AniList')`), case-insensitive
+  /// on the provider's name; null when absent or not a number.
+  int? providerId(String provider) {
+    final p = provider.toLowerCase();
+    for (final e in providerIds.entries) {
+      if (e.key.toLowerCase() == p) return int.tryParse(e.value.trim());
+    }
+    return null;
+  }
 
   Duration? get runTime => runTimeTicks == null ? null : ticksToDuration(runTimeTicks!);
 

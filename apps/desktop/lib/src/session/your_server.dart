@@ -8,7 +8,7 @@ import 'package:signals/signals.dart';
 import 'package:sync_relay_core/core.dart';
 
 import '../jellyfin/accounts.dart';
-import '../jellyfin/session_media.dart' show relayCredentialFor;
+import '../jellyfin/session_media.dart' show relayCredentialsFor;
 import '../state/connect_prefs.dart';
 import '../state/server_isolate.dart';
 import 'invite.dart';
@@ -60,7 +60,7 @@ class YourServer {
         _interfaces = interfaces ?? machineInterfaces;
 
   final ConnectStore forms;
-  /// Linked Jellyfin servers (default: the app's): the relay login.
+  /// Linked Jellyfin servers (default: the app's): the relay logins.
   final JellyfinAccounts? jellyfin;
   final Future<String> Function() _ytDlpDir;
   final String? Function() _logDir;
@@ -156,8 +156,8 @@ class YourServer {
         port: want,
         secret: form.hostSecret,
         // Guests without an account watch Jellyfin items through the
-        // server, with this app's own sign-in.
-        jellyfin: relayCredentialFor(_accounts),
+        // server, with this app's own sign-in on the item's server.
+        jellyfin: relayCredentialsFor(_accounts),
       );
       final invite = await inviteFor(bound, password: form.hostSecret.isNotEmpty);
       shared.value = invite;
