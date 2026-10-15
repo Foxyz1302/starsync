@@ -6,7 +6,11 @@ Layout and rules: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Needs the Flutter SDK (beta channel, Dart 3.13+) and, for the Linux desktop
 build, the usual GTK toolchain (clang, cmake, ninja, pkg-config, libgtk-3-dev).
-mpv libraries come from `media_kit_libs_video`. `fox_utils` (drag & drop,
+mpv libraries come from `media_kit_libs_video`. `flutter_soloud` (the app's
+sounds) compiles SoLoud and miniaudio from source in its build hook with
+that C++ toolchain (MSVC on Windows); it needs no audio dev headers (miniaudio
+loads ALSA / PulseAudio / JACK at run time) and, with `no_xiph_libs` set in
+the desktop pubspec, downloads nothing. `fox_utils` (drag & drop,
 clipboard files and images; native Linux/Windows plugin) is the owner's
 shared package, a git dependency pinned to a tag of
 `git.example.org/Foxyz/fox_utils`: bump it by tagging there and changing
@@ -67,6 +71,9 @@ and `e2e_check` (simulated viewers against a live server).
   media_kit "S/W rendering" because they have no display; that says nothing
   about the app. Run only tests related to
   what you changed.
+- `sound_device_e2e` opens the real audio device (flutter_soloud) and plays
+  every sound of every preset quietly (`WT_SFX_VOLUME`, default 0.1);
+  `sound_engine_test` covers the engine with a fake backend.
 - CI (`.gitea/workflows/ci.yml`): analyze + test for core and server, plus
   `dart compile exe` of the dedicated server (fails if Flutter creeps into
   `packages/server`). Desktop tests are not in CI.
@@ -184,7 +191,7 @@ slow to come up shows mpv's error with "no HTTP error logged".
 - media_kit has no public `Player.setProperty`; the code reaches mpv through a
   dynamic call on `player.platform`. Cache size goes through
   `PlayerConfiguration(bufferSize:)`.
-- Hot restart with any media_kit `Player` alive (session, thumbnails, sfx)
+- Hot restart with any media_kit `Player` alive (session, thumbnails)
   used to SIGSEGV on mpv's `core` thread: each mpv handle's wakeup callback
   is a `NativeCallable` of the old isolate, freed by the restart, and media_kit
   then sends the leftover handles `quit`, which fires it. `fox_utils`' Linux

@@ -335,7 +335,7 @@ menu and Settings say so). Otherwise the session player logs at `warn`
 on media_kit's handle): media_kit drains mpv's log on the UI thread, one
 message at a time, so a chatty level, or ffmpeg logging every retry of a
 refused request, could starve the UI. Shader and yt-dlp hook errors are
-`error` lines and still arrive. The thumbnail and sound players keep
+`error` lines and still arrive. The thumbnail players keep
 media_kit's default (`error`) and nothing listens to their log. The hardware path is
 fragile: media_kit borrows whatever EGL context GDK left current on the main
 thread (upstream media-kit#1404), so an X11 session or a Flutter/GDK change
@@ -1261,10 +1261,17 @@ panel) and chat messages (Copy message, and a link in it).
   dark space reverb) to quiet WAVs; `sound_bank.dart` voices every event
   in three presets (`SoundPreset`: Cosmic, Abyss, Wood & glass) in one
   shared key, so mixed presets still agree. `SynthSfx` renders a sound on
-  first use into the temp dir (cache key: preset, sound, ready index) and
-  plays it on a pool of three audio-only mpv players, at
-  `AppSettings.soundVolume` (square curve) unless switched off in
-  `soundsOff`. Settings → Notifications & sounds has the volume, the
+  first use (on a worker isolate, to WAV bytes in memory) and hands it to
+  `SoundEngine` (`platform/audio/sound_engine.dart`), which loads it into
+  flutter_soloud (SoLoud mixing into a miniaudio output device; voices
+  overlap) once per slot (sound and ready index); a different preset in a
+  slot replaces and frees the old sound. Each play is at
+  `AppSettings.soundVolume` (as v^6, SoLoud's linear gain: the square curve times mpv's cubic volume the sounds used to play through, so the slider sounds as before) unless
+  switched off in `soundsOff`. The device opens 2 s after startup
+  (`warmUp`), so neither startup nor the first sound waits on it; if it
+  can't open, the engine logs `no sounds: audio init failed` once and drops
+  every play. The close path disposes the engine (deinit, 500 ms bound)
+  before leaving the server. Settings → Notifications & sounds has the volume, the
   overall sound set (`soundPreset`), and per sound a preview, its own set
   (`soundPresetFor`, else the overall one) and a switch; a preview always
   re-renders, so an edited spec plays after a hot reload.

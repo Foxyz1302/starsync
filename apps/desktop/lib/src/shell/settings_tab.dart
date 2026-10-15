@@ -18,7 +18,6 @@ import '../screens/home/about_page.dart';
 import '../screens/home/settings_page.dart';
 import '../sfx/sfx.dart';
 import '../sfx/sound_bank.dart';
-import '../sfx/synth_sfx.dart';
 import '../state/session_state.dart';
 import '../state/settings.dart';
 import '../update/update_controller.dart';
@@ -798,10 +797,7 @@ class NotificationsInfo extends StatelessWidget {
 class SoundSettings extends StatelessWidget {
   const SoundSettings({super.key});
 
-  void _preview(SfxKind kind) {
-    final sfx = SessionState.instance.sfx;
-    if (sfx is SynthSfx) unawaited(sfx.preview(kind, readyIndex: 2));
-  }
+  void _preview(SfxKind kind) => unawaited(SessionState.instance.sfx.preview(kind, readyIndex: 2));
 
   @override
   Widget build(BuildContext context) {

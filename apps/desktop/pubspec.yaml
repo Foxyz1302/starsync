@@ -36,6 +36,15 @@ dependencies:
     git:
       url: https://git.example.org/Foxyz/leaf_widgets.git
       ref: v0.1.0
+  # App sounds (sfx/, platform/audio/): SoLoud + miniaudio, built from
+  # source by its build hook (needs only a C++ toolchain).
+  flutter_soloud: ^5.2.1
+# The sounds are WAVs made in memory: no Ogg/Opus/FLAC codecs, so the
+# build hook downloads and bundles no Xiph libraries.
+hooks:
+  user_defines:
+    flutter_soloud:
+      no_xiph_libs: true
 dev_dependencies:
   flutter_test:
     sdk: flutter

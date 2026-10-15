@@ -73,6 +73,8 @@ Future<void> main(List<String> args) async {
   // Linux: the launcher entry and icon Wayland needs (release installs).
   unawaited(installDesktopEntry());
   runApp(const WatchTogetherApp());
+  // The sound device opens once the window is up, not on the first sound.
+  Future.delayed(const Duration(seconds: 2), SessionState.instance.sfx.warmUp);
 }
 
 /// Close button / Alt+F4: leave gracefully first (others see "left", a
@@ -88,6 +90,11 @@ class _CloseGuard with WindowListener {
     if (_closing) return;
     _closing = true;
     await memory.save();
+    try {
+      await SessionState.instance.sfx.dispose().timeout(const Duration(milliseconds: 500));
+    } catch (e) {
+      debugPrint('sound shutdown on close failed: $e');
+    }
     try {
       await SessionState.instance.leave().timeout(const Duration(seconds: 2));
     } catch (e) {

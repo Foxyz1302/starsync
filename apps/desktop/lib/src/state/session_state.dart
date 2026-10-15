@@ -160,7 +160,8 @@ class SessionState {
   final route = signal(AppRoute.home);
   final recents = signal<List<RecentServer>>(const []);
   final status = signal(const HealthStatus(HealthSeverity.info, 'idle'));
-  final SfxService sfx = SynthSfx(
+  /// Owns the app's audio device ([SynthSfx.dispose] on close).
+  final SynthSfx sfx = SynthSfx(
     volume: () => AppSettings.instance.soundVolume.peek(),
     // A nudge is an explicit poke: it ignores its switch (not the volume).
     enabled: (k) => k == SfxKind.nudge || !AppSettings.instance.soundsOff.peek().contains(k.name),
