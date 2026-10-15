@@ -1,20 +1,8 @@
 import 'package:flutter/widgets.dart';
 
-/// Where the app window stands, for auto sit-out
-/// ([ShellPort.watchActivity]).
-enum WindowActivity {
-  /// The window has the keyboard focus.
-  focused,
+import 'window_activity.dart';
 
-  /// Shown, but another window has the focus.
-  unfocused,
-
-  /// Minimised to the taskbar.
-  minimised,
-
-  /// Hidden (closing, or a platform that hides instead of minimising).
-  hidden,
-}
+export 'window_activity.dart';
 
 /// What the clipboard holds for a paste: its files, else its text.
 typedef Paste = ({List<String> files, String? text});
@@ -53,6 +41,10 @@ abstract interface class ShellPort {
   Future<void> saveWindow();
   Future<void> hide();
   Future<void> quit();
+
+  /// Brings the window up and gives it the focus (restored when
+  /// minimised, shown when hidden): a click on a system notification.
+  Future<void> focus();
 
   /// Points the desktop at the window when it is not focused (taskbar
   /// flash, urgency hint); nothing when it is.

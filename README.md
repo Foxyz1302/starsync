@@ -49,7 +49,7 @@ few hours, and when one exists a band across the top of the window says so
 (never over a playing video). "Update and restart" downloads,
 verifies, applies in place and restarts; "Later" hides it until the next
 check; the install folder must be writable by you. The version you run is
-under the Settings tab. Settings has Check now and an auto-check toggle. From a terminal:
+at the bottom of every Settings page (and in the Settings tab's tooltip). Settings has Check now and an auto-check toggle. From a terminal:
 `./starsync-server --upgrade` (no display needed, so it works on a
 server box too), `./starsync --upgrade`, or the shipped `update.sh` /
 `update.bat` (which run the first). Each updates the whole folder, app and
@@ -84,7 +84,8 @@ with a ring for their state (green ready, amber buffering, grey not ready,
 a little faded joining, dimmed reconnecting, dimmed with a moon sitting
 out; a crown on whoever
 hosts, a tower on whoever passes the video on). Click the avatars for the
-member list (force ready, Nudge, Sit out, "Copy invite address"; when you host it lists this computer's
+member list (each member's app version, amber when it differs from yours,
+and the server's at the top; force ready, Nudge, Sit out, "Copy invite address"; when you host it lists this computer's
 network addresses with the port, and friends outside your network need
 that port forwarded or a server they can all reach, like a VPS). Beside them the server and "ready n/m" (who is sitting out or
 reconnecting does not count), the chat button with unread
@@ -107,10 +108,23 @@ loading…") or what went wrong, with Retry or Cancel when it helps. Chat and ac
 Tab), ready to type; it shows messages (select text to copy it, or
 right-click for Copy message and, with a link in it, Copy link / Open in
 browser), and its "Activity" toggle adds
-joins, ready, seeks and the like between them. Joins, leaves, chat and
-other news also pop up bottom left with the person's avatar; click a message to open the chat
-(Settings → Notifications → Chat messages: All by default, or Only when
-paused, or Off; messages always reach the chat, with their sound). Unread chat shows as a count on the chat
+joins, ready, seeks and the like between them. Joins, leaves, someone
+losing connection and coming back, video changes, additions to Up next
+(the title, its picture and who added it), chat and problems also pop up
+bottom left with the person's avatar, above the player's controls (never
+on them); ready, seeks and pauses stay in the activity. Click a message
+to open the chat (Settings → Notifications & sounds → Chat messages: All
+by default, or Only when paused, or Off; messages always reach the chat,
+with their sound). Watching alone, nothing pops up or sounds about the
+party (there is nobody); the app's own notices still show.
+
+**While sitting out or in the background.** Sitting out, only chat,
+nudges, "starting now" (the video starts for the others) and Up next
+reach you; joins and leaves too if you turn on Settings → Notifications &
+sounds → "Joins and leaves too". With the window in the background or
+minimised, the same ones also come as desktop notifications (Linux's
+notification center, Windows' toasts); clicking one brings the window
+up, and a chat one opens the chat. Unread chat shows as a count on the chat
 buttons and, in fullscreen with the controls hidden and the video paused,
 as a small chip top right.
 
@@ -315,10 +329,11 @@ of help: Profile; Party & network (the Host card's default port and
 password, recent servers with remove); Player (below); Jellyfin &
 integrations (linked Jellyfin servers, below, the AnimeFlow connection:
 "connected as <name>" with what you may do, or why not, and playing the
-next episode automatically); Notifications & sounds (what pops up; the sound
+next episode automatically); Notifications & sounds (what pops up, chat
+pop-ups, what reaches you while sitting out or in the background; the sound
 volume and sound set, and every sound with a preview, its own set and a switch); Updates; Keyboard shortcuts (read-only); About
-(the version; resting the mouse on the Settings tab shows it too; and the
-credits, e.g. that the Minimal player design is inspired by uosc).
+(the version, also at the bottom of every Settings page and in the
+Settings tab's tooltip; and the credits, e.g. that the Minimal player design is inspired by uosc).
 
 Player settings live in the player too: ⚙ → Player settings, at the
 right of its controls, and Settings → Player has the same ones (plus the
@@ -502,9 +517,11 @@ top: who passes it on, or that the server fetches it, everyone plays the
 link, or everyone streams it from Jellyfin, with how many watch through
 the server and, for a relay, how fast it arrives against what the video
 needs (the bar's mark; past it is keeping up). It turns amber when the
-source is too slow or reconnecting, red when it left (the others play
-out what the server already has), and whoever passes it on is told once
-when their upload is too slow. Each member's line says how they get it
+source is too slow or its connection dropped ("Bob's connection dropped —
+playing what the server has (2 min)"), red when it left (the others play
+out what the server already has; the player's pill says the same and a
+pop-up tells you once), and whoever passes it on is told once when their
+upload is too slow. Each member's line says how they get it
 ("via server" with their speed, or "direct") after a dot for their
 buffer: green enough to play on, amber low, red empty. A red dot on one
 member while the source keeps up is their own connection.

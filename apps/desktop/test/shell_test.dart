@@ -1,9 +1,14 @@
-// restructure: rewrite in step 2 (Status + Notifier): toasts and the status
-// pill; in step 3 (Your server): the solo strip and Invite friends.
+// restructure: rewrite in step 3 (Your server): the solo strip and Invite
+// friends.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:media_kit_video/media_kit_video.dart' show VideoState;
 import 'package:sync_relay_core/core.dart';
+import 'package:starsync/src/controls/frame.dart' show ControlsFrame, ControlsFrameState;
+import 'package:starsync/src/controls/model/controls_prefs.dart';
+import 'package:starsync/src/controls/session_controls.dart' show controlsBottomHeight;
+import 'package:starsync/src/session/notifier.dart' show Copied;
 import 'package:starsync/src/session/identity.dart';
 import 'package:starsync/src/shell/app_shell.dart';
 import 'package:starsync/src/shell/avatar.dart';
@@ -15,6 +20,7 @@ import 'package:starsync/src/shell/settings_tab.dart' show SettingsTab;
 import 'package:starsync/src/shell/toasts.dart';
 import 'package:starsync/src/session/session_coordinator.dart' show ToastItem;
 import 'package:starsync/src/state/session_state.dart';
+import 'package:starsync/src/state/settings.dart';
 import 'package:starsync/src/update/update_controller.dart';
 
 /// Stands in for media_kit's `Video` (which hangs flutter_test) and
@@ -38,13 +44,14 @@ class _FakeVideoState extends State<FakeVideo> {
   Widget build(BuildContext context) => const ColoredBox(color: Colors.black);
 }
 
-MemberView member(String id, String name, {bool ready = false, bool gone = false}) =>
+MemberView member(String id, String name, {bool ready = false, bool gone = false, String app = ''}) =>
     MemberView(
         id: id,
         name: name,
         ready: ready,
         inSet: ready,
         buffered: 30,
+        app: app,
         presence: gone ? Presence.gone : Presence.watching);
 
 void main() {
@@ -73,10 +80,10 @@ void main() {
     session.route.value = AppRoute.home;
     coord.serverState.value = null;
     coord.playback.alive.value = false;
-    coord.toasts.value = [];
+    session.notifier.clear();
   });
 
-  Future<void> pumpShell(WidgetTester tester, Size size, {UpdateController? updates}) async {
+  Future<void> pumpShell(WidgetTester tester, Size size, {UpdateController? updates, VideoViewBuilder? video}) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -86,7 +93,7 @@ void main() {
         updates: updates ?? UpdateController(currentVersion: '0.0.0-dev'),
         autoUpdateCheck: false,
         windowControls: false,
-        videoBuilder: (context, controls) => const FakeVideo(),
+        videoBuilder: video ?? (context, controls) => const FakeVideo(),
         // A real probe (network, yt-dlp) never answers on the test clock.
         linkProbe: (url) async => LinkProbe.file(Uri.parse(url), 1000),
       ),
@@ -104,11 +111,18 @@ void main() {
   ];
 
   group('version and update bar', () {
-    testWidgets('the version under Settings; the bar on the tabs, off the full player until the video ends',
-        (tester) async {
+    testWidgets('the version at the bottom of Settings, not in the strip; the bar on the tabs, off the full player '
+        'until the video ends', (tester) async {
       final updates = UpdateController(currentVersion: '0.0.0-dev');
       await pumpShell(tester, const Size(1280, 800), updates: updates);
-      expect(find.text('dev run'), findsOneWidget);
+      expect(find.byKey(const ValueKey('strip-version')), findsNothing);
+      expect(find.textContaining('dev run'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('tab-settings')));
+      await tester.pumpAndSettle();
+      expect(
+          tester.widget<SelectableText>(find.byKey(const ValueKey('settings-version'))).data, contains('dev run'));
+      await tester.tap(find.byKey(const ValueKey('tab-library')));
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('update-bar')), findsNothing);
       updates.status.value = const UpdateStatus(UpdatePhase.available,
           manifest: UpdateManifest(version: '9.9.9', protocol: 1, url: 'http://x/a.tgz', notes: ''),
@@ -207,7 +221,9 @@ void main() {
   group('popovers', () {
     testWidgets('members card opens from the avatars and closes outside', (tester) async {
       await pumpShell(tester, const Size(1280, 800));
-      online(party, media: false);
+      session.serverVersion.value = '1.3.0-dev.1';
+      addTearDown(() => session.serverVersion.value = '');
+      online([member('a', 'Alex', ready: true, app: '1.3.0-dev.1'), ...party.skip(1)], media: false);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('avatar-stack')));
       await tester.pumpAndSettle();
@@ -217,6 +233,10 @@ void main() {
         expect(find.descendant(of: card, matching: find.text(m.name)), findsOneWidget);
       }
       expect(find.descendant(of: card, matching: find.text('reconnecting…')), findsOneWidget);
+      // Each member's version in its row, the server's in the header.
+      expect(find.descendant(of: card, matching: find.byKey(const ValueKey('version-a'))), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('1.3.0-dev.1')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('Server 1.3.0-dev.1')), findsOneWidget);
       // Someone else: nudge or sit them out (no kicking).
       await tester.tap(find.descendant(of: find.byKey(const ValueKey('member-b')), matching: find.byTooltip('More')));
       await tester.pumpAndSettle();
@@ -386,11 +406,18 @@ void main() {
     expect(find.text('1/3 ready'), findsOneWidget);
   });
 
+  test('a version that is not ours stands out (a dev run matches any)', () {
+    expect(versionDiffers('1.3.0', own: '1.3.0'), isFalse);
+    expect(versionDiffers('1.2.4', own: '1.3.0'), isTrue);
+    expect(versionDiffers('', own: '1.3.0'), isFalse);
+    expect(versionDiffers('1.2.4', own: '0.0.0-dev'), isFalse);
+  });
+
   test('toasts: feed toasts carry the actor, the rest are the app\'s', () {
     AvatarInfo who(String n) => AvatarInfo(name: n, color: Colors.teal);
     final at = DateTime.now();
     // The actor is exact: "Bob" is not mistaken for "Bob Jr".
-    final chat = shellToastFor(ToastItem(id: 1, text: 'Bob Jr: hi there', at: at, actor: 'Bob Jr'), who);
+    final chat = shellToastFor(ToastItem(id: 1, text: 'Bob Jr: hi there', at: at, actor: 'Bob Jr', chat: true), who);
     expect(chat.who!.name, 'Bob Jr');
     expect(chat.text, 'hi there');
     expect(chat.chat, isTrue);
@@ -404,16 +431,62 @@ void main() {
     expect(app.text, 'Bob joined');
     final notice = shellToastFor(ToastItem(id: 4, text: 'Shaders off', at: at), who);
     expect(notice.who, isNull);
+    // An Up next add: who, what, and the item's picture.
+    final added = shellToastFor(
+        ToastItem(id: 5, text: 'Bob added Ep 6 to Up next', at: at, actor: 'Bob', thumb: 'h1'), who);
+    expect((added.who!.name, added.text, added.icon, added.thumb),
+        ('Bob', 'added Ep 6 to Up next', Icons.playlist_add_rounded, 'h1'));
   });
 
-  testWidgets('toasts slide in with an avatar and leave after their time', (tester) async {
-    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: PartyToasts(life: Duration(seconds: 1)))));
-    coord.toasts.value = [ToastItem(id: 1, text: 'Shaders off', at: DateTime.now())];
+  testWidgets("toasts slide in and leave when the Notifier's time is up", (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: PartyToasts())));
+    session.notifier.notify(const Copied('Shaders off'));
     await tester.pump();
     await tester.pump();
     expect(find.text('Shaders off'), findsOneWidget);
-    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(session.notifier.toastLife);
     await tester.pumpAndSettle();
     expect(find.text('Shaders off'), findsNothing);
   });
+
+  for (final skin in ControlsSkin.values) {
+    testWidgets('toasts sit above the control bar and follow it (${skin.name})', (tester) async {
+      final s = AppSettings.instance;
+      final hide = s.controlsHideSecs.peek();
+      s.controlsSkin.value = skin;
+      s.controlsHideSecs.value = 2;
+      addTearDown(() {
+        s.controlsSkin.value = ControlsSkin.standard;
+        s.controlsHideSecs.value = hide;
+      });
+      coord.playback.alive.value = true;
+      await pumpShell(tester, const Size(1280, 800),
+          video: (context, controls) => Stack(fit: StackFit.expand, children: [
+                const ColoredBox(color: Colors.black),
+                if (controls != null) controls(VideoState()),
+              ]));
+      online(party);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(tester.state<AppShellState>(find.byType(AppShell)).mode, PlayerMode.full);
+      expect(tester.state<ControlsFrameState>(find.byType(ControlsFrame)).visible, isTrue);
+      session.notifier.notify(const Copied('Link copied'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      final body = tester.getRect(find.byKey(const ValueKey('body')));
+      final bar = controlsBottomHeight(skin, s.controlsSize.peek());
+      final up = tester.getRect(find.byType(ToastCard));
+      expect(up.bottom, lessThanOrEqualTo(body.bottom - bar), reason: 'clear of the control bar');
+      // The controls hide: the toasts come down to the edge.
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(tester.state<ControlsFrameState>(find.byType(ControlsFrame)).visible, isFalse);
+      final down = tester.getRect(find.byType(ToastCard));
+      expect(down.bottom, closeTo(body.bottom - AppShellState.toastInset, 1));
+      expect(down.bottom, greaterThan(up.bottom));
+      session.route.value = AppRoute.home;
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+    });
+  }
 }

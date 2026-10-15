@@ -16,12 +16,15 @@ class ServerHealth {
   final String name;
   final int? proto;
   final int viewers;
+  /// Its Starsync version (`version`), '' from a server too old to say.
+  final String version;
   const ServerHealth.offline()
       : online = false,
         name = '',
         proto = null,
-        viewers = 0;
-  const ServerHealth.online({required this.name, this.proto, this.viewers = 0})
+        viewers = 0,
+        version = '';
+  const ServerHealth.online({required this.name, this.proto, this.viewers = 0, this.version = ''})
       : online = true;
 
   /// True when the server speaks another protocol than this build.
@@ -33,11 +36,12 @@ class ServerHealth {
     try {
       final j = jsonDecode(body);
       if (j is! Map || j['ok'] != true) return const ServerHealth.offline();
-      final name = j['name'], proto = j['proto'], viewers = j['viewers'];
+      final name = j['name'], proto = j['proto'], viewers = j['viewers'], version = j['version'];
       return ServerHealth.online(
         name: name is String ? name.trim() : '',
         proto: proto is num ? proto.toInt() : null,
         viewers: viewers is num ? viewers.toInt() : 0,
+        version: version is String ? version.trim() : '',
       );
     } catch (_) {
       return const ServerHealth.offline();

@@ -6,7 +6,10 @@ import 'package:signals/signals_flutter.dart';
 
 import '../controls/model/controls_prefs.dart';
 import '../shaders/shader_presets.dart';
+import '../session/notice_prefs.dart';
 import 'settings_schema.dart';
+
+export '../session/notice_prefs.dart' show ChatPopups, NotifyPrefs;
 
 // App preferences (Settings page), one Hive box. Signals start at their
 // defaults and take the stored values once [AppSettings.ensureLoaded]
@@ -39,6 +42,7 @@ const _keySoundPresetFor = 'soundPresetFor';
 const _keyUnreadyOnSwap = 'unreadyOnSwap';
 const keyAutoSitOut = 'autoSitOut';
 const _keyChatPopups = 'chatPopups';
+const _keyNotifyPeople = 'notifyPeople';
 const _keyShareDiagnostics = 'shareDiagnostics';
 
 enum HwdecMode { auto, off, custom }
@@ -48,23 +52,6 @@ enum HwdecMode { auto, off, custom }
 /// plain 'auto' picks the dxva2 interop, which cannot create its EGL
 /// surface there ("Failed to create EGL surface"). Elsewhere 'auto'.
 String get autoHwdec => Platform.isWindows ? 'auto-copy' : 'auto';
-
-/// When chat messages pop up as toasts (they always reach the chat).
-enum ChatPopups {
-  all('All'),
-  paused('Only when paused'),
-  off('Off');
-
-  final String label;
-  const ChatPopups(this.label);
-
-  /// Whether a chat message pops up now ([playing]: the video plays).
-  bool shows({required bool playing}) => switch (this) {
-        ChatPopups.all => true,
-        ChatPopups.paused => !playing,
-        ChatPopups.off => false,
-      };
-}
 
 class AppSettings {
   static final AppSettings instance = AppSettings();
@@ -100,6 +87,12 @@ class AppSettings {
   final shareDiagnostics = signal(true);
   /// Chat message toasts (default: all). Applies live.
   final chatPopups = signal(ChatPopups.all);
+  /// Joins and leaves also notify while sitting out or with the window in
+  /// the background (default off). Applies live.
+  final notifyPeople = signal(false);
+
+  /// The notification choices as the Notifier reads them.
+  NotifyPrefs get notifyPrefs => NotifyPrefs(chat: chatPopups.peek(), people: notifyPeople.peek());
   /// App sounds (`sfx/`): 0..1, 0 = silent.
   final soundVolume = signal(1.0);
   /// `SfxKind` names switched off one by one.
@@ -174,6 +167,8 @@ class AppSettings {
       if (share is bool) shareDiagnostics.value = share;
       final popups = box.get(_keyChatPopups);
       chatPopups.value = ChatPopups.values.where((m) => m.name == popups).firstOrNull ?? ChatPopups.all;
+      final people = box.get(_keyNotifyPeople);
+      if (people is bool) notifyPeople.value = people;
       final vol = box.get(_keySoundVolume);
       if (vol is num) soundVolume.value = vol.toDouble().clamp(0, 1);
       final off = box.get(_keySoundsOff);
@@ -276,6 +271,11 @@ class AppSettings {
   void setChatPopups(ChatPopups mode) {
     chatPopups.value = mode;
     _put(_keyChatPopups, mode.name);
+  }
+
+  void setNotifyPeople(bool on) {
+    notifyPeople.value = on;
+    _put(_keyNotifyPeople, on);
   }
 
   void setSoundVolume(double v) {

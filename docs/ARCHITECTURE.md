@@ -316,11 +316,11 @@ always an older host), `secret` a wrong password, `replaced` "Starsync
 was opened in another window". Close code 4015 (the server found it
 silent) and any other drop reconnect.
 
-The coordinator maps the state to `health` (`connectionHealth`:
-"connecting…", "connected", "connection unstable…", "connection lost —
-retrying…", "reconnecting…", the reason; closed writes nothing, a cancel
-writes "cancelled", "Retry" "retrying…"), to `reconnecting` (lost or
-reconnecting), `unstable` and `stateStale`. A drop that lasted
+The state is the first input of the session's status (see "App events
+and platform ports": "Connecting…", "Reconnecting…" with Cancel,
+"Connection unstable…", the refusal or "replaced" with Retry; the strip's
+"reconnecting…"); the coordinator also reads it as `reconnecting` (lost
+or reconnecting), `unstable` and `stateStale`. A drop that lasted
 `lostSoundAfter` (4 s; a silent link counts from its last frame) raises
 `ConnectionLost`, the reconnect that follows `ConnectionBack` (each once
 per drop, through the Notifier): a quick flap makes no sound.
@@ -786,11 +786,13 @@ How bytes move:
   4002 and ends the relay (`ServerHub.relayOtherMedia`); a second channel
   replaces the first (4003). The source's leave (grace over, `bye`) or a
   swap ends the relay: its buffer goes, `live` drops, `/r` answers 404.
-  `state.media.relay.live` follows the channel, and viewers show "waiting
-  for <name> to pass the video on" while it is down, "<name> lost
-  signal: playing what the server has" while the source is `gone` (a
-  viewer opening then opens the buffer instead of waiting), "<name> left:
-  playing what the server has" once the source left the server.
+  `state.media.relay.live` follows the channel. Viewers' status (see
+  "App events and platform ports") says "Waiting for <name> to pass the
+  video on" while it is down, "<name>'s connection dropped — playing what
+  the server has (2 min)" while the source is `gone` (from `sourceGoneSince`;
+  a viewer opening then opens the buffer instead of waiting) and "<name>
+  left — playing what the server has" once it left the server; the source
+  gone for 5 s (`sourceDropNotice`) or leaving is also a toast, once each.
 - Stats (`relay_stats.dart`, `ServerHub.sampleRates` on the 1 s
   heartbeat; wire in [PROTOCOL.md](PROTOCOL.md)): the source's rate is
   its bytes over the time a pull is in flight (`FeedClock`, one per media
@@ -807,8 +809,9 @@ How bytes move:
   fetch, Jellyfin), each member's route (source; via server: relayed,
   `/m`, or Jellyfin `jf` false; direct: links, Jellyfin `jf` true) and
   buffer health (enough for `bufferNeed`, low, empty while playing). The
-  members card (`shell/delivery_line.dart`) shows it as a source line and
-  a dot per member; nothing goes on the picture. The source gets one toast
+  status carries it (`Status.delivery`) and the members card
+  (`shell/delivery_line.dart`) shows it as a source line and a dot per
+  member; nothing goes on the picture. The source gets one toast
   per media while `rate` < `need`. Not shown: a direct member's speed
   (the server never sees its bytes).
 
@@ -1219,32 +1222,97 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
 
 ## App events and platform ports
 
+**Status.** What the session is like right now is one computed value,
+`SessionCoordinator.status` (`session/status.dart`, `statusOf` over
+`StatusFacts`; nothing sets it): the connection's `ConnState`, the
+server's state (members and self presence, `state.hold` through who is
+in the set and their buffers, the relay's `live`, `fetch`, `sourceGone` /
+`sourceGoneSince`), this player's facts (`playerError`: it cannot open the
+media; `playerFault`: a "Reload video" failed; `jellyfinPlan`: it plays a
+Jellyfin item with its own account, so the relay is not its concern),
+`fetchFailedFor` (the server's `fetch-fail` for the current media),
+`restarts` (reconnects that found another `welcome.instance`) and a clock
+that moves by the minute. `Status.line` is the player's pill (most
+pressing first: reconnecting with Cancel, unstable, refused or replaced
+with Retry, connecting, your player's fault or error with Reload, the
+server getting the video, the relay's source dropped / left / not
+passing it on yet, finished, someone loading, someone who cannot play
+it, you not ready, who everyone waits for; nothing while it plays and
+everyone is fine, and only connection lines while you sit out), each
+with a `StatusLevel` (ok and info never colour anything, warn amber,
+error red). `Status.party` is the strip's line ("connecting…",
+"reconnecting…", "ready 2/3"), `Status.delivery` the members card's
+source line ("Relay", Stats). `StatusWatch` turns the transitions worth a
+notice into events (Status → Notifier, never back): the relay's source
+gone for 5 s or left, another window took over (`Replaced`), the server
+restarted, a media starting for the first time (`PlaybackStarted`, seen
+held before); the coordinator runs it on every status change and every
+second.
+
 **Events.** Everything that may become a toast, a sound, a window
-attention request or an activity-log line is an `AppEvent`
-(`session/app_events.dart`, a sealed type, pure Dart): the server feed as
-typed `FeedEvent`s (`FeedEvent.of`, one per feed action: joins, leaves
-(`bye` or `grace`), gone (lost signal), return, sat out (`away`: by
-oneself, by someone else, or by this app's auto sit-out), back (`in`),
-ready/unready, force ready/play/hold, swap, seek, pause, resume,
-finished, chat, rename, avatar, queue add/remove/skip, fetch failed;
-people are matched by `actorId` / `targetId`, chat by `fromId`, never by
-name), the session's own (nudged, a member can't play, slow source, relay
-started/failed, connection lost/back, Jellyfin progress not saved) and the app's (shader message, added to Up next, a put-up or
-queue add that failed, Schedule results, problem marked, copied / copy
-failed, update available). Code with news calls
-`SessionCoordinator.notify` (= `Notifier.notify`, `session/notifier.dart`);
-nothing else writes toasts or plays sounds (Settings' sound preview
-aside). `noticeFor` is the whole policy, one `Notice` per event: the
-toast text and its actor, the `SfxCue`, attention, the feed line for the
-activity log. Today: every feed line is logged (`Notifier.feedLog`, the
-last 100); lines a reconnect replayed (`replayed`) are only logged;
-joins, leaves, swaps, chat, being sat out by someone else, being sat out
-by auto sit-out and Up next skips toast (a toast keeps its actor's member
-id, so its avatar is found by id); the sounds are listed under "Sounds"; a nudge also
-asks for attention; an available update does nothing (the update band
-shows it). `Notifier.toasts` holds the toasts, dropped 4 s after they came
-(`expire`, the session's 1 s tick), cleared on connect. The Library
-tab's card errors are still its own snack bars.
+attention request, a system notification or an activity-log line is an
+`AppEvent` (`session/app_events.dart`, a sealed type, pure Dart): the
+server feed as typed `FeedEvent`s (`FeedEvent.of`, one per feed action:
+joins, leaves (`bye` or `grace`), gone (lost signal), return, sat out
+(`away`: by oneself, by someone else, or by this app's auto sit-out), back
+(`in`), ready/unready, force ready/play/hold, swap, seek, pause, resume,
+finished, chat, rename, avatar, queue add (with the item's picture from
+the state that came first)/remove/skip, fetch failed; `own` when this
+member is the actor; people are matched by `actorId` / `targetId`, never
+by name), the session's (nudged, a member can't play, slow source, relay
+started/failed, the source dropped, starting now, connection lost/back,
+server restarted, replaced, a server refusal, Jellyfin progress not
+saved) and the app's (shader message, added to Up next, a put-up or
+queue add that failed (the Library's card errors too), Schedule results,
+problem marked, copied / copy failed, update available). Code with news
+calls `SessionCoordinator.notify` (= `Notifier.notify`,
+`session/notifier.dart`); nothing else writes toasts, plays sounds or
+sends system notifications (Settings' sound preview aside).
+
+**Notifier policy.** `noticeFor(event, NoticeContext)` is the whole
+policy, one `Notice` per event: its `NoticeCategory` (chat, nudge, start,
+upNext, people, party, problem, self, app), the toast text, its actor and
+picture, the `SfxCue`, attention, the system notification, the feed line
+for the activity log. The context: self presence (in, away, gone), alone
+(core's `isAlone` over the others' presence), the window
+(`WindowActivity` from `ShellPort.watchActivity`, wired in `main`),
+playing, the user's choices (`NotifyPrefs`: chat pop-ups All / Only when
+paused / Off, and `notifyPeople`, joins and leaves while away or in the
+background, default off). The coordinator gives the session's part
+(`Notifier.session`). The rules (D1, D4, D9):
+- Every feed line is logged (`Notifier.feedLog`, the last 100); lines a
+  reconnect replayed (`replayed`) are only logged.
+- Toasts (D4): joins, leaves, lost connection (after the server's
+  delayed `gone` line) and returns, swaps, Up next adds (title, the
+  item's picture, who) and skips, chat, being sat out by someone else or
+  by auto sit-out, nudges, problems (someone can't play it, the source
+  dropped, a slow or failed relay of yours, a server refusal, the server
+  restarted, replaced) and the app's notices; the rest (ready, seeks,
+  pauses) only in the activity log. Your own joins, swaps and Up next
+  adds pop up nothing (the app already said so); your own chat pops up
+  without a sound.
+- Sitting out (D1): only chat, nudges, "starting now", Up next, your own
+  and the app's notices, plus joins and leaves when chosen; the rest is
+  logged without a sound.
+- Alone (D9): no social toasts or sounds (people, chat, ready and the
+  like, "starting now"); the app's notices, problems and your own show.
+- "Starting now" pops up only while you sit out or the window is in the
+  background.
+- Chat pop-ups follow the setting (it is in the chat either way); the
+  chat sound has its own switch.
+- The window in the background (unfocused, minimised, hidden): what
+  reaches a member who sits out (chat, nudges, "starting now", Up next,
+  joins and leaves when chosen) also goes out as a system notification
+  (title the person, body the rest; silent, the app plays its sound). A
+  click brings the window up (`ShellPort.focus`) and, for chat, opens the
+  chat (`Notifier.chatRequests`, read by the shell).
+- A nudge also asks for attention; an available update makes no notice
+  (the update band shows it, off the full player while a video is on).
+- The unread badge counts chat in the log (never on the picture while it
+  plays).
+The Notifier owns its toasts' timer: `Notifier.toasts` holds what is on
+screen, each dropped `toastLife` (5 s) after it came (`dismiss` earlier, a
+click on a chat toast); cleared on connect.
 
 **Ports.** UI and session code reach the platform through interfaces
 (`platform/ports/`), made once in the composition root
@@ -1256,7 +1324,8 @@ handed on from there (the coordinator gets its `Notifier`, `Connection` and
   and their changes, the window's activity for auto sit-out
   (`watchActivity`: focused, unfocused, minimised, hidden; window_manager's
   focus, blur, minimise and restore, and the shell's own `hide`, wired to
-  `SessionCoordinator.windowActivity` in `main`), dragging (`WindowDragArea`), close, the way out
+  `SessionCoordinator.windowActivity` and `Notifier.window` in `main`),
+  bringing the window up and focusing it (`focus`), dragging (`WindowDragArea`), close, the way out
   (save, hide, quit), attention, the clipboard paste (files, else text)
   and drop targets (fox_utils).
 - `UrlOpener` (`DesktopUrls`): `xdg-open`, `open`, Windows' `url.dll`.
@@ -1265,8 +1334,15 @@ handed on from there (the coordinator gets its `Notifier`, `Connection` and
   folder in the file manager. Paths for now.
 - `LinkResolver` (`AppYtDlp`): the app's yt-dlp, link probes, mpv's raw
   options, warm-up.
-- `SystemNotifications`: an interface only; desktop shows none
-  (`NoSystemNotifications`).
+- `SystemNotifications` (`DesktopNotifications`,
+  `platform/desktop/desktop_notifications.dart`): `show(title, body, tag,
+  payload)` and `onClick(payload)`, through flutter_local_notifications'
+  platform plugins, picked by the OS: Linux `org.freedesktop.Notifications`
+  over D-Bus (pure Dart; the bundled 256 px icon, else the launcher
+  entry's icon by name; a click is the default action), Windows toast
+  notifications (WinRT, app id `Foxyz.Starsync`; an unpackaged app keeps
+  no history, a click activates it while it runs). Silent; anything that
+  fails (no notification daemon) is logged and dropped.
 - `AppDirsPort` (`DesktopAppDirs`): where Hive and the logs live
   (`AppDirs`, "Desktop UI"), and the copy of the data from before the
   rename; resolved in `main` before the composition root exists, so not a
@@ -1319,19 +1395,22 @@ panel) and chat messages (Copy message, and a link in it).
 
 - **Party strip** (`party_strip.dart`, 60 px): your avatar (profile card; 42 px like the party's),
   the Library / Schedule / Settings tabs with a growing underline (an
-  `HScroll` when narrow; the version in small text under Settings,
-  `shortVersion`, the full one in its tooltip), then offline a grey dot,
+  `HScroll` when narrow; the version in the Settings tab's tooltip, at
+  the bottom of every Settings page and in About), then offline a grey dot,
   "Offline", Join a friend and Host (connect cards; icon-less "Join" and
   "Host" under 1100 px), solo a "Solo · only you" chip, Invite friends
   (the Host card, titled "Invite friends", "Start hosting") and Stop (no
   dialog; no avatars or chat), online the party: `AvatarStack` (host first, then
   ready; spreads on hover; 5 shown, 3 under 1100 px), the server name and
-  "ready n/m" (who the ready counter counts: `countsForReady` in
-  `session/party.dart`, on `PresencePolicy`, so not away, gone or
-  errored; hidden under 1100 px), chat with an unread badge, and Leave
-  (asks first). The stack opens the members card (the source line, then
-  per member status, route and buffer dot (see "Relay", Stats), host /
-  relay pills; "joining…", "sitting out", or for a `gone` member
+  `Status.party` ("ready n/m": who the ready counter counts,
+  `countsForReady` in `session/party.dart`, on `PresencePolicy`, so not
+  away, gone or errored; "connecting…", "reconnecting…"; hidden under
+  1100 px), chat with an unread badge, and Leave (asks first). The stack
+  opens the members card (the server's version under its title: a hosted
+  server is this app's, a joined one's from `/health.version`; the source
+  line, then per member status, route and buffer dot (see "Relay",
+  Stats), their Starsync version (`members[].app`, amber when it is not
+  this app's; also in the avatar's hover), host / relay pills; "joining…", "sitting out", or for a `gone` member
   "reconnecting… (2 min)" with how long; per member force ready, Nudge and Sit
   out (anyone, the host too), your own row Sit out / Join back; "Copy invite
   address": the dialled address when joined; hosting, `inviteAddresses`
@@ -1456,7 +1535,8 @@ panel) and chat messages (Copy message, and a link in it).
   shader files),
   Jellyfin & integrations (linked servers, AnimeFlow's `/me` via
   `AnimeFlowClient.fromAccounts`, auto-advance), notifications & sounds
-  (what pops up; no switches), updates, shortcuts, about.
+  (what pops up, chat pop-ups, joins and leaves while sitting out or in
+  the background), updates, shortcuts, about.
 - **Drop and paste** (`handoff.dart`, `fox_utils`): the shell is one
   `DropTarget` (a "Drop to open" overlay while dragging) and a
   `HardwareKeyboard` handler for Ctrl+V outside a text field (clipboard
@@ -1474,7 +1554,9 @@ panel) and chat messages (Copy message, and a link in it).
   events), being sat out by someone (the `kick` sound), a nudge (always,
   whatever its switch), auto sit-out setting you away (`warn`), and
   connection lost / back (once per drop that lasted a few seconds).
-  Nothing for what the video already says (play, pause, seeks, the end).
+  Nothing for what the video already says (play, pause, seeks, the end),
+  nothing about the party while watching alone, and while sitting out
+  only for what still reaches you (see "Notifier policy").
   The sounds are synthesized, not sampled: `synth.dart` renders voices
   (plucked strings with bends, glass and star bells, a singing bowl,
   hollow knocks, wooden clacks, filtered-noise air and stardust, a long
@@ -1528,9 +1610,10 @@ panel) and chat messages (Copy message, and a link in it).
   big title and episode; it fades out on play and stays gone for that
   media; under 320 px tall (the mini) it drops the cover and shrinks the
   title. One status pill (`player_status.dart`) sits centred in the
-  action area (see "Player overlay"): `playerStatusFor` (pure) picks the most pressing of
-  removed, reconnecting (Cancel), a warn/error health message (Retry),
-  connecting (only after 2 s), finished, someone loading (below
+  action area (see "Player overlay"): it shows `Status.line` (see "App
+  events and platform ports"), connecting only after 2 s: reconnecting
+  (Cancel), refused or replaced (Retry), your player's problem (Reload),
+  the relay, finished, someone loading (below
   `StateBroadcast.bufferNeed`, the gate's own need at the current
   position: less near the end, none at finished; their avatar with the progress round it), you not
   ready (a click marks you ready) and who everyone waits for (avatars,
@@ -1593,13 +1676,17 @@ panel) and chat messages (Copy message, and a link in it).
   picture).
   **Toasts** (`toasts.dart`): the `Notifier`'s toasts bottom left, with
   the avatar of their `ToastItem.actor` (feed and chat toasts; the app's
-  own have none); each
-  slides in, stays 5 s, then slides out and collapses its gap. A click on
-  a chat toast opens the chat; the others let clicks through. Chat toasts
-  follow `AppSettings.chatPopups` (Settings → Notifications: All
-  (default), Only when paused, Off); the message is in the chat either
-  way, and its sound plays whatever this setting (its own switch in
-  Sounds).
+  own have none) and an Up next item's picture (`ToastItem.thumb`, from
+  the queue's picture cache); each slides in, stays while the Notifier
+  keeps it (5 s), then slides out and collapses its gap. A click on a chat
+  toast opens the chat; the others let clicks through. They never cover
+  the player's controls: over the full player (both skins, windowed and
+  fullscreen) they sit `toastInset` (16 px) above the control bar
+  (`controlsBottomHeight` of the skin and size in use) while the controls
+  are up and come down to 16 px from the edge while they are hidden
+  (`AnimatedPositioned`, the shell's `ease`; the player reports its
+  controls through the shell's `controlsShown`); elsewhere 16 px from the
+  bottom left. What pops up at all is the Notifier's policy.
 
 Settings persist in two Hive boxes: `connect_form` (last form, recent
 servers and links, the profile picture and colour; saved even when a join
@@ -1929,9 +2016,10 @@ dedicated server (`package:logging` loggers named by area: `relay`,
 ## Health reporting
 
 Every failure must show in the UI with a cause and a next step; nothing
-stalls silently. The app has a `HealthStatus` signal (severity + message)
-for connecting, reconnecting, wrong password, version mismatch,
-host offline, and starvation ("waiting for X - N.N s buffered").
+stalls silently. The session's status (`SessionCoordinator.status`, see
+"App events and platform ports") says it: connecting, reconnecting, wrong
+password, version mismatch, replaced, the player's problems, the relay's
+source and who everyone waits for.
 Errors are logged with a stack trace at the boundary, then turned into a
 displayable state. The server's `GET /health` returns JSON (`ok`, `name`,
 `proto`, `viewers`, `bytesServed`, `uptimeSecs`); it is unauthenticated, so

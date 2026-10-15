@@ -16,7 +16,6 @@ import '../platform/ports/ports.dart';
 import '../sfx/sfx.dart';
 import '../sfx/sound_bank.dart';
 import '../sfx/synth_sfx.dart';
-import '../session/health.dart';
 import '../session/notifier.dart';
 import '../session/connection.dart' show Connection;
 import '../session/identity.dart' show ClientIdentity;
@@ -163,7 +162,6 @@ class SessionState {
 
   final route = signal(AppRoute.home);
   final recents = signal<List<RecentServer>>(const []);
-  final status = signal(const HealthStatus(HealthSeverity.info, 'idle'));
   /// Owns the app's audio device ([SynthSfx.dispose] on close).
   final SynthSfx sfx = SynthSfx(
     volume: () => AppSettings.instance.soundVolume.peek(),
@@ -173,8 +171,15 @@ class SessionState {
   );
   /// The platform (window, links, folders, yt-dlp, notifications).
   final Ports ports = desktopPorts();
-  /// Every toast, sound and activity-log line goes through it.
-  late final Notifier notifier = Notifier(sfx: sfx, attention: ports.shell.requestAttention);
+  /// Every toast, sound, system notification and activity-log line goes
+  /// through it.
+  late final Notifier notifier = Notifier(
+    sfx: sfx,
+    attention: ports.shell.requestAttention,
+    system: ports.notifications,
+    focusWindow: ports.shell.focus,
+    prefs: () => AppSettings.instance.notifyPrefs,
+  );
   /// The link to the server; lost/back go to the notifier.
   /// The link to the server, with this install's stored identity
   /// (`hello.client` / `seq`); lost/back go to the notifier.
@@ -192,6 +197,9 @@ class SessionState {
   /// The joined server's own name (`/health`), '' until known or when it
   /// only has the default name.
   final serverLabel = signal('');
+  /// The server's Starsync version: a hosted (or solo) server is this
+  /// app's own; a joined one's comes from its `/health`; '' until known.
+  final serverVersion = signal('');
   /// A solo session is becoming a hosted one: the player has nothing open
   /// until the media is up again on the new server.
   final switching = signal(false);
@@ -367,8 +375,6 @@ class SessionState {
     final op = ++_op;
     if (form != null) _rememberForm(form);
     try {
-      status.value =
-          const HealthStatus(HealthSeverity.info, 'starting server…');
       await stopServer();
       if (op != _op) throw const ConnectCancelled();
       final hostKey = newHostKey();
@@ -403,8 +409,6 @@ class SessionState {
         );
       } catch (e, st) {
         debugPrint('server start failed: $e\n$st');
-        status.value = HealthStatus(
-            HealthSeverity.error, 'cannot start server on port ${params.port}: $e');
         rethrow;
       }
       if (op != _op) {
@@ -414,8 +418,7 @@ class SessionState {
       _server = server;
       coordinator.hostFile = (path) async =>
           identical(_server, server) ? server.setFile(path) : null;
-      status.value = HealthStatus(
-          HealthSeverity.ok, soloSession ? 'watching solo' : 'hosting on port ${server.port}');
+      serverVersion.value = appVersion;
       try {
         await coordinator.connect(ConnectParams(
           host: '127.0.0.1',
@@ -452,7 +455,6 @@ class SessionState {
       _setupCrash = cause;
       return;
     }
-    coordinator.health.value = HealthStatus(HealthSeverity.error, message);
     serverCrash.value = message;
     unawaited(leave().catchError((Object e) => debugPrint('leave after crash failed: $e')));
   }
@@ -465,9 +467,12 @@ class SessionState {
       if (op != _op) throw const ConnectCancelled();
       route.value = AppRoute.session;
       serverLabel.value = '';
+      serverVersion.value = '';
       unawaited(probeHealth(params.host, '${params.port}', defaultHealthGet).then((h) {
+        if (op != _op || !h.online) return;
         // 'server' is the dedicated server's default --name: not a name.
-        if (op == _op && h.online && h.name.isNotEmpty && h.name != 'server') serverLabel.value = h.name;
+        if (h.name.isNotEmpty && h.name != 'server') serverLabel.value = h.name;
+        serverVersion.value = h.version;
       }).catchError((Object _) {}));
     } finally {
       await _saveFormQuietly();
@@ -524,7 +529,7 @@ class SessionState {
     solo.value = false;
     coordinator.solo = false;
     serverLabel.value = '';
-    status.value = const HealthStatus(HealthSeverity.info, 'idle');
+    serverVersion.value = '';
     route.value = AppRoute.home;
   }
 }

@@ -39,6 +39,9 @@ dependencies:
   # App sounds (sfx/, platform/audio/): SoLoud + miniaudio, built from
   # source by its build hook (needs only a C++ toolchain).
   flutter_soloud: ^5.2.1
+  # System notifications (platform/desktop/desktop_notifications.dart):
+  # Linux over D-Bus in pure Dart, Windows toasts through WinRT.
+  flutter_local_notifications: ^22.3.0
 # The sounds are WAVs made in memory: no Ogg/Opus/FLAC codecs, so the
 # build hook downloads and bundles no Xiph libraries.
 hooks:

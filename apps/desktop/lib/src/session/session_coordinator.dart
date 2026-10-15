@@ -28,16 +28,18 @@ import '../platform/ports/shell_port.dart' show WindowActivity;
 import 'auto_sit_out.dart';
 import 'connection.dart';
 import 'delivery.dart';
-import 'health.dart';
 import 'media_art.dart';
 import 'notifier.dart';
 import 'now_playing.dart';
 import 'now_playing_info.dart';
 import 'party.dart';
+import 'status.dart';
 import 'switch_trace.dart';
 
 export 'connection.dart' show ConnectCancelled, ConnectParams;
 export 'notifier.dart' show ToastItem;
+export 'delivery.dart' show stateMediaRelay;
+export 'status.dart';
 
 final _log = createLogger('session');
 
@@ -71,12 +73,6 @@ bool unreadyForNewMedia(
         required bool ready}) =>
     enabled && lastMediaId >= 0 && mediaId != lastMediaId && ready;
 
-/// `media.relay` of a state, or null when the media is not relayed.
-MediaRelay? stateMediaRelay(StateBroadcast state) {
-  final r = state.media?['relay'];
-  return r is Map ? MediaRelay.fromJson(Map<String, Object?>.from(r)) : null;
-}
-
 /// What this member serves when its own swap is relayed: set at swap time,
 /// claimed by the state that names this member as the source.
 sealed class _RelayOrigin {
@@ -102,19 +98,6 @@ final class _JellyfinOrigin extends _RelayOrigin {
   final String? link;
   const _JellyfinOrigin(this.link);
 }
-
-/// The health line a connection change writes; null writes none (closed:
-/// whoever closed says why).
-HealthStatus? connectionHealth(ConnState s) => switch (s) {
-      ConnConnecting() => const HealthStatus(HealthSeverity.info, 'connecting…'),
-      ConnOnline() => const HealthStatus(HealthSeverity.ok, 'connected'),
-      ConnUnstable() => const HealthStatus(HealthSeverity.warn, 'connection unstable…'),
-      ConnLost() => const HealthStatus(HealthSeverity.warn, 'connection lost — retrying…'),
-      ConnReconnecting() => const HealthStatus(HealthSeverity.info, 'reconnecting…'),
-      ConnRefused(:final message) => HealthStatus(HealthSeverity.error, message),
-      ConnReplaced(:final message) => HealthStatus(HealthSeverity.error, message),
-      ConnClosed() => null,
-    };
 
 String? stateMediaUrl(StateBroadcast state) {
   final media = state.media;
@@ -171,8 +154,6 @@ class SessionCoordinator {
   final SwitchTrace switchTrace = SwitchTrace();
   final StateDiff diff = StateDiff();
 
-  final health =
-      signal(const HealthStatus(HealthSeverity.info, 'idle'));
   /// The server's latest state. A drop keeps it (with the player, the
   /// media and a relay this member serves): [stateStale] says it is not
   /// current; only leaving clears it.
@@ -191,7 +172,38 @@ class SessionCoordinator {
   late final Computed<bool> reconnecting = computed(() => connection.state.value.retrying);
   /// The link is up but went quiet ([ConnUnstable]).
   late final Computed<bool> unstable = computed(() => connection.state.value is ConnUnstable);
-  final starving = signal<String?>(null);
+  /// The player itself failed (a "Reload video" that failed); '' when
+  /// fine. A fact for [status].
+  final playerFault = signal('');
+  /// The mediaId the server said it could not fetch (`fetch-fail`); -1.
+  final fetchFailedFor = signal(-1);
+  /// Reconnects that found the server restarted (another
+  /// `welcome.instance`).
+  final restarts = signal(0);
+  // The status's clock, moved on by the tick when the minute changes (a
+  // "(2 min)" in it).
+  final _clock = signal(DateTime.now().toUtc());
+
+  /// The one computed status (session/status.dart): the player's pill,
+  /// the strip's line, the members card's source line. Nothing sets it;
+  /// [StatusWatch] turns its transitions into notices.
+  late final Computed<Status> status = computed(() {
+    final plan = jellyfinPlan.value;
+    return statusOf(StatusFacts(
+      conn: connection.state.value,
+      state: serverState.value,
+      selfId: connection.memberId,
+      playerError: playerError.value,
+      playerFault: playerFault.value,
+      ownPlan: plan is OwnPlay,
+      fetchFailedFor: fetchFailedFor.value,
+      names: memberNames,
+      restarts: restarts.value,
+      now: _clock.value,
+    ));
+  });
+  final StatusWatch _statusWatch = StatusWatch();
+  void Function()? _statusEffect;
   /// Why this player cannot open the current media, in plain words
   /// ([playErrorText]); empty while it can. It rides in `report.error`, so
   /// the server stops waiting for this member and the others see it.
@@ -255,7 +267,6 @@ class SessionCoordinator {
   StreamSubscription? _feedSub;
   StreamSubscription? _nudgeSub;
   StreamSubscription? _errSub;
-  void Function()? _connectionHealth;
 
   /// A solo session (set by SessionState): no auto sit-out, there is
   /// nobody to hold up.
@@ -372,6 +383,27 @@ class SessionCoordinator {
     connection
       ..onWelcome = _onWelcome
       ..caps = () => caps;
+    // The Notifier's view of the session (Status → Notifier, never back).
+    notifier.session = () {
+      final r = serverState.peek();
+      return (
+        self: selfMember.peek()?.presence,
+        alone: r != null && aloneIn(r.members, connection.memberId),
+        playing: r?.transport == 'playing',
+      );
+    };
+    _statusEffect = effect(() => _stepStatus(status.value));
+  }
+
+  /// Status transitions worth a notice (see [StatusWatch]).
+  void _stepStatus(Status s) {
+    final events = _statusWatch.step(s, DateTime.now().toUtc());
+    if (events.isEmpty) return;
+    untracked(() {
+      for (final e in events) {
+        notify(e);
+      }
+    });
   }
 
   // yt-dlp is there to resolve links (checked at each connect).
@@ -406,8 +438,6 @@ class SessionCoordinator {
       _playerReady = true;
     } catch (e, st) {
       debugPrint('player init failed: $e\n$st');
-      health.value =
-          HealthStatus(HealthSeverity.error, 'player failed to start: $e');
       rethrow;
     }
   }
@@ -465,6 +495,7 @@ class SessionCoordinator {
     if (connection.params == null || _reloadingVideo) return;
     _reloadingVideo = true;
     _playerReady = false;
+    playerFault.value = '';
     try {
       await playback.recreate();
       final url = _openUrl;
@@ -474,8 +505,7 @@ class SessionCoordinator {
       if (url != null) await _openMedia(url, headers: headers);
     } catch (e, st) {
       debugPrint('video reload failed: $e\n$st');
-      health.value =
-          HealthStatus(HealthSeverity.error, 'video reload failed: $e');
+      playerFault.value = 'video reload failed: $e';
     } finally {
       _playerReady = playback.alive.peek();
       _reloadingVideo = false;
@@ -504,6 +534,10 @@ class SessionCoordinator {
     settledMediaId.value = -1;
     _openUrl = null;
     playerError.value = '';
+    playerFault.value = '';
+    fetchFailedFor.value = -1;
+    restarts.value = 0;
+    _statusWatch.reset();
     _memberErrors = const {};
     _lastReady = false;
     _restoringReady = false;
@@ -535,12 +569,7 @@ class SessionCoordinator {
     _startTicker();
     try {
       final url = welcome.mediaUrl;
-      if (url != null && url.isNotEmpty) {
-        await _openMedia(url);
-      } else {
-        health.value = const HealthStatus(
-            HealthSeverity.info, 'connected — waiting for host media…');
-      }
+      if (url != null && url.isNotEmpty) await _openMedia(url);
       final media = params.media ??
           (params.linkUrl.isEmpty ? null : await mediaForLink(jellyfin, params.linkUrl));
       if (!connection.isCurrent(epoch)) throw const ConnectCancelled();
@@ -549,8 +578,6 @@ class SessionCoordinator {
       if (!connection.isCurrent(epoch)) throw const ConnectCancelled();
       debugPrint('connect failed: $e');
       connection.scheduleReconnect();
-      health.value =
-          HealthStatus(HealthSeverity.error, connectErrorText(e));
       rethrow;
     }
   }
@@ -560,13 +587,8 @@ class SessionCoordinator {
     _stateSub ??= connection.states.listen(_onState);
     _feedSub ??= connection.feeds.listen(_onFeed);
     _nudgeSub ??= connection.nudges.listen(_onNudge);
-    _errSub ??= connection.errors.listen((msg) {
-      health.value = HealthStatus(HealthSeverity.warn, msg);
-    });
-    _connectionHealth ??= connection.state.subscribe((s) {
-      final h = connectionHealth(s);
-      if (h != null) health.value = h;
-    });
+    // The server refused something this app sent: a toast.
+    _errSub ??= connection.errors.listen((msg) => notify(ServerRefused(_sentenceCase(msg))));
   }
 
   /// Opens [url] (with [headers] on every request); false on failure. A
@@ -593,8 +615,6 @@ class SessionCoordinator {
           keepPlayer: keepPlayer,
           onFreshPlayer: () => switchTrace.mark(mediaId, SwitchTrace.player));
       switchTrace.mark(mediaId, promoted ? SwitchTrace.preloaded : SwitchTrace.opened);
-      health.value =
-          const HealthStatus(HealthSeverity.ok, 'connected');
       ok = true;
     } catch (e) {
       debugPrint('open media failed: $e');
@@ -688,8 +708,6 @@ class SessionCoordinator {
     return playback.preload(url, headers: headers, ytdlPath: path, fresh: fresh);
   }
 
-  bool _relayWaitShown = false;
-
   /// The server-fetched media this viewer opens once it is live.
   int _awaitLiveFor = -1;
 
@@ -699,33 +717,6 @@ class SessionCoordinator {
   /// that).
   bool _waitForSource(StateBroadcast r, MediaRelay relay) =>
       !relay.live && !relay.sourceGone && (relay.fetch || r.members.any((m) => m.id == relay.source));
-
-  /// Relayed through a member whose channel is down: say who everyone is
-  /// waiting for (the buffer still plays what it has).
-  void _relayStatus(StateBroadcast r) {
-    final relay = stateMediaRelay(r);
-    final waiting = relay != null &&
-        relay.source.isNotEmpty &&
-        relay.source != connection.memberId &&
-        !relay.live &&
-        _openUrl != null &&
-        jellyfinPlan.peek() is! OwnPlay;
-    if (waiting) {
-      final who = r.members.where((m) => m.id == relay.source).firstOrNull?.name;
-      final gone = memberNames[relay.source] ?? 'the member who put this up';
-      health.value = HealthStatus(
-          HealthSeverity.warn,
-          who == null
-              ? '$gone left: playing what the server has'
-              : relay.sourceGone
-                  ? '$who lost signal: playing what the server has'
-                  : 'waiting for $who to pass the video on');
-      _relayWaitShown = true;
-    } else if (_relayWaitShown) {
-      _relayWaitShown = false;
-      health.value = const HealthStatus(HealthSeverity.ok, 'connected');
-    }
-  }
 
   /// This viewer's `/r/` URL; with tracks, a pieces track's playlist, or
   /// an mpv EDL of every track when there are several (a page's separate
@@ -948,8 +939,6 @@ class SessionCoordinator {
             _awaitLiveFor = r.mediaId;
             final who = r.members.where((m) => m.id == relay.source).firstOrNull?.name;
             _log.info('media ${r.mediaId}: waiting for ${relay.fetch ? 'the server' : who} before opening the relay');
-            health.value = HealthStatus(HealthSeverity.info,
-                relay.fetch ? 'the server is getting the video…' : 'waiting for $who to pass the video on…');
           } else {
             await _openMedia(_relayMediaUrlFor(name, r.mediaId, relay.tracks, relay.queueId));
           }
@@ -976,10 +965,8 @@ class SessionCoordinator {
           _relayMediaUrlFor((r.media?['name'] as String?) ?? '', r.mediaId, relay.tracks, relay.queueId));
     }
     _jellyfinTransport(r);
-    _relayStatus(r);
     if (!_playerReady || _openUrl == null) {
       _wasPlayAllowed = false;
-      _updateStarving(r, 0);
       return;
     }
     // Server clock: serverTime in the state is the server's.
@@ -1014,7 +1001,6 @@ class SessionCoordinator {
       _seekRetries = 0;
     }
     await playback.apply(actions);
-    _updateStarving(r, playback.bufferedSecsAhead);
   }
 
   /// Mirrors the server's ready flag for self into [_lastReady] (force
@@ -1051,7 +1037,6 @@ class SessionCoordinator {
   Future<void> _unloadForOut() async {
     _wasPlayAllowed = false;
     _awaitLiveFor = -1;
-    starving.value = null;
     if (_mediaId == -1 && _openUrl == null) return;
     _mediaId = -1;
     _playerMediaId = -1;
@@ -1085,60 +1070,29 @@ class SessionCoordinator {
     } catch (_) {}
   }
 
-  void _updateStarving(StateBroadcast r, double bufferedAhead) {
-    if (r.transport == 'playing') {
-      starving.value = null;
-      return;
-    }
-    if (r.transport == 'finished') {
-      starving.value = 'finished — seek back or change media';
-      return;
-    }
-    for (final m in r.members) {
-      if (m.inSet && m.buffered < r.bufferNeed) {
-        starving.value =
-            'waiting for ${m.name} — ${m.buffered.toStringAsFixed(1)} s buffered';
-        return;
-      }
-    }
-    final self = selfMember.peek();
-    if (self != null && self.ready) {
-      // Who the ready counter counts (not away, not gone, can play it).
-      final present = r.members.where(countsForReady).toList();
-      final waiters = present
-          .where((m) => m.id != self.id && !(m.inSet && m.ready))
-          .map((m) => m.name)
-          .toList();
-      if (waiters.isNotEmpty) {
-        final readyCount = present.where((m) => m.ready).length;
-        starving.value =
-            'waiting for ${waiters.join(', ')} ($readyCount/${present.length} ready)';
-        return;
-      }
-    }
-    if (self != null && !self.ready) {
-      starving.value = 'press Space when ready';
-      return;
-    }
-    if (r.members.any((m) => m.inSet)) {
-      starving.value = 'held — waiting for readiness';
-      return;
-    }
-    starving.value = 'held — press Space when ready';
-  }
-
   void _onFeed(FeedMessage f) {
+    final r = serverState.peek();
     final event = FeedEvent.of(f,
         selfId: connection.memberId,
-        readyCount: f.action == 'ready'
-            ? serverState.peek()?.members.where((m) => m.ready && countsForReady(m)).length ?? 0
-            : 0);
+        readyCount: f.action == 'ready' ? r?.members.where((m) => m.ready && countsForReady(m)).length ?? 0 : 0,
+        // The state goes out before its feed: the item is in it.
+        queueThumb: f.action == 'queue-add' ? _addedThumb(r, f) : '');
+    // The server gave up fetching what everyone waits for (a fact for
+    // [status]).
+    if (event is FetchFailed && r != null && !f.replayed) fetchFailedFor.value = r.mediaId;
     notify(event);
-    // The server gave up fetching what everyone waits for.
-    if (event is FetchFailed && _awaitLiveFor != -1 && _awaitLiveFor == serverState.peek()?.mediaId) {
-      health.value = const HealthStatus(HealthSeverity.error, "the server couldn't fetch this video");
-    }
   }
+
+  /// The picture of the Up next item [f] (`queue-add`) added: the newest
+  /// item of that title by that member.
+  static String _addedThumb(StateBroadcast? r, FeedMessage f) {
+    for (final q in (r?.queue ?? const <QueueItem>[]).reversed) {
+      if (q.title == f.target && (f.actorId.isEmpty || q.by == f.actorId)) return q.thumb;
+    }
+    return '';
+  }
+
+  static String _sentenceCase(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
   /// Someone poked this member: sound (even when its switch is off; the
   /// volume still applies), a toast, and the window asks for attention.
@@ -1176,7 +1130,10 @@ class SessionCoordinator {
 
   Future<void> _tick() async {
     final now = DateTime.now().toUtc();
-    notifier.expire(now);
+    // The status's clock moves by the minute; its transitions (a source
+    // gone long enough) are checked every second.
+    if (now.difference(_clock.peek()).inMinutes >= 1 || now.minute != _clock.peek().minute) _clock.value = now;
+    _stepStatus(status.peek());
     final r = serverState.peek();
     final online = connection.state.peek().online;
     if (online && connection.token.isNotEmpty && r != null && _playerReady) {
@@ -2038,6 +1995,7 @@ class SessionCoordinator {
     if (!rejoin.reconnect) return;
     _log.info('reconnected: ${rejoin.resumed ? 'resumed' : 'a new member'}'
         '${rejoin.sameServer ? '' : ' (the server restarted)'}');
+    if (!rejoin.sameServer) restarts.value++;
     if (rejoin.resumed) return;
     final before = serverState.peek();
     final raw = welcome.state;
@@ -2107,16 +2065,9 @@ class SessionCoordinator {
   /// "Stop reconnecting".
   void cancelReconnect() => connection.cancelReconnect();
 
-  Future<void> cancelConnect() async {
-    await connection.cancelConnect();
-    health.value = const HealthStatus(HealthSeverity.info, 'cancelled');
-  }
+  Future<void> cancelConnect() => connection.cancelConnect();
 
-  void retry() {
-    if (!connection.retry()) return;
-    health.value =
-        const HealthStatus(HealthSeverity.info, 'retrying…');
-  }
+  void retry() => connection.retry();
 
   /// App close, before [leave]: the players go first (no mpv may outlive
   /// the engine). The Jellyfin stop report [leave] sends keeps the
@@ -2158,11 +2109,7 @@ class SessionCoordinator {
     } catch (_) {}
     // The last lines go before the token does, then the bye.
     await connection.close(bye: bye);
-    if (!silent) {
-      serverState.value = null;
-      starving.value = null;
-      health.value = const HealthStatus(HealthSeverity.info, 'idle');
-    }
+    if (!silent) serverState.value = null;
   }
 
   Future<void> dispose() async {
@@ -2175,7 +2122,7 @@ class SessionCoordinator {
     await _feedSub?.cancel();
     await _nudgeSub?.cancel();
     await _errSub?.cancel();
-    _connectionHealth?.call();
+    _statusEffect?.call();
     _bufferSub?.call();
     _aniList?.close();
     await connection.dispose();

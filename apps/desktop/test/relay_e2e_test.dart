@@ -206,7 +206,7 @@ void main() {
     await _poll(() => stateMediaRelay(alice.serverState.peek()!)?.source.isNotEmpty ?? false, 'relay state');
     await Future.delayed(const Duration(seconds: 7));
     expect(alice.playerError.peek(), isEmpty, reason: 'no "could not be opened" while the source is on its way');
-    expect(alice.health.peek().message, contains('waiting for bob'));
+    expect(alice.status.peek().line?.text, 'Waiting for bob to pass the video on');
     final src = RelaySource(Uri.parse('ws://127.0.0.1:${server.boundPort}/r/default/$token/source'),
         RelayMedia.single(FileRelayBytes(File(file))));
     await src.start();

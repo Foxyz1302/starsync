@@ -1,5 +1,6 @@
-// restructure: rewrite in step 2 (Status + Notifier): delivery lines become
-// part of the one computed status (and the source-gone half of P2).
+// Who fetches the current media and how it spreads (the members card's
+// source line, part of the one status), and each member's route and
+// buffer.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
@@ -63,8 +64,22 @@ void main() {
     final r = _state(_relayed(const MediaRelay(source: 'm1', rate: 4100000, need: 2300000)), [bob, ann]);
     final d = deliveryOf(r, selfId: 'm2', names: names)!;
     expect(d.state, SourceState.left);
-    expect(d.title, 'Foxyz left: playing what the server has');
+    expect(d.title, 'Foxyz left — playing what the server has');
     expect(d.detail, '2 through the server');
+  });
+
+  test("the source's connection dropped: what the server has, for how long, no rates", () {
+    final since = DateTime.utc(2026, 1, 1, 12);
+    final gone = MemberView(id: 'm1', name: 'Foxyz', ready: true, inSet: false, buffered: 30, presence: Presence.gone);
+    final r = _state(
+        _relayed(MediaRelay(source: 'm1', live: true, rate: 4100000, need: 2300000, sourceGone: true, sourceGoneSince: since)),
+        [gone, bob, ann]);
+    final d = deliveryOf(r, selfId: 'm2', now: since.add(const Duration(seconds: 30)))!;
+    expect(d.state, SourceState.gone);
+    expect(d.title, "Foxyz's connection dropped — playing what the server has");
+    expect(d.detail, '2 through the server');
+    expect(deliveryOf(r, selfId: 'm2', now: since.add(const Duration(minutes: 3)))!.title,
+        "Foxyz's connection dropped — playing what the server has (3 min)");
   });
 
   test('channel down: waiting', () {

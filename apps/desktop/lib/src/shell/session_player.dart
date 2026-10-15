@@ -63,6 +63,9 @@ class SessionPlayer extends StatefulWidget {
   /// Window buttons in the fullscreen top bar (off in tests: they need
   /// window_manager).
   final bool windowControls;
+  /// Follows whether the full player's controls are up (the shell lifts
+  /// its toasts above them); the player keeps its own when null.
+  final ValueNotifier<bool>? controlsShown;
   const SessionPlayer({
     super.key,
     required this.mode,
@@ -79,6 +82,7 @@ class SessionPlayer extends StatefulWidget {
     this.unread = 0,
     this.videoBuilder,
     this.windowControls = true,
+    this.controlsShown,
   });
 
   @override
@@ -96,7 +100,8 @@ class _SessionPlayerState extends State<SessionPlayer> {
   int _shaderNoticeSeen = 0;
   bool _miniHover = false;
   // Whether the controls are up (their frame reports it).
-  final _controlsShown = ValueNotifier(true);
+  final _ownShown = ValueNotifier(true);
+  ValueNotifier<bool> get _controlsShown => widget.controlsShown ?? _ownShown;
   // The mouse on a floating element, or the Up next popover open, keeps
   // the controls up.
   final _hold = ControlsHold();
@@ -155,7 +160,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
     _stopShaderWatch();
     _stopPopoverWatch();
     _noFocus.dispose();
-    _controlsShown.dispose();
+    _ownShown.dispose();
     _hold.dispose();
     _model.dispose();
     super.dispose();

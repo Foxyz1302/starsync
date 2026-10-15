@@ -1,5 +1,3 @@
-// restructure: rewrite in step 2 (Status + Notifier): the "status" group
-// (one computed level); the title block and overflow checks stay.
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -8,16 +6,18 @@ import 'package:sync_relay_core/core.dart';
 import 'package:starsync/src/controls/frame.dart';
 import 'package:starsync/src/controls/minimal/style.dart';
 import 'package:starsync/src/controls/minimal/timeline.dart';
-import 'package:starsync/src/session/health.dart';
+import 'package:starsync/src/session/connection.dart';
+import 'package:starsync/src/session/delivery.dart' show MemberNames;
+import 'package:starsync/src/session/app_events.dart';
+import 'package:starsync/src/session/status.dart';
 import 'package:starsync/src/session/now_playing.dart';
 import 'package:starsync/src/shell/now_playing_title.dart';
-import 'package:starsync/src/shell/player_status.dart';
 import 'package:starsync/src/shell/session_player.dart';
 import 'package:starsync/src/shell/start_banner.dart';
 import 'package:starsync/src/state/session_state.dart';
 
-// The player's title block, start card and status pill (never a media_kit
-// `Video`).
+// The one computed status (each input → text and level), the player's
+// title block, start card and status pill (never a media_kit `Video`).
 
 /// A 1x1 transparent PNG.
 final png = Uint8List.fromList(const [
@@ -38,18 +38,44 @@ MemberView mv(String id, String name,
         buffered: buffered,
         presence: gone ? Presence.gone : away ? Presence.away : Presence.watching);
 
-StateBroadcast held(List<MemberView> members, {String transport = 'held', double position = 0, int mediaId = 1}) =>
+StateBroadcast held(List<MemberView> members,
+        {String transport = 'held', double position = 0, int mediaId = 1, MediaRelay? relay}) =>
     StateBroadcast(
       eventId: 1,
       transport: transport,
       position: position,
       serverTime: DateTime.now().toUtc(),
       mediaId: mediaId,
-      media: {'name': 'Movie.mkv', 'size': 1, 'duration': 0},
+      media: {'name': 'Movie.mkv', 'size': 1, 'duration': 0, if (relay != null) 'relay': relay.toJson()},
       members: members,
     );
 
-const ok = HealthStatus(HealthSeverity.ok, 'connected');
+final _now = DateTime.utc(2026, 1, 1, 12);
+
+/// The status of [state] as member [self] sees it, online unless [conn].
+Status st(StateBroadcast? state,
+        {MemberView? self,
+        ConnState conn = const ConnOnline(),
+        String playerError = '',
+        String playerFault = '',
+        bool ownPlan = false,
+        int fetchFailedFor = -1,
+        MemberNames? names,
+        DateTime? now}) =>
+    statusOf(StatusFacts(
+      conn: conn,
+      state: state,
+      selfId: self?.id ?? '',
+      playerError: playerError,
+      playerFault: playerFault,
+      ownPlan: ownPlan,
+      fetchFailedFor: fetchFailedFor,
+      names: names,
+      now: now ?? _now,
+    ));
+
+StatusLine? line(StateBroadcast? state, {MemberView? self, ConnState conn = const ConnOnline(), String playerError = ''}) =>
+    st(state, self: self, conn: conn, playerError: playerError).line;
 
 void main() {
   final coord = SessionState.instance.coordinator;
@@ -57,80 +83,131 @@ void main() {
   tearDown(() {
     debugArtBytes = null;
     coord.serverState.value = null;
-    coord.health.value = const HealthStatus(HealthSeverity.info, 'idle');
     coord.playback.alive.value = false;
   });
 
   group('status', () {
     final me = mv('me', 'Me', ready: true);
 
-    test('problems first: reconnecting, health', () {
-      var v = playerStatusFor(health: const HealthStatus(HealthSeverity.warn, 'connection lost — retrying…'),
-          reconnecting: true);
-      expect(v!.text, 'Reconnecting…');
-      expect(v.action, StatusAction.cancel);
-      v = playerStatusFor(health: const HealthStatus(HealthSeverity.warn, 'waiting for Bob to pass the video on'),
-          state: held([me]), self: me);
-      expect(v!.kind, StatusKind.problem);
-      expect(v.text, 'Waiting for Bob to pass the video on');
-      expect(v.tone, HealthSeverity.warn);
-      expect(v.action, StatusAction.retry);
+    test('the connection first: reconnecting, unstable, refused, replaced, connecting', () {
+      final r = held([me]);
+      for (final (conn, text, level, action) in [
+        (const ConnLost(), 'Reconnecting…', StatusLevel.warn, StatusAction.cancel),
+        (const ConnReconnecting(2), 'Reconnecting…', StatusLevel.warn, StatusAction.cancel),
+        (const ConnUnstable(), 'Connection unstable…', StatusLevel.warn, null),
+        (const ConnRefused('secret', 'wrong password'), 'Wrong password', StatusLevel.error, StatusAction.retry),
+        (const ConnReplaced(), replacedText, StatusLevel.error, StatusAction.retry),
+        (const ConnConnecting(), 'Connecting…', StatusLevel.info, null),
+      ]) {
+        final v = line(r, self: me, conn: conn)!;
+        expect((v.text, v.level, v.action), (text, level, action), reason: '$conn');
+      }
+      // Sitting out does not hide the connection.
+      expect(line(held([mv('me', 'Me', away: true)]), self: mv('me', 'Me', away: true), conn: const ConnLost())!.text,
+          'Reconnecting…');
     });
 
-    test('info never shows; connecting only once slow', () {
-      expect(playerStatusFor(health: const HealthStatus(HealthSeverity.info, 'connected — waiting for host media…')),
-          isNull);
-      const connecting = HealthStatus(HealthSeverity.info, 'connecting…');
-      expect(playerStatusFor(health: connecting), isNull);
-      expect(playerStatusFor(health: connecting, slowConnect: true)!.text, 'Connecting…');
-      expect(playerStatusFor(health: ok, state: held([me], transport: 'playing'), self: me), isNull);
-      expect(playerStatusFor(health: ok, state: held([me]), self: me), isNull, reason: 'everyone ready');
+    test('the party line: connecting, reconnecting with the state kept, the ready count', () {
+      expect(st(null, conn: const ConnConnecting()).party, 'connecting…');
+      final r = held([me, mv('b', 'Bob'), mv('z', 'Zed', gone: true)]);
+      expect(st(r, self: me, conn: const ConnLost()).party, 'reconnecting…');
+      expect(st(r, self: me).party, 'ready 1/2', reason: 'gone is not counted');
+    });
+
+    test('nothing to say: playing, everyone ready, nothing up', () {
+      expect(line(held([me], transport: 'playing'), self: me), isNull);
+      expect(line(held([me]), self: me), isNull, reason: 'everyone ready');
+      expect(line(null), isNull);
     });
 
     test('finished, then whoever is loading', () {
-      expect(playerStatusFor(health: ok, state: held([me], transport: 'finished'), self: me)!.text,
-          'Finished · seek back or pick the next video');
+      expect(line(held([me], transport: 'finished'), self: me)!.text, 'Finished · seek back or pick the next video');
       final slow = mv('b', 'Bob', ready: true, buffered: RelayConstants.minBufferSecs / 2);
-      final v = playerStatusFor(health: ok, state: held([me, slow, mv('c', 'Cleo')]), self: me)!;
+      final v = line(held([me, slow, mv('c', 'Cleo')]), self: me)!;
       expect(v.kind, StatusKind.loading);
       expect(v.text, 'Bob is loading…');
       expect(v.who.single.id, 'b');
       expect(v.progress, closeTo(0.5, 1e-9));
       final mine = mv('me', 'Me', ready: true, buffered: 0);
-      expect(playerStatusFor(health: ok, state: held([mine]), self: mine)!.text, 'Loading the video…');
+      expect(line(held([mine]), self: mine)!.text, 'Loading the video…');
     });
 
     test('you, then the others with a ready count', () {
       final notMe = mv('me', 'Me');
-      final v = playerStatusFor(health: ok, state: held([notMe, mv('b', 'Bob')]), self: notMe)!;
+      final v = line(held([notMe, mv('b', 'Bob')]), self: notMe)!;
       expect(v.kind, StatusKind.you);
       expect(v.text, "Press Space when you're ready");
       expect(v.action, StatusAction.ready);
       expect(v.self, isTrue);
-      final w = playerStatusFor(
-          health: ok,
-          state: held([me, mv('b', 'Bob'), mv('m', 'Mika'), mv('z', 'Zed', gone: true), mv('o', 'Ola', away: true)]),
+      final w = line(held([me, mv('b', 'Bob'), mv('m', 'Mika'), mv('z', 'Zed', gone: true), mv('o', 'Ola', away: true)]),
           self: me)!;
       expect(w.kind, StatusKind.waiting);
       expect(w.text, 'Waiting for Bob and Mika', reason: 'nobody waits for who sits out');
       expect(w.detail, '1/3 ready');
       final outMe = mv('me', 'Me', away: true);
-      expect(playerStatusFor(health: ok, state: held([outMe, mv('b', 'Bob')]), self: outMe), isNull,
-          reason: 'sitting out: the join-back card speaks');
+      expect(line(held([outMe, mv('b', 'Bob')]), self: outMe), isNull, reason: 'sitting out: the join-back card speaks');
       expect(w.who.map((m) => m.name), ['Bob', 'Mika']);
     });
 
-    test("can't play: yours with Retry (reload); others' instead of waiting", () {
-      var v = playerStatusFor(health: ok, state: held([me]), self: me, playerError: 'Not allowed (403)')!;
-      expect((v.kind, v.text, v.action), (StatusKind.problem, "Can't play this: Not allowed (403)", StatusAction.reload));
-      final bob = MemberView(id: 'b', name: 'Bob', ready: false, inSet: false, buffered: 0,
-          error: 'Not allowed (403)');
-      v = playerStatusFor(health: ok, state: held([me, bob, mv('m', 'Mika', ready: true)]), self: me)!;
+    test("can't play: yours with Reload, a broken player too; others' instead of waiting", () {
+      var v = line(held([me]), self: me, playerError: 'Not allowed (403)')!;
+      expect((v.kind, v.text, v.action, v.level),
+          (StatusKind.problem, "Can't play this: Not allowed (403)", StatusAction.reload, StatusLevel.error));
+      v = st(held([me]), self: me, playerFault: 'video reload failed: gone').line!;
+      expect((v.text, v.action), ('Video reload failed: gone', StatusAction.reload));
+      final bob = MemberView(id: 'b', name: 'Bob', ready: false, inSet: false, buffered: 0, error: 'Not allowed (403)');
+      v = line(held([me, bob, mv('m', 'Mika', ready: true)]), self: me)!;
       expect((v.kind, v.text, v.action), (StatusKind.cannotPlay, "Bob can't play this: Not allowed (403)", null));
       expect(v.who.single.id, 'b');
       final notMe = mv('me', 'Me');
-      v = playerStatusFor(health: ok, state: held([notMe, bob]), self: notMe)!;
+      v = line(held([notMe, bob]), self: notMe)!;
       expect((v.kind, v.action), (StatusKind.cannotPlay, StatusAction.ready));
+    });
+
+    group('the relay', () {
+      final bob = mv('b', 'Bob', ready: true);
+      test('the server fetching, then failing', () {
+        final r = held([me, bob], relay: const MediaRelay(fetch: true));
+        expect((line(r, self: me)!.kind, line(r, self: me)!.text),
+            (StatusKind.fetching, 'The server is getting the video…'));
+        final failed = st(r, self: me, fetchFailedFor: 1).line!;
+        expect((failed.text, failed.level), ("The server couldn't fetch this video", StatusLevel.error));
+      });
+
+      test('waiting for the member passing it on', () {
+        final v = line(held([me, bob], relay: const MediaRelay(source: 'b')), self: me)!;
+        expect((v.text, v.level), ('Waiting for Bob to pass the video on', StatusLevel.warn));
+        expect(line(held([me, bob], relay: const MediaRelay(source: 'b', live: true)), self: me), isNull);
+      });
+
+      test("the source's connection dropped: what the server has, and for how long; even while playing", () {
+        final gone = MemberView(id: 'b', name: 'Bob', ready: true, inSet: false, buffered: 30, presence: Presence.gone);
+        final since = _now.subtract(const Duration(seconds: 20));
+        final r = held([me, gone],
+            transport: 'playing',
+            relay: MediaRelay(source: 'b', live: true, sourceGone: true, sourceGoneSince: since));
+        final v = st(r, self: me);
+        expect((v.line!.text, v.line!.level), ("Bob's connection dropped — playing what the server has", StatusLevel.warn));
+        expect(v.source!.left, isFalse);
+        expect(st(r, self: me, now: _now.add(const Duration(minutes: 2))).line!.text,
+            "Bob's connection dropped — playing what the server has (2 min)");
+        expect(v.delivery!.title, "Bob's connection dropped — playing what the server has");
+        // With its own Jellyfin account this viewer does not read the relay.
+        expect(st(r, self: me, ownPlan: true).line, isNull);
+      });
+
+      test('the source left: named from before', () {
+        final names = MemberNames()..observe(held([me, bob]));
+        final r = held([me], transport: 'playing', relay: const MediaRelay(source: 'b', sourceGone: true));
+        final v = st(r, self: me, names: names);
+        expect(v.line!.text, 'Bob left — playing what the server has');
+        expect(v.source!.left, isTrue);
+      });
+
+      test('the source itself sees none of it', () {
+        final r = held([me, bob], relay: const MediaRelay(source: 'me'));
+        expect(line(r, self: me), isNull);
+      });
     });
 
     test('names read as a sentence', () {
@@ -138,6 +215,46 @@ void main() {
       expect(nameList(['Bob', 'Mika']), 'Bob and Mika');
       expect(nameList(['Bob', 'Mika', 'Cleo']), 'Bob, Mika and Cleo');
       expect(nameList(['Bob', 'Mika', 'Cleo', 'Dan', 'Eve']), 'Bob, Mika and 3 others');
+    });
+  });
+
+  group('status transitions', () {
+    final me = mv('me', 'Me', ready: true);
+    final gone = MemberView(id: 'b', name: 'Bob', ready: true, inSet: false, buffered: 30, presence: Presence.gone);
+
+    test('the source gone a few seconds: one notice; left: another', () {
+      final w = StatusWatch();
+      final r = held([me, gone],
+          transport: 'playing', relay: MediaRelay(source: 'b', live: true, sourceGone: true, sourceGoneSince: _now));
+      expect(w.step(st(r, self: me), _now.add(const Duration(seconds: 2))), isEmpty, reason: 'a quick drop says nothing');
+      final at = _now.add(sourceDropNotice);
+      expect(w.step(st(r, self: me), at).single, isA<RelaySourceDropped>().having((e) => e.name, 'name', 'Bob'));
+      expect(w.step(st(r, self: me), at.add(const Duration(seconds: 1))), isEmpty, reason: 'once');
+      final names = MemberNames()..observe(r);
+      final left = held([me], transport: 'playing', relay: const MediaRelay(source: 'b', sourceGone: true));
+      expect(w.step(st(left, self: me, names: names), at).single,
+          isA<RelaySourceDropped>().having((e) => e.left, 'left', isTrue));
+    });
+
+    test('starting now: the first start of a media seen held, not a resume or a join mid-way', () {
+      final w = StatusWatch();
+      expect(w.step(st(held([me], transport: 'playing', mediaId: 7), self: me), _now), isEmpty,
+          reason: 'joined while it played');
+      w.step(st(held([me]), self: me), _now);
+      final started = w.step(st(held([me], transport: 'playing'), self: me), _now);
+      expect(started.single, isA<PlaybackStarted>().having((e) => e.title, 'title', isNotEmpty));
+      w.step(st(held([me]), self: me), _now);
+      expect(w.step(st(held([me], transport: 'playing'), self: me), _now), isEmpty, reason: 'a resume');
+    });
+
+    test('replaced and a restarted server, once each', () {
+      final w = StatusWatch();
+      w.step(statusOf(StatusFacts(conn: const ConnOnline(), now: _now)), _now);
+      expect(w.step(statusOf(StatusFacts(conn: const ConnReplaced(), now: _now)), _now).single, isA<Replaced>());
+      expect(w.step(statusOf(StatusFacts(conn: const ConnReplaced(), now: _now)), _now), isEmpty);
+      expect(w.step(statusOf(StatusFacts(conn: const ConnOnline(), restarts: 1, now: _now)), _now).single,
+          isA<ServerRestarted>());
+      expect(w.step(statusOf(StatusFacts(conn: const ConnOnline(), restarts: 1, now: _now)), _now), isEmpty);
     });
   });
 

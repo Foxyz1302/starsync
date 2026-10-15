@@ -15,65 +15,71 @@ sealed class AppEvent {
 /// in the activity log.
 sealed class FeedEvent extends AppEvent {
   final FeedMessage feed;
-  const FeedEvent(this.feed);
+  /// This member is the actor (its own chat, ready, queue add...).
+  final bool own;
+  const FeedEvent(this.feed, {this.own = false});
 
   String get actor => feed.actor;
 
   /// [feed] as its typed event. [selfId]: this member's id (people are
   /// matched by `actorId` / `targetId`, never by name); [readyCount]:
-  /// members ready in the latest state (the pitch of a `ready` sound).
-  factory FeedEvent.of(FeedMessage f, {String selfId = '', int readyCount = 0}) {
+  /// members ready in the latest state (the pitch of a `ready` sound);
+  /// [queueThumb]: the picture hash of the Up next item a `queue-add`
+  /// added (from the state that came with it), '' when none.
+  factory FeedEvent.of(FeedMessage f, {String selfId = '', int readyCount = 0, String queueThumb = ''}) {
     bool isSelf(String id) => selfId.isNotEmpty && id == selfId;
+    final own = isSelf(f.actorId);
     return switch (f.action) {
-      'join' => MemberJoined(f),
-      'leave' => MemberLeft(f),
-      'gone' => MemberGone(f),
-      'return' => MemberReturned(f),
+      'join' => MemberJoined(f, own: own),
+      'leave' => MemberLeft(f, own: own),
+      'gone' => MemberGone(f, own: own),
+      'return' => MemberReturned(f, own: own),
       'away' => MemberSatOut(f,
+          own: own,
           atYou: isSelf(f.targetId) && !isSelf(f.actorId),
           autoSelf: isSelf(f.actorId) && f.targetId.isEmpty && f.reason.isNotEmpty),
-      'in' => MemberBack(f),
-      'ready' => ReadyChanged(f, ready: true, readyIndex: readyCount),
-      'unready' => ReadyChanged(f, ready: false),
-      'force-ready' => ForcedReady(f, ready: true),
-      'force-unready' => ForcedReady(f, ready: false),
-      'force-play' => ForcedTransport(f, play: true),
-      'force-hold' => ForcedTransport(f, play: false),
-      'swap' => MediaSwapped(f),
-      'seek' => Seeked(f),
-      'pause' => Paused(f),
-      'resume' => Resumed(f),
-      'finished' => Finished(f),
-      'chat' => ChatPosted(f, own: isSelf(f.actorId)),
-      'rename' => MemberRenamed(f),
-      'avatar' => AvatarChanged(f),
-      'queue-add' => QueueAdded(f),
-      'queue-remove' => QueueRemoved(f),
-      'queue-skip' => QueueSkipped(f),
-      'fetch-fail' => FetchFailed(f),
-      _ => OtherFeed(f),
+      'in' => MemberBack(f, own: own),
+      'ready' => ReadyChanged(f, own: own, ready: true, readyIndex: readyCount),
+      'unready' => ReadyChanged(f, own: own, ready: false),
+      'force-ready' => ForcedReady(f, own: own, ready: true),
+      'force-unready' => ForcedReady(f, own: own, ready: false),
+      'force-play' => ForcedTransport(f, own: own, play: true),
+      'force-hold' => ForcedTransport(f, own: own, play: false),
+      'swap' => MediaSwapped(f, own: own),
+      'seek' => Seeked(f, own: own),
+      'pause' => Paused(f, own: own),
+      'resume' => Resumed(f, own: own),
+      'finished' => Finished(f, own: own),
+      'chat' => ChatPosted(f, own: own),
+      'rename' => MemberRenamed(f, own: own),
+      'avatar' => AvatarChanged(f, own: own),
+      'queue-add' => QueueAdded(f, own: own, thumb: queueThumb),
+      'queue-remove' => QueueRemoved(f, own: own),
+      'queue-skip' => QueueSkipped(f, own: own),
+      'fetch-fail' => FetchFailed(f, own: own),
+      _ => OtherFeed(f, own: own),
     };
   }
 }
 
 class MemberJoined extends FeedEvent {
-  const MemberJoined(super.feed);
+  const MemberJoined(super.feed, {super.own});
 }
 
 /// Left for good (`reason` `bye`: the app closed or Leave; `grace`: gone
 /// too long).
 class MemberLeft extends FeedEvent {
-  const MemberLeft(super.feed);
+  const MemberLeft(super.feed, {super.own});
 }
 
 /// Lost signal: gone for a while, kept in its grace period.
 class MemberGone extends FeedEvent {
-  const MemberGone(super.feed);
+  const MemberGone(super.feed, {super.own});
 }
 
 /// Back within its grace after a [MemberGone].
 class MemberReturned extends FeedEvent {
-  const MemberReturned(super.feed);
+  const MemberReturned(super.feed, {super.own});
 }
 
 /// Someone sat out (`away`: the actor itself, or `target` sat out by the
@@ -83,87 +89,89 @@ class MemberReturned extends FeedEvent {
 class MemberSatOut extends FeedEvent {
   final bool atYou;
   final bool autoSelf;
-  const MemberSatOut(super.feed, {this.atYou = false, this.autoSelf = false});
+  const MemberSatOut(super.feed, {super.own, this.atYou = false, this.autoSelf = false});
 }
 
 /// Back from sitting out (`in`).
 class MemberBack extends FeedEvent {
-  const MemberBack(super.feed);
+  const MemberBack(super.feed, {super.own});
 }
 
 class ReadyChanged extends FeedEvent {
   final bool ready;
   /// Members ready when it came (pitch of the ready sound).
   final int readyIndex;
-  const ReadyChanged(super.feed, {required this.ready, this.readyIndex = 0});
+  const ReadyChanged(super.feed, {super.own, required this.ready, this.readyIndex = 0});
 }
 
 class ForcedReady extends FeedEvent {
   final bool ready;
-  const ForcedReady(super.feed, {required this.ready});
+  const ForcedReady(super.feed, {super.own, required this.ready});
 }
 
 /// Force play / hold.
 class ForcedTransport extends FeedEvent {
   final bool play;
-  const ForcedTransport(super.feed, {required this.play});
+  const ForcedTransport(super.feed, {super.own, required this.play});
 }
 
 class MediaSwapped extends FeedEvent {
-  const MediaSwapped(super.feed);
+  const MediaSwapped(super.feed, {super.own});
 }
 
 class Seeked extends FeedEvent {
-  const Seeked(super.feed);
+  const Seeked(super.feed, {super.own});
 }
 
 class Paused extends FeedEvent {
-  const Paused(super.feed);
+  const Paused(super.feed, {super.own});
 }
 
 class Resumed extends FeedEvent {
-  const Resumed(super.feed);
+  const Resumed(super.feed, {super.own});
 }
 
 class Finished extends FeedEvent {
-  const Finished(super.feed);
+  const Finished(super.feed, {super.own});
 }
 
 /// A chat message (`reason` carries the text); [own]: this member sent it.
 class ChatPosted extends FeedEvent {
-  final bool own;
-  const ChatPosted(super.feed, {this.own = false});
+  const ChatPosted(super.feed, {super.own});
 }
 
 class MemberRenamed extends FeedEvent {
-  const MemberRenamed(super.feed);
+  const MemberRenamed(super.feed, {super.own});
 }
 
 class AvatarChanged extends FeedEvent {
-  const AvatarChanged(super.feed);
+  const AvatarChanged(super.feed, {super.own});
 }
 
+/// Someone added an item to Up next (`target` its title); [thumb]: the
+/// item's picture hash ('' when none).
 class QueueAdded extends FeedEvent {
-  const QueueAdded(super.feed);
+  final String thumb;
+  const QueueAdded(super.feed, {super.own, this.thumb = ''});
 }
 
 class QueueRemoved extends FeedEvent {
-  const QueueRemoved(super.feed);
+  const QueueRemoved(super.feed, {super.own});
 }
 
 /// Up next skipped an item (`target` its title, `reason` why).
 class QueueSkipped extends FeedEvent {
-  const QueueSkipped(super.feed);
+  const QueueSkipped(super.feed, {super.own});
 }
 
 /// The server could not fetch the current media.
 class FetchFailed extends FeedEvent {
-  const FetchFailed(super.feed);
+  const FetchFailed(super.feed, {super.own});
 }
 
 /// An action this app does not know (a newer server).
 class OtherFeed extends FeedEvent {
-  const OtherFeed(super.feed);
+  const OtherFeed(super.feed, {super.own});
 }
 
 // -------------------------------------------------------------- session
@@ -207,6 +215,38 @@ class ConnectionLost extends AppEvent {
 /// It came back after [ConnectionLost].
 class ConnectionBack extends AppEvent {
   const ConnectionBack();
+}
+
+/// The server refused something this app sent (`err`: Up next is full, a
+/// forbidden action...).
+class ServerRefused extends AppEvent {
+  final String text;
+  const ServerRefused(this.text);
+}
+
+/// The member passing the current video on has been gone a few seconds
+/// ([left]: it left the server); viewers play what the server has.
+class RelaySourceDropped extends AppEvent {
+  final String name;
+  final bool left;
+  const RelaySourceDropped(this.name, {this.left = false});
+}
+
+/// The current media started playing for the first time ("starting
+/// now"; [title]: what plays, '' when unknown).
+class PlaybackStarted extends AppEvent {
+  final String title;
+  const PlaybackStarted(this.title);
+}
+
+/// A reconnect found the server restarted (another `welcome.instance`).
+class ServerRestarted extends AppEvent {
+  const ServerRestarted();
+}
+
+/// Another window of this install took the member over (`replaced`).
+class Replaced extends AppEvent {
+  const Replaced();
 }
 
 /// Jellyfin progress reports fail (once per media).

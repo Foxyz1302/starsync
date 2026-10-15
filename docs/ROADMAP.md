@@ -38,10 +38,7 @@ Problems are numbered; delete a line when its fix ships.
 - P2 Viewers of a relay whose source is gone: mpv loops on failed seeks
   past what the server buffered (viewer-side recovery, step 5).
 - P7 Sat-out people get tracked as watched on Jellyfin.
-- P8 Sat-out people get the normal notifications.
 - P9 The watched rule (position coverage) misses real watches (D3).
-- P11 Toasts cover the video controls.
-- P12 Queue additions don't show as toasts.
 - P15 Commands reach a player mid-switch (`seek 90.0`, `event:5` errors).
 - P17 Preload, warm relay and the fresh player per video are layered on
   the player instead of being one media pipeline.
@@ -78,14 +75,6 @@ the automatic continuation and countdown, relay state), the device
 (client id, library and folders, match corrections, watch history,
 settings, notification prefs, what this app is sourcing) and the
 integrations (Jellyfin played/resume, AniList list).
-2. Status (one computed level, incl. the server's hold reason) + Notifier
-   (`noticeFor(event, context)`: self presence, alone, window activity,
-   playing, prefs, replayed; owns its toast timer; system notifications
-   port; library snack bars moved in). Fixes P8 P11 P12 P21 P33, "source
-   left"; D4, D1 notifications, D9 alone policy (`isAlone` in core). Step 1
-   left over for it: the presence notices are today's (sat you out, a
-   toast when auto sit-out sets you away, lost signal and return only in
-   the activity log); a replayed feed only logs.
 3. Your server: one hub, listeners attached and detached without members
    reconnecting (old isolate path kept until that's proven); Invite as a
    value (filtered addresses, version gate from `/health.version`, an `fp`
@@ -141,6 +130,13 @@ restarted app, but the app starts on Home (it does not rejoin by itself)
 and does not remember what it was passing on, so a relay it served ends
 with its grace unless it is put up again; worth doing only if updates
 ever happen mid-session (D8 says never during playback).
+Left of step 2: system notifications need a human check (Linux: the
+notification shows and a click brings the window up, also on Wayland,
+where focus may be refused without an activation token; Windows: toasts
+from an unpackaged install, at 1.3.0). On Linux the notification carries
+no `desktop-entry` hint (flutter_local_notifications_linux does not
+export its hint types), so a shell may name it "starsync" from the
+bundle rather than "Starsync".
 
 **Open decisions:**
 - Starting together: today someone has to stay unready so others can

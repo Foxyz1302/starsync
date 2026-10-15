@@ -13,6 +13,7 @@ import '../jellyfin/accounts_panel.dart';
 import '../schedule/animeflow.dart';
 import '../screens/home/about_page.dart';
 import '../screens/home/settings_page.dart';
+import '../screens/home/ui.dart' show appName, displayVersion;
 import '../session/auto_sit_out.dart' show AutoSitOutTimes;
 import '../sfx/sfx.dart';
 import '../sfx/sound_bank.dart';
@@ -228,6 +229,19 @@ class SettingsTab extends StatelessWidget {
                         Text(section.label, style: Theme.of(context).textTheme.headlineSmall),
                         const SizedBox(height: 14),
                         ..._page(context),
+                        // The version, quietly (also the Settings tab's
+                        // tooltip and About).
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: SelectableText(
+                            '$appName ${displayVersion()}',
+                            key: const ValueKey('settings-version'),
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -730,8 +744,9 @@ class _AnimeFlowCardState extends State<AnimeFlowCard> {
   }
 }
 
-/// What pops up (chat pop-ups: [AppSettings.chatPopups]) and what makes
-/// a sound.
+/// What pops up (chat pop-ups: [AppSettings.chatPopups]), what reaches
+/// you while you sit out or the window is in the background
+/// ([AppSettings.notifyPeople]), and what makes a sound.
 class NotificationsInfo extends StatelessWidget {
   const NotificationsInfo({super.key});
 
@@ -753,8 +768,9 @@ class NotificationsInfo extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              line('Joins, leaves and video changes',
-                  'Pop up bottom left for 5 s, with the person\'s picture'),
+              line('Joins, leaves, lost connections and video changes',
+                  "Pop up bottom left for 5 s with the person's picture, above the player's controls"),
+              line('Added to Up next', 'With the title, its picture and who added it'),
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 child: Row(
@@ -781,7 +797,30 @@ class NotificationsInfo extends StatelessWidget {
               ),
               line('Sat out or nudged by someone', 'Only on your end, with their picture'),
               line('Ready, seeks and pauses', 'Only in Chat & activity (Tab), never as a pop-up'),
-              line('App notices', 'Shader changes, auto sit-out setting you away'),
+              line('Watching alone', 'No pop-ups or sounds about the party: there is nobody else'),
+              line('App notices', 'Shader changes, copies, errors, auto sit-out setting you away'),
+            ],
+          ),
+        ),
+        SettingsPanel(
+          title: 'Sitting out and in the background',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              line('What still reaches you',
+                  'While you sit out, only chat, nudges, "starting now" and Up next pop up. With the window '
+                  'in the background or minimised they also go out as system notifications; a click brings '
+                  'the window up (a chat one opens the chat)'),
+              SignalBuilder(
+                builder: (context) => SwitchListTile(
+                  key: const ValueKey('notify-people'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Joins and leaves too'),
+                  subtitle: Text('Who joins, leaves, loses connection or comes back', style: muted),
+                  value: AppSettings.instance.notifyPeople.value,
+                  onChanged: AppSettings.instance.setNotifyPeople,
+                ),
+              ),
             ],
           ),
         ),

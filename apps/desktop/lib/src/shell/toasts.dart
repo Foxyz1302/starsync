@@ -5,29 +5,29 @@ import 'package:signals/signals_flutter.dart';
 
 import '../session/session_coordinator.dart' show ToastItem;
 import '../state/session_state.dart';
-import '../state/settings.dart';
 import 'avatar.dart';
 import 'motion.dart';
 
-/// One toast on screen: who (null = the app itself), what, and whether it
-/// is on its way out.
+/// One toast on screen: who (null = the app itself), what, a picture
+/// (an Up next item's), and whether it is on its way out.
 class ShellToast {
   final int id;
   final AvatarInfo? who;
   final IconData? icon;
   final String text;
   final bool chat;
+  final String thumb;
   bool leaving = false;
-  ShellToast({required this.id, required this.text, this.who, this.icon, this.chat = false});
+  ShellToast({required this.id, required this.text, this.who, this.icon, this.chat = false, this.thumb = ''});
 }
 
-/// Splits a coordinator toast into who and what: feed and chat toasts
-/// name their [ToastItem.actor] and start with it ("Bob joined", "Bob:
-/// hi"); the rest are the app's.
+/// Splits a Notifier toast into who and what: feed and chat toasts name
+/// their [ToastItem.actor] and start with it ("Bob joined", "Bob: hi");
+/// the rest are the app's.
 ShellToast shellToastFor(ToastItem t, AvatarInfo Function(String name) avatar) {
   final n = t.actor;
-  if (n == null || n.isEmpty) return ShellToast(id: t.id, text: t.text, icon: Icons.info_outline);
-  if (t.text.startsWith('$n: ')) {
+  if (n == null || n.isEmpty) return ShellToast(id: t.id, text: t.text, icon: Icons.info_outline, thumb: t.thumb);
+  if (t.chat && t.text.startsWith('$n: ')) {
     return ShellToast(id: t.id, who: avatar(n), text: t.text.substring(n.length + 2), chat: true);
   }
   final rest = t.text.startsWith('$n ') ? t.text.substring(n.length + 1) : t.text;
@@ -35,24 +35,30 @@ ShellToast shellToastFor(ToastItem t, AvatarInfo Function(String name) avatar) {
       ? Icons.login
       : rest.startsWith('left')
           ? Icons.logout
-          : rest.startsWith('sat you out')
-              ? Icons.bedtime
-              : rest.startsWith('nudged')
-                  ? Icons.notifications_active_outlined
-                  : rest.startsWith('changed')
-                      ? Icons.swap_horiz
-                      : Icons.info_outline;
-  return ShellToast(id: t.id, who: avatar(n), text: rest, icon: icon);
+          : rest.startsWith('lost connection')
+              ? Icons.wifi_off_rounded
+              : rest.startsWith('is back')
+                  ? Icons.wifi_rounded
+                  : rest.startsWith('sat you out')
+                      ? Icons.bedtime
+                      : rest.startsWith('nudged')
+                          ? Icons.notifications_active_outlined
+                          : rest.startsWith('changed')
+                              ? Icons.swap_horiz
+                              : rest.startsWith('added')
+                                  ? Icons.playlist_add_rounded
+                                  : Icons.info_outline;
+  return ShellToast(id: t.id, who: avatar(n), text: rest, icon: icon, thumb: t.thumb);
 }
 
-/// The coordinator's toasts as cards with avatars, bottom-left: each
-/// slides in, stays [life], then slides out and collapses its gap. A click
-/// on a chat toast opens the chat ([onOpenChat]); the rest let clicks
-/// through. Chat toasts follow [AppSettings.chatPopups].
+/// The Notifier's toasts as cards with avatars, bottom-left: each slides
+/// in, stays while the Notifier keeps it (it drops it after its time),
+/// then slides out and collapses its gap. A click on a chat toast opens
+/// the chat ([onOpenChat]); the rest let clicks through. What pops up at
+/// all (chat pop-ups, sitting out, alone) is the Notifier's policy.
 class PartyToasts extends StatefulWidget {
-  final Duration life;
   final VoidCallback? onOpenChat;
-  const PartyToasts({super.key, this.life = const Duration(seconds: 5), this.onOpenChat});
+  const PartyToasts({super.key, this.onOpenChat});
 
   @override
   State<PartyToasts> createState() => _PartyToastsState();
@@ -72,19 +78,17 @@ class _PartyToastsState extends State<PartyToasts> {
     _seen = {for (final t in coord.toasts.peek()) t.id};
     _stop = effect(() {
       final items = coord.toasts.value;
+      final ids = {for (final t in items) t.id};
       final fresh = [for (final t in items) if (!_seen.contains(t.id)) t];
-      _seen = {for (final t in items) t.id};
-      if (fresh.isEmpty) return;
+      final gone = _seen.difference(ids);
+      _seen = ids;
+      if (fresh.isEmpty && gone.isEmpty) return;
       // Only new toasts re-run this, not the party they mention.
       untracked(() {
-        final playing = coord.serverState.value?.transport == 'playing';
-        final popups = AppSettings.instance.chatPopups.value;
         for (final t in fresh) {
-          final toast = shellToastFor(t, (n) => avatarForName(n, coord, t.actorId));
-          // Chat per Settings → Notifications (it is in the chat either way).
-          if (toast.chat && !popups.shows(playing: playing)) continue;
-          _add(toast);
+          _add(shellToastFor(t, (n) => avatarForName(n, coord, t.actorId)));
         }
+        if (gone.isNotEmpty) _leave(gone);
       });
     });
   }
@@ -92,13 +96,22 @@ class _PartyToastsState extends State<PartyToasts> {
   void _add(ShellToast t) {
     // Not from inside the effect's build-time notification.
     scheduleMicrotask(() {
+      if (mounted) setState(() => _shown.add(t));
+    });
+  }
+
+  void _leave(Set<int> ids) {
+    scheduleMicrotask(() {
       if (!mounted) return;
-      setState(() => _shown.add(t));
-      _timers.add(Timer(widget.life, () {
-        if (mounted) setState(() => t.leaving = true);
-      }));
-      _timers.add(Timer(widget.life + easeTime, () {
-        if (mounted) setState(() => _shown.remove(t));
+      final leaving = [for (final t in _shown) if (ids.contains(t.id) && !t.leaving) t];
+      if (leaving.isEmpty) return;
+      setState(() {
+        for (final t in leaving) {
+          t.leaving = true;
+        }
+      });
+      _timers.add(Timer(easeTime, () {
+        if (mounted) setState(() => _shown.removeWhere(leaving.contains));
       }));
     });
   }
@@ -114,7 +127,7 @@ class _PartyToastsState extends State<PartyToasts> {
 
   void _open(ShellToast t) {
     widget.onOpenChat?.call();
-    setState(() => t.leaving = true);
+    SessionState.instance.notifier.dismiss(t.id);
   }
 
   @override
@@ -206,6 +219,8 @@ class ToastCard extends StatelessWidget {
             children: [
               if (who != null)
                 StatusAvatar(info: who, size: 38, badges: false)
+              else if (toast.thumb.isNotEmpty)
+                _Thumb(hash: toast.thumb)
               else
                 CircleAvatar(
                   radius: 19,
@@ -237,6 +252,8 @@ class ToastCard extends StatelessWidget {
                     ],
                     Text(
                       toast.text,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: toast.chat ? 15 : 14,
                         color: toast.chat || who == null ? scheme.onSurface : scheme.onSurfaceVariant,
@@ -245,8 +262,40 @@ class ToastCard extends StatelessWidget {
                   ],
                 ),
               ),
+              if (who != null && toast.thumb.isNotEmpty) ...[
+                const SizedBox(width: 12),
+                _Thumb(hash: toast.thumb),
+              ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// An Up next item's picture (16:9, from the queue's picture cache);
+/// a blank until it is fetched.
+class _Thumb extends StatelessWidget {
+  final String hash;
+  const _Thumb({required this.hash});
+
+  @override
+  Widget build(BuildContext context) {
+    final thumbs = SessionState.instance.coordinator.queue.thumbs;
+    return ClipRRect(
+      key: const ValueKey('toast-thumb'),
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        width: 68,
+        height: 38,
+        child: ListenableBuilder(
+          listenable: thumbs,
+          builder: (context, _) {
+            final bytes = thumbs.bytesFor(hash);
+            if (bytes == null) return ColoredBox(color: Theme.of(context).colorScheme.surfaceContainerHighest);
+            return Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true);
+          },
         ),
       ),
     );

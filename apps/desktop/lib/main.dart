@@ -52,8 +52,12 @@ Future<void> main(List<String> args) async {
   final ports = SessionState.instance.ports;
   await ports.shell.start(
       title: dirs.profile == null ? appName : '$appName [${dirs.profile}]', onCloseRequest: shutDownApp);
-  // Focus, minimise and restore feed auto sit-out.
-  ports.shell.watchActivity(SessionState.instance.coordinator.windowActivity);
+  // Focus, minimise and restore feed auto sit-out and the Notifier (in
+  // the background, notices go out as system notifications).
+  ports.shell.watchActivity((a) {
+    SessionState.instance.coordinator.windowActivity(a);
+    SessionState.instance.notifier.window = a;
+  });
   try {
     await SessionState.instance.loadForm();
   } catch (e, st) {

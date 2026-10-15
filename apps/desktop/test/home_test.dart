@@ -80,9 +80,11 @@ void main() {
 
   test('health parse: online, junk and protocol mismatch', () {
     final ok = ServerHealth.parse(jsonEncode(
-        {'ok': true, 'name': 'Den', 'proto': RelayConstants.protoVersion, 'viewers': 2}));
+        {'ok': true, 'name': 'Den', 'proto': RelayConstants.protoVersion, 'viewers': 2, 'version': '1.3.0'}));
     expect(ok.online, isTrue);
     expect(ok.name, 'Den');
+    expect(ok.version, '1.3.0');
+    expect(ServerHealth.parse('{"ok":true}').version, '', reason: 'a server too old to say');
     expect(ok.viewers, 2);
     expect(ok.needsUpdate, isFalse);
     expect(ServerHealth.parse('{"ok":true,"proto":-1}').needsUpdate, isTrue);

@@ -30,6 +30,8 @@ class AvatarInfo {
   /// How it gets the media and its buffer ([MemberDelivery.detail]), for
   /// the hover; empty when unknown.
   final String delivery;
+  /// Their Starsync version (`members[].app`), for the hover; '' unknown.
+  final String app;
   const AvatarInfo({
     this.id = '',
     required this.name,
@@ -44,6 +46,7 @@ class AvatarInfo {
     this.self = false,
     this.error = '',
     this.delivery = '',
+    this.app = '',
   });
 
   /// Sitting out.
@@ -136,6 +139,7 @@ AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator 
     self: self,
     error: m.error,
     delivery: delivery == null ? '' : memberDeliveryOf(m, r!, delivery).detail,
+    app: m.app,
   );
 }
 
@@ -332,6 +336,7 @@ class _AvatarStackState extends State<AvatarStack> {
                           ? visible[i].name
                           : "${visible[i].name} can't play this: ${visible[i].error}",
                       if (visible[i].delivery.isNotEmpty) visible[i].delivery,
+                      if (visible[i].app.isNotEmpty) 'Starsync ${visible[i].app}',
                     ].join('\n'),
                     child: StatusAvatar(info: visible[i], size: size),
                   ),

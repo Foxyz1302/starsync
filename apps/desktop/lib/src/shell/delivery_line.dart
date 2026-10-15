@@ -8,13 +8,14 @@ import 'motion.dart';
 
 Color _tone(SourceState s, ColorScheme scheme) => switch (s) {
       SourceState.ok => scheme.primary,
-      SourceState.slow || SourceState.waiting => Colors.amber,
+      SourceState.slow || SourceState.waiting || SourceState.gone => Colors.amber,
       SourceState.left => Colors.redAccent.shade200,
     };
 
 IconData _icon(Delivery d) => switch (d.state) {
       SourceState.left => Icons.link_off_rounded,
       SourceState.waiting => Icons.hourglass_top_rounded,
+      SourceState.gone => Icons.wifi_off_rounded,
       _ => switch (d.kind) {
           DeliveryKind.memberRelay => Icons.cell_tower,
           DeliveryKind.serverFetch => Icons.cloud_download_outlined,
@@ -28,8 +29,8 @@ IconData _icon(Delivery d) => switch (d.state) {
 /// Where the current media comes from and how it reaches the others:
 /// "Foxyz passes it on through the server", "3 through the server ·
 /// 4.1 MB/s, needs 2.3 MB/s" and a bar of the source's speed against the
-/// video's (past the mark: keeping up). Amber when slow or waiting, red
-/// when the source left.
+/// video's (past the mark: keeping up). Amber when slow, waiting or the
+/// source's connection dropped, red when the source left.
 class SourceLine extends StatelessWidget {
   final Delivery delivery;
   const SourceLine({super.key, required this.delivery});
@@ -40,7 +41,7 @@ class SourceLine extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final tone = _tone(d.state, scheme);
     final detail = d.detail;
-    final headroom = d.state == SourceState.left ? null : d.headroom;
+    final headroom = d.state == SourceState.left || d.state == SourceState.gone ? null : d.headroom;
     return Tooltip(
       message: d.explain,
       waitDuration: const Duration(milliseconds: 400),

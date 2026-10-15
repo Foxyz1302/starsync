@@ -98,6 +98,17 @@ class DesktopShell implements ShellPort {
   }
 
   @override
+  Future<void> focus() async {
+    try {
+      if (await windowManager.isMinimized()) await windowManager.restore();
+      if (!await windowManager.isVisible()) await windowManager.show();
+      await windowManager.focus();
+    } catch (e) {
+      debugPrint('window focus failed: $e');
+    }
+  }
+
+  @override
   Future<void> requestAttention() => requestWindowAttention();
 
   @override

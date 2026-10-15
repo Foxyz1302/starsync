@@ -58,7 +58,7 @@ void main() {
         expect(c.serverState.peek()!.position, closeTo(13.77, 0.1));
         await _poll(() => !c.playback.player.state.playing, 'player stopped');
         expect(c.playback.positionSecs, greaterThan(12));
-        expect(c.starving.peek(), contains('finished'));
+        expect(c.status.peek().line?.kind, StatusKind.finished);
 
         c.seekTo(2);
         await _poll(

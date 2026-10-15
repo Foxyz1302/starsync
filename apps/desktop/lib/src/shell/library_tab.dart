@@ -13,6 +13,7 @@ import '../jellyfin/home_page.dart' show libraryIcon, isVideoLibrary;
 import '../jellyfin/picker_source.dart';
 import '../jellyfin/session_media.dart';
 import '../screens/home/media_picker.dart';
+import '../session/app_events.dart' show ActionFailed;
 import '../state/session_state.dart';
 import 'library_link.dart';
 import 'motion.dart';
@@ -196,21 +197,17 @@ class _LibraryTabState extends State<LibraryTab> {
     return pick is JellyfinMedia ? add(pick, next: next) : pick as String;
   }
 
-  /// A card's menu: errors as a snack bar.
+  /// A card's menu: errors as a toast (the Notifier's).
   Future<void> _cardQueue(JellyfinSelection sel, {bool next = false}) async {
     final error = await _queueJellyfin(sel, next: next);
-    if (error != null && mounted) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(error)));
-    }
+    if (error != null) SessionState.instance.notifier.notify(ActionFailed(error));
   }
 
-  /// Double-click on a card: put it up, errors as a snack bar.
+  /// Double-click on a card: put it up, errors as a toast.
   Future<void> _doublePutUp(JellyfinSelection sel) async {
     _c.select(sel);
     final error = await _putUpJellyfin(sel);
-    if (error != null && mounted) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(error)));
-    }
+    if (error != null) SessionState.instance.notifier.notify(ActionFailed(error));
   }
 
   // -------------------------------------------------------------- build

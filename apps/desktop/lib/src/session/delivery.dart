@@ -6,6 +6,12 @@ import 'party.dart';
 // Who fetches the current media and how it spreads, from the state alone:
 // the members card's source line and each member's route and buffer.
 
+/// `media.relay` of a state, or null when the media is not relayed.
+MediaRelay? stateMediaRelay(StateBroadcast state) {
+  final r = state.media?['relay'];
+  return r is Map ? MediaRelay.fromJson(Map<String, Object?>.from(r)) : null;
+}
+
 /// "4.1 MB/s", "850 kB/s".
 String formatRate(int bytesPerSec) {
   if (bytesPerSec >= 1000000) {
@@ -50,6 +56,9 @@ enum SourceState {
   slow,
   /// Its channel is down (or the server has not read the link yet).
   waiting,
+  /// The source member's connection dropped (`gone`, within its grace):
+  /// viewers play what the server has.
+  gone,
   /// It left the server.
   left,
 }
@@ -114,6 +123,9 @@ class Delivery {
   final String sourceName;
   final bool sourceIsSelf;
   final SourceState state;
+  /// [SourceState.gone]: since when; and the time the line is read at.
+  final DateTime? goneSince;
+  final DateTime? at;
   /// `media.relay.rate` / `need` (0 unknown).
   final int rate, need;
   /// Members (not sitting out, not the source) reading from the server,
@@ -125,6 +137,8 @@ class Delivery {
     this.sourceName = '',
     this.sourceIsSelf = false,
     this.state = SourceState.ok,
+    this.goneSince,
+    this.at,
     this.rate = 0,
     this.need = 0,
     this.viaServer = 0,
@@ -155,12 +169,21 @@ class Delivery {
         };
       case DeliveryKind.memberRelay:
         return switch (state) {
-          SourceState.left => '$sourceName left: playing what the server has',
+          SourceState.left => '$sourceName left — playing what the server has',
+          SourceState.gone => sourceIsSelf
+              ? 'Reconnecting you to the server…'
+              : "$sourceName's connection dropped — playing what the server has${_for()}",
           SourceState.waiting => sourceIsSelf ? 'Reconnecting you to the server…' : 'Waiting for $who to reconnect',
           SourceState.slow => sourceIsSelf ? 'Your upload is slower than the video' : "$who's upload is slower than the video",
           SourceState.ok => sourceIsSelf ? 'You pass it on through the server' : '$who passes it on through the server',
         };
     }
+  }
+
+  String _for() {
+    final since = goneSince, now = at;
+    if (since == null || now == null || now.difference(since).inMinutes < 1) return '';
+    return ' (${sinceText(since, now)})';
   }
 
   /// "3 through the server · 4.1 MB/s, needs 2.3 MB/s"; empty when
@@ -170,7 +193,7 @@ class Delivery {
       if (direct > 0 && (kind == DeliveryKind.jellyfin || kind == DeliveryKind.memberRelay))
         '$direct with their own account',
       if (viaServer > 0 && kind != DeliveryKind.link) '$viaServer through the server',
-      if (rate > 0 && state != SourceState.left) need > 0 ? '${formatRate(rate)}, needs ${formatRate(need)}' : formatRate(rate),
+      if (rate > 0 && state != SourceState.left && state != SourceState.gone) need > 0 ? '${formatRate(rate)}, needs ${formatRate(need)}' : formatRate(rate),
     ];
     return parts.join(' · ');
   }
@@ -193,8 +216,9 @@ class Delivery {
 }
 
 /// The current media's [Delivery]; null with nothing up or nobody else in
-/// the server. [names] remembers a source that left.
-Delivery? deliveryOf(StateBroadcast r, {required String selfId, MemberNames? names}) {
+/// the server. [names] remembers a source that left; [now] reads how long
+/// a gone source has been gone.
+Delivery? deliveryOf(StateBroadcast r, {required String selfId, MemberNames? names, DateTime? now}) {
   final media = r.media;
   if (media == null || r.members.length < 2) return null;
   final rel = media['relay'];
@@ -237,6 +261,8 @@ Delivery? deliveryOf(StateBroadcast r, {required String selfId, MemberNames? nam
       ? SourceState.ok
       : kind == DeliveryKind.memberRelay && source == null
           ? SourceState.left
+          : kind == DeliveryKind.memberRelay && (relay.sourceGone || source?.presence == Presence.gone)
+              ? SourceState.gone
           : !relay.live
               ? SourceState.waiting
               : relay.slow
@@ -248,6 +274,8 @@ Delivery? deliveryOf(StateBroadcast r, {required String selfId, MemberNames? nam
     sourceName: source?.name ?? names?[sourceId] ?? 'The member passing it on',
     sourceIsSelf: sourceId.isNotEmpty && sourceId == selfId,
     state: state,
+    goneSince: state == SourceState.gone ? relay?.sourceGoneSince ?? source?.goneSince : null,
+    at: now ?? DateTime.now().toUtc(),
     rate: relay?.rate ?? 0,
     need: relay?.need ?? 0,
     viaServer: via,

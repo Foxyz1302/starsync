@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../controls/frame.dart' show DoubleClickListener;
+import '../controls/session_controls.dart' show controlsBottomHeight;
 import '../files/folder_store.dart';
 import '../files/ui/files_page.dart' show showFilesFolder;
 import '../jellyfin/accounts.dart';
@@ -98,6 +99,9 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   final _chat = TextEditingController();
   final _chatFocus = FocusNode();
   final _playerKey = GlobalKey();
+  /// Whether the full player's controls are up (the player's frame
+  /// reports it): the toasts sit above them.
+  final _controlsShown = ValueNotifier(true);
 
   Alignment _corner = Alignment.bottomRight;
   Offset? _drag; // mini top-left while dragging
@@ -187,6 +191,17 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
         _autoFull = false;
       });
     }));
+    // A click on a chat system notification: the window is up, open the
+    // chat.
+    var chatAsks = coord.notifier.chatRequests.peek();
+    _stops.add(effect(() {
+      final asks = coord.notifier.chatRequests.value;
+      if (asks == chatAsks) return;
+      chatAsks = asks;
+      _later(() {
+        if (!_chatOpen && _online.peek()) _toggleChat();
+      });
+    }));
     // Chat that arrives while the panel is closed.
     _stops.add(effect(() {
       final log = coord.feedLog.value;
@@ -250,6 +265,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     _picker.dispose();
     _chat.dispose();
     _chatFocus.dispose();
+    _controlsShown.dispose();
     if (_fullscreen) _setWindowFullscreen(false);
     super.dispose();
   }
@@ -771,15 +787,43 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
             ),
           ),
           if (online && _shown != PlayerMode.none) _playerLayer(area),
-          Positioned(left: 16, bottom: _fullscreen ? 90 : 16, child: PartyToasts(
-            onOpenChat: () {
-              if (!_chatOpen) _toggleChat();
-            },
-          )),
+          _toasts(full && online),
         ],
       );
     });
   }
+
+  /// The toasts, bottom left; over the full player above its control
+  /// bar (the bar's height in the skin and size in use), moving up while
+  /// the controls show and down while they are hidden, so they never
+  /// cover the controls (both skins).
+  Widget _toasts(bool overPlayer) {
+    final toasts = PartyToasts(
+      onOpenChat: () {
+        if (!_chatOpen) _toggleChat();
+      },
+    );
+    return ValueListenableBuilder<bool>(
+      valueListenable: _controlsShown,
+      builder: (context, shown, child) => SignalBuilder(builder: (context) {
+        final s = AppSettings.instance;
+        final bar = controlsBottomHeight(s.controlsSkin.value, s.controlsSize.value);
+        return AnimatedPositioned(
+          key: const ValueKey('toasts'),
+          duration: easeTime,
+          curve: ease,
+          left: toastInset,
+          bottom: overPlayer && shown ? bar + toastInset : toastInset,
+          child: child!,
+        );
+      }),
+      child: toasts,
+    );
+  }
+
+  /// The toasts' distance from the body's left and bottom edges (and from
+  /// the player's control bar).
+  static const toastInset = 16.0;
 
   Offset _cornerPos(Size area, Alignment a, Size size) => Offset(
         a.x < 0 ? _miniMargin : (area.width - size.width - _miniMargin).clamp(0, double.infinity),
@@ -852,6 +896,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
                   onLeave: _confirmLeave,
                   videoBuilder: widget.videoBuilder,
                   windowControls: widget.windowControls,
+                  controlsShown: _controlsShown,
                 ),
               ),
             ),

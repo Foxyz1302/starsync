@@ -1,6 +1,3 @@
-// restructure: rewrite in step 2 (Status + Notifier): "feed and chat toasts
-// name their actor exactly".
-//
 // The session through drops, takeovers and goodbyes: real coordinators
 // (real mpv), a real server, and FlakyProxy between a member and it.
 import 'dart:async';
@@ -242,7 +239,7 @@ void main() {
       final second = await member(server.boundPort, 'me', identity: install);
       expect(second.connection.memberId, id, reason: 'the newer connection took the member over');
       await _poll(() => first.connection.state.peek() is ConnReplaced, 'the first one replaced');
-      expect(first.health.peek().message, replacedText);
+      expect(first.status.peek().line?.text, replacedText);
       // It does not fight back.
       await Future.delayed(const Duration(seconds: 4));
       expect(first.connection.state.peek(), isA<ConnReplaced>());
@@ -412,6 +409,7 @@ void main() {
       final toasts = coord.toasts.peek();
       expect(toasts.firstWhere((t) => t.text == 'Bob Jr joined').actor, 'Bob Jr');
       final chat = toasts.firstWhere((t) => t.text == 'Bob Jr: hi there');
+      expect(chat.chat, isTrue);
       expect(chat.actor, 'Bob Jr');
       expect(chat.actorId, friend.memberId, reason: 'matched by member id');
       // Others' chat makes a sound, your own does not.

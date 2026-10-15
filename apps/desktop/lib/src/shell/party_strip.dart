@@ -121,10 +121,9 @@ class PartyStrip extends StatelessWidget {
                             label: t.label,
                             selected: t == tab,
                             compact: compact,
-                            // The version: always in sight under Settings,
-                            // the full one a rest of the mouse away.
+                            // The version a rest of the mouse away (also at
+                            // the bottom of Settings and in About).
                             tooltip: t == ShellTab.settings ? '$appName ${displayVersion()}' : null,
-                            caption: t == ShellTab.settings ? shortVersion() : null,
                             onTap: () => onTab(t),
                           ),
                       ],
@@ -281,13 +280,9 @@ class _ServerLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SignalBuilder(
     builder: (context) {
-      final coord = SessionState.instance.coordinator;
-      final r = coord.serverState.value;
-      // The ready counter counts who the presence policy counts (not away,
-      // not gone, able to play it).
-      final counted = (r?.members ?? const <MemberView>[]).where(countsForReady).toList();
-      final ready = counted.where((m) => m.ready).length;
-      final stale = coord.stateStale.value;
+      // "connecting…", "reconnecting…", "ready 2/3" (the ready counter
+      // counts who the presence policy counts), from the one status.
+      final line = SessionState.instance.coordinator.status.value.party;
       return Column(
         key: const ValueKey('server-label'),
         mainAxisSize: MainAxisSize.min,
@@ -298,11 +293,7 @@ class _ServerLabel extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.w600, height: 1.1),
           ),
           Text(
-            r == null
-                ? 'connecting…'
-                : stale
-                    ? 'reconnecting…'
-                    : 'ready $ready/${counted.length}',
+            line,
             style: TextStyle(
               color: scheme.onSurfaceVariant,
               fontSize: 12,
@@ -373,8 +364,6 @@ class StripTab extends StatelessWidget {
   final VoidCallback onTap;
   /// Shown after resting on the tab.
   final String? tooltip;
-  /// Small text under the tab (the version under Settings).
-  final String? caption;
   const StripTab({
     super.key,
     required this.label,
@@ -382,7 +371,6 @@ class StripTab extends StatelessWidget {
     required this.onTap,
     this.compact = false,
     this.tooltip,
-    this.caption,
   });
 
   @override
@@ -399,7 +387,6 @@ class StripTab extends StatelessWidget {
           child: SizedBox(
             height: partyStripHeight,
             child: Stack(
-              clipBehavior: Clip.none,
               alignment: Alignment.center,
               children: [
                 Column(
@@ -426,27 +413,6 @@ class StripTab extends StatelessWidget {
                     ),
                   ],
                 ),
-                if (caption case final c?)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 2,
-                    height: 13,
-                    child: OverflowBox(
-                      maxWidth: 160,
-                      child: Text(
-                        c,
-                        key: const ValueKey('strip-version'),
-                        maxLines: 1,
-                        softWrap: false,
-                        style: TextStyle(
-                          fontSize: 10,
-                          height: 1.2,
-                          color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-                        ),
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),
@@ -522,18 +488,31 @@ class MembersCard extends StatelessWidget {
             final address = hosting
                 ? null
                 : '${session.lastForm.host}:${session.lastForm.port}';
-            final delivery = r == null
-                ? null
-                : deliveryOf(r, selfId: coord.connection.memberId, names: coord.memberNames);
+            final delivery = coord.status.value.delivery;
+            final server = session.serverVersion.value;
             return Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                  child: Text(
-                    ['In the server', ?address].join(' · '),
-                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        ['In the server', ?address].join(' · '),
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      if (server.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: VersionText(
+                            key: const ValueKey('server-version'),
+                            label: 'Server',
+                            version: server,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
                 if (delivery != null) SourceLine(delivery: delivery),
@@ -618,6 +597,7 @@ class _MemberTile extends StatelessWidget {
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           Text(info.self ? '${m.name} (you)' : m.name),
+          if (m.app.isNotEmpty) VersionText(key: ValueKey('version-${m.id}'), version: m.app),
           if (info.host) const Pill('host', Colors.amber),
           if (info.relaying)
             const Pill('passing the video on', Colors.lightBlueAccent),
@@ -650,6 +630,35 @@ class _MemberTile extends StatelessWidget {
     );
   }
 }
+
+/// A Starsync version, quiet ("1.3.0"), amber with a hint when it is not
+/// the one this app runs; [label] before it ("Server 1.3.0").
+class VersionText extends StatelessWidget {
+  final String version;
+  final String? label;
+  const VersionText({super.key, required this.version, this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final differs = versionDiffers(version);
+    final text = Text(
+      [?label, version].join(' '),
+      style: TextStyle(
+        fontSize: 11,
+        color: differs ? Colors.amber.shade300 : scheme.onSurfaceVariant.withValues(alpha: 0.8),
+        fontWeight: differs ? FontWeight.w600 : FontWeight.w400,
+      ),
+    );
+    if (!differs) return text;
+    return Tooltip(message: 'You run ${shortVersion()}', child: text);
+  }
+}
+
+/// [version] is not the one this app runs (a dev run matches anything:
+/// it has no version of its own).
+bool versionDiffers(String version, {String own = appVersion}) =>
+    version.isNotEmpty && own != '0.0.0-dev' && version != '0.0.0-dev' && version != own;
 
 /// Hosting: the addresses friends on this network can join, the first
 /// one behind "Copy invite address", and what friends elsewhere need.
