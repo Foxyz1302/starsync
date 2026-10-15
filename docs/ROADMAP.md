@@ -74,12 +74,56 @@ Problems are numbered; delete a line when its fix ships.
   next episode, tracking); test library: the user's
   `/mnt/torrents/Torrents/Binux/` (several shows and a movie).
 
-**Restructure** (in order): identity + presence (D1 D2 D5 D6); notifier
-(toasts, sounds on `SoundEngine`, system notifications, activity log);
-what's next + watch tracking (D3); media pipeline + media identity
-(Jellyfin, local folders, links resolve to one show/episode identity);
-"your server" (D9). The plan with the current and target system maps is
-the "Starsync architecture" write-up.
+**Restructure** (in order; reviewed against the code). Truth lives in
+three places: the server (members, presence, gate, transport, queue incl.
+the automatic continuation and countdown, relay state), the device
+(client id, library and folders, match corrections, watch history,
+settings, notification prefs, what this app is sourcing) and the
+integrations (Jellyfin played/resume, AniList list).
+0. Safety net and seams, no visible change: fix P27; an `AppEvent` type;
+   platform ports wrapping today's calls (window/shell, open URL,
+   notifications, yt-dlp process, folder access, player host);
+   Connection extracted from the coordinator; the proto 16 spec written.
+1. Connection + Identity + Presence, proto 16 in full (one bump, with a
+   min/max version range and a stable refusal frame so later changes are
+   additive): a lasting client id; a socket close no longer removes the
+   member (explicit `bye`); presence joining/in/away/gone with grace;
+   `PresencePolicy` in core used by server and app alike; bounded D2
+   hold; relay `sourceGone` and source resume; queue `by` lasting;
+   `members[].app`. Fixes P1 P3 P4 P6, server half of P2; D1 D2 D5 D6.
+2. Status (one computed level) + Notifier (pure policy over events:
+   toasts above the controls, SoundEngine, system notifications, activity
+   log). Fixes P8 P11 P12 P21 P33, visible half of P2; D4, D1, D9 alone
+   policy ("alone" = no other connected member, In or Away).
+3. Your server: one hub, listeners attached (loopback; LAN on Invite),
+   nothing restarts; Invite as a value (link/deep link, filtered
+   addresses, version gate). Fixes P22 P23 P24; D9.
+4. Library + Media identity: L1 local grouping (pure Dart, offline: kinds
+   episode/movie/extra, folder hints, gaps, merge across folders) and L2
+   match (AniList/TVDB ids, art, names, manual pin, cache); one `MediaRef`
+   carried in swap/queue media. Fixes P34 and Files' next episode.
+5. What's next (decides which/when, never opens; continuation and
+   countdown as server state, shared cancel) + Watch tracking (time In,
+   device history, Jellyfin now, AniList later). Fixes P7 P9; D3.
+6. Media pipeline + player host port: plan → resolve → open → ready,
+   commands queued during a switch, source-drop recovery, resolver and
+   source chosen by capability. Fixes P2 (client) P15 P17 P18 P28 P29;
+   P30 P31 P32 as a player-host sub-step; D6 client half, D11.
+Not in the restructure: P25 (ops).
+
+**Open decisions** (raised by the review):
+- Queue survival: does your own server keep the queue across an app
+  restart (conflicts with the "No server storage" decision)?
+- Transport for Android later: plain `ws://` needs a cleartext exception
+  on Android 9+; `wss://` behind a proxy changes the Invite format.
+- Auto-Away: suggest Away after a long minimise (client intent), or only
+  by hand?
+- Hold and grace lengths: D2 hold bound (e.g. 15 s), grace ~10 min; a
+  source in grace keeps its relay buffer.
+- Platform decision: "Desktop + mpv only" becomes "mpv only, desktop
+  first" if Android goes ahead.
+- D10 was dropped on purpose (preload/warm relay/fresh player are folded
+  into step 6, not a separate decision).
 
 ## Backlog
 
