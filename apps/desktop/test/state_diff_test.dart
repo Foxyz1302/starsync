@@ -130,22 +130,19 @@ void main() {
         name: 'a',
         ready: true,
         inSet: true,
-        buffered: 9,
-        stale: false);
+        buffered: 9);
     const catchingUp = MemberView(
         id: 'm2',
         name: 'b',
         ready: false,
         inSet: false,
-        buffered: 0,
-        stale: false);
+        buffered: 0);
     const unreadyInSet = MemberView(
         id: 'm3',
         name: 'c',
         ready: false,
         inSet: true,
-        buffered: 9,
-        stale: false);
+        buffered: 9);
 
     test('only in-set ready members may follow transport to playing', () {
       final state = _stateWithMembers([ready, catchingUp, unreadyInSet]);

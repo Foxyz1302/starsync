@@ -16,7 +16,7 @@ import '../session/app_events.dart' show ActionFailed, ScheduleResult;
 import '../session/session_coordinator.dart' show ConnectParams;
 import '../screens/home/health_probe.dart';
 import '../screens/home/media_picker.dart';
-import '../screens/home/profile.dart';
+import '../session/identity.dart';
 import '../screens/home/update_indicator.dart';
 import '../state/session_state.dart';
 import '../state/settings.dart';
@@ -202,7 +202,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     // plays again).
     var wasOut = false;
     _stops.add(effect(() {
-      final out = coord.selfOut.value;
+      final out = coord.selfAway.value;
       if (wasOut && !out && session.route.peek() == AppRoute.session) {
         _later(() {
           if (_mode == PlayerMode.none) _show(PlayerMode.mini);
@@ -323,7 +323,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   /// player shows the join-back card). Once out, × closes the player.
   void _closePlayer() {
     final coord = SessionState.instance.coordinator;
-    if (coord.selfOut.peek()) {
+    if (coord.selfAway.peek()) {
       _show(PlayerMode.none);
     } else {
       coord.sitOut();
@@ -447,6 +447,8 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
 
   /// Ctrl+V outside a text field (a focused field pastes on its own).
   bool _onKey(KeyEvent e) {
+    // Any key is activity (auto sit-out).
+    SessionState.instance.coordinator.markInput();
     if (e is! KeyDownEvent || e.logicalKey != LogicalKeyboardKey.keyV) return false;
     final keys = HardwareKeyboard.instance;
     if (!(keys.isControlPressed || keys.isMetaPressed) || keys.isShiftPressed || keys.isAltPressed) return false;
@@ -675,9 +677,18 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
         }),
       ),
     );
+    // Any pointer use anywhere is activity (auto sit-out).
+    final coord = SessionState.instance.coordinator;
     return Listener(
-      onPointerHover: (e) => _pointer = e.localPosition,
-      onPointerDown: (e) => _pointer = e.localPosition,
+      onPointerHover: (e) {
+        _pointer = e.localPosition;
+        coord.markInput();
+      },
+      onPointerDown: (e) {
+        _pointer = e.localPosition;
+        coord.markInput();
+      },
+      onPointerSignal: (_) => coord.markInput(),
       child: _dropTarget(shell),
     );
   }

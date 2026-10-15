@@ -17,7 +17,7 @@ class _Member {
   late WelcomeMessage welcome;
   _Member(this.ws);
 
-  static Future<_Member> join(int port, String name, {String secret = 'pw'}) async {
+  static Future<_Member> join(int port, String name, {String secret = 'pw', String client = '', int seq = 0}) async {
     final ws = await WebSocket.connect('ws://127.0.0.1:$port/sync');
     final m = _Member(ws);
     final w = Completer<String>();
@@ -29,8 +29,8 @@ class _Member {
       proto: RelayConstants.protoVersion,
       secret: secret,
       user: HelloUser(name: name),
-      media: const HelloMedia(name: '', size: 0, duration: 0),
-    ).toJson()));
+      client: client,
+      seq: seq).toJson()));
     m.welcome = WelcomeMessage.fromJson(
         Map<String, Object?>.from(jsonDecode(await w.future.timeout(const Duration(seconds: 5))) as Map));
     return m;
@@ -86,8 +86,8 @@ void main() {
     await tmp.delete(recursive: true);
   });
 
-  Future<_Member> join(String name) async {
-    final m = await _Member.join(server.boundPort, name);
+  Future<_Member> join(String name, {String client = '', int seq = 0}) async {
+    final m = await _Member.join(server.boundPort, name, client: client, seq: seq);
     cleanup.add(() => m.ws.close());
     return m;
   }
@@ -249,6 +249,75 @@ void main() {
       final (status, _, body) = await pending.timeout(const Duration(seconds: 10));
       expect(status, 206);
       expect(body, bytes.sublist(RelayBuffer.slice * 4));
+    });
+
+    group('the source drops (D6)', () {
+      const install = 'relaySourceInstall0001';
+      Map? relayOf(_Member m) => m.media?['relay'] as Map?;
+
+      test('gone: the relay stays, sourceGone, the buffer serves; back with the same info it continues', () async {
+        final alice = await join('alice', client: install, seq: 1);
+        final bob = await join('bob');
+        await swapRelay(alice);
+        final src = await startSource(alice);
+        final url = viewerUrl(bob, mediaIdOf(alice));
+        expect((await get(url, range: 'bytes=0-${RelayBuffer.slice * 2 - 1}')).$3, bytes.sublist(0, RelayBuffer.slice * 2));
+        await alice.ws.close();
+        await src.close();
+        await src.done;
+        await _until(() => relayOf(bob)?['sourceGone'] == true, 'sourceGone');
+        expect(relayOf(bob)!['sourceGoneSince'], isA<String>());
+        expect(server.hub.relay, isNotNull, reason: 'the relay lives through the grace');
+        expect((await get(url, range: 'bytes=0-99')).$3, bytes.sublist(0, 100), reason: 'what is buffered serves');
+        final pending = get(url, range: 'bytes=${RelayBuffer.slice * 4}-');
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        final again = await join('alice', client: install, seq: 2);
+        expect([again.welcome.resumed, again.welcome.token], [true, alice.welcome.token]);
+        await _until(() => relayOf(bob)?['sourceGone'] == null, 'source back');
+        await startSource(again);
+        final (status, _, body) = await pending.timeout(const Duration(seconds: 10));
+        expect(status, 206);
+        expect(body, bytes.sublist(RelayBuffer.slice * 4), reason: 'the rest is pulled from the source again');
+      });
+
+      test('back with another media: closed with 4002, the relay ends', () async {
+        final alice = await join('alice');
+        final bob = await join('bob');
+        await swapRelay(alice);
+        final src = await startSource(alice);
+        await _until(() => server.hub.relay?.live == true, 'live');
+        await src.close();
+        await src.done;
+        final other = File('${tmp.path}/other.mkv')..writeAsBytesSync(List.filled(1000, 3));
+        final wrong = await startSource(alice, from: RelayMedia.single(FileRelayBytes(other)));
+        await wrong.done.timeout(const Duration(seconds: 5));
+        await _until(() => server.hub.relay == null, 'relay ended');
+        await _until(() => relayOf(bob) != null && relayOf(bob)!['live'] == null, 'not live');
+        expect((await get(viewerUrl(bob, mediaIdOf(alice)), range: 'bytes=0-9')).$1, 404);
+      });
+
+      test('a second channel for the same relay replaces the first (4003)', () async {
+        final alice = await join('alice');
+        await swapRelay(alice);
+        final first = await startSource(alice);
+        await _until(() => server.hub.relay?.live == true, 'live');
+        await startSource(alice);
+        await first.done.timeout(const Duration(seconds: 5));
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        expect(server.hub.relay?.live, isTrue, reason: 'the second one feeds it');
+      });
+
+      test('its source leaving for good ends the relay', () async {
+        final alice = await join('alice');
+        final bob = await join('bob');
+        await swapRelay(alice);
+        final src = await startSource(alice);
+        await _until(() => server.hub.relay?.live == true, 'live');
+        alice.send(const ByeMessage().toJson());
+        await src.done.timeout(const Duration(seconds: 5));
+        await _until(() => relayOf(bob)?['sourceGone'] == true && relayOf(bob)?['live'] == null, 'ended');
+        expect(server.hub.relay, isNull);
+      });
     });
 
     test('two tracks: each byte-exact at its own URL, welcome is an EDL of both', () async {
@@ -554,13 +623,17 @@ void main() {
       expect(server.hub.warm!.queueId, isNot(id));
     });
 
-    test('not for an adder alone; dropped when its adder leaves', () async {
+    test('not for an adder alone; kept while its adder is gone, dropped when it leaves', () async {
       final alice = await join('alice');
       await add(alice, through('k-abcdefgh'));
       expect(headRelay(alice), isNull);
       final bob = await join('bob');
       await _until(() => headRelay(bob) != null, 'warm relay once someone could read it');
       await alice.ws.close();
+      await _until(() => headRelay(bob)?['sourceGone'] == true, 'adder gone');
+      expect(server.hub.warm, isNotNull, reason: 'its adder may come back within the grace');
+      server.hub.engine.applyLeave(alice.welcome.token, reason: 'bye');
+      server.hub.changed();
       await _until(() => bob.lastState!['members'] is List && (bob.lastState!['members'] as List).length == 1, 'left');
       expect(queueOf(bob), hasLength(1));
       expect(headRelay(bob), isNull);

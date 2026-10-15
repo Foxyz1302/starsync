@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:signals/signals_core.dart';
@@ -9,6 +10,7 @@ import '../screens/home/ui.dart' show appName, displayVersion;
 import '../state/settings.dart';
 import '../sync/sync_client.dart';
 import 'app_events.dart';
+import 'identity.dart' show ClientIdentity;
 
 /// Thrown when a connect is superseded by cancel/leave before it finished.
 class ConnectCancelled implements Exception {
@@ -74,6 +76,10 @@ sealed class ConnState {
 
   /// The reconnect loop runs ([ConnLost] or [ConnReconnecting]).
   bool get retrying => false;
+
+  /// A welcomed socket is up ([ConnOnline] or [ConnUnstable]): what the
+  /// server says is current.
+  bool get online => false;
 }
 
 /// Not connected and not trying: before the first connect, after leave,
@@ -91,15 +97,30 @@ final class ConnConnecting extends ConnState {
   String toString() => 'connecting';
 }
 
-/// Welcome received.
+/// Welcome received; frames arrive.
 final class ConnOnline extends ConnState {
   const ConnOnline();
+  @override
+  bool get online => true;
   @override
   String toString() => 'online';
 }
 
-/// Dropped (the socket closed, or no state for [Connection.silenceLimit]);
-/// the next attempt is scheduled.
+/// Still the same socket, but nothing came for [Connection.unstableAfter]
+/// (the server sends a state every second): the link may be dying. Back
+/// to [ConnOnline] with the next frame, [ConnLost] at
+/// [Connection.silenceLimit].
+final class ConnUnstable extends ConnState {
+  const ConnUnstable();
+  @override
+  bool get online => true;
+  @override
+  String toString() => 'unstable';
+}
+
+/// Dropped (the socket closed, or nothing came for
+/// [Connection.silenceLimit]); the next attempt is scheduled. The session
+/// keeps what it had (the last state, the player, a relay it serves).
 final class ConnLost extends ConnState {
   const ConnLost();
   @override
@@ -120,9 +141,10 @@ final class ConnReconnecting extends ConnState {
   String toString() => 'reconnecting($attempt)';
 }
 
-/// The first dial failed; nothing retries. [code]: `version` or `secret`
-/// when the server said so, else empty (offline, timeout, anything else);
-/// [message]: in plain words ([connectErrorText]).
+/// The server refused this app; nothing retries. [code]: `version` or
+/// `secret` when the server said so, else empty (offline, timeout,
+/// anything else on the first dial); [message]: in plain words
+/// ([connectErrorText]).
 final class ConnRefused extends ConnState {
   final String code;
   final String message;
@@ -131,88 +153,173 @@ final class ConnRefused extends ConnState {
   String toString() => 'refused($code: $message)';
 }
 
-/// Another socket took this member over. Not produced yet (protocol 16
-/// adds the `replaced` refusal).
+/// Another connection of this install holds the member (`err` `replaced`,
+/// close 4013, or this hello was `stale`): Starsync was opened in another
+/// window. Nothing retries ("Retry" takes the member back).
 final class ConnReplaced extends ConnState {
   const ConnReplaced();
+  String get message => replacedText;
   @override
   String toString() => 'replaced';
 }
 
+/// [ConnReplaced] in plain words.
+const replacedText = 'Starsync was opened in another window';
+
+/// A version refusal in plain words: [err] is the server's `err`
+/// `version` (its range in `min`/`max`), or a proto 15 server's codeless
+/// `proto mismatch`, which is always an older host.
+String versionText(ErrorFrame? err) {
+  final max = err?.max, min = err?.min;
+  if (err?.code == null || (max != null && max < RelayConstants.protoMin)) {
+    return 'the host runs an older Starsync — they need to update';
+  }
+  if (min != null && min > RelayConstants.protoMax) return 'the host runs a newer Starsync — update the app';
+  return 'the host runs a different Starsync version — update both apps';
+}
+
 /// A failed dial in plain words.
 String connectErrorText(Object e) {
+  if (e is HelloRefused) {
+    final err = e.error;
+    if (err != null && err.code == null && err.message.contains('proto mismatch')) return versionText(err);
+    return switch (e.code) {
+      ErrCode.version => versionText(err),
+      ErrCode.secret => 'wrong server password (401)',
+      ErrCode.replaced || ErrCode.stale => replacedText,
+      _ => 'refused: ${err?.message ?? 'closed (${e.closeCode})'}',
+    };
+  }
   final msg = '$e';
-  if (msg.contains('proto mismatch')) return 'host runs a different version — update the app';
-  if (msg.contains('wrong secret')) return 'wrong server password (401)';
   if (msg.contains('SocketException') || msg.contains('Connection refused')) {
     return 'host offline — check address and port';
   }
   return 'connect failed: $e';
 }
 
-ConnRefused _refused(Object e) {
-  final msg = '$e';
-  final code = msg.contains('proto mismatch')
-      ? 'version'
-      : msg.contains('wrong secret')
-          ? 'secret'
-          : '';
-  return ConnRefused(code, connectErrorText(e));
+/// The terminal state a failed dial leaves, or null when another attempt
+/// may work.
+ConnState? _terminalFor(Object e, {required bool first}) {
+  if (e is HelloRefused) {
+    final err = e.error;
+    if (err != null && err.code == null && err.message.contains('proto mismatch')) {
+      return ConnRefused('version', versionText(err));
+    }
+    switch (e.code) {
+      case ErrCode.replaced:
+      case ErrCode.stale:
+        return const ConnReplaced();
+      case ErrCode.version:
+        return ConnRefused('version', connectErrorText(e));
+      case ErrCode.secret:
+        return ConnRefused('secret', connectErrorText(e));
+      default:
+        break;
+    }
+  }
+  return first ? ConnRefused('', connectErrorText(e)) : null;
 }
+
+/// What a hello says about this install besides the connect form.
+typedef HelloIdentity = ({String client, int seq, ClientCaps caps, int? feedAfter});
 
 /// Builds the `hello` for [params]. Injectable so later protocol versions
 /// add fields without changing [Connection].
-typedef HelloBuilder = HelloMessage Function(ConnectParams params);
+typedef HelloBuilder = HelloMessage Function(ConnectParams params, HelloIdentity id);
 
-/// Today's hello.
-HelloMessage defaultHello(ConnectParams params) => HelloMessage(
-      proto: RelayConstants.protoVersion,
+/// Protocol 16's hello: this build's version range, the install's client
+/// id and connection count, the app version, platform and what it can do;
+/// `feedAfter` on a reconnect to the same server.
+HelloMessage defaultHello(ConnectParams params, HelloIdentity id) => HelloMessage(
+      proto: RelayConstants.protoMax,
+      protoMin: RelayConstants.protoMin,
       secret: params.secret,
       user: HelloUser(name: params.name, avatar: params.avatar),
-      media: const HelloMedia(name: '', size: 0, duration: 0),
       hostKey: params.hostKey,
+      client: id.client,
+      seq: id.seq,
+      app: appVersion,
+      platform: Platform.operatingSystem,
+      caps: id.caps,
+      feedAfter: id.feedAfter,
     );
 
-/// The session's part of a reconnect: called right before an attempt
-/// dials (read what to restore then; the welcome's state replaces it). The
-/// function it returns runs once that attempt is online; [stale] turns
-/// true when a cancel, retry, leave or new connect superseded it. An error
-/// there counts as a failed attempt.
-typedef ReconnectHandler = Future<void> Function(WelcomeMessage welcome, bool Function() stale) Function();
+/// How a welcome relates to the member this app held before.
+typedef Rejoin = ({
+  /// A reconnect of the running session (not its first dial).
+  bool reconnect,
+  /// `welcome.resumed`: the same member, everything kept.
+  bool resumed,
+  /// The same server boot as the last welcome (`welcome.instance`).
+  bool sameServer,
+  /// The token the session held before this welcome ('' on the first).
+  String oldToken,
+});
+
+/// The session's part of a welcome, called before its state goes out
+/// (see [Connection.onWelcome]).
+typedef WelcomeHandler = void Function(WelcomeMessage welcome, Rejoin rejoin);
 
 /// The link to the server: the [SyncClient] socket, the first connect,
-/// reconnects ([reconnectDelay] between attempts, the previous token
-/// offered as `resume`, epochs that make a cancelled attempt stale), the
-/// "no state for [silenceLimit] = lost" policy, the 1 s heartbeat (clock
-/// ping, diagnostics), the connection lost/back events and [state]. What
-/// a reconnect restores in the session is the [onReconnect] handler's.
+/// reconnects (backoff with jitter between attempts, epochs that make a
+/// cancelled attempt stale), the silence policy ("unstable" after
+/// [unstableAfter] without a frame, lost at [silenceLimit]), the 1 s
+/// heartbeat (clock ping, which also keeps this member under the
+/// server's silence limit, and diagnostics), the connection lost/back
+/// events and [state]. The install's identity rides in every hello
+/// ([identity]); what a welcome means to the session is its [onWelcome].
 class Connection {
   final SyncClient client;
   /// Where [ConnectionLost] / [ConnectionBack] go (the Notifier).
   final void Function(AppEvent event) _notify;
   /// Builds each dial's hello.
   final HelloBuilder hello;
-  /// Wait before each reconnect attempt.
+  /// `hello.client` / `hello.seq` (the stored one in the app; a fresh
+  /// in-memory one by default, so every test connection is its own
+  /// install).
+  final ClientIdentity identity;
+  /// `hello.caps` at each dial (the session sets it).
+  ClientCaps Function() caps;
+  /// Wait before the first reconnect attempt; it doubles per failed
+  /// attempt up to [maxReconnectDelay], each with ±20 % jitter.
   final Duration reconnectDelay;
-  /// No state broadcast for this long means the connection is lost.
+  final Duration maxReconnectDelay;
+  /// No frame for this long: [ConnUnstable].
+  final Duration unstableAfter;
+  /// No frame for this long means the connection is lost.
   final Duration silenceLimit;
-  /// The clock [silenceLimit] is measured on (UTC; a test passes a fake
-  /// one). The heartbeat that checks it stays a real 1 s timer.
+  /// The lost sound plays only once a drop lasted this long (a quick
+  /// reconnect says nothing, and no lost/back pair per flap).
+  final Duration lostSoundAfter;
+  /// The clock the silence and the lost sound are measured on (UTC; a
+  /// test passes a fake one). The heartbeat that checks it stays a real
+  /// 1 s timer.
   final DateTime Function() now;
+  final Random _random;
 
   Connection(
       {void Function(AppEvent event)? notify,
       SyncClient? client,
       this.hello = defaultHello,
-      this.reconnectDelay = const Duration(milliseconds: 1500),
-      this.silenceLimit = const Duration(seconds: 5),
-      DateTime Function()? now})
+      ClientIdentity? identity,
+      ClientCaps Function()? caps,
+      this.reconnectDelay = const Duration(seconds: 1),
+      this.maxReconnectDelay = const Duration(seconds: 15),
+      this.unstableAfter = const Duration(seconds: 3),
+      this.silenceLimit = const Duration(seconds: 9),
+      this.lostSoundAfter = const Duration(seconds: 4),
+      DateTime Function()? now,
+      Random? random})
       : _notify = notify ?? ((_) {}),
         now = now ?? _utcNow,
+        identity = identity ?? ClientIdentity.ephemeral(),
+        caps = caps ?? (() => const ClientCaps(source: true)),
+        _random = random ?? Random(),
         client = client ?? SyncClient() {
+    this.client.onFrame = () => _lastFrameAt = this.now();
     _subs = [
       this.client.status.listen(_onStatus),
-      this.client.states.listen((_) => _lastStateAt = this.now()),
+      this.client.errors.listen(_onError),
     ];
   }
 
@@ -224,8 +331,8 @@ class Connection {
   /// Every change is notified, a repeat too.
   ReadonlySignal<ConnState> get state => _state;
 
-  /// Set by the session (see [ReconnectHandler]).
-  ReconnectHandler? onReconnect;
+  /// Set by the session (see [WelcomeHandler]).
+  WelcomeHandler? onWelcome;
 
   /// This app's log lines to the server's session log (Settings: "Share
   /// diagnostics with the server"), and "Mark a problem". Runs from
@@ -239,12 +346,6 @@ class Connection {
     return (base: DiagUploader.baseOf(uri), token: client.token, offsetMs: client.clockSync.offsetMs);
   }
 
-  /// No state broadcast for [silenceLimit] (checked every second while not
-  /// closed): what the server said is stale. Synchronous, before [state]
-  /// goes lost.
-  Stream<void> get silence => _silence.stream;
-  final _silence = StreamController<void>.broadcast(sync: true);
-
   ConnectParams? _params;
   /// The last connect's parameters (with [updateProfile]'s changes); a
   /// reconnect dials with them.
@@ -254,23 +355,26 @@ class Connection {
   int _epoch = 0;
   Timer? _reconnectTimer;
   Timer? _heartbeat;
-  // Set by close/cancel: no reconnect, no lost detection.
+  // Set by close/cancel/a terminal refusal: no reconnect, no lost detection.
   bool _closed = false;
   bool _everOnline = false;
   /// The connection-lost sound played; the reconnected one answers it once.
   bool _lostSounded = false;
-  // Token of the current connection, offered as `resume` on reconnect.
-  String _resumeToken = '';
-  DateTime? _lastStateAt;
+  DateTime? _lastFrameAt;
+  /// When the current drop began (the last frame for a silent link).
+  DateTime? _droppedAt;
   int _attempt = 0;
+  /// Non-terminal `err` frames, in plain words.
+  final _errorTexts = StreamController<String>.broadcast();
 
   // The socket and what the server said, read through.
   Stream<StateBroadcast> get states => client.states;
-  /// Feed entries, chat included.
+  /// Feed entries, chat included; replayed ones after a reconnect.
   Stream<FeedMessage> get feeds => client.feeds;
   Stream<NudgeNotice> get nudges => client.nudges;
-  /// `err` frames after the welcome.
-  Stream<String> get errors => client.errors;
+  /// `err` frames after the welcome (a `replaced` one ends the connection
+  /// instead).
+  Stream<String> get errors => _errorTexts.stream;
   String get token => client.token;
   String get memberId => client.memberId;
   /// This member's `/j/...` URL from `welcome`.
@@ -304,7 +408,7 @@ class Connection {
   void sendChat(String text) => client.sendChat(text);
   void sendArt(int mediaId, {String? poster, String? banner}) =>
       client.sendArt(mediaId, poster: poster, banner: banner);
-  void sendOut(String target, bool out) => client.sendOut(target, out);
+  void sendPresence(PresenceIntent intent) => client.sendPresence(intent);
   void sendNudge(String target) => client.sendNudge(target);
 
   /// Name and/or picture change for everyone now; reconnects send them too.
@@ -325,14 +429,14 @@ class Connection {
   /// False once a cancel, retry, leave or new connect followed [epoch].
   bool isCurrent(int epoch) => epoch == _epoch;
 
-  /// A new session with [params]: forgets the last one's resume token and
+  /// A new session with [params]: forgets the last one's server and
   /// starts the diagnostics. [dial] connects.
   void begin(ConnectParams params) {
     _params = params;
     _closed = false;
     _everOnline = false;
     _lostSounded = false;
-    _resumeToken = '';
+    _droppedAt = null;
     _attempt = 0;
     diag
       ..share = AppSettings.instance.shareDiagnostics.peek()
@@ -341,125 +445,184 @@ class Connection {
 
   /// The first dial of the session [begin] started. Throws
   /// [ConnectCancelled] when [epoch] went stale meanwhile (whoever bumped
-  /// it also closed the socket); any other failure leaves [state] refused.
+  /// it also closed the socket); any other failure leaves [state] refused
+  /// (or replaced).
   Future<WelcomeMessage> dial(int epoch) async {
     final params = _params!;
     _set(const ConnConnecting());
     try {
-      final welcome = await client.connectWith(wsUri: _wsUri(params), hello: hello(params));
+      final welcome = await _connect(params, reconnect: false);
       if (epoch != _epoch) throw const ConnectCancelled();
       _online();
       return welcome;
     } catch (e) {
       if (epoch != _epoch) throw const ConnectCancelled();
       debugPrint('connect failed: $e');
-      _set(_refused(e));
+      _set(_terminalFor(e, first: true)!);
       rethrow;
     }
   }
 
-  static Uri _wsUri(ConnectParams p) => Uri.parse('ws://${p.host}:${p.port}/sync');
-
-  /// [hello] offering the previous connection's token.
-  HelloMessage _resumeHello(ConnectParams params) {
-    final h = hello(params);
-    return HelloMessage(
-        proto: h.proto, secret: h.secret, user: h.user, media: h.media, hostKey: h.hostKey, resume: _resumeToken);
+  Future<WelcomeMessage> _connect(ConnectParams params, {required bool reconnect}) {
+    final oldToken = client.token;
+    final before = client.instance;
+    final id = (
+      client: identity.clientId,
+      seq: identity.nextSeq(),
+      caps: caps(),
+      feedAfter: reconnect && before.isNotEmpty && client.lastFeedSeq > 0 ? client.lastFeedSeq : null,
+    );
+    return client.connectWith(
+      wsUri: _wsUri(params),
+      hello: hello(params, id),
+      onWelcome: (w) {
+        _lastFrameAt = now();
+        onWelcome?.call(w, (
+          reconnect: reconnect,
+          resumed: w.resumed,
+          sameServer: before.isNotEmpty && before == w.instance,
+          oldToken: oldToken,
+        ));
+      },
+    );
   }
+
+  static Uri _wsUri(ConnectParams p) => Uri.parse('ws://${p.host}:${p.port}/sync');
 
   void _online() {
     _attempt = 0;
     _everOnline = true;
+    _droppedAt = null;
     if (_lostSounded) {
       _lostSounded = false;
       _notify(const ConnectionBack());
     }
-    _resumeToken = client.token;
-    _lastStateAt = now();
+    _lastFrameAt = now();
     _set(const ConnOnline());
-    _startHeartbeat();
+    _heartbeat ??= Timer.periodic(const Duration(seconds: 1), (_) => _beat());
   }
 
   void _set(ConnState s) => _state.set(s, force: true);
 
   void _onStatus(SyncStatus s) {
-    // Before the first welcome a close is just the dial failing.
-    if (s != SyncStatus.closed || _closed || !_everOnline) return;
-    _dropped();
-  }
-
-  /// Lost (said again while already retrying), the lost sound once per
-  /// drop, and a reconnect unless one is already scheduled or dialling.
-  void _dropped() {
-    if (_state.peek().retrying) {
-      _set(const ConnLost());
-    } else {
-      scheduleReconnect();
+    // Before the first welcome a close is just the dial failing; during a
+    // reconnect attempt the attempt reports it. A socket error (a reset
+    // link) may come without a close.
+    if (s != SyncStatus.closed && s != SyncStatus.error) return;
+    if (_closed || !_everOnline || !_state.peek().online) return;
+    switch (s == SyncStatus.closed ? client.closeCode : null) {
+      case CloseCodes.replaced:
+      case CloseCodes.stale:
+        _end(const ConnReplaced());
+      case CloseCodes.version:
+        _end(ConnRefused('version', versionText(null)));
+      case CloseCodes.secret:
+        _end(const ConnRefused('secret', 'wrong server password (401)'));
+      default:
+        _dropped(now());
     }
-    _soundLost();
   }
 
-  void _startHeartbeat() {
-    _heartbeat?.cancel();
-    _heartbeat = Timer.periodic(const Duration(seconds: 1), (_) => _beat());
+  void _onError(ErrorFrame e) {
+    if (e.code == ErrCode.replaced) {
+      _end(const ConnReplaced());
+      return;
+    }
+    if (!_errorTexts.isClosed) _errorTexts.add(e.message);
   }
 
-  /// Every second while connected: a clock sample, the diagnostics, and
-  /// the silence check.
+  /// A terminal state: no more attempts, the socket goes.
+  void _end(ConnState s) {
+    debugPrint('connection ended: $s');
+    _halt(s);
+    unawaited(client.drop());
+  }
+
+  /// Lost since [since]: the socket goes, a reconnect is scheduled (unless
+  /// one already is or dials).
+  void _dropped(DateTime since) {
+    if (_closed || _state.peek().retrying) return;
+    _droppedAt = since;
+    unawaited(client.drop());
+    scheduleReconnect();
+  }
+
+  /// Every second once online: a ping (a clock sample; it also keeps this
+  /// member under the server's silence limit while nothing else is sent),
+  /// the diagnostics, the silence check and the delayed lost sound.
   void _beat() {
     final t = now();
-    if (client.token.isNotEmpty) client.sendPing();
+    final s = _state.peek();
+    if (s.online) client.sendPing();
     diag
       ..share = AppSettings.instance.shareDiagnostics.peek()
       ..tick();
-    final last = _lastStateAt;
-    if (!_closed && last != null && t.difference(last) >= silenceLimit) {
-      _silence.add(null);
-      if (!_state.peek().retrying) _dropped();
+    if (_closed) return;
+    final last = _lastFrameAt;
+    if (s.online && last != null) {
+      final quiet = t.difference(last);
+      if (quiet >= silenceLimit) {
+        debugPrint('connection: nothing for ${quiet.inSeconds} s; reconnecting');
+        _dropped(last);
+      } else if (quiet >= unstableAfter) {
+        if (s is ConnOnline) _set(const ConnUnstable());
+      } else if (s is ConnUnstable) {
+        _set(const ConnOnline());
+      }
+    }
+    final since = _droppedAt;
+    if (_state.peek().retrying && since != null && !_lostSounded && t.difference(since) >= lostSoundAfter) {
+      _lostSounded = true;
+      _notify(const ConnectionLost());
     }
   }
 
-  void _soundLost() {
-    if (!_everOnline || _lostSounded) return;
-    _lostSounded = true;
-    _notify(const ConnectionLost());
-  }
-
-  /// Reconnect after [reconnectDelay] ([state] lost), unless closed,
-  /// never online (unless [manual]) or already retrying.
+  /// Reconnect after the backoff ([state] lost), unless closed, never
+  /// online (unless [manual]) or already retrying.
   void scheduleReconnect({bool manual = false}) {
     if (_closed || _params == null) return;
     if (!manual && !_everOnline) return;
     if (_state.peek().retrying) return;
+    _droppedAt ??= now();
     _set(const ConnLost());
     _armReconnect();
+  }
+
+  /// The wait before attempt [attempt] (1 = the first after a drop).
+  Duration delayFor(int attempt) {
+    final base = reconnectDelay.inMilliseconds * pow(2, max(0, attempt - 1));
+    final capped = min(base.toDouble(), maxReconnectDelay.inMilliseconds.toDouble());
+    return Duration(milliseconds: (capped * (0.8 + 0.4 * _random.nextDouble())).round());
   }
 
   void _armReconnect() {
     final epoch = _epoch;
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(reconnectDelay, () => _reconnect(epoch));
+    _reconnectTimer = Timer(delayFor(_attempt + 1), () => _reconnect(epoch));
   }
 
   /// One reconnect attempt. An attempt from an older epoch must not touch
-  /// state (it would kill the newer connection and leave a ghost member).
+  /// state (it would kill the newer connection).
   Future<void> _reconnect(int epoch) async {
     _reconnectTimer = null;
     bool stale() => epoch != _epoch;
     final params = _params;
     if (stale() || params == null || _closed) return;
-    final after = onReconnect?.call();
     try {
       _set(ConnReconnecting(++_attempt));
-      final welcome = await client.connectWith(wsUri: _wsUri(params), hello: _resumeHello(params));
+      await _connect(params, reconnect: true);
       // Whoever bumped the epoch also closed (or replaced) the socket.
       if (stale()) return;
       _online();
-      if (after != null) await after(welcome, stale);
     } catch (e) {
       if (stale()) return;
       debugPrint('reconnect failed: $e');
-      _retryAfterFailure(e);
+      final end = _terminalFor(e, first: false);
+      if (end != null) {
+        _end(end);
+      } else {
+        _retryAfterFailure(e);
+      }
     }
   }
 
@@ -468,7 +631,7 @@ class Connection {
       _set(const ConnClosed());
     } else if (!_everOnline) {
       // Only a manual retry before any welcome gets here.
-      _set(_refused(e));
+      _set(_terminalFor(e, first: true)!);
     } else {
       if (!_state.peek().retrying) _set(const ConnLost());
       _armReconnect();
@@ -477,32 +640,34 @@ class Connection {
 
   /// "Stop reconnecting": no more attempts; one dialling is aborted.
   void cancelReconnect() {
-    _halt();
-    unawaited(client.disconnect().catchError((_) {}));
+    _halt(const ConnClosed());
+    unawaited(client.drop());
   }
 
   /// Cancel during setup: aborts the dial.
   Future<void> cancelConnect() async {
-    _halt();
+    _halt(const ConnClosed());
     try {
-      await client.disconnect();
+      await client.drop();
     } catch (_) {}
   }
 
-  void _halt() {
+  void _halt(ConnState s) {
     _closed = true;
     invalidate();
     _heartbeat?.cancel();
     _heartbeat = null;
-    _set(const ConnClosed());
+    _set(s);
   }
 
-  /// "Retry": a reconnect after [reconnectDelay] whatever the state.
-  /// False without a session to retry.
+  /// "Retry": a reconnect after the first backoff whatever the state
+  /// (after [ConnReplaced] it takes the member back from the other
+  /// window). False without a session to retry.
   bool retry() {
     if (_params == null) return false;
     invalidate();
     _closed = false;
+    _attempt = 0;
     _set(const ConnClosed());
     scheduleReconnect(manual: true);
     return true;
@@ -519,10 +684,14 @@ class Connection {
     _set(const ConnClosed());
   }
 
-  /// [stop], the last diagnostics (before the token goes), the socket.
-  Future<void> close() async {
+  /// [stop], the last diagnostics (before the token goes), with [bye] the
+  /// member's `bye` (flushed: the server's close is awaited briefly), then
+  /// the socket.
+  Future<void> close({bool bye = false}) async {
     stop();
     await diag.stop();
+    // A welcomed socket still open (a dead one costs the short wait).
+    if (bye && client.isOpen && client.token.isNotEmpty) await client.sendBye();
     try {
       await client.disconnect();
     } catch (_) {}
@@ -533,7 +702,7 @@ class Connection {
     for (final s in _subs) {
       await s.cancel();
     }
-    await _silence.close();
+    await _errorTexts.close();
     await client.dispose();
   }
 }

@@ -1,6 +1,7 @@
 import 'package:sync_relay_core/core.dart';
 
 import '../jellyfin/session_media.dart' show compareMemberIds;
+import '../session/party.dart' show isPresent;
 
 // Who puts an Up next item up. Pure: only what every client sees in
 // `state` decides, so all clients agree without a wire message (like the
@@ -12,20 +13,22 @@ import '../jellyfin/session_media.dart' show compareMemberIds;
 typedef QueuePerformer = ({String? id, String? why});
 
 /// - A link passed on by its adder, or the adder's file: only the adder
-///   (their app has the file, the cookies). Gone: skipped.
+///   (their app has the file, the cookies). Gone (disconnected, in its
+///   grace): it waits for them; left for good: skipped.
 /// - Jellyfin: the adder when it plays that server with its own account,
-///   else the lowest member id that does (`jf[serverId] == true`, not
-///   stale, not sitting out). Nobody: skipped.
+///   else the lowest member id that does (`jf[serverId] == true`,
+///   present: `in` or joining). Nobody: skipped.
 /// - A link everyone opens, or one the server fetches: the adder when
-///   present (not stale or sitting out), else the lowest such member id.
+///   present, else the lowest present member id.
 QueuePerformer queuePerformer(QueueItem item, List<MemberView> members) {
   MemberView? adder;
   for (final m in members) {
     if (m.id == item.by) adder = m;
   }
-  bool active(MemberView m) => !m.stale && !m.out;
+  bool active(MemberView m) => isPresent(m);
   if (item.how.adderOnly) {
     if (adder == null) return (id: null, why: '${_name(item)} left');
+    if (adder.presence == Presence.gone) return (id: null, why: null);
     return (id: adder.id, why: null);
   }
   final ref = item.media.jellyfin;
@@ -48,8 +51,9 @@ String? autoAdvanceLowest(Iterable<MemberView> members) {
 }
 
 /// Who takes an item nobody can put up off the queue (`remove` with why):
-/// the lowest member id that is not stale.
-String? queueJanitor(List<MemberView> members) => autoAdvanceLowest(members.where((m) => !m.stale));
+/// the lowest member id that is connected (not gone).
+String? queueJanitor(List<MemberView> members) =>
+    autoAdvanceLowest(members.where((m) => m.presence != Presence.gone));
 
 /// How [item] plays, in a few words for its row: "through Foxyz" (you:
 /// "through you"), "server fetches", "everyone fetches", "Jellyfin",

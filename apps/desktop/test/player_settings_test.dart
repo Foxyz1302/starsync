@@ -272,8 +272,8 @@ void main() {
 
     testWidgets('the state\'s host flag crowns that member for everyone', (tester) async {
       online(const [
-        MemberView(id: 'm1', name: 'Hana', ready: true, inSet: true, buffered: 30, stale: false, host: true),
-        MemberView(id: 'm2', name: 'Bob', ready: false, inSet: false, buffered: 0, stale: false),
+        MemberView(id: 'm1', name: 'Hana', ready: true, inSet: true, buffered: 30, host: true),
+        MemberView(id: 'm2', name: 'Bob', ready: false, inSet: false, buffered: 0),
       ]);
       final avatars = {for (final a in partyAvatars(coord)) a.name: a};
       expect(avatars['Hana']!.host, isTrue);
@@ -292,7 +292,7 @@ void main() {
     });
 
     testWidgets('hosting: Copy invite address lists this machine\'s addresses', (tester) async {
-      online(const [MemberView(id: 'm1', name: 'Me', ready: false, inSet: false, buffered: 0, stale: false)]);
+      online(const [MemberView(id: 'm1', name: 'Me', ready: false, inSet: false, buffered: 0)]);
       coord.hostFile = (_) async => null;
       SessionState.instance.lastForm.hostPort = '8080';
       bigWindow(tester);

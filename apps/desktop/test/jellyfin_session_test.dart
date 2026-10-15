@@ -60,9 +60,15 @@ JellyfinMediaSource fixtureSource() => JellyfinPlaybackInfo.fromJson(
         jsonDecode(jellyfinFixture('playback_info')) as Map<String, dynamic>)
     .primarySource!;
 
-MemberView member(String id, String name, {Map<String, bool> jf = const {}, bool stale = false}) =>
+MemberView member(String id, String name, {Map<String, bool> jf = const {}, bool gone = false}) =>
     MemberView(
-        id: id, name: name, ready: true, inSet: true, buffered: 10, stale: stale, jf: jf);
+        id: id,
+        name: name,
+        ready: true,
+        inSet: true,
+        buffered: 10,
+        presence: gone ? Presence.gone : Presence.watching,
+        jf: jf);
 
 void main() {
   setUp(reports.clear);
@@ -371,7 +377,7 @@ void main() {
         member('m10', 'Ann', jf: {fixtureServerId: true}),
         member('m2', 'Bob', jf: {fixtureServerId: true}),
         member('m1', 'Guest', jf: {fixtureServerId: false}),
-        member('m0', 'Old', jf: {fixtureServerId: true}, stale: true),
+        member('m0', 'Old', jf: {fixtureServerId: true}, gone: true),
         member('m3', 'Fresh'),
       ];
       expect(autoAdvanceSwapper(members, fixtureServerId), 'm2');

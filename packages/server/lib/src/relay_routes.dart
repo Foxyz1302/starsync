@@ -75,6 +75,10 @@ class ActiveRelay {
   RelicWebSocket? _channel;
   var _channelFeeds = const <ChannelRelayFeed>[];
   List<_TrackInfo>? _infos;
+  /// The source's first `info` on this relay: a later channel (the source
+  /// back within its grace) must send the same one, else the relay ends
+  /// (4002).
+  _SourceInfo? _firstInfo;
   /// Shared by the tracks: time any of them waits on the source.
   final clock = FeedClock();
   final _rate = SourceRate();
@@ -295,7 +299,9 @@ class ActiveRelay {
 
   void _attachChannel(RelicWebSocket ws, List<_TrackInfo> infos) {
     final old = _channel;
-    if (old != null && !identical(old, ws)) unawaited(old.tryClose());
+    // A second channel for the same relay replaces the first (the
+    // source's app reconnected before the old link died).
+    if (old != null && !identical(old, ws)) unawaited(_closeWith(old, CloseCodes.relayReplaced, 'replaced'));
     _channel = ws;
     final named = tracks.isNotEmpty;
     final feeds = _channelFeeds = [
@@ -315,6 +321,33 @@ class ActiveRelay {
     }
     onLiveChanged();
   }
+}
+
+/// A source's `info` as a whole: its tracks, and the optional `name` and
+/// `duration` it gives. Two are the same media when the tracks agree
+/// (kinds, byte sizes, piece shapes) and the name and duration agree
+/// where both give one.
+typedef _SourceInfo = ({List<_TrackInfo> tracks, String name, double duration});
+
+bool _sameInfo(_SourceInfo a, _SourceInfo b) {
+  if (a.tracks.length != b.tracks.length) return false;
+  for (var i = 0; i < a.tracks.length; i++) {
+    final x = a.tracks[i], y = b.tracks[i];
+    if (x.kind != y.kind || x.size != y.size || (x.pieces == null) != (y.pieces == null)) return false;
+    if (x.pieces != null && !x.pieces!.sameShape(y.pieces!)) return false;
+  }
+  if (a.name.isNotEmpty && b.name.isNotEmpty && a.name != b.name) return false;
+  if (a.duration > 0 && b.duration > 0 && (a.duration - b.duration).abs() > 0.5) return false;
+  return true;
+}
+
+_SourceInfo _sourceInfo(Map j, List<_TrackInfo> tracks) {
+  final d = j['duration'];
+  return (
+    tracks: tracks,
+    name: j['name'] is String ? j['name'] as String : '',
+    duration: d is num && d.isFinite && d > 0 ? d.toDouble() : 0,
+  );
 }
 
 /// The tracks of a channel's `info` frame (`size`, or `tracks[]` each
@@ -342,9 +375,11 @@ List<_TrackInfo>? _infoTracks(Map j) {
   return out;
 }
 
-Future<void> _closeNotSource(RelicWebSocket ws) async {
+Future<void> _closeNotSource(RelicWebSocket ws) => _closeWith(ws, CloseCodes.relayNotSource, 'not the source');
+
+Future<void> _closeWith(RelicWebSocket ws, int code, String reason) async {
   try {
-    await ws.close(relayCloseNotSource, 'not the source');
+    await ws.close(code, reason);
   } catch (_) {
     await ws.tryClose();
   }
@@ -357,12 +392,15 @@ Future<void> _closeNotSource(RelicWebSocket ws) async {
 /// with tracks (a pieces track's media playlist), and
 /// `.../<key>/<track>/p/<i>` piece `i` of a pieces track. `<key>` is the
 /// media id, or the queue id of a warm (or promoted) relay. [relayAt]
-/// finds the relay of a key, [sourceOf] the relay a token may feed.
+/// finds the relay of a key, [sourceOf] the relay a token may feed;
+/// [onOtherMedia] hears of a source back with another media than its
+/// first `info` (the channel is closed with 4002; the relay should end).
 void mountRelayRoutes(
   RelicApp app,
   SessionMap sessions, {
   required ActiveRelay? Function(String key) relayAt,
   required ActiveRelay? Function(String token, String? queueId) sourceOf,
+  void Function(ActiveRelay relay)? onOtherMedia,
   void Function(String token, MediaLog log)? onLog,
 }) {
   app.get('/r/:sid/:token/source', (final req) {
@@ -397,12 +435,22 @@ void mountRelayRoutes(
               case 'info':
                 if (attached) continue;
                 final infos = _infoTracks(j);
+                final first = r._firstInfo;
+                if (infos != null && first != null && !_sameInfo(first, _sourceInfo(j, infos))) {
+                  // The source came back with another media: the relay
+                  // ends (its buffer is of the first one).
+                  _log.warning('relay channel: the source is back with another media (${r.name}); the relay ends');
+                  await _closeWith(ws, CloseCodes.relayOtherMedia, 'other media');
+                  onOtherMedia?.call(r);
+                  return;
+                }
                 if (infos == null || !r._channelInfo(infos)) {
                   // Not the media this swap named: the source stops.
                   _log.warning('relay channel: info does not match the media (${r.name})');
                   await _closeNotSource(ws);
                   return;
                 }
+                r._firstInfo ??= _sourceInfo(j, infos);
                 attached = true;
                 _log.info('relay channel up (${r.name}${r.warm ? ', warm' : ''}, from ${r.sourceId}, '
                     '${infos.map((t) => t.size != null ? '${t.size} bytes' : '${t.pieces!.length} pieces').join(' + ')})');

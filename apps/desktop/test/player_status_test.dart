@@ -29,8 +29,14 @@ final png = Uint8List.fromList(const [
 ]);
 
 MemberView mv(String id, String name,
-        {bool ready = false, bool? inSet, double buffered = 30, bool stale = false, bool out = false}) =>
-    MemberView(id: id, name: name, ready: ready, inSet: inSet ?? ready, buffered: buffered, stale: stale, out: out);
+        {bool ready = false, bool? inSet, double buffered = 30, bool gone = false, bool away = false}) =>
+    MemberView(
+        id: id,
+        name: name,
+        ready: ready,
+        inSet: inSet ?? ready,
+        buffered: buffered,
+        presence: gone ? Presence.gone : away ? Presence.away : Presence.watching);
 
 StateBroadcast held(List<MemberView> members, {String transport = 'held', double position = 0, int mediaId = 1}) =>
     StateBroadcast(
@@ -103,12 +109,12 @@ void main() {
       expect(v.self, isTrue);
       final w = playerStatusFor(
           health: ok,
-          state: held([me, mv('b', 'Bob'), mv('m', 'Mika'), mv('z', 'Zed', stale: true), mv('o', 'Ola', out: true)]),
+          state: held([me, mv('b', 'Bob'), mv('m', 'Mika'), mv('z', 'Zed', gone: true), mv('o', 'Ola', away: true)]),
           self: me)!;
       expect(w.kind, StatusKind.waiting);
       expect(w.text, 'Waiting for Bob and Mika', reason: 'nobody waits for who sits out');
       expect(w.detail, '1/3 ready');
-      final outMe = mv('me', 'Me', out: true);
+      final outMe = mv('me', 'Me', away: true);
       expect(playerStatusFor(health: ok, state: held([outMe, mv('b', 'Bob')]), self: outMe), isNull,
           reason: 'sitting out: the join-back card speaks');
       expect(w.who.map((m) => m.name), ['Bob', 'Mika']);
@@ -117,7 +123,7 @@ void main() {
     test("can't play: yours with Retry (reload); others' instead of waiting", () {
       var v = playerStatusFor(health: ok, state: held([me]), self: me, playerError: 'Not allowed (403)')!;
       expect((v.kind, v.text, v.action), (StatusKind.problem, "Can't play this: Not allowed (403)", StatusAction.reload));
-      final bob = MemberView(id: 'b', name: 'Bob', ready: false, inSet: false, buffered: 0, stale: false,
+      final bob = MemberView(id: 'b', name: 'Bob', ready: false, inSet: false, buffered: 0,
           error: 'Not allowed (403)');
       v = playerStatusFor(health: ok, state: held([me, bob, mv('m', 'Mika', ready: true)]), self: me)!;
       expect((v.kind, v.text, v.action), (StatusKind.cannotPlay, "Bob can't play this: Not allowed (403)", null));

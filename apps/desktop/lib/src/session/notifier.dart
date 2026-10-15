@@ -15,7 +15,9 @@ class ToastItem {
   /// The member a feed or chat toast is about (their name, as the feed
   /// carries it; [text] starts with it); null for the app's own toasts.
   final String? actor;
-  const ToastItem({required this.id, required this.text, required this.at, this.actor});
+  /// [actor]'s member id (feed and chat toasts); '' when unknown.
+  final String actorId;
+  const ToastItem({required this.id, required this.text, required this.at, this.actor, this.actorId = ''});
 }
 
 /// What one [AppEvent] does: a toast ([toast], about [actor]), a sound,
@@ -34,6 +36,8 @@ class Notice {
 
 /// The policy: what each event does.
 Notice noticeFor(AppEvent e) => switch (e) {
+      // Lines a reconnect replayed (`welcome.feed`): the log only.
+      FeedEvent(:final feed) when feed.replayed => Notice(log: feed),
       // The feed: everything is logged; joins, leaves, swaps and chat
       // pop up; the social actions have a sound.
       MemberJoined(:final feed) => Notice(
@@ -50,6 +54,10 @@ Notice noticeFor(AppEvent e) => switch (e) {
           sound: own ? null : const SfxCue(SfxKind.chat)),
       MemberSatOut(:final feed, atYou: true) => Notice(
           log: feed, toast: '${feed.actor} sat you out', actor: feed.actor, sound: const SfxCue(SfxKind.kick)),
+      MemberSatOut(:final feed, autoSelf: true) => Notice(
+          log: feed,
+          toast: 'You sit out (${feed.reason == 'minimised' ? 'minimised' : 'idle'}); you are back as soon as you return',
+          sound: const SfxCue(SfxKind.warn)),
       ReadyChanged(:final feed, ready: true, :final readyIndex) =>
         Notice(log: feed, sound: SfxCue(SfxKind.ready, readyIndex: readyIndex)),
       ReadyChanged(:final feed, ready: false) => Notice(log: feed, sound: const SfxCue(SfxKind.unready)),
@@ -68,11 +76,6 @@ Notice noticeFor(AppEvent e) => switch (e) {
       RelayStarted() =>
         const Notice(toast: 'Passing the video on through the server. Keep the app open while it plays.'),
       RelayFailed(:final error) => Notice(toast: 'Cannot pass the video on: $error'),
-      IdleWarning(:final sitsOut) => Notice(
-          toast: sitsOut
-              ? 'idle — sitting out in 2 min unless you press Space'
-              : 'idle — auto-unready in 2 min unless you press Space',
-          sound: const SfxCue(SfxKind.warn)),
       ConnectionLost() => const Notice(sound: SfxCue(SfxKind.lost)),
       ConnectionBack() => const Notice(sound: SfxCue(SfxKind.back)),
       JellyfinProgressFailed(:final signInExpired) =>
@@ -119,7 +122,12 @@ class Notifier {
       _toastId++;
       toasts.value = [
         ...toasts.peek(),
-        ToastItem(id: _toastId, text: text, at: DateTime.now().toUtc(), actor: n.actor),
+        ToastItem(
+            id: _toastId,
+            text: text,
+            at: DateTime.now().toUtc(),
+            actor: n.actor,
+            actorId: n.actor == null ? '' : n.log?.actorId ?? ''),
       ];
     }
     final sound = n.sound;

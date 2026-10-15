@@ -54,8 +54,7 @@ void main() {
       ws.add(jsonEncode(HelloMessage(
               proto: RelayConstants.protoVersion,
               secret: '',
-              user: const HelloUser(name: 'live'),
-              media: const HelloMedia(name: '', size: 0, duration: 0))
+              user: const HelloUser(name: 'live'))
           .toJson()));
       final welcome = await frames.firstWhere((f) => f['t'] == 'welcome').timeout(const Duration(seconds: 5));
       ws.add(jsonEncode(SwapIntent(

@@ -76,10 +76,12 @@ window; guests need no Jellyfin or account.
 6. **Swap.** Anyone can change the video by pasting another link. Everybody
    stops at 0 and the gate runs again for everyone there; ready flags stay
    as they were (a setting unreadies you instead).
-7. **Leave.** Closing or leaving drops you from the server; the others keep
-   going. If you vanish without saying goodbye, you are marked stale after 15 s
-   (stops blocking) and removed after 30 s. The app reconnects by itself and
-   takes over your old place (same member, ready flag and video).
+7. **Leave.** Closing the app or Leave says goodbye and drops you from the
+   server; the others keep going. If you vanish without a goodbye, after 15 s
+   of silence you are "gone": you stop blocking but keep your place
+   (ready flag, sitting out, Up next items, the video you pass on) for
+   10 minutes. The app keeps playing and reconnects by itself, with an id
+   of its own, and takes that place back.
 
 There are no roles: anyone can seek, swap, force-ready others, nudge
 anyone, and sit anyone out (the host too). Someone sitting out stays

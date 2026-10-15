@@ -37,7 +37,7 @@ const _keySoundPreset = 'soundPreset';
 const _keyWelcomeDismissed = 'welcomeDismissed';
 const _keySoundPresetFor = 'soundPresetFor';
 const _keyUnreadyOnSwap = 'unreadyOnSwap';
-const _keyIdleSitsOut = 'idleSitsOut';
+const keyAutoSitOut = 'autoSitOut';
 const _keyChatPopups = 'chatPopups';
 const _keyShareDiagnostics = 'shareDiagnostics';
 
@@ -77,8 +77,9 @@ class AppSettings {
   /// Session: send ready=false when the video changes (a swap keeps the
   /// server's ready flags).
   final unreadyOnSwap = signal(false);
-  /// Session: the idle auto-unready sits this member out instead.
-  final idleSitsOut = signal(false);
+  /// Session: auto sit-out (idle while nothing plays, or minimised for a
+  /// while, sets you away; coming back sets you in).
+  final autoSitOut = signal(true);
   /// The player controls' skin (`controls/`). Applies live.
   final controlsSkin = signal(ControlsSkin.standard);
   /// The bar's clock: elapsed / total or the time left.
@@ -151,8 +152,8 @@ class AppSettings {
       if (advance is bool) autoAdvance.value = advance;
       final unready = box.get(_keyUnreadyOnSwap);
       if (unready is bool) unreadyOnSwap.value = unready;
-      final idleOut = box.get(_keyIdleSitsOut);
-      if (idleOut is bool) idleSitsOut.value = idleOut;
+      final autoOut = box.get(keyAutoSitOut);
+      if (autoOut is bool) autoSitOut.value = autoOut;
       controlsSkin.value =
           ControlsSkin.fromStored(box.get(_keyControlsSkin), legacyMpvControls: box.get(_keyMpvControls));
       final time = box.get(_keyTimeDisplay);
@@ -230,9 +231,9 @@ class AppSettings {
     _put(_keyUnreadyOnSwap, on);
   }
 
-  void setIdleSitsOut(bool on) {
-    idleSitsOut.value = on;
-    _put(_keyIdleSitsOut, on);
+  void setAutoSitOut(bool on) {
+    autoSitOut.value = on;
+    _put(keyAutoSitOut, on);
   }
 
   void setControlsSkin(ControlsSkin skin) {

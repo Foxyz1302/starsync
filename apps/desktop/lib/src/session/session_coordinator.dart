@@ -24,14 +24,16 @@ import '../sync/avatar_cache.dart';
 import '../sync/state_diff.dart';
 import '../sync/user_seek.dart';
 import '../queue/queue_controller.dart';
+import '../platform/ports/shell_port.dart' show WindowActivity;
+import 'auto_sit_out.dart';
 import 'connection.dart';
 import 'delivery.dart';
 import 'health.dart';
-import 'idle.dart';
 import 'media_art.dart';
 import 'notifier.dart';
 import 'now_playing.dart';
 import 'now_playing_info.dart';
+import 'party.dart';
 import 'switch_trace.dart';
 
 export 'connection.dart' show ConnectCancelled, ConnectParams;
@@ -60,8 +62,8 @@ const autoAdvanceSecs = 10;
 
 /// "Unready when the video changes": a state with a newer [mediaId] than
 /// the last one this session saw ([lastMediaId], -1 before the first) while
-/// self is ready (or a reconnect is restoring it). A swap keeps the
-/// server's ready flags, so the client unreadies itself.
+/// self is ready (or a fresh member after a reconnect is restoring it). A
+/// swap keeps the server's ready flags, so the client unreadies itself.
 bool unreadyForNewMedia(
         {required bool enabled,
         required int lastMediaId,
@@ -106,10 +108,12 @@ final class _JellyfinOrigin extends _RelayOrigin {
 HealthStatus? connectionHealth(ConnState s) => switch (s) {
       ConnConnecting() => const HealthStatus(HealthSeverity.info, 'connecting…'),
       ConnOnline() => const HealthStatus(HealthSeverity.ok, 'connected'),
+      ConnUnstable() => const HealthStatus(HealthSeverity.warn, 'connection unstable…'),
       ConnLost() => const HealthStatus(HealthSeverity.warn, 'connection lost — retrying…'),
       ConnReconnecting() => const HealthStatus(HealthSeverity.info, 'reconnecting…'),
       ConnRefused(:final message) => HealthStatus(HealthSeverity.error, message),
-      ConnReplaced() || ConnClosed() => null,
+      ConnReplaced(:final message) => HealthStatus(HealthSeverity.error, message),
+      ConnClosed() => null,
     };
 
 String? stateMediaUrl(StateBroadcast state) {
@@ -169,13 +173,24 @@ class SessionCoordinator {
 
   final health =
       signal(const HealthStatus(HealthSeverity.info, 'idle'));
+  /// The server's latest state. A drop keeps it (with the player, the
+  /// media and a relay this member serves): [stateStale] says it is not
+  /// current; only leaving clears it.
   final serverState = signal<StateBroadcast?>(null);
+  /// [serverState] is from before a drop: the connection is reconnecting
+  /// or ended (replaced, refused).
+  late final Computed<bool> stateStale = computed(() {
+    final s = connection.state.value;
+    return serverState.value != null && (s.retrying || s is ConnReplaced || s is ConnRefused);
+  });
   /// The activity log ([Notifier.feedLog]).
   Signal<List<FeedMessage>> get feedLog => notifier.feedLog;
   /// Toasts on screen ([Notifier.toasts]).
   Signal<List<ToastItem>> get toasts => notifier.toasts;
   /// The reconnect loop runs ([ConnState.retrying]).
   late final Computed<bool> reconnecting = computed(() => connection.state.value.retrying);
+  /// The link is up but went quiet ([ConnUnstable]).
+  late final Computed<bool> unstable = computed(() => connection.state.value is ConnUnstable);
   final starving = signal<String?>(null);
   /// Why this player cannot open the current media, in plain words
   /// ([playErrorText]); empty while it can. It rides in `report.error`, so
@@ -232,42 +247,40 @@ class SessionCoordinator {
     return null;
   });
 
-  /// Self sits out: the player has nothing open until [joinBack].
-  late final Computed<bool> selfOut = computed(() => selfMember.value?.out ?? false);
+  /// Self sits out (`away`): the player has nothing open until [joinBack].
+  late final Computed<bool> selfAway = computed(() => selfMember.value?.presence == Presence.away);
 
   Timer? _ticker;
   StreamSubscription? _stateSub;
   StreamSubscription? _feedSub;
   StreamSubscription? _nudgeSub;
   StreamSubscription? _errSub;
-  StreamSubscription? _silenceSub;
   void Function()? _connectionHealth;
 
-  /// A solo session (set by SessionState): no idle unready / sit out,
-  /// there is nobody to hold up.
+  /// A solo session (set by SessionState): no auto sit-out, there is
+  /// nobody to hold up.
   bool solo = false;
   bool _playerReady = false;
   bool _wasPlayAllowed = false;
-  // Last ready flag the server reported for self; restored after a
-  // reconnect (the server forgets dropped members).
+  // Last ready flag the server reported for self; sent again when a
+  // reconnect lands as a new member (grace over, server restarted).
   bool _lastReady = false;
-  // Set after a reconnect until the server echoes the restored ready, so
-  // the fresh member's ready=false doesn't overwrite [_lastReady].
+  // Set after such a reconnect until the server echoes the restored
+  // ready, so the fresh member's ready=false doesn't overwrite [_lastReady].
   bool _restoringReady = false;
-  // Last out flag the server reported for self; a reconnect that lands
-  // as a new member sits out again.
-  bool _lastOut = false;
+  // Self is `away` in the last state; a reconnect that lands as a new
+  // member sits out again.
+  bool _lastAway = false;
   // [joinBack] ran while playing: ready once the player has buffered
   // (or after [_joinBackWait]), so the others do not pause for the load.
   DateTime? _joinBackAt;
   static const _joinBackWait = Duration(seconds: 15);
-  // Last mediaId seen in a state; unlike [_mediaId] it survives a
-  // reconnect, so only a real swap counts as a new video.
+  // Last mediaId seen in a state; unlike [_mediaId] it survives sitting
+  // out, so only a real swap counts as a new video.
   int _seenMediaId = -1;
   int _mediaId = -1;
   // The mediaId whose media the player holds (or is opening); -1 for none.
-  // Unlike [_mediaId] it survives a lost connection, so a reconnect to the
-  // same media keeps the player, and a swap stops the previous media.
+  // A swap stops the previous media.
   int _playerMediaId = -1;
   // [_playerMediaId] at the last open: the same media again (a reconnect,
   // joining back) keeps the player, any other gets a fresh one (see
@@ -282,8 +295,7 @@ class SessionCoordinator {
   // [link]: the web link it came from (a relayed one has no `url`).
   ({HelloMedia media, int after, String? link, Uint8List? art})? _pendingArt;
   AniListClient? _aniList;
-  // What this member serves for media [$1]; survives a reconnect (the
-  // state then looks new again).
+  // What this member serves for media [$1].
   (int, _RelayOrigin)? _activeOrigin;
   RelaySource? _relaySource;
   int _relaySourceMediaId = -1;
@@ -308,7 +320,9 @@ class SessionCoordinator {
   // True while a media open is in flight: the player's duration may still
   // belong to the previous media then.
   bool _opening = false;
-  final IdleTracker _idle = IdleTracker(DateTime.now().toUtc());
+  /// Auto sit-out (Settings: "Auto sit-out"): idle or minimised for a
+  /// while sets this member away, coming back sets it in again.
+  final AutoSitOut autoSitOut = AutoSitOut(DateTime.now().toUtc());
   Map<String, String>? _openHeaders;
 
   // Jellyfin: the resolved ref, the mediaId it belongs to, a generation
@@ -355,7 +369,26 @@ class SessionCoordinator {
       required this.ytDlp,
       required this.jellyfin,
       required this.trackPrefs}) {
-    connection.onReconnect = _onReconnect;
+    connection
+      ..onWelcome = _onWelcome
+      ..caps = () => caps;
+  }
+
+  // yt-dlp is there to resolve links (checked at each connect).
+  bool _canResolve = false;
+
+  /// `hello.caps`: this app serves relays; resolves links when its yt-dlp
+  /// is there; plays Jellyfin with its own account when one is linked.
+  ClientCaps get caps => ClientCaps(
+      source: true,
+      resolve: _canResolve,
+      jellyfin: jellyfin.accounts.any((a) => jellyfin.statusOf(a.serverId) != JellyfinAccountStatus.expired));
+
+  Future<void> _checkResolve() async {
+    try {
+      final y = await ytDlp.ytDlp.timeout(const Duration(milliseconds: 500));
+      _canResolve = y.enabled && (y.path != null || await File(y.managedPath).exists());
+    } catch (_) {}
   }
 
   /// The session's first player: created here on connect, disposed by
@@ -449,7 +482,12 @@ class SessionCoordinator {
     }
   }
 
-  void markInput() => _idle.activity(DateTime.now().toUtc());
+  /// Keyboard, mouse or an action: activity for auto sit-out.
+  void markInput() => autoSitOut.input(DateTime.now().toUtc());
+
+  /// The window gained or lost the focus, was minimised or restored (the
+  /// shell port's [WindowActivity], wired in `main`).
+  void windowActivity(WindowActivity a) => autoSitOut.window(a, DateTime.now().toUtc());
 
   Future<void> connect(ConnectParams params) async {
     // Own epoch first: a cancel during any await below makes this stale.
@@ -469,7 +507,7 @@ class SessionCoordinator {
     _memberErrors = const {};
     _lastReady = false;
     _restoringReady = false;
-    _lastOut = false;
+    _lastAway = false;
     _joinBackAt = null;
     _seenMediaId = -1;
     _wasPlayAllowed = false;
@@ -486,11 +524,15 @@ class SessionCoordinator {
     markInput();
     _subscribe();
     notifier.clear();
+    await _checkResolve();
     await initPlayer();
     if (!connection.isCurrent(epoch)) throw const ConnectCancelled();
     // Health follows the connection's state from here (connecting,
     // connected; a failed dial leaves its reason).
     final welcome = await connection.dial(epoch);
+    // Reports, the seek check and auto sit-out run from here until leave,
+    // through drops.
+    _startTicker();
     try {
       final url = welcome.mediaUrl;
       if (url != null && url.isNotEmpty) {
@@ -503,7 +545,6 @@ class SessionCoordinator {
           (params.linkUrl.isEmpty ? null : await mediaForLink(jellyfin, params.linkUrl));
       if (!connection.isCurrent(epoch)) throw const ConnectCancelled();
       if (media != null) _swap(media);
-      _startTicker();
     } catch (e) {
       if (!connection.isCurrent(epoch)) throw const ConnectCancelled();
       debugPrint('connect failed: $e');
@@ -522,30 +563,18 @@ class SessionCoordinator {
     _errSub ??= connection.errors.listen((msg) {
       health.value = HealthStatus(HealthSeverity.warn, msg);
     });
-    _silenceSub ??= connection.silence.listen((_) => _onConnectionSilent());
     _connectionHealth ??= connection.state.subscribe((s) {
       final h = connectionHealth(s);
       if (h != null) health.value = h;
     });
   }
 
-  /// The drop handling: no state for [Connection.silenceLimit], so what
-  /// the server said is stale. (A closed socket keeps it until then.)
-  void _onConnectionSilent() {
-    if (serverState.peek() == null) return;
-    serverState.value = null;
-    starving.value = null;
-    _wasPlayAllowed = false;
-    _mediaId = -1;
-    _clearPendingSeek();
-    diff.reset();
-  }
-
   /// Opens [url] (with [headers] on every request); false on failure. A
   /// new media gets a fresh player (or the preload holding it); the media
-  /// the player held before (a reconnect) keeps it.
+  /// the player held before (back from sitting out, a reload) keeps it.
   Future<bool> _openMedia(String url, {Map<String, String>? headers}) async {
     if (url == _openUrl) return true;
+    _opens++;
     _log.info('media $_mediaId: open ${_urlKind(url, headers)}: ${logUrl(url)}'
         '${headers == null || headers.isEmpty ? '' : ' (headers: ${headers.keys.join(', ')})'}');
     final keepPlayer = _playerMediaId == _openedFor;
@@ -581,6 +610,12 @@ class SessionCoordinator {
     return ok;
   }
 
+  int _opens = 0;
+
+  /// How many times this session opened a media in the player (a drop
+  /// and return must not add one).
+  int get opens => _opens;
+
   // The media whose buffer reached the gate's need was reported at once.
   int _bufferReportedFor = -1;
 
@@ -589,7 +624,7 @@ class SessionCoordinator {
   void _onBuffered() {
     final r = serverState.peek();
     if (r == null || r.transport != 'held' || _bufferReportedFor == r.mediaId) return;
-    if (_lastOut || _opening || _openUrl == null || _playerMediaId != r.mediaId || !_playerReady) return;
+    if (_lastAway || _opening || _openUrl == null || _playerMediaId != r.mediaId || !_playerReady) return;
     if (connection.token.isEmpty || playback.bufferedSecsAhead < r.bufferNeed) return;
     _bufferReportedFor = r.mediaId;
     _sendReport(r);
@@ -660,9 +695,10 @@ class SessionCoordinator {
 
   /// A relay nobody feeds yet: the server's fetch before it is read, or a
   /// member's before its channel is up while that member is still here
-  /// (once it left, the server's buffer is all there is: open that).
+  /// (once it is gone or left, the server's buffer is all there is: open
+  /// that).
   bool _waitForSource(StateBroadcast r, MediaRelay relay) =>
-      !relay.live && (relay.fetch || r.members.any((m) => m.id == relay.source));
+      !relay.live && !relay.sourceGone && (relay.fetch || r.members.any((m) => m.id == relay.source));
 
   /// Relayed through a member whose channel is down: say who everyone is
   /// waiting for (the buffer still plays what it has).
@@ -677,8 +713,13 @@ class SessionCoordinator {
     if (waiting) {
       final who = r.members.where((m) => m.id == relay.source).firstOrNull?.name;
       final gone = memberNames[relay.source] ?? 'the member who put this up';
-      health.value = HealthStatus(HealthSeverity.warn,
-          who == null ? '$gone left: playing what the server has' : 'waiting for $who to pass the video on');
+      health.value = HealthStatus(
+          HealthSeverity.warn,
+          who == null
+              ? '$gone left: playing what the server has'
+              : relay.sourceGone
+                  ? '$who lost signal: playing what the server has'
+                  : 'waiting for $who to pass the video on');
       _relayWaitShown = true;
     } else if (_relayWaitShown) {
       _relayWaitShown = false;
@@ -743,9 +784,10 @@ class SessionCoordinator {
   /// The server only pulls while someone watches through it. When the
   /// media came from Up next item [queueId] whose warm relay this member
   /// feeds, that source carries on instead.
-  void _startRelaySource(int mediaId, RelayMedia media, {bool announce = false, String queueId = ''}) {
-    // Back after a reconnect on the same media: it is still serving (and
-    // redials by itself).
+  void _startRelaySource(int mediaId, RelayMedia media,
+      {bool announce = false, String queueId = '', String name = '', double duration = 0}) {
+    // Already serving this media (it redials by itself through a drop and
+    // goes on once this member is back).
     if (_relaySource != null && _relaySourceMediaId == mediaId) {
       unawaited(media.close());
       return;
@@ -767,8 +809,11 @@ class SessionCoordinator {
       }));
       return;
     }
+    // The same `info` on every dial (name and length included), so the
+    // server knows a re-dial after a drop as the same media and continues.
     final src = RelaySource(
-        Uri.parse('ws://$_wsHost:$_wsPort/r/default/${connection.token}/source'), media);
+        Uri.parse('ws://$_wsHost:$_wsPort/r/default/${connection.token}/source'), media,
+        name: name, duration: duration);
     _relaySource = src;
     _relaySourceMediaId = mediaId;
     relaying.value = true;
@@ -841,7 +886,7 @@ class SessionCoordinator {
 
   Future<void> _applyState(StateBroadcast r) async {
     _trackSelfReady(r);
-    if (_lastOut) {
+    if (_lastAway) {
       // A newer media than the one this member serves: that relay ended.
       if (_relaySourceMediaId != -1 && _relaySourceMediaId != r.mediaId) _stopRelaySource();
       await _unloadForOut();
@@ -886,12 +931,12 @@ class SessionCoordinator {
         } else if (origin is _FileOrigin) {
           // The source first: viewers wait on it, not on this player.
           _startRelaySource(r.mediaId, RelayMedia.single(FileRelayBytes(File(origin.path))),
-              announce: true, queueId: relay?.queueId ?? '');
+              announce: true, queueId: relay?.queueId ?? '', name: name, duration: _durationOf(r));
           await _openMedia(origin.path);
         } else if (origin is _LinkOrigin) {
           _startRelaySource(
               r.mediaId, LinkRelayMedia(Uri.parse(origin.url), ytDlp: origin.ytDlp, probe: origin.probe),
-              announce: true, queueId: relay?.queueId ?? '');
+              announce: true, queueId: relay?.queueId ?? '', name: name, duration: _durationOf(r));
           await _openMedia(origin.url);
         } else if (relay != null && !mine) {
           if (_waitForSource(r, relay)) {
@@ -973,20 +1018,18 @@ class SessionCoordinator {
   }
 
   /// Mirrors the server's ready flag for self into [_lastReady] (force
-  /// by others included). After a stale spell the server puts a ready
-  /// member back in the set by itself.
+  /// by others included), and whether self is away.
   void _trackSelfReady(StateBroadcast r) {
     final self = selfMember.peek();
     if (self == null) return;
-    // [_seenMediaId], not [_mediaId]: that one is -1 after a lost
-    // connection, which would end the restore before its echo.
+    // [_seenMediaId], not [_mediaId]: that one is -1 while sitting out.
     if (_seenMediaId >= 0 && r.mediaId != _seenMediaId) _restoringReady = false;
     if (_restoringReady) {
       if (self.ready) _restoringReady = false;
     } else {
       _lastReady = self.ready;
     }
-    _lastOut = self.out;
+    _lastAway = self.presence == Presence.away;
     final last = _seenMediaId;
     _seenMediaId = r.mediaId;
     // A ready restored by a reconnect may not have echoed yet: unready
@@ -1060,9 +1103,10 @@ class SessionCoordinator {
     }
     final self = selfMember.peek();
     if (self != null && self.ready) {
-      final present = r.members.where((m) => !m.out).toList();
+      // Who the ready counter counts (not away, not gone, can play it).
+      final present = r.members.where(countsForReady).toList();
       final waiters = present
-          .where((m) => m.id != self.id && !m.stale && !(m.inSet && m.ready))
+          .where((m) => m.id != self.id && !(m.inSet && m.ready))
           .map((m) => m.name)
           .toList();
       if (waiters.isNotEmpty) {
@@ -1085,8 +1129,10 @@ class SessionCoordinator {
 
   void _onFeed(FeedMessage f) {
     final event = FeedEvent.of(f,
-        selfName: selfMember.peek()?.name,
-        readyCount: f.action == 'ready' ? serverState.peek()?.members.where((m) => m.ready).length ?? 0 : 0);
+        selfId: connection.memberId,
+        readyCount: f.action == 'ready'
+            ? serverState.peek()?.members.where((m) => m.ready && countsForReady(m)).length ?? 0
+            : 0);
     notify(event);
     // The server gave up fetching what everyone waits for.
     if (event is FetchFailed && _awaitLiveFor != -1 && _awaitLiveFor == serverState.peek()?.mediaId) {
@@ -1107,18 +1153,18 @@ class SessionCoordinator {
   /// server's gate does not wait for the next tick).
   void _sendReport(StateBroadcast r) {
     // Duration only once the open media is the server's current one.
-    // Sitting out: still a report (it keeps this member fresh), empty.
-    final known = !_lastOut && !_opening && _openUrl != null && _mediaId == r.mediaId;
+    // Sitting out: still a report, empty.
+    final known = !_lastAway && !_opening && _openUrl != null && _mediaId == r.mediaId;
     // The buffer counts only while the player holds the server's current
     // media: before a swap's media is open it is the previous one's (or
     // none), and the start must wait for this member.
-    final holds = !_lastOut && !_opening && _openUrl != null && _playerMediaId == r.mediaId;
+    final holds = !_lastAway && !_opening && _openUrl != null && _playerMediaId == r.mediaId;
     _checkPlayerError(r.mediaId);
     final error = playerError.peek();
     final buffered = holds ? playback.bufferedSecsAhead : 0.0;
     if (holds && buffered >= r.bufferNeed) switchTrace.mark(r.mediaId, SwitchTrace.buffered);
     connection.sendReport(
-      position: _lastOut ? 0 : playback.positionSecs,
+      position: _lastAway ? 0 : playback.positionSecs,
       buffered: buffered,
       eventId: r.eventId,
       duration: known ? playback.durationSecs : 0,
@@ -1132,34 +1178,33 @@ class SessionCoordinator {
     final now = DateTime.now().toUtc();
     notifier.expire(now);
     final r = serverState.peek();
-    if (connection.token.isNotEmpty && r != null && _playerReady) {
+    final online = connection.state.peek().online;
+    if (online && connection.token.isNotEmpty && r != null && _playerReady) {
       _sendReport(r);
-      if (!_lastOut) {
-        _checkSeekLanded(r);
-        unawaited(_tickJellyfin(r));
-      }
+      if (!_lastAway) _checkSeekLanded(r);
     }
-    // No warning when there is nothing to lose (unready), and none while
-    // PLAYING: the ready flag gates nothing then, and watching counts as
-    // activity so a pause after a long watch starts a fresh idle clock.
-    if (r != null) _readyAfterJoinBack(r, now);
-    final sitOutWhenIdle = AppSettings.instance.idleSitsOut.peek();
-    final event = solo
-        ? IdleEvent.none
-        : _idle.tick(now,
-            playing: serverState.peek()?.transport == 'playing',
-            selfReady: selfMember.peek()?.ready ?? false);
-    switch (event) {
-      case IdleEvent.warn:
-        notify(IdleWarning(sitsOut: sitOutWhenIdle));
-      case IdleEvent.unready:
-        _lastReady = false;
-        if (sitOutWhenIdle) {
-          sitOut();
-        } else {
-          connection.sendReady(false, source: 'auto');
-        }
-      case IdleEvent.none:
+    // The Jellyfin progress goes on through a drop (the player does).
+    if (connection.token.isNotEmpty && r != null && _playerReady && !_lastAway) unawaited(_tickJellyfin(r));
+    if (r != null && online) _readyAfterJoinBack(r, now);
+    _tickAutoSitOut(r, now, online: online);
+  }
+
+  /// Auto sit-out's second (only while online: the state is current).
+  void _tickAutoSitOut(StateBroadcast? r, DateTime now, {required bool online}) {
+    final step = autoSitOut.tick(now,
+        self: online ? selfMember.peek()?.presence : null,
+        playing: r?.transport == 'playing',
+        alone: r == null || aloneIn(r.members, connection.memberId),
+        enabled: !solo && AppSettings.instance.autoSitOut.peek());
+    switch (step) {
+      case AutoAway(:final reason):
+        _log.info('auto sit-out: away (${reason.name})');
+        _joinBackAt = null;
+        connection.sendPresence(PresenceIntent(state: Presence.away, reason: reason));
+      case AutoBack():
+        _log.info('auto sit-out: back');
+        _joinBack(ready: false);
+      case AutoStay():
         break;
     }
   }
@@ -1170,7 +1215,7 @@ class SessionCoordinator {
     final at = _joinBackAt;
     if (at == null) return;
     final self = selfMember.peek();
-    if (self == null || self.out) {
+    if (self == null || self.presence == Presence.away) {
       if (now.difference(at) > _joinBackWait) _joinBackAt = null;
       return;
     }
@@ -1252,12 +1297,13 @@ class SessionCoordinator {
 
   void toggleReady() {
     final self = selfMember.peek();
-    if (self?.out ?? false) {
+    if (self?.presence == Presence.away) {
       joinBack();
       return;
     }
-    // Ready but out of the set (dropped out while stale) gates like
-    // unready, so Space puts self back in instead of unreadying.
+    // Ready but out of the set (joined while playing, a player error)
+    // gates like unready, so Space puts self back in instead of
+    // unreadying.
     final next = !((self?.ready ?? false) && (self?.inSet ?? false));
     markInput();
     _lastReady = next;
@@ -1333,20 +1379,34 @@ class SessionCoordinator {
   void sitOut([String? memberId]) {
     final target = memberId ?? connection.memberId;
     if (target.isEmpty) return;
+    final self = target == connection.memberId;
+    if (self) {
+      _joinBackAt = null;
+      autoSitOut.manual();
+    }
     markInput();
-    if (target == connection.memberId) _joinBackAt = null;
-    connection.sendOut(target, true);
+    connection.sendPresence(PresenceIntent(target: self ? '' : target, state: Presence.away));
   }
 
-  /// Back from sitting out: the media opens at the server position and
-  /// this member readies. Held: at once (the gate waits for the buffer);
-  /// playing: once buffered, so the others do not pause for the load.
+  /// Back from sitting out (`in`, through joining): the media opens at
+  /// the server position and this member readies. Held: at once (the
+  /// gate waits for the buffer); playing: once buffered, so the others do
+  /// not pause for the load.
   void joinBack() {
     final self = selfMember.peek();
-    if (self == null || !self.out) return;
+    if (self == null || self.presence != Presence.away) return;
+    autoSitOut.manual();
     markInput();
-    connection.sendOut(self.id, false);
-    if (serverState.peek()?.transport == 'playing') {
+    _joinBack(ready: true);
+  }
+
+  /// `in` again; with [ready] this member readies too (auto sit-out's
+  /// return keeps the ready flag the server kept).
+  void _joinBack({required bool ready}) {
+    connection.sendPresence(const PresenceIntent(state: Presence.watching));
+    if (!ready) {
+      _joinBackAt = null;
+    } else if (serverState.peek()?.transport == 'playing') {
       _joinBackAt = DateTime.now().toUtc();
     } else {
       _joinBackAt = null;
@@ -1365,10 +1425,18 @@ class SessionCoordinator {
   /// [queueId]: the Up next item this puts up (the server takes it off
   /// the queue); [art]: a picture to send as its art (a queued item's).
   void _swap(HelloMedia media, {String? link, String? queueId, Uint8List? art}) {
+    // A swap sent into a dropped link would be lost without a word.
+    if (!connection.state.peek().online) {
+      notify(const ActionFailed('Reconnecting: put it up again once back'));
+      return;
+    }
     // Putting something up means watching it: back first. Not for Up next
     // coming up by itself: whoever puts it up may be sitting out.
     final self = selfMember.peek();
-    if (self != null && self.out && queueId == null) connection.sendOut(self.id, false);
+    if (self != null && self.presence == Presence.away && queueId == null) {
+      autoSitOut.manual();
+      connection.sendPresence(const PresenceIntent(state: Presence.watching));
+    }
     _pendingArt = (media: media, after: serverState.peek()?.mediaId ?? 0, link: link ?? media.url, art: art);
     connection.sendSwap(media, queueId: queueId);
   }
@@ -1722,12 +1790,14 @@ class SessionCoordinator {
     // This member put it up: serve it to viewers without an account, with
     // its own sign-in, else the pasted link (played directly here too).
     if (origin != null) {
+      final name = (r.media?['name'] as String?) ?? '';
       if (plan is OwnPlay) {
         _startRelaySource(r.mediaId, RelayMedia.single(HttpRelayBytes(Uri.parse(plan.url), headers: plan.headers)),
-            queueId: stateMediaRelay(r)?.queueId ?? '');
+            queueId: stateMediaRelay(r)?.queueId ?? '', name: name, duration: _durationOf(r));
       } else if (origin.link != null) {
         plan = RelayPlay(origin.link!);
-        _startRelaySource(r.mediaId, RelayMedia.single(HttpRelayBytes(Uri.parse(origin.link!))));
+        _startRelaySource(r.mediaId, RelayMedia.single(HttpRelayBytes(Uri.parse(origin.link!))),
+            name: name, duration: _durationOf(r));
       }
     }
     jellyfinPlan.value = plan;
@@ -1957,41 +2027,82 @@ class SessionCoordinator {
     unawaited(_playJellyfin(ref, r));
   }
 
-  /// A reconnect's part here (see [ReconnectHandler]): what to restore is
-  /// read before the attempt dials.
-  Future<void> Function(WelcomeMessage, bool Function()) _onReconnect() {
-    final wasOut = _lastOut;
-    var wantReady = _lastReady && !wasOut;
-    final seenBefore = _seenMediaId;
-    return (welcome, stale) async {
-      final url = welcome.mediaUrl;
-      if (url != null && url.isNotEmpty && url != _openUrl) {
-        await _openMedia(url);
-      }
-      if (stale()) return;
-      // The server forgot the dropped member; restore the ready flag it
-      // last reported (not a local guess: others may have forced it).
-      // Not when the video changed meanwhile and the user unreadies then.
-      if (unreadyForNewMedia(
-          enabled: AppSettings.instance.unreadyOnSwap.peek(),
-          lastMediaId: seenBefore,
-          mediaId: connection.lastState?.mediaId ?? seenBefore,
-          ready: wantReady)) {
-        wantReady = false;
-        _lastReady = false;
-      }
-      // A new member (the server dropped the old one) sits out again; a
-      // resumed one still does.
-      final selfNow = connection.lastState?.members.where((m) => m.id == connection.memberId).firstOrNull;
-      if (wasOut && !(selfNow?.out ?? false)) connection.sendOut(connection.memberId, true);
-      if (wantReady) {
-        _lastReady = true;
-        _restoringReady = true;
-        connection.sendReady(true, source: 'manual');
-      }
-      _startTicker();
-    };
+  /// A welcome's part here (see [WelcomeHandler]), before its state is
+  /// applied. The first one and a resumed one need nothing: the member
+  /// kept everything (ready flag, presence, queue items, relay) and the
+  /// player kept the media. A new member after a drop (grace over, or the
+  /// server restarted) gets this app's intent again (ready, away), and
+  /// the media opens again only if it changed or its URL named the old
+  /// token.
+  void _onWelcome(WelcomeMessage welcome, Rejoin rejoin) {
+    if (!rejoin.reconnect) return;
+    _log.info('reconnected: ${rejoin.resumed ? 'resumed' : 'a new member'}'
+        '${rejoin.sameServer ? '' : ' (the server restarted)'}');
+    if (rejoin.resumed) return;
+    final before = serverState.peek();
+    final raw = welcome.state;
+    StateBroadcast? now;
+    try {
+      now = raw == null ? null : StateBroadcast.fromJson(raw);
+    } catch (_) {}
+    final changed = before == null ||
+        now == null ||
+        (rejoin.sameServer ? now.mediaId != before.mediaId : !_sameMedia(before.media, now.media));
+    final tokenUrl = rejoin.oldToken.isNotEmpty &&
+        rejoin.oldToken != welcome.token &&
+        (_openUrl?.contains('/${rejoin.oldToken}/') ?? false);
+    if (changed || tokenUrl) {
+      _forgetMedia();
+    } else if (!rejoin.sameServer && _mediaId != -1) {
+      // The same media under a restarted server's numbering: the player
+      // keeps it.
+      _mediaId = _playerMediaId = _openedFor = now.mediaId;
+      _seenMediaId = now.mediaId;
+    }
+    // The intent the server lost: ready (unless the video changed and the
+    // user unreadies then), and sitting out.
+    var wantReady = _lastReady && !_lastAway;
+    if (changed && wantReady && _seenMediaId >= 0 && AppSettings.instance.unreadyOnSwap.peek()) {
+      wantReady = false;
+      _lastReady = false;
+    }
+    if (_lastAway) {
+      connection.sendPresence(PresenceIntent(
+          state: Presence.away, reason: autoSitOut.autoAway ? PresenceReason.idle : PresenceReason.manual));
+    }
+    if (wantReady) {
+      _restoringReady = true;
+      connection.sendReady(true, source: 'manual');
+    }
   }
+
+  /// Whether two states' `media` are the same media (a restarted server
+  /// counts its `mediaId` from 1 again).
+  static bool _sameMedia(Map<String, Object?>? a, Map<String, Object?>? b) {
+    if (a == null || b == null) return a == b;
+    final ra = refOfStateMedia(a), rb = refOfStateMedia(b);
+    if (ra != null || rb != null) return ra != null && rb != null && sameJellyfinItem(ra, rb);
+    return a['name'] == b['name'] && a['size'] == b['size'] && a['url'] == b['url'] && (a['relay'] == null) == (b['relay'] == null);
+  }
+
+  /// The next state's media is new to this player: it opens again from
+  /// scratch (a relay this member served for the old one stops).
+  void _forgetMedia() {
+    _mediaId = -1;
+    _playerMediaId = -1;
+    _openUrl = null;
+    _openHeaders = null;
+    _awaitLiveFor = -1;
+    _wasPlayAllowed = false;
+    diff.reset();
+    _clearPendingSeek();
+    _stopRelaySource();
+    stopWarmSource();
+    _activeOrigin = null;
+  }
+
+  /// The media's length from a state (0 unknown).
+  static double _durationOf(StateBroadcast r) => (r.media?['duration'] as num?)?.toDouble() ?? 0;
 
   /// "Stop reconnecting".
   void cancelReconnect() => connection.cancelReconnect();
@@ -2018,12 +2129,16 @@ class SessionCoordinator {
     await playback.disposeAll();
   }
 
-  Future<void> leave({bool silent = false}) async {
+  /// Out of the session: with [bye] (Leave, closing the app) the member
+  /// leaves the server at once (others see "left"); without it (Update and
+  /// restart) it goes `gone` and the restarted app takes it back within
+  /// the grace.
+  Future<void> leave({bool silent = false, bool bye = true}) async {
     connection.invalidate();
-    await _teardown(silent: silent);
+    await _teardown(silent: silent, bye: bye);
   }
 
-  Future<void> _teardown({bool silent = false}) async {
+  Future<void> _teardown({bool silent = false, bool bye = true}) async {
     connection.stop();
     _ticker?.cancel();
     _ticker = null;
@@ -2041,8 +2156,8 @@ class SessionCoordinator {
     try {
       await playback.dispose();
     } catch (_) {}
-    // The last lines go before the token does.
-    await connection.close();
+    // The last lines go before the token does, then the bye.
+    await connection.close(bye: bye);
     if (!silent) {
       serverState.value = null;
       starving.value = null;
@@ -2060,7 +2175,6 @@ class SessionCoordinator {
     await _feedSub?.cancel();
     await _nudgeSub?.cancel();
     await _errSub?.cancel();
-    await _silenceSub?.cancel();
     _connectionHealth?.call();
     _bufferSub?.call();
     _aniList?.close();

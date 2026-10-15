@@ -1,6 +1,3 @@
-// restructure: rewrite in step 1 (Connection + Identity + Presence): the
-// resume-token takeover becomes a lasting client id; ping/pong and the
-// seek echo stay.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -47,12 +44,15 @@ class _Client {
   final WebSocket ws;
   final frames = <Map<String, Object?>>[];
   final _welcome = Completer<Map<String, Object?>>();
+  final closed = Completer<int?>();
   _Client(this.ws) {
     ws.listen((m) {
       final d = Map<String, Object?>.from(jsonDecode('$m') as Map);
       frames.add(d);
       if (d['t'] == 'welcome' && !_welcome.isCompleted) _welcome.complete(d);
-    }, onError: (_) {}, onDone: () {});
+    }, onError: (_) {}, onDone: () {
+      if (!closed.isCompleted) closed.complete(ws.closeCode);
+    });
   }
 
   StateBroadcast? get lastState {
@@ -65,18 +65,24 @@ class _Client {
   void send(Map<String, Object?> j) => ws.add(jsonEncode(j));
 
   static Future<(_Client, WelcomeMessage)> join(int port, String name,
-      {String resume = ''}) async {
+      {String client = '', int seq = 0}) async {
+    final c = await dial(port, name, client: client, seq: seq);
+    final w = await c._welcome.future.timeout(const Duration(seconds: 5));
+    return (c, WelcomeMessage.fromJson(w));
+  }
+
+  /// Sends the hello and returns at once (a refused one gets no welcome).
+  static Future<_Client> dial(int port, String name, {String client = '', int seq = 0}) async {
     final ws = await WebSocket.connect('ws://127.0.0.1:$port/sync');
     final c = _Client(ws);
     c.send(HelloMessage(
-      proto: RelayConstants.protoVersion,
-      secret: 'w',
-      user: HelloUser(name: name),
-      media: const HelloMedia(name: '', size: 0, duration: 0),
-      resume: resume,
-    ).toJson());
-    final w = await c._welcome.future.timeout(const Duration(seconds: 5));
-    return (c, WelcomeMessage.fromJson(w));
+            proto: RelayConstants.protoVersion,
+            secret: 'w',
+            user: HelloUser(name: name),
+            client: client,
+            seq: seq)
+        .toJson());
+    return c;
   }
 }
 
@@ -98,42 +104,70 @@ void main() {
   });
   tearDown(() => server.stop());
 
-  test('reconnect after an unclean drop takes over the old member, no ghost',
-      () async {
+  const alice = 'aliceInstallIdAAAAAAAA';
+
+  test('an unclean drop: the same app takes its member over (id, token, ready), no ghost', () async {
     final proxy = await _FreezableProxy.start(server.boundPort);
     final other = (await _Client.join(server.boundPort, 'other')).$1;
-    final (first, welcome) = await _Client.join(proxy.port, 'alice');
+    final (first, welcome) = await _Client.join(proxy.port, 'alice', client: alice, seq: 1);
+    expect(welcome.resumed, isFalse);
+    expect(welcome.instance, server.hub.instance);
+    expect(welcome.proto, RelayConstants.protoMax);
+    expect(welcome.grace, RelayConstants.graceSecs);
     first.send(const ReadyIntent(ready: true).toJson());
-    await _until(() => server.hub.engine.members[welcome.token]?.ready == true,
-        'ready');
+    await _until(() => server.hub.engine.members[welcome.token]?.ready == true, 'ready');
     proxy.frozen = true; // unclean drop: the server's socket stays open
 
-    final (second, again) =
-        await _Client.join(server.boundPort, 'alice', resume: welcome.token);
+    final (second, again) = await _Client.join(server.boundPort, 'alice', client: alice, seq: 2);
+    expect(again.resumed, isTrue);
     expect(again.memberId, welcome.memberId);
-    expect(again.token, welcome.token,
-        reason: 'same token keeps the media URL valid');
-    expect(server.hub.engine.members.length, 2,
-        reason: 'alice once (taken over) plus other, no ghost');
-    expect(server.hub.engine.members[welcome.token]!.ready, isTrue,
-        reason: 'ready survives the takeover');
-    // The frozen old socket closing later must not remove the new one.
+    expect(again.token, welcome.token, reason: 'same token keeps the media URL valid');
+    expect(server.hub.engine.members.length, 2, reason: 'alice once (taken over) plus other, no ghost');
+    expect(server.hub.engine.members[welcome.token]!.ready, isTrue, reason: 'ready survives the takeover');
+    // The frozen old socket closing later must not touch the member.
     await proxy.close();
     await Future.delayed(const Duration(seconds: 2));
-    expect(server.hub.engine.members.containsKey(welcome.token), isTrue);
+    expect(server.hub.engine.members[welcome.token]!.presence, isNot(Presence.gone));
     expect(server.hub.sockets.containsKey(welcome.token), isTrue);
     second.send(const ChatMessage(text: 'still here').toJson());
-    await _until(
-        () => other.frames.any((f) => f['t'] == 'chat' && f['text'] == 'still here'),
+    await _until(() => other.frames.any((f) => f['t'] == 'chat' && f['text'] == 'still here'),
         'chat from the resumed member');
     await other.ws.close();
     await second.ws.close();
   });
 
-  test('unknown resume token joins as a new member', () async {
-    final (a, wa) = await _Client.join(server.boundPort, 'a', resume: 'nope');
-    expect(wa.token, isNot('nope'));
+  test('a takeover tells the older socket: err replaced, then its close code', () async {
+    final (first, welcome) = await _Client.join(server.boundPort, 'alice', client: alice, seq: 1);
+    final (second, again) = await _Client.join(server.boundPort, 'alice', client: alice, seq: 1);
+    expect([again.resumed, again.memberId, again.token], [true, welcome.memberId, welcome.token],
+        reason: 'the same seq takes over too');
+    expect(await first.closed.future.timeout(const Duration(seconds: 5)), CloseCodes.replaced);
+    final err = first.frames.lastWhere((f) => f['t'] == 'err');
+    expect(err['code'], 'replaced');
+    // Frames from the old socket (had it stayed open) no longer count.
+    expect(server.hub.sockets[welcome.token], isNotNull);
+    await second.ws.close();
+  });
+
+  test("an older hello than the member's gets err stale and is closed", () async {
+    final (current, welcome) = await _Client.join(server.boundPort, 'alice', client: alice, seq: 5);
+    final older = await _Client.dial(server.boundPort, 'alice', client: alice, seq: 4);
+    expect(await older.closed.future.timeout(const Duration(seconds: 5)), CloseCodes.stale);
+    expect(older.frames.single['code'], 'stale');
+    expect(server.hub.sockets.containsKey(welcome.token), isTrue, reason: 'the current one stays');
+    expect(server.hub.engine.members, hasLength(1));
+    await current.ws.close();
+  });
+
+  test('without a client id, or with another, it is a new member', () async {
+    final (a, wa) = await _Client.join(server.boundPort, 'a');
+    final (b, wb) = await _Client.join(server.boundPort, 'a');
+    final (c, wc) = await _Client.join(server.boundPort, 'a', client: 'someOtherInstallId0001');
+    expect({wa.memberId, wb.memberId, wc.memberId}, hasLength(3));
+    expect([wa.resumed, wb.resumed, wc.resumed], [false, false, false]);
     await a.ws.close();
+    await b.ws.close();
+    await c.ws.close();
   });
 
   test('ping gets a pong with the client stamp and the server clock', () async {

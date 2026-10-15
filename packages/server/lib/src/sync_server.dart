@@ -67,7 +67,7 @@ class SyncServer {
 
   /// [ytDlp] replaces the server's own (tests). [clock] and [liveness]
   /// go to the engine: a test passes a fake clock to step through the
-  /// silence limits ([Liveness]) without waiting.
+  /// silence, grace and joiner limits ([Liveness]) without waiting.
   SyncServer(this.config,
       {YtDlp? ytDlp, this.loopbackOnly = false, this.logDir, SyncClock? clock, Liveness liveness = const Liveness()}) {
     hub = ServerHub(sessions, config.secret,
@@ -103,7 +103,11 @@ class SyncServer {
         body: Body.fromString(jsonEncode({
           'ok': true,
           'name': config.name,
-          'proto': RelayConstants.protoVersion,
+          'proto': RelayConstants.protoMax,
+          'protoMin': RelayConstants.protoMin,
+          'protoMax': RelayConstants.protoMax,
+          'version': appVersion,
+          'tls': false,
           'viewers': viewers,
           'bytesServed': bytes,
           'uptimeSecs': uptime,
@@ -113,7 +117,8 @@ class SyncServer {
     final requests = MediaRequestLog();
     void logRequest(String token, MediaLog log) => requests(hub.who(token), log);
     mountSessionMediaRoute(_app, sessions, onLog: logRequest);
-    mountRelayRoutes(_app, sessions, relayAt: hub.relayAt, sourceOf: hub.sourceOf, onLog: logRequest);
+    mountRelayRoutes(_app, sessions,
+        relayAt: hub.relayAt, sourceOf: hub.sourceOf, onOtherMedia: hub.relayOtherMedia, onLog: logRequest);
     mountAvatarRoute(_app, hub);
     mountArtRoute(_app, hub);
     mountSessionLogRoutes(_app, hub, () => _sessionLog);
@@ -174,12 +179,7 @@ class SyncServer {
     );
     _startedAt = DateTime.now();
     _heartbeat = Timer.periodic(const Duration(seconds: 1), (_) {
-      hub.engine.tick();
-      hub.sweepClosedSockets();
-      hub.dropSilentSockets();
-      hub.sampleRates();
-      hub.broadcastState();
-      hub.broadcastFeed();
+      hub.heartbeat();
       _sessionLog?.flush();
     });
     _log.info('server "${config.name}" listening on $boundPort');

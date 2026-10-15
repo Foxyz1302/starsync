@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'constants.dart';
 import 'errors.dart';
+import 'presence.dart';
 import 'protocol.dart';
 import 'sync_engine.dart';
 
@@ -36,7 +37,10 @@ enum QueueHow {
 /// One entry of Up next as everyone sees it. [media] is what the swap
 /// puts up, without a URL for [QueueHow.server], [QueueHow.through] and
 /// [QueueHow.file] (the server, or the adder's app, keeps it). [key]: the
-/// adder's own handle for what it keeps (adder-only items).
+/// adder's own handle for what it keeps (adder-only items). [auto]: the
+/// continuation of media [forMedia] (the next episode): at most one, always
+/// after the others, replaced by a newer one, dropped by any swap that does
+/// not put it up (wire `auto` and `for`).
 class QueueItem {
   final String id;
   final HelloMedia media;
@@ -52,6 +56,9 @@ class QueueItem {
   final String by;
   final String byName;
   final String key;
+  final bool auto;
+  /// The `mediaId` an [auto] item continues; 0 otherwise.
+  final int forMedia;
   const QueueItem({
     this.id = '',
     required this.media,
@@ -63,10 +70,12 @@ class QueueItem {
     this.by = '',
     this.byName = '',
     this.key = '',
+    this.auto = false,
+    this.forMedia = 0,
   });
 
   QueueItem copyWith({String? id, HelloMedia? media, String? title, String? sub, double? duration,
-          String? thumb, String? by, String? byName, String? key}) =>
+          String? thumb, String? by, String? byName, String? key, bool? auto, int? forMedia}) =>
       QueueItem(
         id: id ?? this.id,
         media: media ?? this.media,
@@ -78,6 +87,8 @@ class QueueItem {
         by: by ?? this.by,
         byName: byName ?? this.byName,
         key: key ?? this.key,
+        auto: auto ?? this.auto,
+        forMedia: forMedia ?? this.forMedia,
       );
 
   Map<String, Object?> toJson() => {
@@ -91,6 +102,8 @@ class QueueItem {
         if (by.isNotEmpty) 'by': by,
         if (byName.isNotEmpty) 'byName': byName,
         if (key.isNotEmpty) 'key': key,
+        if (auto) 'auto': true,
+        if (auto) 'for': forMedia,
       };
 
   /// Null when [j] is not an item this side can read.
@@ -111,6 +124,8 @@ class QueueItem {
       by: j['by'] is String ? j['by'] as String : '',
       byName: j['byName'] is String ? j['byName'] as String : '',
       key: j['key'] is String ? j['key'] as String : '',
+      auto: j['auto'] == true,
+      forMedia: j['auto'] == true && j['for'] is num && (j['for'] as num).isFinite ? (j['for'] as num).toInt() : 0,
     );
   }
 }
@@ -118,8 +133,9 @@ class QueueItem {
 /// Client to server: one change to Up next. [op] `add` (with [item],
 /// [next] = right after what plays instead of at the end, [thumb] base64
 /// picture), `move` ([id] to index [to]), `remove` ([id]; [why] set when it
-/// is skipped because it cannot play), `play` ([id] now) or `skip` (the
-/// first item now).
+/// is skipped because it cannot play), `play` ([id] now), `skip` (the
+/// first item now) or `cancel` (drops the [QueueItem.auto] item and the
+/// countdown, `state.advance`, for everyone).
 class QueueIntent {
   final String op;
   final QueueItem? item;
@@ -137,8 +153,9 @@ class QueueIntent {
   const QueueIntent.remove(String id, {String why = ''}) : this._('remove', id: id, why: why);
   const QueueIntent.play(String id) : this._('play', id: id);
   const QueueIntent.skip() : this._('skip');
+  const QueueIntent.cancel() : this._('cancel');
 
-  static const ops = {'add', 'move', 'remove', 'play', 'skip'};
+  static const ops = {'add', 'move', 'remove', 'play', 'skip', 'cancel'};
 
   Map<String, Object?> toJson() => {
         't': 'queue',
@@ -210,26 +227,54 @@ class EngineQueue {
     return i < 0 ? null : _items[i].privateUrl;
   }
 
-  /// Adds [item] (already cleaned) with a fresh id, at the end or, with
-  /// [next], first. Null when full ([RelayConstants.maxQueueItems]).
+  /// The continuation item ([QueueItem.auto]), always last; null when none.
+  QueueItem? get auto {
+    final i = _autoIndex;
+    return i < 0 ? null : _items[i].item;
+  }
+
+  int get _autoIndex => _items.indexWhere((e) => e.item.auto);
+
+  /// Adds [item] (already cleaned) with a fresh id, at the end (before the
+  /// [auto] item) or, with [next], first. An [QueueItem.auto] item goes
+  /// last and replaces the earlier one. Null when full
+  /// ([RelayConstants.maxQueueItems]).
   QueueItem? add(QueueItem item, {bool next = false, String? privateUrl, Uint8List? thumb}) {
+    if (item.auto) dropAuto();
     if (_items.length >= RelayConstants.maxQueueItems) return null;
     final t = thumb == null ? null : ArtImage(thumb);
     final added = item.copyWith(id: 'q${_nextId++}', thumb: t?.hash ?? '');
     final e = _Entry(added, privateUrl, t == null ? null : (hash: t.hash, bytes: t.bytes));
-    if (next) {
+    if (item.auto) {
+      _items.add(e);
+    } else if (next) {
       _items.insert(0, e);
     } else {
-      _items.add(e);
+      final a = _autoIndex;
+      _items.insert(a < 0 ? _items.length : a, e);
     }
     return added;
+  }
+
+  /// Drops the [auto] item; returns it (null when there was none).
+  QueueItem? dropAuto() {
+    final i = _autoIndex;
+    if (i < 0) return null;
+    final a = _items.removeAt(i).item;
+    if (play == a.id) _clearPlay();
+    return a;
   }
 
   /// Moves [id] to [to] (clamped). False when unknown or unchanged.
   bool move(String id, int to) {
     final i = _index(id);
     if (i < 0) return false;
-    final target = to.clamp(0, _items.length - 1);
+    // The auto item stays after the others: it does not move, nothing
+    // moves past it.
+    final a = _autoIndex;
+    if (i == a) return false;
+    final last = _items.length - (a < 0 ? 1 : 2);
+    final target = to.clamp(0, last);
     if (target == i) return false;
     final e = _items.removeAt(i);
     _items.insert(target, e);
@@ -257,8 +302,10 @@ class EngineQueue {
   }
 
   /// A swap happened: [id] (when it came from Up next) leaves the list,
-  /// and any pending play request is over.
+  /// the [auto] item goes too unless it is [id], and any pending play
+  /// request is over.
   void swapped(String? id) {
+    if (auto?.id != id) dropAuto();
     if (id != null) {
       final i = _index(id);
       if (i >= 0) _items.removeAt(i);
@@ -290,20 +337,40 @@ class EngineQueue {
   }
 }
 
+/// Why a `queue` message was refused: the `err` the sender gets.
+typedef QueueRefusal = ({ErrCode code, String message});
+
 /// The `queue` messages applied to the engine's [SyncEngine.queue], with
-/// their feed lines (`queue-add`, `queue-remove`, `queue-skip`). Each
-/// returns whether the queue changed; [applyQueueAdd] an error text for the
-/// sender instead (null when added).
+/// their feed lines (`queue-add`, `queue-remove`, `queue-skip`,
+/// `advance-cancel`). Each returns whether the queue changed;
+/// [applyQueueAdd] a refusal for the sender instead (null when added).
 extension EngineQueueOps on SyncEngine {
-  /// [item] is already cleaned by the server (see `cleanQueueAdd`).
-  String? applyQueueAdd(String token, QueueItem item,
+  /// [item] is already cleaned by the server (see `cleanQueueAdd`). An
+  /// [QueueItem.auto] item must continue the current media
+  /// ([QueueItem.forMedia] = [SyncEngine.mediaId]) and come from who put
+  /// it up ([SyncEngine.swapBy]) or, when that member is not `in`, from the
+  /// first member who is.
+  QueueRefusal? applyQueueAdd(String token, QueueItem item,
       {bool next = false, String? privateUrl, Uint8List? thumb}) {
     final member = members[token];
     if (member == null) return null;
+    if (item.auto) {
+      if (media == null || item.forMedia != mediaId) {
+        return (code: ErrCode.bad, message: 'bad message: an auto item must name the current media');
+      }
+      final swapper = members[swapBy];
+      final firstIn = members.values.where((m) => m.presence == Presence.watching).firstOrNull;
+      final allowed = token == swapBy ||
+          ((swapper == null || swapper.presence != Presence.watching) && identical(firstIn, member));
+      if (!allowed) {
+        return (code: ErrCode.forbidden, message: 'only who put this media up adds what continues it');
+      }
+    }
     final added = queue.add(item.copyWith(by: member.id, byName: member.name),
         next: next, privateUrl: privateUrl, thumb: thumb);
-    if (added == null) return 'Up next is full (${RelayConstants.maxQueueItems} items)';
-    feed.add(FeedMessage(actor: member.name, action: 'queue-add', target: added.title, at: now));
+    if (added == null) return (code: ErrCode.full, message: 'Up next is full (${RelayConstants.maxQueueItems} items)');
+    feed.add(FeedMessage(
+        actor: member.name, actorId: member.id, action: 'queue-add', target: added.title, at: now));
     return null;
   }
 
@@ -319,6 +386,7 @@ extension EngineQueueOps on SyncEngine {
     if (gone == null) return false;
     feed.add(FeedMessage(
         actor: member.name,
+        actorId: member.id,
         action: why.isEmpty ? 'queue-remove' : 'queue-skip',
         target: gone.title,
         reason: why,
@@ -332,5 +400,19 @@ extension EngineQueueOps on SyncEngine {
     final target = id.isEmpty ? (queue.isEmpty ? null : queue.items.first.id) : id;
     if (target == null || queue.play == target) return false;
     return queue.requestPlay(target, now);
+  }
+
+  /// `cancel`: drops the continuation ([EngineQueue.auto]) and the
+  /// countdown ([SyncEngine.advance]) for everyone (feed `advance-cancel`).
+  bool applyQueueCancel(String token) {
+    final member = members[token];
+    if (member == null) return false;
+    final dropped = queue.dropAuto();
+    final hadAdvance = advance != null;
+    advance = null;
+    if (dropped == null && !hadAdvance) return false;
+    feed.add(FeedMessage(
+        actor: member.name, actorId: member.id, action: 'advance-cancel', target: dropped?.title, at: now));
+    return true;
   }
 }

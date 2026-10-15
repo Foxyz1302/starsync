@@ -1,41 +1,93 @@
-# Protocol (proto = 15)
+# Protocol (proto = 16)
 
 Wire format only. Behavior (gate, clock, timeouts) is in
 [ARCHITECTURE.md](ARCHITECTURE.md). Source of truth:
 `packages/core/lib/src/protocol.dart` and `packages/server/lib/src/server_hub.dart`.
 
 Any wire change bumps `RelayConstants.protoVersion` and edits this file in
-the same commit. Changes are additive where possible; a client and server
-with different `proto` refuse each other at `hello` (`proto mismatch`).
+the same commit. Versions are ranges: a server accepts
+`[protoMin, protoMax]` (`RelayConstants.protoMin` / `protoMax`, both 16
+today), a client sends its own range (`hello.protoMin` .. `hello.proto`),
+and the connection uses the highest version both have (`welcome.proto`).
+Later additions raise `protoMax` only, so they stay additive. Fields
+marked **reserved** are parsed and documented but nothing produces them
+yet; the restructure step named next to them does.
 
 ## Transport
 
 - WebSocket at `/sync`, JSON text frames, each an object with a `t` field.
 - The first client frame must be `hello` within 10 s. Server pings every 5 s.
 - Match incoming frames by `t`, never by order: `welcome` can race `state`.
-- Failures: server sends `{"t":"err","message":...}` and closes.
-  Messages: `bad hello: ...`, `proto mismatch: got X, want Y`, `wrong secret`,
-  `rejected: <reason>` (e.g. avatar too large), `bad message: ...` (a frame
-  with a non-finite number, e.g. NaN position), `bad swap media`,
-  `swap needs a url or the hosted file` (empty swap).
-- `GET /health` returns JSON (`ok`, `name`, `proto`, `viewers`, `bytesServed`,
-  `uptimeSecs`; unauthenticated). `GET /m/<sid>/<token>/<name>`
-  serves the host's file (Range table in ARCHITECTURE.md).
-  `GET /j/<sid>/<token>/<itemId>` relays the current Jellyfin media and
-  Up next's first one (see
-  "Jellyfin media" below). `/r/<sid>/<token>/...` is the relay of a
-  member's media (see "Relay" below). `GET /a/<sid>/<token>/<hash>` serves
-  a member's picture (see "Avatars" below), `GET /i/<sid>/<token>/<hash>`
-  the current media's art (see "Media art" below). `POST` and `GET
-  /l/<sid>/<token>` send and read the session log (see "Diagnostics"
-  below).
+- A socket without any frame from its client for 15 s
+  (`RelayConstants.silenceSecs`) is closed by the server (close code
+  4015) and its member is `gone` (see "Presence"). Clients send a
+  `report` every second and a `ping` every second anyway.
+- Failures: `err` (see "Errors and close codes"); a refused `hello` is
+  followed by a close.
+- `GET /health` returns JSON (unauthenticated, no member names): `ok`,
+  `name`, `proto` (= `protoMax`), `protoMin`, `protoMax`, `version` (the
+  server's app version, e.g. `1.3.0`), `tls` (**reserved**: always false;
+  a server with TLS would serve the same endpoints over `wss://` /
+  `https://`), `viewers`, `bytesServed`, `uptimeSecs`.
+- `GET /m/<sid>/<token>/<name>` serves the host's file (Range table in
+  ARCHITECTURE.md). `GET /j/<sid>/<token>/<itemId>` relays the current
+  Jellyfin media and Up next's first one (see "Jellyfin media" below).
+  `/r/<sid>/<token>/...` is the relay of a member's media (see "Relay"
+  below). `GET /a/<sid>/<token>/<hash>` serves a member's picture (see
+  "Avatars" below), `GET /i/<sid>/<token>/<hash>` the current media's art
+  (see "Media art" below). `POST` and `GET /l/<sid>/<token>` send and read
+  the session log (see "Diagnostics" below). A token works from the
+  member's `welcome` until it leaves (through its grace, see "Presence").
+
+## Errors and close codes
+
+```
+{"t":"err","code":"version","min":16,"max":16,"server":"1.3.0","for":"hello",
+ "message":"proto mismatch: got 15, want 16..16"}
+{"t":"err","code":"bad","for":"seek","message":"bad message: position must be finite"}
+```
+
+- `message` is plain text for people; a proto 15 app shows it as is (the
+  version refusal starts with `proto mismatch:` for that reason). `code`
+  is for programs; `for` names the `t` of the frame that failed, when
+  there is one. With `code` `version`: `min`/`max` the server's range,
+  `server` its app version. This shape is stable from proto 16 on.
+- Codes: `version` (no common version), `secret` (`wrong secret`),
+  `rejected` (understood but refused: `rejected: avatar too large`,
+  `server fetch needs a server password`, `The server can't fetch this
+  link: ...`), `bad` (malformed: `bad hello: ...`, `bad message: ...` for
+  a frame with a non-finite number or a bad queue item, `bad swap media`,
+  `swap needs a url or the hosted file`, `relay fetch needs an http(s)
+  url`), `replaced` (another hello of the same client took the member
+  over; the client stops, "opened in another window"), `stale` (this hello
+  is older than the member's current one), `forbidden` (`presence` `in` for
+  someone else; an `auto` queue item from someone else than the swapper),
+  `rate` (**reserved**; nudges over the cap are still dropped silently),
+  `full` (`Up next is full (100 items)`).
+- After `err` the socket stays open, except at `hello` and for
+  `replaced`, which are followed by a close.
+- Close codes (the server's; constants: `CloseCodes` in core):
+
+| Code | Socket | Meaning |
+|---|---|---|
+| 1000 | `/sync` | the member left (`bye`, or its grace ran out) |
+| 4001 | relay channel | not (or no longer) the source of this relay; the source stops |
+| 4002 | relay channel | the source is back with another media than the relay's first `info`; the relay ends, the source stops |
+| 4003 | relay channel | a newer channel of the same source replaced this one; this one stops |
+| 4010 | `/sync` | refused: `err` `version` |
+| 4011 | `/sync` | refused: `err` `secret` |
+| 4012 | `/sync` | refused: `err` `bad` or `rejected` at `hello` |
+| 4013 | `/sync` | `err` `replaced`: another connection of the same client holds the member |
+| 4014 | `/sync` | refused: `err` `stale` |
+| 4015 | `/sync` | silent for 15 s: the member is `gone` |
 
 ## Client to server
 
 ```
-{"t":"hello","proto":15,"secret":"","user":{"name":"","avatar":""},
- "media":{"name":"","size":0,"duration":0,"url":null},"hostKey":"...",
- "resume":"<token>"}
+{"t":"hello","protoMin":16,"proto":16,"secret":"","user":{"name":"","avatar":""},
+ "media":{},"hostKey":"...","client":"<install id>","seq":7,"app":"1.3.0",
+ "platform":"linux","caps":{"source":true,"resolve":true,"jellyfin":true},
+ "feedAfter":41}
 {"t":"ready","ready":true,"source":"manual"}      source: manual | auto
 {"t":"force","target":"all"|"<memberId>","ready":true}
 {"t":"seek","position":123.4,"seq":3}
@@ -47,27 +99,45 @@ with different `proto` refuse each other at `hello` (`proto mismatch`).
  "duration":1440.5,"mediaId":2,"jf":{"<serverId>":true},"error":"Not allowed (403)"}
 {"t":"ping","c":1767225600000}
 {"t":"chat","text":"..."}
-{"t":"out","target":"<memberId>","out":true}
+{"t":"presence","target":"<memberId>","state":"away"|"in","reason":"manual"}
+{"t":"bye"}
 {"t":"nudge","target":"<memberId>"}
 {"t":"profile","name":"...","avatar":"<base64>"}
 {"t":"art","mediaId":2,"poster":"<base64>","banner":"<base64>"}
-{"t":"queue","op":"add"|"move"|"remove"|"play"|"skip",...}   see "Queue"
+{"t":"queue","op":"add"|"move"|"remove"|"play"|"skip"|"cancel",...}   see "Queue"
 ```
 
 Field notes:
+- `hello.proto` / `hello.protoMin`: the client's version range
+  (`protoMin` absent: `proto` only). The server reads them before
+  anything else in the hello (a hello of another version may not parse)
+  and refuses with `err` `version` when the ranges do not meet.
+  `hello.media` is ignored; a proto 16 client still sends `{}` so a proto
+  15 server, which requires it, answers with its own `proto mismatch`.
 - `hello.secret`: the server password; a server with an empty secret is open.
-  `hello.media` is carried but not used by the server today.
 - `hello.hostKey` (optional, omitted when empty): the hosting app
   generates a random key per hosting, gives it to its server and sends it
   from its own client. The member whose key equals the server's is the host
   (`members[].host`). A server without a key (the dedicated server) has no
   host. Where the connection comes from does not matter.
-- `hello.resume` (optional, omitted when empty): the token from this
-  client's previous `welcome`, sent on reconnect. If the server still has
-  that member, the connection takes it over: `welcome`
-  returns the same `token` and `memberId`, the member keeps its flags, and
-  there is no `join`/`leave` feed. Otherwise it is ignored and a new member
-  joins.
+- `hello.client` (optional): a random id per install, 16 to 64
+  characters of `[A-Za-z0-9_-]` (the app uses 22 characters of
+  base64url), else `err` `bad`. Private: never broadcast, never logged.
+  It names the member across connections (see "Presence"); without it
+  every hello is a new member. **Reserved**: deriving it per server (an
+  HMAC of an install secret and the dialled host:port).
+- `hello.seq` (default 0): increases with every connection this install
+  makes. A hello whose `seq` is lower than the one holding the member
+  gets `err` `stale` and is closed; equal or higher takes the member over.
+- `hello.app` (the app version, cut to 32 characters): shown as
+  `members[].app`. `hello.platform` (`linux`, `windows`, `macos`,
+  `android`): logged only. `hello.caps`: what the app can do (`source`:
+  serve a relay; `resolve`: run yt-dlp; `jellyfin`: play with its own
+  account), shown as `members[].caps`; unknown entries are ignored.
+- `hello.feedAfter` (optional): the last `feed.seq` the client saw from
+  this server; `welcome.feed` replays the lines after it. A client should
+  send it only for the same `welcome.instance` (a restarted server counts
+  from 1 again).
 - `seek.seq` (optional, default 0): increasing per client; echoed in
   `state.seekSeq` so the sender recognises its own seek.
 - `report.duration` / `report.mediaId` (optional, omitted when 0): the open
@@ -75,7 +145,9 @@ Field notes:
   the first one whose `mediaId` is current while its media duration is 0.
   `report.buffered` is the current media's: a client sends 0 while its
   player does not hold it yet, and the server counts a report whose
-  `mediaId` names an earlier media as `buffered` 0.
+  `mediaId` names an earlier media as `buffered` 0. A `joining` member's
+  report ends its joining once it holds the current media at the server
+  position (within 5 s) with the buffer the gate needs (see "Presence").
 - `report.jf` (optional): Jellyfin access per `ServerId`, `true` = this
   client plays the item with its own account, `false` = through the relay.
   Sticky: a report without `jf` keeps the last one. At most 8 entries, keys
@@ -92,27 +164,27 @@ Field notes:
   clears it, and so does a swap. An errored member is out of the ready
   gate: out of the set, a `ready` or `force` does not put it back; when
   the error clears it is in the set again like a join (unless `playing`,
-  then from its `ready`). Optional on both sides: older servers ignore it,
-  older clients ignore `members[].error`.
+  then only if it is ready). It also ends a `joining`.
 - `ping.c`: the client's clock in epoch ms; answered with `pong`.
 - `user.avatar`: base64 PNG, at most 256 KiB of characters (else
   `rejected: ...`). `name` is trimmed, empty becomes `?`, cut to 32
-  characters.
+  characters. A takeover applies the hello's name and picture like a
+  `profile`.
 - `profile`: changes this member's name and/or picture mid-session. A field
   that is absent (or null) stays as it is; `avatar: ""` removes the picture.
   Same rules as `hello.user`; a too large avatar gets `err`
   `rejected: avatar too large` (the socket stays open, nothing changes).
 - `art`: pictures of the current media (see "Media art").
 - `chat.text` is cut to 500 characters.
-- `out`: `out:true` sits the member `target` out (anyone, the host
-  included); `out:false` brings the sender back and only works with its own
-  member id as `target`. An out member is never in the set and never
-  ready: `ready` from it and `force` on it are ignored, a swap leaves it
-  out, the `buffered` of its reports counts as 0 (it keeps sending
-  `report`: that keeps it fresh). Coming back puts it in the set like a
-  join (unless `playing`), unready; it sends `ready` itself. Unknown
-  targets and no-op changes are ignored. Feed: `out` (`target` = the name
-  of who was sat out, absent when the actor sat itself out) and `back`.
+- `presence`: `target` a member id (absent or empty: oneself). `state`
+  `away` sits `target` out: anyone may, on anyone (the host included); a
+  `gone` target comes back `away`. `state` `in` brings oneself back (through
+  `joining`, see "Presence"); for anyone else it is `err` `forbidden`.
+  `reason` (`manual` default, `idle`, `minimised`, `bye`) goes into the
+  feed line. Unknown targets and no-op changes are ignored.
+- `bye`: the member leaves now (the Leave button, the app closing): feed
+  `leave` (reason `bye`), its token stops working, the socket closes
+  (1000). Anything else that ends a socket keeps the member (`gone`).
 - `nudge`: the server sends `{"t":"nudge","from":<memberId>,"name":<name>}`
   to `target` only (no feed). At most 3 per second and 20 per minute per
   sender; the rest, nudges to oneself and to unknown targets are dropped
@@ -120,29 +192,34 @@ Field notes:
 - `swap.media.url` is the link; `name`, `size`, `duration` are informational.
   `swap.media.jellyfin` makes it Jellyfin media (see below); then `url` is
   dropped. `swap.media.relay` makes it relayed media (see "Relay").
-  A swap keeps every member's `ready` and puts every fresh member in the
-  set (`inSet`); clients that want to be unready for the new media send
-  `ready` themselves (gate: ARCHITECTURE.md, "Ready gate").
+  `swap.media.ref` says what it is (see "Media identity"). A swap keeps
+  every member's `ready` and puts every member in the set (`inSet`; who
+  counts is up to presence); clients that want to be unready for the new
+  media send `ready` themselves (gate: ARCHITECTURE.md, "Ready gate").
 - Frames before `welcome` (other than `hello`) are ignored; unparsable or
-  unknown frames are ignored silently.
+  unknown frames are ignored silently. Frames
+  from a socket another hello took over are ignored.
 
 ## Server to client
 
 ```
-{"t":"welcome","token":"...","memberId":"m1","mediaUrl":"...","relayUrl":"...",
- "state":{<state>}}
+{"t":"welcome","proto":16,"token":"...","memberId":"m1","resumed":false,
+ "instance":"<random per boot>","grace":600,"mediaUrl":"...","relayUrl":"...",
+ "state":{<state>},"feed":[<feed with "replayed":true>,...]}
 {"t":"state","eventId":7,"transport":"playing"|"held"|"finished","position":12.3,
  "serverTime":"<ISO-8601 UTC>","mediaId":1,
- "media":{name,size,duration,url?,jellyfin?,relay?,swapBy?,art?}|absent,
- "members":[{"id","name","avatarHash"?,"ready","inSet","buffered","stale","jf"?,
-   "host"?,"out"?,"error"?,"rate"?}],
+ "media":{name,size,duration,url?,jellyfin?,relay?,ref?,swapBy?,art?}|absent,
+ "members":[{"id","name","avatarHash"?,"ready","inSet","buffered","presence",
+   "goneSince"?,"jf"?,"host"?,"error"?,"rate"?,"app"?,"caps"?}],
  "seekBy":"m1","seekSeq":3,"relay":true,"relayNext":true,"queue":[<item>]?,
- "queuePlay":"q3"?}
+ "queuePlay":"q3"?,"hold":{"reason":"joining","members":["m3"],"until":"<ISO>"}?,
+ "advance":{"id":"q3","at":"<ISO>","secs":10}?}
 {"t":"pong","c":1767225600000,"s":1767225600012}
-{"t":"feed","actor":"","action":"","target":"","reason":"","at":"<ISO-8601>"}
-{"t":"chat","text":"...","from":"<name>"}
+{"t":"feed","seq":12,"actor":"","actorId":"m2","action":"","target":"","targetId":"m3",
+ "reason":"","at":"<ISO-8601>"}
+{"t":"chat","text":"...","from":"<name>","fromId":"m2"}
 {"t":"nudge","from":"m2","name":"Alice"}
-{"t":"err","message":""}
+{"t":"err","code":"...","message":"...","for":"..."}
 ```
 
 - `welcome.token` is private to its owner and appears only in that member's
@@ -151,7 +228,15 @@ Field notes:
   the shared link.
   `welcome.state` has the same shape as `state`. `relayUrl` is present only
   when `state.relay` is: this member's `/j/...` URL for the current
-  Jellyfin media (private like `token`).
+  Jellyfin media (private like `token`). `welcome.proto`: the version of
+  this connection. `welcome.resumed`: the hello took over this client's
+  member (same `memberId` and `token`, everything it had kept); false for
+  a new member, also after a server restart. `welcome.instance`: random
+  per server boot (a client that held a member of another instance knows
+  the server restarted, not that its grace ran out). `welcome.grace`:
+  seconds a `gone` member is kept. `welcome.feed` (omitted when empty):
+  the feed lines after `hello.feedAfter`, at most the last 50, oldest
+  first, each with `replayed: true` (log them, do not toast them).
 - `state` is sent every second and on every change. `position` is the value at
   `serverTime` (server clock); clients extrapolate while `transport` is
   `playing`, on the server's clock (see `pong`). `finished`: the media
@@ -161,7 +246,8 @@ Field notes:
   (see "Relay"). `media.duration` is 0 until a client reports
   it. `media.swapBy`: member id of who swapped it in (omitted once that
   member left, and for the media the server started with). `media.art`:
-  see "Media art". `seekBy` (member id) and `seekSeq` are present only while the current
+  see "Media art". `media.ref`: see "Media identity". `seekBy` (member id)
+  and `seekSeq` are present only while the current
   `eventId` came from a seek. `relay` (omitted when false): the server can
   relay the current Jellyfin media. `relayNext` (omitted when false, proto
   13): it can relay Up next's first item too (a Jellyfin ref on the same
@@ -169,29 +255,98 @@ Field notes:
   `report.jf`, omitted when it never sent one. `members[].avatarHash`
   (omitted when the member has no picture) names the picture's bytes (see
   "Avatars"). `members[].host` (omitted when false): the member sent the
-  server's `hostKey` (see `hello.hostKey`). `members[].out` (omitted when
-  false): the member sits out (see `out`). `members[].error` (omitted when
+  server's `hostKey` (see `hello.hostKey`). `members[].presence` and
+  `goneSince` (ISO, only while `gone`): see "Presence". `members[].inSet`:
+  the member counts for the ready gate right now (in the set, no player
+  error, and its presence counts). `members[].error` (omitted when
   empty): the member's player cannot open the current media (see
   `report.error`). `members[].rate` (omitted when 0): bytes per second
   the server sent this member over the last 5 s (`/m`, `/j` and `/r`
   together), two significant digits, under 10 kB/s counts as 0. Members
   that fetch the media themselves read nothing from the server.
+  `members[].app` / `caps` (omitted when empty): its `hello.app` /
+  `hello.caps`.
+- `state.hold` (present while `held` with media up): why. `reason`, most
+  pressing first: `joining` (a joiner within its bound holds the start;
+  `until` is when that bound ends, server clock), `ready` (someone in the
+  set is not ready), `buffer` (someone's buffer is short of `bufferNeed`),
+  `source` (the same while the relay's source is `gone`), `start` (nobody
+  counts for the gate: someone has to ready up). `members`: the member
+  ids the gate waits for (empty for `start`).
+- `state.advance` (**reserved**, step 6): the shared countdown to Up next
+  (see "Queue").
 - `pong.c` echoes the ping's `c`; `pong.s` is the server's clock in epoch ms
   (the clock `serverTime` uses). With `t3` the local receive time, the offset
   is `s - (c + t3) / 2`, accurate to half the round trip.
-- `feed.action` values: `ready`, `unready`, `force-ready`, `force-unready`,
-  `force-play`, `force-hold`, `out`, `back`, `join`, `leave`, `stale`, `swap`,
-  `seek`, `pause`, `resume`, `finished`, `chat`, `rename`, `avatar`,
-  `queue-add`, `queue-remove`, `queue-skip`, `fetch-fail` (proto 12: the
-  server could not fetch the current media, `target` its name). `target`
-  and `reason` are optional; `reason` carries `auto`/`manual` for ready and
-  `silent too long` or `no signal` for leave/stale. `rename`: `actor` is the
-  new name, `target` the old one. `avatar`: the actor changed only the
-  picture. `queue-*`: `target` is the item's title, `reason` (skip) why it
-  could not play (see "Queue").
-- Chat is delivered twice: a `chat` frame with the text and a textless
-  `feed` with `action:"chat"`. Render the `chat` frame only; the reference
-  client drops the textless feed entry.
+- `feed`: `seq` increases by one per line for the server's life (a
+  restart counts from 1 again); `actor` / `target` are display names as
+  they were then, `actorId` / `targetId` the member ids (`server` for the
+  server's own lines; omitted when none): match people by id, not by
+  name. `action` values: `ready`, `unready`, `force-ready`, `force-unready`,
+  `force-play`, `force-hold`, `join` (a new member only), `leave` (for
+  good: `reason` `bye` or `grace`), `gone` (10 s after the member went
+  `gone`; a quicker return says nothing), `return` (back within the grace
+  after a `gone` line), `away` (`target` the member set away, absent when
+  the actor set itself; `reason` `idle`/`minimised`/`bye`, empty for
+  manual), `in` (back from away), `swap`, `seek`, `pause`, `resume`,
+  `finished`, `chat`, `rename`, `avatar`, `queue-add`, `queue-remove`,
+  `queue-skip`, `advance-cancel` (`target` the dropped continuation's
+  title, if any), `fetch-fail` (the server could not fetch the current
+  media, `target` its name). `reason` carries `auto`/`manual` for ready.
+  `rename`: `actor` is the new name, `target` the old one. `avatar`: the
+  actor changed only the picture. `queue-*`: `target` is the item's
+  title, `reason` (skip) why it could not play (see "Queue").
+- Chat is delivered twice: a `chat` frame with the text (`fromId` the
+  sender's member id) and a textless `feed` with `action:"chat"`. Render
+  the `chat` frame only; the reference client drops the textless feed
+  entry.
+
+## Presence
+
+The member is lasting: one per client, kept across reconnects. Gate
+rules and timings in detail: ARCHITECTURE.md, "Sync model".
+
+- The server maps `hello.client` to one member. A hello with a known
+  client id (and a `seq` not older than the member's) takes that member
+  over: `memberId` and `token` stay, so `/m` `/r` `/j` URLs keep working;
+  the ready flag, presence, queue items, relay, picture all stay; an older
+  socket still open gets `err` `replaced` and closes (4013).
+  `welcome.resumed` is true.
+- A socket close (or 15 s of silence) is not a leave: the member goes
+  `gone` (`goneSince`) and is kept for the grace, 10 min
+  (`welcome.grace`), with everything it had; a relay it serves goes on
+  (see "Relay"). After the grace it leaves (feed `leave`, reason
+  `grace`), its token stops working; a hello with its client id after
+  that is a new member. `bye` leaves at once.
+- `members[].presence`: `joining` (new, back from `gone`, or back `in`
+  from `away`, while media is up: it loads in the background until its
+  report holds the current media at the server position with
+  `bufferNeed` buffered, or reports an error, or 60 s pass; then `in`),
+  `in` (watching), `away` (sat out: still in the server, never counted
+  for the gate, the ready counter or watched tracking), `gone`
+  (disconnected, in its grace). A member `away` when it dropped comes
+  back `away`. With no media up a joiner is `in` at once.
+- What each presence counts for is one table, `PresencePolicy` in core
+  (`presence.dart`), used by the server and the app: the gate counts
+  `in`, and `joining` only while `held` and for at most 15 s after it
+  started joining (never while `playing`: a joiner never pauses anyone);
+  the ready counter and preloads count `joining` and `in`; watched
+  tracking and full social notifications count `in` (`joining` too for
+  the notifications).
+
+## Media identity
+
+```
+media.ref = {"kind":"episode","title":"Show","anilistId":1,"anilistEp":6,
+             "tvdbId":2,"season":1,"ep":6,"absolute":30}
+```
+
+- In `swap.media`, `state.media` and `queue[].media`; passed through as
+  is (the server drops non-integer ids and cuts `title` to 200
+  characters). `kind` `episode`, `movie` or `extra` (else no ref); every
+  other field optional; `season` absent for absolute numbering. At most
+  2 KiB of JSON, else `err` `bad`. **Reserved**: nothing produces it yet
+  (step 4).
 
 ## Avatars
 
@@ -278,6 +433,8 @@ state media.relay = {"source":"m2","live":true}   or {"fetch":true,"live":true}
       media.relay = {"fetch":true,"live":true,"tracks":[{"kind":"video"},{"kind":"audio"}]}
       media.relay = {"source":"m2","live":true,"rate":4100000,"need":2300000}
       media.relay = {"source":"m2","live":true,"queueId":"q3"}   started in Up next (proto 14)
+      media.relay = {"source":"m2","live":true,"sourceGone":true,"sourceGoneSince":"<ISO>"}
+                                     its source is gone, in its grace
       queue[0].media.relay = {"source":"m2","live":true,"tracks":[...]}   its warm relay
       queue[0].media.relay = {"fetch":true,"live":true}
 ```
@@ -309,6 +466,12 @@ anything else means one file.
   channel is connected, or the server could read the link). `tracks`: as
   the swap named them, or, with `fetch`, set once the server has read the
   link (together with `live`).
+- `sourceGone` (omitted when false) and `sourceGoneSince` (ISO): the
+  source member is `gone` (see "Presence"). The relay and its buffer stay
+  through the source's grace; viewers play what is buffered. A source's
+  leave (grace over, `bye`) ends the relay: `live` goes, `sourceGone`
+  stays, its URLs answer 404. A swap ends it as before. The warm relay's
+  `queue[0].media.relay` carries the same fields.
 - `state.media.relay.rate` (omitted while unknown): bytes per second the
   source (with `fetch`, the server's own fetch) delivers while the buffer
   is waiting on it, smoothed over about 4 s of that time and present once
@@ -368,11 +531,23 @@ anything else means one file.
   relay's source token is accepted; anyone else, or the source once its
   relay is dropped, is closed with code 4001 (the source stops instead
   of reconnecting). A warm relay's tracks are those of its source's
-  first `info`.
+  first `info`. The source's token works through its grace, so a source
+  back from a drop dials the channel again (before or after its own
+  `hello`) and sends its `info` again: the same as its first (track
+  kinds, byte sizes, piece shapes, and `name` / `duration` where both
+  give them) continues the relay: the buffer stays and the server pulls
+  what it still lacks with new pull ids, from the first byte or piece not
+  buffered (the `pull` frames below are that exchange; nothing else is
+  needed). Another `info` closes the channel with 4002 and ends the
+  relay. A second channel for the same relay replaces the first, which is
+  closed with 4003. The source stops on 4001, 4002 and 4003 and
+  reconnects (with backoff) on anything else.
   Frames:
 
 ```
-source -> server  {"t":"info","size":<bytes>}            first frame, one file
+source -> server  {"t":"info","size":<bytes>,"name":"Ep 06.mkv","duration":1440.5}
+                                                         first frame, one file
+                                                         (name, duration optional)
                   {"t":"info","tracks":[{"kind":"video","size":<bytes>},
                                         {"kind":"audio","size":<bytes>}]}
                                                          first frame, tracks
@@ -397,26 +572,31 @@ server -> source  {"t":"pull","id":1,"track":0,"start":0,"end":1048575}
   init and key pieces it uses, `iv` an explicit IV (`0x` + hex), `disc` a
   discontinuity before it; `seq` (default 0) the media sequence of the
   first segment. A piece pull's bytes end with `end` like a range pull.
-  An `info` whose tracks differ from the swap's `tracks` (count, bytes or
-  pieces), or a malformed piece list, closes the channel with 4001. A
-  track `size` or piece count/roles different from the one before (a
-  reconnect) drops that track's buffer.
+  A first `info` whose tracks differ from the swap's `tracks` (count,
+  bytes or pieces), or a malformed piece list, closes the channel with
+  4001. A later `info` unlike the first closes it with 4002 (see above).
 
 ## Join and reconnect
 
 `hello` then `welcome`, then the app opens `mediaUrl`, seeks to the server
-position and buffers. A joining member is `ready=false`; it is `inSet`
-at once unless the server is `playing`, then from its first `ready`
-(members present at a swap are put in the set by it). A socket the server sees close loses its token; reconnect
-is a fresh `hello` (with `resume` = the old token), after which the client
-re-sends its prior ready flag. If the old member was still there (unclean
-drop), `resume` takes it over and the token and media URL stay the same.
+position and buffers. A new member is `ready=false` and `joining` (with
+media up); it is in the set at once unless the server is `playing`,
+then from its first `ready` (members present at a swap are put in the
+set by it), and the gate counts it per "Presence". A reconnect is a
+`hello` with the same `client` and a higher `seq` (and `feedAfter`):
+within the grace it is the same member (`welcome.resumed`), its token and
+media URL unchanged, its ready flag and presence kept; after a
+non-resumed `welcome` (grace over, server restarted) the client sends
+its intent again (`ready`, `presence`).
 
 ## Queue (proto 12)
 
 Up next: what plays after the current media, held by the server for
 everyone, in memory (a restart loses it). Any member edits it; items stay
-when their adder leaves. Behavior (who puts an item up, the countdown,
+when their adder leaves. `by` is the adder's lasting member id: it
+survives reconnects, and while the adder is `gone` its `through`/`file`
+items wait for it (it is still in `members`) instead of being skipped;
+after it left for good they cannot play. Behavior (who puts an item up, the countdown,
 skipping) is in [ARCHITECTURE.md](ARCHITECTURE.md), "Up next".
 
 ```
@@ -425,11 +605,14 @@ client {"t":"queue","op":"add","at":"end"|"next","item":{<item>},"thumb":"<base6
        {"t":"queue","op":"remove","id":"q3","why":"Bob left"}
        {"t":"queue","op":"play","id":"q3"}
        {"t":"queue","op":"skip"}
+       {"t":"queue","op":"cancel"}
+       {"t":"queue","op":"add","item":{<item>,"auto":true,"for":2}}
        {"t":"swap","media":{...},"queueId":"q3"}
 state  "queue":[<item>,...], "queuePlay":"q3"
 <item> = {"id":"q3","media":{<swap media>},"how":"direct"|"server"|"through"|"file"|"jellyfin",
           "title":"...","sub":"...","duration":213,"thumb":"<hash>",
-          "by":"m2","byName":"Bob","key":"<adder's handle>"}
+          "by":"m2","byName":"Bob","key":"<adder's handle>","auto":true?,"for":2?}
+state  "advance":{"id":"q3","at":"<server time>","secs":10}   reserved
 ```
 
 - `add`: `item` without `id`, `by`, `byName`, `thumb` (the server sets
@@ -461,6 +644,19 @@ state  "queue":[<item>,...], "queuePlay":"q3"
   the member who can put it up to do so now. `skip` is `play` of the
   first item. `queuePlay` ends with any swap, when the item is removed,
   or after 30 s.
+- `auto` (with `for`, the `mediaId` it continues): the continuation (the
+  next episode). Only for the current media (else `err` `bad`), and only
+  from the member who put it up (`media.swapBy`) or, when that member is
+  not `in`, from the first member who is (else `err` `forbidden`). At most
+  one: a newer one replaces it; it stays after the other items (an `add`
+  goes before it, `next` puts an item first, `move` never passes it, it
+  does not move itself); any swap that does not put it up drops it.
+- `cancel`: drops the `auto` item and the countdown for everyone (feed
+  `advance-cancel`); nothing to drop, nothing happens.
+- `state.advance` (**reserved**, step 6): the shared countdown when the
+  media finishes and an item is first; at `at` + `secs` the server would
+  set `queuePlay` to `id`, holding while its performer or source is
+  `gone`. The server never starts one yet; `cancel` and any swap clear it.
 - `swap.queueId`: the swap puts that item up and takes it off the queue
   in the same step. A swap naming an item that is no longer queued is
   ignored (someone put it up first). For a `server` item the swap may

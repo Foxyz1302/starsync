@@ -1,6 +1,3 @@
-// restructure: rewrite in step 1 (Connection + Identity + Presence): "the
-// source drops uncleanly and resumes" (resume token, D6 source resume); the
-// rest stays.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -8,11 +5,13 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:sync_relay_core/core.dart';
+import 'package:sync_relay_core/testing.dart';
 import 'package:sync_relay_server/server.dart';
 import 'package:starsync/src/jellyfin/accounts.dart';
 import 'package:starsync/src/jellyfin/track_prefs.dart';
 import 'package:starsync/src/playback/yt_dlp_app.dart';
 import 'package:starsync/src/screens/home/picked_media.dart';
+import 'package:starsync/src/session/connection.dart' show ConnOnline;
 import 'package:starsync/src/session/session_coordinator.dart';
 
 // The relay with real coordinators, real mpv and a dedicated server that
@@ -197,12 +196,7 @@ void main() {
       final j = jsonDecode('$f') as Map;
       if (j['t'] == 'welcome' && !welcome.isCompleted) welcome.complete(j);
     }, onError: (_) {});
-    ws.add(jsonEncode(const HelloMessage(
-            proto: RelayConstants.protoVersion,
-            secret: 'pw',
-            user: HelloUser(name: 'bob'),
-            media: HelloMedia(name: '', size: 0, duration: 0))
-        .toJson()));
+    ws.add(jsonEncode(const HelloMessage(secret: 'pw', user: HelloUser(name: 'bob')).toJson()));
     final token = (await welcome.future.timeout(const Duration(seconds: 5)))['token'] as String;
     final size = await File(file).length();
     ws.add(jsonEncode({
@@ -225,10 +219,10 @@ void main() {
     }
   });
 
-  test('the source drops uncleanly and resumes: it keeps its copy and keeps serving',
+  test('the source drops uncleanly and comes back: the others play on, the relay continues (D6)',
       timeout: const Timeout(Duration(minutes: 2)), () async {
     final file = await _media();
-    final proxy = await _Blackhole.start(server.boundPort);
+    final proxy = await FlakyProxy.start(server.boundPort);
     try {
       final alice = await member('alice');
       final acc = JellyfinAccounts(store: MemoryJellyfinStore());
@@ -241,17 +235,30 @@ void main() {
       await _poll(() => server.hub.relay?.live == true, 'source live');
       await _poll(() => alice.playback.durationSecs > 19 && bob.playback.durationSecs > 19, 'both opened');
       final token = bob.connection.token;
+      final opens = bob.opens;
 
-      // Bob's network goes silent (no FIN): states stop, he reconnects
-      // with `resume`, the server still has him.
-      proxy.cut();
+      // Bob's network goes silent (no FIN) on every link he has, the sync
+      // socket and his relay channel, and new ones too, long enough for
+      // the server to call him gone: the relay stays (`sourceGone`).
+      proxy.onConnect = (l) => l.blackhole();
+      for (final l in proxy.links) {
+        l.blackhole();
+      }
       await _poll(() => bob.reconnecting.peek(), 'reconnect engaged', timeout: const Duration(seconds: 15));
-      await _poll(() => !bob.reconnecting.peek() && bob.serverState.peek() != null, 'back',
-          timeout: const Duration(seconds: 20));
+      await _poll(() => stateMediaRelay(alice.serverState.peek()!)?.sourceGone ?? false, 'source gone for alice',
+          timeout: const Duration(seconds: 25));
+      expect(alice.serverState.peek()!.media, isNotNull);
+      expect(server.hub.relay, isNotNull, reason: 'the relay is kept through the grace');
+      // His link comes back: the same member, his source dials its channel
+      // again with the same `info` and the relay continues.
+      proxy.onConnect = null;
+      await _poll(() => bob.connection.state.peek() is ConnOnline, 'back', timeout: const Duration(seconds: 30));
       expect(bob.connection.token, token, reason: 'resumed as the same member');
-      await _poll(() => server.hub.relay?.live == true, 'source redialled', timeout: const Duration(seconds: 15));
+      expect(bob.serverState.peek(), isNotNull, reason: 'the state stayed through the drop');
+      await _poll(() => server.hub.relay?.live == true && !(stateMediaRelay(alice.serverState.peek()!)?.sourceGone ?? true),
+          'source redialled', timeout: const Duration(seconds: 25));
       expect(bob.relaying.peek(), isTrue);
-      expect(bob.playback.durationSecs, greaterThan(19), reason: 'still his own copy');
+      expect(bob.opens, opens, reason: 'still his own copy, not reopened');
 
       // Alice can still get bytes the buffer never had.
       alice.seekTo(17);
@@ -260,43 +267,4 @@ void main() {
       await proxy.close();
     }
   });
-}
-
-/// TCP proxy whose [cut] silently stops forwarding on every connection made
-/// so far (no FIN, like a dead Wi-Fi); later connections work.
-class _Blackhole {
-  final ServerSocket _server;
-  final _conns = <(Socket, Socket, List<bool>)>[];
-  _Blackhole(this._server);
-  int get port => _server.port;
-
-  static Future<_Blackhole> start(int target) async {
-    final b = _Blackhole(await ServerSocket.bind(InternetAddress.loopbackIPv4, 0));
-    b._server.listen((c) async {
-      final up = await Socket.connect('127.0.0.1', target);
-      final dead = [false];
-      b._conns.add((c, up, dead));
-      c.listen((d) {
-        if (!dead[0]) up.add(d);
-      }, onDone: () => dead[0] ? null : up.destroy(), onError: (_) {});
-      up.listen((d) {
-        if (!dead[0]) c.add(d);
-      }, onDone: () => dead[0] ? null : c.destroy(), onError: (_) {});
-    });
-    return b;
-  }
-
-  void cut() {
-    for (final (_, _, dead) in _conns) {
-      dead[0] = true;
-    }
-  }
-
-  Future<void> close() async {
-    await _server.close();
-    for (final (a, b, _) in _conns) {
-      a.destroy();
-      b.destroy();
-    }
-  }
 }

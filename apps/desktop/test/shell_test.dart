@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
-import 'package:starsync/src/screens/home/profile.dart';
+import 'package:starsync/src/session/identity.dart';
 import 'package:starsync/src/shell/app_shell.dart';
 import 'package:starsync/src/shell/avatar.dart';
 import 'package:starsync/src/shell/motion.dart';
@@ -38,8 +38,14 @@ class _FakeVideoState extends State<FakeVideo> {
   Widget build(BuildContext context) => const ColoredBox(color: Colors.black);
 }
 
-MemberView member(String id, String name, {bool ready = false, bool stale = false}) =>
-    MemberView(id: id, name: name, ready: ready, inSet: ready, buffered: 30, stale: stale);
+MemberView member(String id, String name, {bool ready = false, bool gone = false}) =>
+    MemberView(
+        id: id,
+        name: name,
+        ready: ready,
+        inSet: ready,
+        buffered: 30,
+        presence: gone ? Presence.gone : Presence.watching);
 
 void main() {
   final session = SessionState.instance;
@@ -93,7 +99,7 @@ void main() {
     member('b', 'Bob'),
     member('c', 'Cleo', ready: true),
     member('d', 'Dan'),
-    member('e', 'Eve', stale: true),
+    member('e', 'Eve', gone: true),
     member('f', 'Finn'),
   ];
 
@@ -145,7 +151,7 @@ void main() {
       expect(find.byKey(const ValueKey('strip-join')), findsNothing);
       expect(find.byKey(const ValueKey('strip-leave')), findsOneWidget);
       expect(find.byKey(const ValueKey('strip-chat')), findsOneWidget);
-      expect(find.text('ready 2/6'), findsOneWidget);
+      expect(find.text('ready 2/5'), findsOneWidget, reason: 'Eve is gone: not counted');
       final stack = find.byKey(const ValueKey('party-avatars'));
       // Five shown, the sixth as "+1"; ready ones first.
       expect(find.descendant(of: stack, matching: find.byType(StatusAvatar)), findsNWidgets(5));

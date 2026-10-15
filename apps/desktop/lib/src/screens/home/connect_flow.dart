@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 
+import '../../session/connection.dart' show connectErrorText;
+import '../../session/identity.dart';
 import '../../session/session_coordinator.dart';
 import '../../state/session_state.dart';
-import 'profile.dart';
+import '../../sync/sync_client.dart' show HelloRefused;
 
 /// What a card shows under its fields after a failed attempt.
 class CardError {
@@ -107,7 +109,9 @@ class ConnectFlow extends ChangeNotifier {
     } catch (e) {
       if (myAttempt != _attempt) return;
       busy = null;
-      errors[mode] = CardError('Could not connect', '$e');
+      // A refusal says why in plain words (an older host, a wrong password,
+      // another window).
+      errors[mode] = CardError('Could not connect', e is HelloRefused ? connectErrorText(e) : '$e');
       _notify();
       return;
     }

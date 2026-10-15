@@ -66,8 +66,10 @@ size (`ServerIsolate.setFile`): the host's in-session File swap then sends a
   SIGINT and SIGTERM stop it. A Flutter binary cannot run without a
   display, which is why the server is its own build.
 
-`SyncServer` runs a 1 s heartbeat: stale sweep, closed-socket sweep, silent
-socket drop, state + feed broadcast. There is one session, id `default`.
+`SyncServer` runs a 1 s heartbeat (`ServerHub.heartbeat`): closed-socket
+sweep, the engine's sweep (silence, joining, gone notices, grace),
+relay source state, warm relay, rates, state + feed broadcast. There is
+one session, id `default`.
 
 Passwords: the default secret is empty, which means an open server (a
 warning is logged). Otherwise one shared secret, compared at hello.
@@ -77,8 +79,8 @@ it in the server config and sends it in its own `hello`. The member whose
 key matches is the host (`members[].host`: the crown, art rights). The
 address a connection comes from plays no part (so a reverse proxy or tunnel
 on the same machine does not make everyone the host). The dedicated server
-has no key, so it has no host. Nobody removes anyone: members sit each
-other out ("Sitting out" below), the host included, since the hosted
+has no key, so it has no host. Nobody removes anyone: members set each
+other away ("Presence" below), the host included, since the hosted
 server and its `/m/` file serving do not need the host's player.
 
 ## Sync model
@@ -108,47 +110,80 @@ Loosely modeled on Syncplay, with a different readiness design.
   Besides the 1 s tick, a report goes out right after a new media is
   open and, while HELD, the moment the buffer reaches `need`, so the gate
   does not wait for the next tick.
-- **Ready gate** (HELD to PLAYING): the in-set is non-empty and every
-  in-set member is ready, fresh and has `buffered >= need`. `need` is 4 s
+- **Ready gate** (HELD to PLAYING): the members that count for the gate
+  (`SyncEngine.countsForGate`: in the set, no player error, and their
+  presence counts, see "Presence") are not empty and every one is ready
+  and has `buffered >= need`. `need` is 4 s
   (`minBufferSecs`), or near the end what is left minus 2 s
   (`endSlackSecs`, floor 0), since mpv cannot buffer past the end. So a
   lone viewer plays alone; with others present everyone must ready.
-- **In-set** (who the gate waits for): a member joins it on joining, or
-  on coming back from stale, while not PLAYING (any media, the one the
-  server started with included); joining while PLAYING it stays out
-  (`ready=false`) until it readies: a late joiner never pauses anyone. A
-  swap puts every fresh member in the set and keeps everyone's ready flag,
-  so the next video starts once everyone ready has buffered (the client
-  setting "Unready when the video changes", `AppSettings.unreadyOnSwap`,
-  default off, sends `ready=false` itself on a new `mediaId`; not for the
-  first state of a session, and a reconnect does not restore a ready that
-  a swap meanwhile would have dropped). Stale, leave, sitting out and a
-  player error remove from the set.
+  While HELD, `state.hold` says why (`HoldReason`: a joiner within its
+  bound, someone unready, a short buffer, the same with the relay's
+  source gone, or nobody to start).
+- **In-set** (`EngineMember.inSet`, who the gate may wait for): a member
+  joins it on joining, or on coming back from `gone` or `away`, while not
+  PLAYING (any media, the one the server started with included); joining
+  while PLAYING it stays out (`ready=false`) until it readies. A swap puts
+  every member in the set and keeps everyone's ready flag, so the next
+  video starts once everyone ready has buffered (the client setting
+  "Unready when the video changes", `AppSettings.unreadyOnSwap`, default
+  off, sends `ready=false` itself on a new `mediaId`; not for the first
+  state of a session, and a reconnect does not restore a ready that a
+  swap meanwhile would have dropped). A player error removes from the
+  set; presence decides whether a member in the set counts.
+- **Identity**: an install sends a random client id (`hello.client`,
+  private: never broadcast, never logged) and a `seq` that rises with
+  every connection. The server maps the client id to one member for its
+  life: the same id and token on every reconnect (`welcome.resumed`),
+  so the member keeps its ready flag, presence, queue items (`by`), the
+  relay it serves and its picture. A hello takes the member over when its
+  `seq` is not older than the member's; the older socket gets `replaced`
+  and closes, an older hello gets `stale` (so two windows of one install
+  cannot fight: the newest wins, the client stops on `replaced`).
+  `welcome.instance` changes per server boot, so a client tells "the
+  server restarted" from "my grace ran out" (both: `resumed` false).
+- **Presence** (`Presence`, `members[].presence`; D1, D2):
+  `joining` -> `in`, `away`, `gone`. What each counts for is one table,
+  `PresencePolicy.countsFor(presence, Purpose)` in core
+  (`presence.dart`), shared by the server and the app: `in` counts for
+  the gate, the ready counter, watched tracking, preloads and social
+  notifications; `joining` for all but tracking, and for the gate only
+  while HELD and for at most `joinerHold` (15 s) after it started
+  joining, never while PLAYING; `away` and `gone` for none.
+  - `joining`: a new member, one back from `gone`, or one back `in` from
+    `away`, while media is up (with nothing up it is `in` at once). It
+    loads in the background; a report that holds the current media at
+    the server position (within the 5 s seek threshold) with `need`
+    buffered makes it `in`, already in sync, so a joiner during playback
+    never pauses anyone (D2). A report error or `joiningTimeout` (60 s)
+    ends joining too. Coming `in` while PLAYING it stays out of the set
+    until it is ready (its own auto-ready follows its buffer); while
+    HELD it keeps its place in the set. While HELD a joiner holds the
+    start at most 15 s (bounded hold), then the others go on without it.
+  - `away` (sat out): anyone sets anyone away (`presence` `away`, the
+    host included); only the member itself comes back (`in`, through
+    `joining`). Its ready flag and reports are kept but never count;
+    `force` leaves it alone; a swap leaves it away. Away survives a drop
+    (back from `gone` it is `away` again).
+  - `gone`: its socket closed or fell silent. Kept for the grace
+    (`Liveness.grace`, 10 min) with everything it had, its token working
+    (`/m` `/r` `/j` URLs, the relay channel); out of the gate. The feed
+    says `gone` only after `goneNotice` (10 s), so a quick reconnect is
+    silent; back after that line it says `return`. After the grace it
+    leaves (feed `leave`, reason `grace`); `bye` leaves at once (reason
+    `bye`). Only a hello brings it back; frames of a socket that no longer
+    holds the member are ignored.
 - **Player error** (`EngineMember.error`, `report.error`,
   `state.members[].error`): a member whose player cannot open the current
   media says why in its reports; the server takes it out of the set at
-  once (like sitting out, but automatic: `ready`/`force` do not put it
-  back, its ready flag is kept), so the others start without it. A report
-  without it (the media opened, after a reload too) or a swap clears it:
-  back in the set like a join while not PLAYING; while PLAYING from its
-  next frame if it is ready (the others then hold for its buffer, as for a
-  stale member coming back), else from its `ready`.
-- **Sitting out** (`EngineMember.out`, `state.members[].out`): a member
-  stays connected (chat, feed, party, nudges) but is never in the set and
-  never ready: no `ready` or `force` reaches it, a swap leaves it out, its
-  reports keep it fresh but their `buffered` counts as 0. Anyone can sit
-  anyone out (`out` with `out:true`, the host included); only the member
-  itself comes back (`out:false`): it is then in the set like a fresh join
-  (unless PLAYING) and still unready. The app: an out member's player has
-  nothing open (no stream or relay pulls; a relay it serves goes on) and
-  shows the join-back card (cover, title, episode, the server position and
-  playing/paused). "Join back" or Space sends `out:false` and then
-  `ready`: at once while HELD (the gate waits for its buffer), while
-  PLAYING once the player has buffered `need` (at most 15 s), so the others
-  do not pause for the load. Putting something up while out comes back
-  first. A reconnect that lands as a new member sits out again.
-- **Pause**: while PLAYING, any in-set member who becomes not ready, under
-  `need` buffered or stale flips the server to HELD (feed action `pause` by
+  once (like away, but automatic: `ready`/`force` do not put it
+  back, its ready flag is kept), so the others start without it; it also
+  ends a `joining`. A report without it (the media opened, after a reload
+  too) or a swap clears it: back in the set like a join while not
+  PLAYING; while PLAYING at once if it is ready (the others then hold for
+  its buffer), else from its `ready`.
+- **Pause**: while PLAYING, any member counting for the gate who becomes
+  not ready or under `need` buffered flips the server to HELD (feed action `pause` by
   `server`). Recovery resumes by itself when the gate passes.
 - **End**: while PLAYING with a known duration, reaching it sets FINISHED
   (feed `finished` by `server`, position = duration). Clients pause where they
@@ -178,36 +213,48 @@ Loosely modeled on Syncplay, with a different readiness design.
   landed after 1.5 s is re-applied once (`_checkSeekLanded`), to the server
   position recomputed now, and only while its event is still current and the
   user is not seeking.
-- **Liveness**: WS ping every 5 s; silent over 15 s means stale (out of the
-  gate, `stale` feed); over 30 s the socket is closed and the member removed.
-  The durations are a `Liveness` (core, `sync_engine.dart`; defaults
-  `RelayConstants.staleAfterSecs` / `dropAfterSecs` / `pingIntervalSecs`)
-  given to `SyncEngine(liveness:)` and `SyncServer(liveness:)`; stale and
-  drop are measured on the engine's clock (`SyncEngine.clock`,
-  `SyncServer(clock:)`) by the 1 s heartbeat sweep, so a test with a fake
-  clock steps through them; the ping is the socket's own real timer.
-  A stale member goes back into the set with its next frame if it is ready
-  (also one stale at a swap) or the server is not PLAYING.
-  Closed sockets are polled with `isClosed` every second: Relic's server-side
-  `onDone` does not fire for dead peers, so presence never relies on it.
-- **Resume**: a reconnecting client sends its previous token as
-  `hello.resume`. If the server still has that member (an unclean drop it has
-  not noticed), the new socket takes it over: same token, member id, ready
-  flag and media URL (the player keeps streaming), no join/leave feed, and the
-  dead socket is closed without removing the member. An unknown token joins
-  as a new member.
-- **Client policies**: no state broadcast for 5 s means connection lost, clear
-  the server state and reconnect every 1.5 s until cancelled (an epoch counter makes
-  a cancelled attempt stale). A closed socket means lost at once (the
-  server state stays until the 5 s pass). After a reconnect the ready flag is
-  restored from the server's state. Cancel during setup aborts the join.
-  Closing the window leaves gracefully (see "App close" under Desktop UI).
-  Where it lives: see "Connection" below.
-- **Idle** (`IdleTracker`): measured from the later of the last input and the
-  moment playback stopped. While HELD and self ready: warning at 8 min,
-  auto-unready at 10 min, and never less than 2 min after the warning.
-  With "When idle, sit out instead of just unready"
-  (`AppSettings.idleSitsOut`, default off) the 10 min step sits out.
+- **Liveness**: WS ping every 5 s; a socket without any frame for 15 s
+  (`silence`) is closed (4015) and its member goes `gone`; the grace, the
+  `gone` notice, the joiner bound and the joining timeout follow. The
+  durations are a `Liveness` (core, `sync_engine.dart`; defaults
+  `RelayConstants.silenceSecs` / `graceSecs` / `goneNoticeSecs` /
+  `joinerHoldSecs` / `joiningTimeoutSecs` / `pingIntervalSecs`) given to
+  `SyncEngine(liveness:)` and `SyncServer(liveness:)`; all but the ping
+  are measured on the engine's clock (`SyncEngine.clock`,
+  `SyncServer(clock:)`) by the 1 s heartbeat sweep, so a test with a
+  fake clock steps through them; the ping is the socket's own real
+  timer. Any frame counts (`SyncEngine.touch`). Closed sockets are polled
+  with `isClosed` every second: Relic's server-side `onDone` does not
+  fire for dead peers, so presence never relies on it. A half-open link
+  is caught by the silence.
+- **Client policies**: a drop is not the end of the session. The app
+  keeps the last state (`SessionCoordinator.stateStale` while it
+  reconnects or after the connection ended; the strip says
+  "reconnecting…"), the player and its media, and a relay it
+  serves; it reconnects with backoff and jitter and comes back as the same
+  member (see "Connection" below). No frame for 3 s is "connection
+  unstable", 9 s is lost (well under the server's 15 s). A welcome that
+  resumed needs nothing re-sent; a new member (grace over, server
+  restarted) gets the app's ready and sitting out again, and the media
+  opens again only when it changed (or its URL named the old token). The
+  app's own `ping` every second keeps it under the server's silence limit
+  even with nothing playing. Cancel during setup aborts the join. Leave
+  and closing the window send `bye` (see "App close" under Desktop UI);
+  Update and restart does not.
+- **Auto sit-out** (`AutoSitOut`, `session/auto_sit_out.dart`; Settings
+  "Auto sit-out", `AppSettings.autoSitOut`, default on): not playing and
+  no input for 5 min sets this member `away` (reason `idle`); minimised
+  or hidden for 10 min does, playing or not (`minimised`): while playing
+  idle input does not count, and watching is activity, so a pause after
+  a long watch starts a fresh clock. Input (any key or pointer use in the
+  window, `markInput`, from `AppShell` and the controls) or the window's
+  focus brings
+  it back `in` (without touching the ready flag), but only from an away
+  it set itself: a manual one (own or someone else's) stays. Never when
+  alone (`isAlone` in core: no other member connected, `in`, `joining` or
+  `away`) and never in a solo session. The window changes come from
+  `ShellPort.watchActivity` (focused, unfocused, minimised, hidden); the
+  timings are `AutoSitOutTimes`.
 - **Nudge**: `nudge` names a member; the server passes it to that member
   only (no feed), at most 3 per second and 20 per minute per sender
   (`nudgesPerSec`, `nudgesPerMin`; the rest is dropped silently). The
@@ -227,41 +274,66 @@ Additive wire changes only; bump `proto` and PROTOCOL.md in the same commit.
 `Connection` (`session/connection.dart`) is the link to the server, made
 in the composition root (`SessionState.connection`) and passed to the
 `SessionCoordinator`. It owns the `SyncClient` socket, the first connect
-(`begin` + `dial`), reconnects (`reconnectDelay`, 1.5 s; the previous
-token as `hello.resume`), the epoch (`invalidate`, `isCurrent`) that makes
-a cancelled connect or attempt stale, the 1 s heartbeat (clock `ping`,
-the diagnostics tick, the silence check: `silenceLimit`, 5 s), the
+(`begin` + `dial`), reconnects (`delayFor`: 1 s, doubling per failed
+attempt up to 15 s, each ±20 % jitter), the epoch (`invalidate`,
+`isCurrent`) that makes a cancelled connect or attempt stale, the 1 s
+heartbeat (clock `ping`, the diagnostics tick, the silence check), the
 diagnostics uploader (`diag`, started with the session, stopped by
 `close` before the socket), "Stop reconnecting" (`cancelReconnect`),
-"Retry" (`retry`) and setup cancel (`cancelConnect`). The `hello` is
-built by an injectable `HelloBuilder` (`defaultHello`). The silence is
-measured on `Connection.now` (injectable, UTC wall clock by default); the
-heartbeat and the reconnect delay are real timers. The incoming
-streams (`states`, `feeds`, `nudges`, `errors`), the send methods, the
-`token`, `memberId` and `serverNow()` are read through it.
+"Retry" (`retry`) and setup cancel (`cancelConnect`).
+
+Each hello is built by an injectable `HelloBuilder` (`defaultHello`):
+this build's version range (`RelayConstants.protoMin` .. `protoMax`), the
+install's `ClientIdentity` (`session/identity.dart`: a random 22
+character base64url client id and a `seq` that rises with every
+connection, both in the settings box, so per data folder and per
+`STARSYNC_PROFILE`; tests get a fresh in-memory one per `Connection`),
+`app` (the app version), `platform`, `caps` (source always; resolve when
+the app's yt-dlp is there; jellyfin when an account is linked, checked by
+the coordinator at each connect) and, on a reconnect to a server seen
+before, `feedAfter` (the last `feed.seq`). The replay (`welcome.feed`)
+reaches the activity log only, marked `replayed`; a welcome of another
+`instance` (a restarted server) drops it and counts from 1 again.
 
 `Connection.state` (a signal of the sealed `ConnState`): `ConnClosed`
 (before a connect, after leave or a cancel), `ConnConnecting` (the first
-dial), `ConnOnline` (welcome received), `ConnLost` (dropped: the socket
-closed or the silence limit passed; the next attempt is scheduled),
-`ConnReconnecting(attempt)` (an attempt dialling, and after it failed
-until the next one), `ConnRefused(code, message)` (the first dial failed:
-`version`, `secret` or empty, and the plain-words reason; nothing
-retries) and `ConnReplaced` (not produced yet). Every change notifies,
-a repeat too. The coordinator maps it to `health` (`connectionHealth`:
-"connecting…", "connected", "connection lost — retrying…",
-"reconnecting…", the reason; closed writes nothing, a cancel writes
-"cancelled", "Retry" "retrying…") and to `reconnecting` (lost or
-reconnecting). The first drop of a connection raises `ConnectionLost`,
-the reconnect that follows `ConnectionBack` (each once per drop, through
-the Notifier).
+dial), `ConnOnline` (welcome received, frames arrive), `ConnUnstable`
+(the same socket, nothing for `unstableAfter`, 3 s), `ConnLost` (the
+socket closed or errored, or nothing for `silenceLimit`, 9 s: the socket
+is dropped, the next attempt scheduled), `ConnReconnecting(attempt)` (an
+attempt dialling, and after it failed until the next one),
+`ConnRefused(code, message)` (`version`, `secret`, or empty for a first
+dial that failed otherwise; nothing retries) and `ConnReplaced` (`err`
+`replaced`, close 4013 or 4014: another window of this install holds the
+member; nothing retries, "Retry" takes it back). The silence and the
+lost sound are measured on `Connection.now` (injectable, UTC wall clock
+by default); the heartbeat and the reconnect delay are real timers.
 
-The session's part of a reconnect is the coordinator's
-`onReconnect` handler: before an attempt dials it reads what to restore
-(ready, sat out, the media seen), once online it opens the media again
-if its URL changed, sends `out`/`ready` back and restarts the session's
-ticker. The silence (`Connection.silence`) clears the coordinator's
-server state (`_onConnectionSilent`).
+Refusals in plain words (`connectErrorText`, `versionText`): `version`
+says whether the host runs an older or a newer Starsync (from the
+server's `min`/`max`; a proto 15 server's codeless `proto mismatch` is
+always an older host), `secret` a wrong password, `replaced` "Starsync
+was opened in another window". Close code 4015 (the server found it
+silent) and any other drop reconnect.
+
+The coordinator maps the state to `health` (`connectionHealth`:
+"connecting…", "connected", "connection unstable…", "connection lost —
+retrying…", "reconnecting…", the reason; closed writes nothing, a cancel
+writes "cancelled", "Retry" "retrying…"), to `reconnecting` (lost or
+reconnecting), `unstable` and `stateStale`. A drop that lasted
+`lostSoundAfter` (4 s; a silent link counts from its last frame) raises
+`ConnectionLost`, the reconnect that follows `ConnectionBack` (each once
+per drop, through the Notifier): a quick flap makes no sound.
+
+The session's part of a welcome is the coordinator's `onWelcome`
+handler (`_onWelcome`), called before the welcome's state goes out: the
+first welcome and a resumed one need nothing; a new member after a drop
+gets the app's intent again (`ready`, `presence` `away`) and the media is
+forgotten (opened again from the state) only when it changed. The
+incoming streams (`states`, `feeds`, `nudges`, `errors`), the send
+methods, the `token`, `memberId` and `serverNow()` are read through it.
+`close(bye:)` sends `bye` and waits briefly for the server's close, so
+the frame goes out before the socket does.
 
 ## Media
 
@@ -425,8 +497,9 @@ output (`generation`), volume (and so mute) and shaders carry over, and
 the old player is paused and disposed once the view let go of its
 texture (as on leave). A fresh player waits for the previous old one to
 be gone, so at most one old player lingers. The first open after join or
-Reload video uses the player just created; a reconnect or joining back to
-the media the player held keeps it (`_openedFor`). Cost (`SwitchTrace`
+Reload video uses the player just created; joining back to the media the
+player held keeps it (`_openedFor`); a dropped connection never touches
+the player. Cost (`SwitchTrace`
 `player`, headless, so without the `VideoController`): 45 to 65 ms per
 swap for one app in the process (mpv created and initialised, then
 pinned), about 150 ms with three in one process
@@ -436,8 +509,7 @@ switch of about 1.5 s. `openUrl` opens with `play: false`; play/pause/seek/rate 
 ready) or the user's own seeks (see Sync model). A server seek within 0.5 s of the current position is skipped. `leave()`
 stops the player (otherwise audio keeps playing). On media change
 (`mediaId` bump) the coordinator stops the previous media at once (no old
-picture or sound while the new one resolves, is fetched or opens; a
-reconnect to the media the player holds keeps it), then opens the new URL
+picture or sound while the new one resolves, is fetched or opens), then opens the new URL
 (or promotes the preload holding it) and `StateDiff` seeks to 0, holds
 and resets rate.
 
@@ -700,12 +772,24 @@ How bytes move:
   the server has); Up next preloads wait the same way. The putter starts
   its source before opening its own player, and the source reads its
   tracks' sizes at once.
-- Source away: viewers keep playing from the buffer; a request waits up
-  to 60 s for missing bytes. The source reconnects with backoff (same
-  token after a resume); a different size (or piece count and roles)
-  drops that track's buffer.
+- Source away (D6): viewers keep playing from the buffer; a request
+  waits up to 60 s for missing bytes. The source member going `gone`
+  does not end the relay: it lives through the source's grace
+  (`media.relay.sourceGone`, `ServerHub.refreshRelaySource`). The source
+  (`RelaySource`, kept by the coordinator through the app's own drop)
+  reconnects its channel with backoff (its token lasts through the
+  grace; a half-open channel is caught by its 5 s WebSocket ping) and
+  sends its `info` again, the same on every dial (the coordinator passes
+  the media's `name` and `duration`): the same as its first (sizes, piece
+  shapes, kinds, and name and duration when given) carries on, the
+  buffer filler pulling what is missing; another one is closed with
+  4002 and ends the relay (`ServerHub.relayOtherMedia`); a second channel
+  replaces the first (4003). The source's leave (grace over, `bye`) or a
+  swap ends the relay: its buffer goes, `live` drops, `/r` answers 404.
   `state.media.relay.live` follows the channel, and viewers show "waiting
-  for <name> to pass the video on" while it is down, "<name> left:
+  for <name> to pass the video on" while it is down, "<name> lost
+  signal: playing what the server has" while the source is `gone` (a
+  viewer opening then opens the buffer instead of waiting), "<name> left:
   playing what the server has" once the source left the server.
 - Stats (`relay_stats.dart`, `ServerHub.sampleRates` on the 1 s
   heartbeat; wire in [PROTOCOL.md](PROTOCOL.md)): the source's rate is
@@ -942,7 +1026,8 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   next episode, every client with the setting on shows a 10 s countdown
   card (Cancel / Play now; without the setting, a "Next" card with Play
   next). Exactly one client swaps: `autoAdvanceSwapper`, the lowest member
-  id among non-stale members whose `jf` for that server is true. Only what
+  id among present members (`in` or `joining`) whose `jf` for that
+  server is true. Only what
   every client sees in `state` decides it (who put the item up is not in
   `state`; a late joiner never saw that swap), so clients agree without a
   wire change. Cancel is local: it stops the countdown on that screen, and
@@ -985,15 +1070,16 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   memory under it and nothing else leaves it. The adder gets a toast
   "Added … to Up next"; everyone else an activity-log line.
 - **Who puts an item up** (`queuePerformer`, from `state` alone, so all
-  clients agree): a link passed on or a file, only its adder (gone:
-  skipped, "Bob left"); a Jellyfin item, its adder when it plays that
-  server with its own account, else the lowest member id that does
-  (`jf`, which lists every working account; nobody: skipped); a link
-  everyone opens or the server fetches, its adder when present, else the
-  lowest active member id; for these, stale or sitting out counts as
-  away (an adder who is stale is waited for until it is gone). A skip is
-  a `remove` with the reason from the lowest member id that is not stale
-  (`queueJanitor`); the feed's `queue-skip` toasts on every screen.
+  clients agree): a link passed on or a file, only its adder (`gone`:
+  the item waits for it through its grace; left for good: skipped, "Bob
+  left"); a Jellyfin item, its adder when it plays that server with its
+  own account, else the lowest present member id that does (`jf`, which
+  lists every working account; nobody: skipped); a link everyone opens
+  or the server fetches, its adder when present, else the lowest present
+  member id (present: `in` or `joining`, `isPresent` in
+  `session/party.dart`). A skip is a `remove` with the reason from the
+  lowest member id that is not `gone` (`queueJanitor`); the feed's
+  `queue-skip` toasts on every screen.
 - **Advancing**: at `finished` with Up next waiting, every screen shows
   `UpNextCard` (picture, title, who added it and how; with auto-advance on
   a 10 s countdown with Cancel, else Play now only); at zero the app that
@@ -1136,12 +1222,14 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
 **Events.** Everything that may become a toast, a sound, a window
 attention request or an activity-log line is an `AppEvent`
 (`session/app_events.dart`, a sealed type, pure Dart): the server feed as
-typed `FeedEvent`s (`FeedEvent.of`: joins, leaves, stale, sat out, back,
+typed `FeedEvent`s (`FeedEvent.of`, one per feed action: joins, leaves
+(`bye` or `grace`), gone (lost signal), return, sat out (`away`: by
+oneself, by someone else, or by this app's auto sit-out), back (`in`),
 ready/unready, force ready/play/hold, swap, seek, pause, resume,
-finished, chat, rename, avatar, queue add/remove/skip, fetch failed),
-the session's own (nudged, a member can't play, slow source, relay
-started/failed, idle warning, connection lost/back, Jellyfin progress
-not saved) and the app's (shader message, added to Up next, a put-up or
+finished, chat, rename, avatar, queue add/remove/skip, fetch failed;
+people are matched by `actorId` / `targetId`, chat by `fromId`, never by
+name), the session's own (nudged, a member can't play, slow source, relay
+started/failed, connection lost/back, Jellyfin progress not saved) and the app's (shader message, added to Up next, a put-up or
 queue add that failed, Schedule results, problem marked, copied / copy
 failed, update available). Code with news calls
 `SessionCoordinator.notify` (= `Notifier.notify`, `session/notifier.dart`);
@@ -1149,8 +1237,10 @@ nothing else writes toasts or plays sounds (Settings' sound preview
 aside). `noticeFor` is the whole policy, one `Notice` per event: the
 toast text and its actor, the `SfxCue`, attention, the feed line for the
 activity log. Today: every feed line is logged (`Notifier.feedLog`, the
-last 100); joins, leaves, swaps, chat, being sat out by someone else and
-Up next skips toast; the sounds are listed under "Sounds"; a nudge also
+last 100); lines a reconnect replayed (`replayed`) are only logged;
+joins, leaves, swaps, chat, being sat out by someone else, being sat out
+by auto sit-out and Up next skips toast (a toast keeps its actor's member
+id, so its avatar is found by id); the sounds are listed under "Sounds"; a nudge also
 asks for attention; an available update does nothing (the update band
 shows it). `Notifier.toasts` holds the toasts, dropped 4 s after they came
 (`expire`, the session's 1 s tick), cleared on connect. The Library
@@ -1163,7 +1253,10 @@ handed on from there (the coordinator gets its `Notifier`, `Connection` and
 `LinkResolver` as constructor arguments):
 - `ShellPort` (`DesktopShell`): window start (remembered bounds, the
   close request routed to `shutDownApp`), fullscreen, minimize/maximize
-  and their changes, dragging (`WindowDragArea`), close, the way out
+  and their changes, the window's activity for auto sit-out
+  (`watchActivity`: focused, unfocused, minimised, hidden; window_manager's
+  focus, blur, minimise and restore, and the shell's own `hide`, wired to
+  `SessionCoordinator.windowActivity` in `main`), dragging (`WindowDragArea`), close, the way out
   (save, hide, quit), attention, the clipboard paste (files, else text)
   and drop targets (fox_utils).
 - `UrlOpener` (`DesktopUrls`): `xdg-open`, `open`, Windows' `url.dll`.
@@ -1233,10 +1326,13 @@ panel) and chat messages (Copy message, and a link in it).
   (the Host card, titled "Invite friends", "Start hosting") and Stop (no
   dialog; no avatars or chat), online the party: `AvatarStack` (host first, then
   ready; spreads on hover; 5 shown, 3 under 1100 px), the server name and
-  "ready n/m" (hidden under 1100 px), chat with an unread badge, and Leave
+  "ready n/m" (who the ready counter counts: `countsForReady` in
+  `session/party.dart`, on `PresencePolicy`, so not away, gone or
+  errored; hidden under 1100 px), chat with an unread badge, and Leave
   (asks first). The stack opens the members card (the source line, then
   per member status, route and buffer dot (see "Relay", Stats), host /
-  relay pills, "sitting out"; per member force ready, Nudge and Sit
+  relay pills; "joining…", "sitting out", or for a `gone` member
+  "reconnecting… (2 min)" with how long; per member force ready, Nudge and Sit
   out (anyone, the host too), your own row Sit out / Join back; "Copy invite
   address": the dialled address when joined; hosting, `inviteAddresses`
   of `NetworkInterface.list` (IPv4, no loopback or link-local, private
@@ -1245,8 +1341,9 @@ panel) and chat messages (Copy message, and a link in it).
   drag area; the window buttons sit at its end.
 - **Avatars** (`avatar.dart`): `StatusAvatar` draws a ring outside the
   picture with a gap in the background colour (both scale with the size):
-  green ready, amber buffering (with a spinner), grey not ready, dimmed
-  stale, dimmed with a moon ("away") sitting out (last in the stack); a crown for the host (`members[].host` in the state; your own
+  green ready, amber buffering (with a spinner), grey not ready, a little
+  faded joining, dimmed with a dark ring `gone` (reconnecting, last in
+  the stack), dimmed with a moon ("away") sitting out; a crown for the host (`members[].host` in the state; your own
   app also knows before the first state) and a tower for the member
   passing the video on. `memberAvatarImage` is the one picture lookup: yours from the
   profile, anyone else's from `coordinator.avatars` by `avatarHash`.
@@ -1262,7 +1359,7 @@ panel) and chat messages (Copy message, and a link in it).
   attempt and its error outlive the card; a card closes itself once
   in a server that is not solo. Join says that a friend gives the address
   and that no account or Jellyfin is needed.
-- **Profile** (`profile_card.dart`, `screens/home/profile.dart`): a card
+- **Profile** (`profile_card.dart`, `session/identity.dart`): a card
   tinted with your colour: picture (hover "Change" opens `CropPicker`:
   drag, wheel or slider zoom, previews at 88/42/24 px, exports a 256 px
   PNG), name edited in place, colour swatches, links to the Settings pages.
@@ -1375,7 +1472,8 @@ panel) and chat messages (Copy message, and a link in it).
 - **Sounds** (`sfx/`): the `Notifier` plays an `SfxCue` for ready,
   unready, force-ready, join, leave, swap and others' chat (feed
   events), being sat out by someone (the `kick` sound), a nudge (always,
-  whatever its switch), the idle warning, and connection lost / back (once per drop).
+  whatever its switch), auto sit-out setting you away (`warn`), and
+  connection lost / back (once per drop that lasted a few seconds).
   Nothing for what the video already says (play, pause, seeks, the end).
   The sounds are synthesized, not sampled: `synth.dart` renders voices
   (plucked strings with bends, glass and star bells, a singing bowl,
@@ -1703,9 +1801,13 @@ since media_kit_video frees a video output on a thread of its own after
 dispose returns, and an output still up when the engine stops blocks the
 plugin's teardown (`~VideoOutput` waits on a texture callback that never
 comes). Then `SessionState.leave`
-(Jellyfin stop report, last diagnostics, the goodbye, so others see
-"left") and the hosted server's stop, 3 s in all; an update restart then
-closes Hive and starts the new binary. Last the window closes the normal
+(Jellyfin stop report, last diagnostics, then `bye`, flushed: the app
+waits up to 600 ms for the server to close the socket, so others see
+"left" at once) and the hosted server's stop, 3 s in all. Update and
+restart leaves without `bye` (`shutDownApp(restart: true)`): the member
+stays `gone`, and the restarted app, with the same client id, takes it
+back within the grace when it joins again; it then closes Hive (the
+identity's `seq` is stored) and starts the new binary. Last the window closes the normal
 way (`setPreventClose(false)` + `close`), so the engine and plugins are
 torn down inside the platform's main loop, and the runners end the
 process without `exit()`'s handlers: Linux `_exit` after

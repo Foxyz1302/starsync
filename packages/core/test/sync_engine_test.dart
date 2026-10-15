@@ -1,8 +1,3 @@
-// restructure: rewrite in step 1 (Connection + Identity + Presence): the
-// groups "sitting out", "membership + gate", "presence gate", "stale ready
-// rejoins" and the member rules of "swap" pin today's presence (out flag,
-// stale sweep, leave on drop); presence In/Away/Gone with grace replaces
-// them ("liveness on the engine clock" then steps through the grace). The clock, correction, end-of-file and wire groups stay.
 import 'dart:convert';
 
 import 'package:sync_relay_core/core.dart';
@@ -41,52 +36,59 @@ void main() {
     });
   });
 
-  group('sitting out', () {
-    test('an out member never blocks, is never ready, its buffer is ignored', () {
+  group('away', () {
+    test('an away member never blocks; ready, force, swap and reports leave it away', () {
       join('a', 'alice');
       final bob = join('b', 'bob');
       engine.applyReady('a', true);
       buffer('a', 4.0);
       expect(engine.transport, Transport.held, reason: 'bob is in the set');
-      engine.applyOut('a', bob, true);
+      expect(engine.applyPresence('a', bob, Presence.away), isNull);
       final b = engine.members['b']!;
-      expect([b.out, b.inSet, b.ready], [true, false, false]);
+      expect(b.presence, Presence.away);
+      expect(engine.countsForGate(b), isFalse);
       expect(engine.transport, Transport.playing);
-      final feed = engine.feed.drain().lastWhere((f) => f.action == 'out');
-      expect([feed.actor, feed.target], ['alice', 'bob']);
-      expect(engine.broadcast().members.last.toJson()['out'], isTrue);
-      expect(engine.broadcast().members.first.toJson().containsKey('out'), isFalse);
-      // Ready, force, swap and reports leave it out.
+      final feed = engine.feed.drain().lastWhere((f) => f.action == 'away');
+      expect([feed.actor, feed.actorId, feed.target, feed.targetId], ['alice', 'm1', 'bob', 'm2']);
+      final view = engine.broadcast().members.last.toJson();
+      expect([view['presence'], view['inSet']], ['away', false]);
+      expect(engine.broadcast().members.first.toJson()['presence'], 'in');
       engine.applyReady('b', true);
       engine.applyForce('a', 'all', true);
       buffer('b', 9);
       engine.applySwap('a', const HelloMedia(name: 'n', size: 1, duration: 0, url: 'u'));
-      expect([b.ready, b.inSet, b.buffered], [false, false, 0]);
+      expect(b.presence, Presence.away);
+      expect(engine.countsForGate(b), isFalse);
       expect(engine.members['a']!.inSet, isTrue);
     });
 
-    test('only oneself comes back: in the set unready, ready follows', () {
+    test('only oneself comes back in, through joining: no pause while playing', () {
+      engine.media = const HelloMedia(name: 'f', size: 1, duration: 100);
       final alice = join('a', 'alice');
       final bob = join('b', 'bob');
-      engine.applyOut('b', bob, true);
-      expect(engine.feed.drain().last.target, isNull, reason: 'sat out by itself');
-      engine.applyReady('a', true);
       buffer('a', 4.0);
-      expect(engine.transport, Transport.playing);
-      engine.applyOut('a', bob, false);
-      expect(engine.members['b']!.out, isTrue, reason: 'others cannot bring bob back');
-      engine.applyOut('b', bob, false);
-      final b = engine.members['b']!;
-      expect([b.out, b.inSet, b.ready], [false, false, false], reason: 'playing: in from its ready');
-      expect(engine.transport, Transport.playing);
-      engine.applyReady('b', true);
-      expect(engine.transport, Transport.held, reason: 'now the gate waits for bob');
       buffer('b', 4.0);
+      engine.applyPresence('b', bob, Presence.away, reason: PresenceReason.idle);
+      final line = engine.feed.drain().last;
+      expect([line.action, line.target, line.reason], ['away', null, 'idle'], reason: 'sat out by itself');
+      engine.applyReady('a', true);
       expect(engine.transport, Transport.playing);
-      // The host can be sat out like anyone.
+      expect(engine.applyPresence('a', bob, Presence.watching), ErrCode.forbidden);
+      expect(engine.members['b']!.presence, Presence.away, reason: 'others cannot bring bob back');
+      expect(engine.applyPresence('b', '', Presence.watching), isNull);
+      final b = engine.members['b']!;
+      expect(b.presence, Presence.joining);
+      expect(engine.feed.drain().last.action, 'in');
+      engine.applyReady('b', true);
+      t = t.add(const Duration(seconds: 1));
+      expect(engine.transport, Transport.playing, reason: 'a joiner never holds a playing gate (D2)');
+      buffer('b', 4.0);
+      expect(b.presence, Presence.watching);
+      expect(engine.transport, Transport.playing, reason: 'it came in already in sync');
+      // The host can be set away like anyone.
       engine.members['a']!.host = true;
-      engine.applyOut('b', alice, true);
-      expect(engine.members['a']!.out, isTrue);
+      engine.applyPresence('b', alice, Presence.away);
+      expect(engine.members['a']!.presence, Presence.away);
     });
   });
 
@@ -177,7 +179,7 @@ void main() {
       expect(engine.members['b']!.inSet, isTrue);
     });
 
-    test('disconnect removes from quorum, playback resumes', () {
+    test('a drop is not a leave: gone, out of the gate, kept with its ready flag', () {
       join('a', 'alice');
       join('b', 'bob');
       engine.applyReady('a', true);
@@ -185,25 +187,18 @@ void main() {
       buffer('a', 4.0);
       buffer('b', 4.0);
       expect(engine.transport, Transport.playing);
-      engine.applyLeave('b');
+      engine.applyGone('b');
       expect(engine.transport, Transport.playing);
+      final b = engine.members['b']!;
+      expect([b.presence, b.ready, b.goneSince], [Presence.gone, true, t]);
+      final view = engine.broadcast().members.last.toJson();
+      expect([view['presence'], view['goneSince'], view['inSet']], ['gone', t.toIso8601String(), false]);
+      engine.applyLeave('b', reason: 'bye');
       expect(engine.members.containsKey('b'), isFalse);
+      expect(engine.feed.drain().last.reason, 'bye');
     });
 
-    test('stale ghosts excluded from gate', () {      join('a', 'alice');
-      join('b', 'bob');
-      engine.applyReady('a', true);
-      engine.applyReady('b', true);
-      buffer('a', 4.0);
-      buffer('b', 4.0);
-      expect(engine.transport, Transport.playing);
-      t = t.add(const Duration(seconds: 60));
-      engine.sweepStale();
-      expect(engine.transport, Transport.playing);
-      expect(engine.broadcast().members.firstWhere((m) => m.id == 'm2').stale, isTrue);
-    });
-
-    test('silent past drop window removed with leave feed', () {
+    test('silent past the limit goes gone (not a leave)', () {
       join('a', 'alice');
       join('b', 'bob');
       engine.applyReady('a', true);
@@ -211,18 +206,34 @@ void main() {
       buffer('a', 4.0);
       buffer('b', 4.0);
       expect(engine.transport, Transport.playing);
-      t = t.add(const Duration(seconds: 30));
-      expect(engine.sweepDropped(), isEmpty);
+      t = t.add(const Duration(seconds: 15));
       buffer('a', 4.0);
-      t = t.add(const Duration(seconds: 61));
+      expect(engine.sweepSilent(), isEmpty, reason: 'exactly the limit is not past it');
+      t = t.add(const Duration(seconds: 1));
       buffer('a', 4.0);
-      final dropped = engine.sweepDropped();
-      expect(dropped, ['b']);
-      expect(engine.members.containsKey('b'), isFalse);
+      expect(engine.sweepSilent(), ['b']);
+      expect(engine.members['b']!.presence, Presence.gone);
       expect(engine.transport, Transport.playing);
+      expect(engine.feed.drain().where((f) => f.action == 'leave'), isEmpty);
+    });
+
+    test('a gone member leaves after the grace (feed leave, reason grace)', () {
+      final left = <String>[];
+      engine.onLeft = (m) => left.add(m.id);
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applyGone('b');
+      t = t.add(const Duration(minutes: 9, seconds: 59));
+      buffer('a', 0);
+      engine.tick();
+      expect(engine.members.containsKey('b'), isTrue);
+      t = t.add(const Duration(seconds: 1));
+      buffer('a', 0);
+      engine.tick();
+      expect(engine.members.containsKey('b'), isFalse);
+      expect(left, ['m2']);
       final leaves = engine.feed.drain().where((f) => f.action == 'leave').toList();
-      expect(leaves.single.actor, 'bob');
-      expect(leaves.single.reason, 'silent too long');
+      expect([leaves.single.actor, leaves.single.actorId, leaves.single.reason], ['bob', 'm2', 'grace']);
     });
   });
 
@@ -262,13 +273,14 @@ void main() {
       expect(engine.transport, Transport.playing);
     });
 
-    test('stale other exempts the lone watcher', () {
+    test('a silent other (gone) exempts the lone watcher', () {
       join('a', 'alice');
       join('b', 'bob');
       t = t.add(const Duration(seconds: 16));
       engine.applyReady('a', true);
       buffer('a', 6.0);
       engine.tick();
+      expect(engine.members['b']!.presence, Presence.gone);
       expect(engine.transport, Transport.playing);
     });
 
@@ -420,19 +432,25 @@ void main() {
       expect(engine.transport, Transport.playing);
     });
 
-    test('a stale member stays out, rejoins with its next frame if ready', () {
+    test('a gone member stays out of the gate; back, it comes in through joining', () {
       join('a', 'alice');
       join('b', 'bob');
       engine.applyReady('b', true);
-      t = t.add(const Duration(seconds: 16));
+      engine.applyGone('b');
       engine.applyReady('a', true);
       engine.applySwap('a', ep2);
-      expect(engine.members['b']!.inSet, isFalse);
+      expect(engine.countsForGate(engine.members['b']!), isFalse);
       buffer('a', 6.0);
       expect(engine.transport, Transport.playing);
+      expect(engine.applyTakeover('b', seq: 1), isTrue);
+      final b = engine.members['b']!;
+      expect([b.presence, b.ready], [Presence.joining, true]);
       buffer('b', 0);
-      expect(engine.members['b']!.inSet, isTrue);
-      expect(engine.transport, Transport.held);
+      expect(engine.transport, Transport.playing, reason: 'returning never pauses a playing gate (D2)');
+      buffer('b', 6.0);
+      expect(b.presence, Presence.watching);
+      expect(engine.countsForGate(b), isTrue);
+      expect(engine.transport, Transport.playing);
     });
 
     test("the previous media's buffer never starts the new one", () {
@@ -584,8 +602,8 @@ void main() {
     });
   });
 
-  group('stale ready rejoins', () {
-    test('ready member swept while stale is back in the set when reports resume', () {
+  group('return', () {
+    test('a ready member back from gone is in the set again once in sync', () {
       join('a', 'alice');
       join('b', 'bob');
       engine.applyReady('a', true);
@@ -593,19 +611,19 @@ void main() {
       buffer('a', 6.0);
       buffer('b', 6.0);
       expect(engine.transport, Transport.playing);
-      // bob goes silent past staleAfter; alice keeps reporting.
+      // bob goes silent past the limit; alice keeps reporting.
       for (var i = 0; i < 16; i++) {
         t = t.add(const Duration(seconds: 1));
         buffer('a', 6.0);
-        engine.sweepStale();
+        engine.tick();
       }
-      expect(engine.members['b']!.inSet, isFalse);
+      expect(engine.members['b']!.presence, Presence.gone);
       expect(engine.members['b']!.ready, isTrue);
-      // bob's reports resume: he must be gated again without pressing Space.
-      buffer('b', 6.0);
-      expect(engine.members['b']!.inSet, isTrue);
-      expect(engine.broadcast().members.firstWhere((m) => m.id == 'm2').inSet,
-          isTrue);
+      // No media up: nothing to load, bob is `in` at once and gated again
+      // without pressing Space.
+      engine.applyTakeover('b', seq: 1);
+      expect(engine.members['b']!.presence, Presence.watching);
+      expect(engine.broadcast().members.firstWhere((m) => m.id == 'm2').inSet, isTrue);
     });
 
     test('unready late joiner does not join on reports', () {
@@ -616,34 +634,184 @@ void main() {
       buffer('b', 6.0);
       expect(engine.members['b']!.inSet, isFalse);
     });
+
+    test('away survives a drop: back away, not joining', () {
+      join('a', 'alice');
+      final bob = join('b', 'bob');
+      engine.applyPresence('b', bob, Presence.away);
+      engine.applyGone('b');
+      expect(engine.members['b']!.presence, Presence.gone);
+      engine.applyTakeover('b', seq: 2);
+      expect(engine.members['b']!.presence, Presence.away);
+    });
+
+    test('the gone line waits; a quick return says nothing, a late one says return', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.feed.drain();
+      engine.applyGone('b');
+      t = t.add(const Duration(seconds: 9));
+      buffer('a', 0);
+      engine.tick();
+      expect(engine.feed.drain().where((f) => f.action == 'gone'), isEmpty);
+      engine.applyTakeover('b', seq: 1);
+      expect(engine.feed.drain().map((f) => f.action).where((a) => a != 'pause' && a != 'resume'), isEmpty,
+          reason: 'a quick return is silent');
+      engine.applyGone('b');
+      t = t.add(const Duration(seconds: 10));
+      buffer('a', 0);
+      engine.tick();
+      final gone = engine.feed.drain().where((f) => f.action == 'gone').toList();
+      expect([gone.single.actor, gone.single.actorId], ['bob', 'm2']);
+      engine.applyTakeover('b', seq: 2);
+      expect(engine.feed.drain().map((f) => f.action), contains('return'));
+    });
+  });
+
+  group('D2: joiners', () {
+    const ep = HelloMedia(name: 'Ep01.mkv', size: 9, duration: 600);
+
+    test('a joiner while playing never changes the transport, even ready', () {
+      engine.media = ep;
+      join('a', 'alice');
+      engine.applyReady('a', true);
+      buffer('a', 6.0);
+      expect(engine.transport, Transport.playing);
+      final events = engine.eventId;
+      join('b', 'bob');
+      final b = engine.members['b']!;
+      expect(b.presence, Presence.joining);
+      engine.applyReady('b', true);
+      buffer('b', 0);
+      t = t.add(const Duration(seconds: 10));
+      engine.applyReport('b', 0, 30, engine.eventId);
+      expect(b.presence, Presence.joining, reason: 'its buffer is at 0, not at the server position');
+      buffer('a', 6.0);
+      expect([engine.transport, engine.eventId], [Transport.playing, events]);
+      buffer('b', 6.0);
+      expect(b.presence, Presence.watching);
+      expect([engine.transport, engine.eventId], [Transport.playing, events], reason: 'in, already in sync');
+      expect(engine.feed.drain().map((f) => f.action), isNot(contains('pause')));
+    });
+
+    test('while held a joiner holds at most joinerHold, then the others start', () {
+      engine.media = ep;
+      join('a', 'alice');
+      buffer('a', 6.0);
+      engine.applyReady('a', true);
+      expect(engine.transport, Transport.playing);
+      engine.applyReady('a', false);
+      expect(engine.transport, Transport.held);
+      join('b', 'bob');
+      engine.applyReady('a', true);
+      expect(engine.transport, Transport.held, reason: 'bob joined while held: he is waited for');
+      final hold = engine.holdInfo()!;
+      expect([hold.reason, hold.members, hold.until], [HoldReason.joining, ['m2'], t.add(const Duration(seconds: 15))]);
+      t = t.add(const Duration(seconds: 14));
+      buffer('a', 6.0);
+      engine.tick();
+      expect(engine.transport, Transport.held);
+      t = t.add(const Duration(seconds: 1));
+      buffer('a', 6.0);
+      engine.tick();
+      expect(engine.transport, Transport.playing, reason: 'bounded hold (D2)');
+      expect(engine.members['b']!.presence, Presence.joining);
+    });
+
+    test('joining ends on a report error or the timeout', () {
+      engine.media = ep;
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applyReport('a', 0, 0, engine.eventId, mediaId: engine.mediaId, error: 'Not found (404)');
+      expect(engine.members['a']!.presence, Presence.watching);
+      expect(engine.countsForGate(engine.members['a']!), isFalse, reason: 'the error keeps it out');
+      for (var i = 0; i < 59; i++) {
+        t = t.add(const Duration(seconds: 1));
+        buffer('b', 0); // still loading
+        engine.tick();
+      }
+      expect(engine.members['b']!.presence, Presence.joining);
+      t = t.add(const Duration(seconds: 1));
+      buffer('b', 0);
+      engine.tick();
+      expect(engine.members['b']!.presence, Presence.watching);
+    });
+
+    test('hold reasons: ready, buffer, source, start', () {
+      engine.media = ep;
+      join('a', 'alice');
+      buffer('a', 6.0);
+      expect(engine.holdInfo()!.reason, HoldReason.ready);
+      engine.applyReady('a', true);
+      engine.applySwap('a', ep);
+      expect([engine.holdInfo()!.reason, engine.holdInfo()!.members], [HoldReason.buffer, ['m1']]);
+      expect(engine.holdInfo(sourceGone: true)!.reason, HoldReason.source);
+      engine.applyPresence('a', '', Presence.away);
+      expect(engine.holdInfo()!.reason, HoldReason.start);
+      expect(engine.broadcast().toJson()['hold'], {'reason': 'start', 'members': <String>[]});
+    });
+  });
+
+  group('feed', () {
+    test('lines carry ids and a rising seq; a replay keeps the last lines after a seq', () {
+      join('a', 'alice');
+      final bob = join('b', 'bob');
+      engine.applyForce('a', bob, true);
+      final lines = engine.feed.drain();
+      expect([for (final f in lines) f.seq], [1, 2, 3]);
+      expect([lines.last.actorId, lines.last.targetId, lines.last.target], ['m1', 'm2', 'bob']);
+      for (var i = 0; i < 60; i++) {
+        engine.applySeek('a', i.toDouble());
+      }
+      engine.feed.drain();
+      expect(engine.feed.after(2), hasLength(RelayConstants.feedReplayLines), reason: 'bounded');
+      final replay = engine.feed.after(60);
+      expect([for (final f in replay) f.seq], [61, 62, 63]);
+      expect(replay.every((f) => f.replayed), isTrue);
+      final json = replay.first.toJson();
+      expect([json['seq'], json['actorId'], json['replayed']], [61, 'm1', true]);
+      expect(FeedMessage.fromJson(json).replayed, isTrue);
+    });
   });
 
   group('liveness on the engine clock', () {
-    test('stale and drop follow Liveness and the fake clock, not wall time', () {
+    test('silence, gone notice, grace follow Liveness and the fake clock, not wall time', () {
       engine = SyncEngine(
           clock: clock,
-          liveness: const Liveness(staleAfter: Duration(minutes: 5), dropAfter: Duration(minutes: 10)));
+          liveness: const Liveness(
+              silence: Duration(minutes: 5), goneNotice: Duration(minutes: 1), grace: Duration(minutes: 10)));
       join('a', 'alice');
       engine.applyReady('a', true);
       engine.feed.drain();
       t = t.add(const Duration(minutes: 5));
       engine.tick();
-      expect(engine.members['a']!.inSet, isTrue, reason: 'not past staleAfter yet');
+      expect(engine.members['a']!.presence, Presence.watching, reason: 'not past the silence yet');
       t = t.add(const Duration(seconds: 1));
       engine.tick();
-      expect(engine.members['a']!.inSet, isFalse);
-      expect(engine.feed.drain().map((f) => f.action), ['stale']);
-      t = t.add(const Duration(minutes: 4, seconds: 59));
-      expect(engine.sweepDropped(), isEmpty, reason: 'exactly dropAfter is not past it');
+      expect(engine.members['a']!.presence, Presence.gone);
+      expect(engine.feed.drain(), isEmpty);
+      t = t.add(const Duration(minutes: 1));
+      engine.tick();
+      expect(engine.feed.drain().map((f) => f.action), ['gone']);
+      t = t.add(const Duration(minutes: 8, seconds: 59));
+      engine.tick();
+      expect(engine.members, isNotEmpty);
       t = t.add(const Duration(seconds: 1));
-      expect(engine.sweepDropped(), ['a']);
+      engine.tick();
+      expect(engine.members, isEmpty);
       expect(engine.feed.drain().map((f) => f.action), ['leave']);
     });
 
-    test('defaults are today\'s 15 s / 30 s', () {
-      expect(engine.staleAfter, const Duration(seconds: 15));
-      expect(engine.dropAfter, const Duration(seconds: 30));
-      expect(engine.liveness.pingInterval, const Duration(seconds: 5));
+    test('defaults: 15 s silence, 10 min grace, 10 s gone notice, 15 s joiner hold', () {
+      final l = engine.liveness;
+      expect([l.silence, l.grace, l.goneNotice, l.joinerHold, l.joiningTimeout, l.pingInterval], const [
+        Duration(seconds: 15),
+        Duration(minutes: 10),
+        Duration(seconds: 10),
+        Duration(seconds: 15),
+        Duration(seconds: 60),
+        Duration(seconds: 5),
+      ]);
     });
   });
 
@@ -687,6 +855,7 @@ void main() {
       engine.applyReady('a', true);
       buffer('a', 6.0);
       t = t.add(const Duration(seconds: 21));
+      buffer('a', 6.0); // a frame a second keeps it present
       engine.tick();
       expect(engine.transport, Transport.finished);
       engine.applySeek('a', 5);
@@ -700,6 +869,7 @@ void main() {
       engine.applyReady('a', true);
       buffer('a', 6.0);
       t = t.add(const Duration(seconds: 21));
+      buffer('a', 6.0); // a frame a second keeps it present
       engine.tick();
       expect(engine.transport, Transport.finished);
       engine.applySwap(

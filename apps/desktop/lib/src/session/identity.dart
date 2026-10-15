@@ -1,13 +1,83 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:hive_ce/hive.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:sync_relay_core/core.dart' show validClientId;
 
-import '../../state/connect_prefs.dart';
-import '../../state/session_state.dart';
-import '../../widgets/avatar_pipeline.dart';
+import '../state/connect_prefs.dart';
+import '../state/session_state.dart';
+import '../state/settings.dart' show settingsBoxName;
+import '../widgets/avatar_pipeline.dart';
+
+// Who this app is: to the server (the per-install client id and its
+// rising connection count, [ClientIdentity]) and to people (name, picture
+// and colour, [Profile]).
+
+/// `hello.client` and `hello.seq` (PROTOCOL.md "Presence"): a random id
+/// per install, kept in the settings box (so per data folder, and per
+/// `STARSYNC_PROFILE`), and a number that rises with every connection this
+/// install makes. A server maps the id to one lasting member; the higher
+/// `seq` wins when two windows of the same install connect.
+class ClientIdentity {
+  static const _keyClient = 'clientId';
+  static const _keySeq = 'clientSeq';
+
+  final Box? _box;
+  ClientIdentity._(this._box, this.clientId, this._seq);
+
+  /// The id: 22 characters of base64url (16 random bytes). Private: never
+  /// shown, never logged.
+  final String clientId;
+  int _seq;
+
+  /// The last `seq` handed out.
+  int get seq => _seq;
+
+  /// The stored identity (the settings box, once open); one is made and
+  /// stored on first use. Without the box (tests, no store): [ephemeral].
+  factory ClientIdentity.stored() {
+    final box = Hive.isBoxOpen(settingsBoxName) ? Hive.box(settingsBoxName) : null;
+    if (box == null) return ClientIdentity.ephemeral();
+    var id = box.get(_keyClient);
+    if (id is! String || !validClientId(id)) {
+      id = newClientId();
+      unawaited(_put(box, _keyClient, id));
+    }
+    final seq = box.get(_keySeq);
+    return ClientIdentity._(box, id, seq is int && seq > 0 ? seq : 0);
+  }
+
+  /// A fresh id kept in memory only (each test coordinator is its own
+  /// install).
+  factory ClientIdentity.ephemeral() => ClientIdentity._(null, newClientId(), 0);
+
+  /// The `seq` for the next hello: one higher than any before, stored at
+  /// once.
+  int nextSeq() {
+    _seq++;
+    final box = _box;
+    if (box != null) unawaited(_put(box, _keySeq, _seq));
+    return _seq;
+  }
+
+  static Future<void> _put(Box box, String key, Object value) async {
+    try {
+      await box.put(key, value);
+    } catch (e) {
+      debugPrint('save $key failed: $e');
+    }
+  }
+
+  /// 16 random bytes as 22 characters of base64url.
+  static String newClientId() {
+    final r = Random.secure();
+    return base64Url.encode([for (var i = 0; i < 16; i++) r.nextInt(256)]).replaceAll('=', '');
+  }
+}
 
 /// Colours offered in the profile card; the first is the default.
 const profileColors = <Color>[

@@ -37,7 +37,7 @@ typedef RestartFn = Future<void> Function(String executable, List<String> args);
 // relaunched detached with the same args, then the window closes.
 Future<void> _closeAndRestart(String executable, List<String> args) async {
   final keep = args.where((a) => a != '--upgrade').toList();
-  await shutDownApp(beforeQuit: () async {
+  await shutDownApp(restart: true, beforeQuit: () async {
     try {
       await Hive.close();
     } catch (e) {

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:sync_relay_core/core.dart';
@@ -6,6 +7,14 @@ import 'package:test/test.dart';
 void main() {
   group('redactLog', () {
     const tok = '50989dda73c45a4710751f8aff4a1982';
+
+    test('the per-install client id never shows (hello.client)', () {
+      const id = 'AbCdEfGhIjKlMnOpQrStUv';
+      final hello = jsonEncode(const HelloMessage(secret: '', user: HelloUser(name: 'a'), client: id).toJson());
+      expect(redactLog('bad hello: $hello'), isNot(contains(id)));
+      expect(redactLog('client=$id seq=3'), 'client=*** seq=3');
+      expect(redactLog('{"clientId":"$id"}'), isNot(contains(id)));
+    });
 
     test('signed URLs keep scheme, host, path and parameter names only', () {
       final out = redactLog('GET https://upos-hz-mirrorakam.akamaized.net/a/b-30080.m4s?deadline=1791826934&upsig=0f61b79b&hdnts=exp~acl -> 403');

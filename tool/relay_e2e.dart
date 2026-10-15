@@ -35,10 +35,9 @@ Future<void> main(List<String> argv) async {
     ws.add(jsonEncode(HelloMessage(
             proto: RelayConstants.protoVersion,
             secret: '',
-            user: HelloUser(name: name),
-            media: const HelloMedia(name: '', size: 0, duration: 0))
+            user: HelloUser(name: name))
         .toJson()));
-    // Stay alive like a real client (silent members get dropped).
+    // Stay alive like a real client (a silent member goes gone).
     Timer.periodic(const Duration(seconds: 1), (_) => ws.add(jsonEncode({'t': 'report', 'position': 0, 'buffered': 0, 'eventId': 0})));
     return (ws, await welcome.future);
   }

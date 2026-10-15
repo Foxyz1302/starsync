@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'constants.dart';
 import 'errors.dart';
+import 'presence.dart';
 import 'queue.dart';
 
 /// Reads an optional JSON number as a finite double. JSON like 1e400 decodes to
@@ -97,6 +100,89 @@ class JellyfinRef {
       Object.hash(serverId, itemId, mediaSourceId, title, subtitle, runtimeSecs);
 }
 
+/// What a media is, independent of where its bytes come from (`media.ref`):
+/// an episode, a movie or an extra, by AniList and/or TVDB ids. Carried
+/// as is in `swap.media`, `state.media` and `queue[].media` (the server
+/// keeps it, at most [RelayConstants.maxMediaRefBytes] of JSON); nothing
+/// produces it yet (step 4).
+class MediaRef {
+  static const kinds = {'episode', 'movie', 'extra'};
+
+  /// `episode`, `movie` or `extra`.
+  final String kind;
+  final String title;
+  final int? anilistId;
+  /// The episode number within the AniList entry.
+  final int? anilistEp;
+  final int? tvdbId;
+  /// TVDB season (null: unknown or none, e.g. absolute numbering).
+  final int? season;
+  final int? ep;
+  /// Absolute episode number across seasons.
+  final int? absolute;
+  const MediaRef(
+      {required this.kind,
+      this.title = '',
+      this.anilistId,
+      this.anilistEp,
+      this.tvdbId,
+      this.season,
+      this.ep,
+      this.absolute});
+
+  Map<String, Object?> toJson() => {
+        'kind': kind,
+        if (title.isNotEmpty) 'title': title,
+        if (anilistId != null) 'anilistId': anilistId,
+        if (anilistEp != null) 'anilistEp': anilistEp,
+        if (tvdbId != null) 'tvdbId': tvdbId,
+        if (season != null) 'season': season,
+        if (ep != null) 'ep': ep,
+        if (absolute != null) 'absolute': absolute,
+      };
+
+  /// Null when [j] is not a ref (no known `kind`); throws
+  /// [ProtocolException] when it is larger than
+  /// [RelayConstants.maxMediaRefBytes] as JSON. Ids that are not
+  /// non-negative integers are dropped; the title is one line of at most
+  /// 200 characters.
+  static MediaRef? fromJson(Object? j) {
+    if (j is! Map) return null;
+    if (utf8.encode(jsonEncode(j)).length > RelayConstants.maxMediaRefBytes) {
+      throw const ProtocolException('media.ref too large');
+    }
+    final kind = j['kind'];
+    if (kind is! String || !kinds.contains(kind)) return null;
+    int? n(Object? v) => v is num && v.isFinite && v >= 0 && v == v.roundToDouble() ? v.toInt() : null;
+    final title = j['title'] is String ? (j['title'] as String).replaceAll(RegExp(r'\s+'), ' ').trim() : '';
+    return MediaRef(
+      kind: kind,
+      title: title.length > 200 ? title.substring(0, 200) : title,
+      anilistId: n(j['anilistId']),
+      anilistEp: n(j['anilistEp']),
+      tvdbId: n(j['tvdbId']),
+      season: n(j['season']),
+      ep: n(j['ep']),
+      absolute: n(j['absolute']),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is MediaRef &&
+      other.kind == kind &&
+      other.title == title &&
+      other.anilistId == anilistId &&
+      other.anilistEp == anilistEp &&
+      other.tvdbId == tvdbId &&
+      other.season == season &&
+      other.ep == ep &&
+      other.absolute == absolute;
+
+  @override
+  int get hashCode => Object.hash(kind, title, anilistId, anilistEp, tvdbId, season, ep, absolute);
+}
+
 class HelloMedia {
   final String name;
   final int size;
@@ -106,13 +192,16 @@ class HelloMedia {
   final JellyfinRef? jellyfin;
   /// Relayed media (bytes from the source member through the server).
   final MediaRelay? relay;
+  /// What it is ([MediaRef]); null when unknown.
+  final MediaRef? ref;
   const HelloMedia(
       {required this.name,
       required this.size,
       required this.duration,
       this.url,
       this.jellyfin,
-      this.relay});
+      this.relay,
+      this.ref});
 
   HelloMedia copyWith({double? duration, int? size, MediaRelay? relay}) => HelloMedia(
       name: name,
@@ -120,7 +209,8 @@ class HelloMedia {
       duration: duration ?? this.duration,
       url: url,
       jellyfin: jellyfin,
-      relay: relay ?? this.relay);
+      relay: relay ?? this.relay,
+      ref: ref);
 
   Map<String, Object?> toJson() => {
         'name': name,
@@ -129,6 +219,7 @@ class HelloMedia {
         if (url != null) 'url': url,
         if (jellyfin != null) 'jellyfin': jellyfin!.toJson(),
         if (relay != null) 'relay': relay!.toJson(),
+        if (ref != null) 'ref': ref!.toJson(),
       };
 
   factory HelloMedia.fromJson(Map<String, Object?> json) {
@@ -141,6 +232,7 @@ class HelloMedia {
       url: json['url'] as String?,
       jellyfin: jf is Map ? JellyfinRef.fromJson(Map<String, Object?>.from(jf)) : null,
       relay: relay is Map ? MediaRelay.fromJson(Map<String, Object?>.from(relay)) : null,
+      ref: MediaRef.fromJson(json['ref']),
     );
   }
 }
@@ -185,7 +277,10 @@ class RelayTrackSpec {
 /// buffer asks for bytes, and the media's average bitrate. [queueId]:
 /// the Up next item this relay was started for (its warm relay) before
 /// it went up; viewers open its `/r/.../<queueId>/...` URLs, so their
-/// preloads of it carry on.
+/// preloads of it carry on. [sourceGone]: the source member is `gone`
+/// (since [sourceGoneSince]): the relay and its buffer stay, viewers play
+/// what is buffered; it stays set once the source left for good (the
+/// relay has ended then: `live` false, `/r` answers 404).
 class MediaRelay {
   final String source;
   final bool fetch;
@@ -194,6 +289,8 @@ class MediaRelay {
   final int rate;
   final int need;
   final String queueId;
+  final bool sourceGone;
+  final DateTime? sourceGoneSince;
   const MediaRelay(
       {this.source = '',
       this.fetch = false,
@@ -201,7 +298,9 @@ class MediaRelay {
       this.tracks = const [],
       this.rate = 0,
       this.need = 0,
-      this.queueId = ''});
+      this.queueId = '',
+      this.sourceGone = false,
+      this.sourceGoneSince});
 
   /// The source is measured slower than the media plays (both known):
   /// below 85 % of [need], so a rate close to it does not flicker.
@@ -214,14 +313,26 @@ class MediaRelay {
   static bool validTracks(List<RelayTrackSpec> t) =>
       t.length <= maxTracks && (t.length > 1 || (t.length == 1 && t.single.pieces));
 
-  MediaRelay copyWith({bool? live, List<RelayTrackSpec>? tracks, int? rate, int? need}) => MediaRelay(
-      source: source,
-      fetch: fetch,
-      live: live ?? this.live,
-      tracks: tracks ?? this.tracks,
-      rate: rate ?? this.rate,
-      need: need ?? this.need,
-      queueId: queueId);
+  /// [sourceGoneSince] null with [sourceGone] true: since now is unknown,
+  /// keep the earlier one; pass [sourceGone] false to clear both.
+  MediaRelay copyWith(
+          {bool? live,
+          List<RelayTrackSpec>? tracks,
+          int? rate,
+          int? need,
+          bool? sourceGone,
+          DateTime? sourceGoneSince}) =>
+      MediaRelay(
+          source: source,
+          fetch: fetch,
+          live: live ?? this.live,
+          tracks: tracks ?? this.tracks,
+          rate: rate ?? this.rate,
+          need: need ?? this.need,
+          queueId: queueId,
+          sourceGone: sourceGone ?? this.sourceGone,
+          sourceGoneSince:
+              (sourceGone ?? this.sourceGone) ? (sourceGoneSince ?? this.sourceGoneSince) : null);
 
   Map<String, Object?> toJson() => {
         if (source.isNotEmpty) 'source': source,
@@ -231,6 +342,8 @@ class MediaRelay {
         if (rate > 0) 'rate': rate,
         if (need > 0) 'need': need,
         if (queueId.isNotEmpty) 'queueId': queueId,
+        if (sourceGone) 'sourceGone': true,
+        if (sourceGone && sourceGoneSince != null) 'sourceGoneSince': sourceGoneSince!.toUtc().toIso8601String(),
       };
 
   /// Unknown kinds, a single byte track or too many make it one file.
@@ -238,6 +351,7 @@ class MediaRelay {
     final t = json['tracks'];
     final specs = t is List ? [for (final e in t) RelayTrackSpec.fromJson(e)] : const <RelayTrackSpec?>[];
     final ok = !specs.contains(null) && validTracks(specs.cast<RelayTrackSpec>());
+    final gone = json['sourceGone'] == true;
     return MediaRelay(
         source: json['source'] is String ? json['source'] as String : '',
         fetch: json['fetch'] == true,
@@ -245,57 +359,165 @@ class MediaRelay {
         tracks: ok ? List.unmodifiable(specs.cast<RelayTrackSpec>()) : const [],
         rate: _byteRate(json['rate']),
         need: _byteRate(json['need']),
-        queueId: json['queueId'] is String ? json['queueId'] as String : '');
+        queueId: json['queueId'] is String ? json['queueId'] as String : '',
+        sourceGone: gone,
+        sourceGoneSince: gone ? DateTime.tryParse('${json['sourceGoneSince']}') : null);
   }
 
   /// A bytes-per-second field: a finite non-negative number, else 0.
   static int _byteRate(Object? v) => v is num && v.isFinite && v > 0 ? v.round() : 0;
 }
 
+/// The highest wire version both sides speak: the client's
+/// [clientMin]..[clientMax] (`hello.protoMin`..`hello.proto`) against this
+/// build's [RelayConstants.protoMin]..[RelayConstants.protoMax]; null when
+/// the ranges do not meet.
+int? pickProto(int clientMin, int clientMax,
+    {int serverMin = RelayConstants.protoMin, int serverMax = RelayConstants.protoMax}) {
+  final hi = clientMax < serverMax ? clientMax : serverMax;
+  final lo = clientMin > serverMin ? clientMin : serverMin;
+  return hi >= lo ? hi : null;
+}
+
+/// What this app can do (`hello.caps`, `members[].caps`): serve a relay
+/// ([source]), resolve links with yt-dlp ([resolve]), play Jellyfin with
+/// its own account ([jellyfin]). Unknown entries are ignored. Wire: an
+/// object of `true` flags, e.g. `{"source":true,"resolve":true}`.
+class ClientCaps {
+  final bool source;
+  final bool resolve;
+  final bool jellyfin;
+  const ClientCaps({this.source = false, this.resolve = false, this.jellyfin = false});
+
+  bool get isEmpty => !source && !resolve && !jellyfin;
+
+  Map<String, Object?> toJson() => {
+        if (source) 'source': true,
+        if (resolve) 'resolve': true,
+        if (jellyfin) 'jellyfin': true,
+      };
+
+  factory ClientCaps.fromJson(Object? j) => j is Map
+      ? ClientCaps(source: j['source'] == true, resolve: j['resolve'] == true, jellyfin: j['jellyfin'] == true)
+      : const ClientCaps();
+
+  @override
+  bool operator ==(Object other) =>
+      other is ClientCaps && other.source == source && other.resolve == resolve && other.jellyfin == jellyfin;
+  @override
+  int get hashCode => Object.hash(source, resolve, jellyfin);
+}
+
+/// `hello.client`: an opaque per-install id ([RelayConstants.minClientIdLength]
+/// to [RelayConstants.maxClientIdLength] characters of base64url). Private:
+/// never broadcast, never logged.
+bool validClientId(String id) =>
+    id.length >= RelayConstants.minClientIdLength &&
+    id.length <= RelayConstants.maxClientIdLength &&
+    RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(id);
+
+/// The first frame of a `/sync` socket. A proto 16 app sends `media: {}`
+/// (ignored) so a proto 15 server, which requires it, answers with its
+/// "proto mismatch" instead of a parse error.
 class HelloMessage {
+  /// The client's highest wire version (`hello.proto`).
   final int proto;
+  /// The client's lowest wire version (`hello.protoMin`); defaults to
+  /// [proto] when absent.
+  final int protoMin;
   final String secret;
   final HelloUser user;
-  final HelloMedia media;
   /// The hosting app's own client proves it is the host with this; empty
   /// for everyone else.
   final String hostKey;
-  /// Token from this client's previous `welcome`, sent on reconnect: if the
-  /// server still has that member (an unclean drop it has not noticed), the
-  /// connection takes it over instead of leaving a ghost.
-  final String resume;
+  /// Per-install id ([validClientId]): a hello with a known one takes that
+  /// member over. Empty: a fresh member every time (tools, tests).
+  final String client;
+  /// Increasing per [client] (every connect of this install sends a higher
+  /// one): an older hello than the member's last gets `err stale`.
+  final int seq;
+  /// App version (`"1.3.0"`), shown as `members[].app`.
+  final String app;
+  /// `linux`, `windows`, `macos` or `android`; logged, not broadcast.
+  final String platform;
+  final ClientCaps caps;
+  /// The last `feed.seq` this client saw from this server: `welcome.feed`
+  /// replays what came after it (at most [RelayConstants.feedReplayLines]).
+  /// Null: no replay.
+  final int? feedAfter;
   const HelloMessage(
-      {required this.proto,
+      {this.proto = RelayConstants.protoMax,
+      int? protoMin,
       required this.secret,
       required this.user,
-      required this.media,
       this.hostKey = '',
-      this.resume = ''});
+      this.client = '',
+      this.seq = 0,
+      this.app = '',
+      this.platform = '',
+      this.caps = const ClientCaps(),
+      this.feedAfter})
+      : protoMin = protoMin ?? (proto < RelayConstants.protoMin ? proto : RelayConstants.protoMin);
 
   Map<String, Object?> toJson() => {
         't': 'hello',
+        'protoMin': protoMin,
         'proto': proto,
         'secret': secret,
         'user': user.toJson(),
-        'media': media.toJson(),
+        'media': const <String, Object?>{},
         if (hostKey.isNotEmpty) 'hostKey': hostKey,
-        if (resume.isNotEmpty) 'resume': resume,
+        if (client.isNotEmpty) 'client': client,
+        if (seq != 0) 'seq': seq,
+        if (app.isNotEmpty) 'app': app,
+        if (platform.isNotEmpty) 'platform': platform,
+        if (!caps.isEmpty) 'caps': caps.toJson(),
+        if (feedAfter != null) 'feedAfter': feedAfter,
       };
+
+  /// The client's version range read leniently from a raw hello, before
+  /// [HelloMessage.fromJson]: a hello of another version may not parse.
+  /// Null when it names none.
+  static ({int min, int max})? protoRangeOf(Map<String, Object?> json) {
+    final p = json['proto'];
+    if (p is! num || !p.isFinite) return null;
+    final m = json['protoMin'];
+    final max = p.toInt();
+    final min = m is num && m.isFinite && m.toInt() <= max ? m.toInt() : max;
+    return (min: min, max: max);
+  }
 
   factory HelloMessage.fromJson(Map<String, Object?> json) {
     if (json['t'] != 'hello') throw const ProtocolException('not a hello message');
     final user = json['user'];
-    final media = json['media'];
-    if (user is! Map || media is! Map) throw const ProtocolException('hello missing user/media');
+    if (user is! Map) throw const ProtocolException('hello missing user');
+    final client = json['client'] ?? '';
+    if (client is! String || (client.isNotEmpty && !validClientId(client))) {
+      throw const ProtocolException('bad client id');
+    }
+    final proto = finiteInt(json['proto'], 'proto', fallback: RelayConstants.protoMax);
+    final feedAfter = json['feedAfter'];
     return HelloMessage(
-      proto: finiteInt(json['proto'], 'proto', fallback: RelayConstants.protoVersion),
+      proto: proto,
+      protoMin: finiteInt(json['protoMin'], 'protoMin', fallback: proto),
       secret: (json['secret'] as String?) ?? '',
       user: HelloUser.fromJson(Map<String, Object?>.from(user)),
-      media: HelloMedia.fromJson(Map<String, Object?>.from(media)),
       hostKey: (json['hostKey'] as String?) ?? '',
-      resume: (json['resume'] as String?) ?? '',
+      client: client,
+      seq: finiteInt(json['seq'], 'seq'),
+      app: _short(json['app'], 32),
+      platform: _short(json['platform'], 16),
+      caps: ClientCaps.fromJson(json['caps']),
+      feedAfter: feedAfter == null ? null : finiteInt(feedAfter, 'feedAfter'),
     );
   }
+}
+
+/// A short plain string field: one line, at most [max] characters.
+String _short(Object? v, int max) {
+  if (v is! String) return '';
+  final line = v.replaceAll(RegExp(r'\s+'), ' ').trim();
+  return line.length > max ? line.substring(0, max) : line;
 }
 
 class SyncState {
@@ -328,44 +550,208 @@ class WelcomeMessage {
   /// server can relay it (`state.relay`); private like [token].
   final String? relayUrl;
   final Map<String, Object?>? state;
+  /// The wire version of this connection ([pickProto]).
+  final int proto;
+  /// The hello took over this client's member (same [memberId] and
+  /// [token], everything it had kept); false for a new member.
+  final bool resumed;
+  /// Random per server boot: a client that held a member of another
+  /// instance knows the server restarted (not that its grace ran out).
+  final String instance;
+  /// Seconds a `gone` member is kept ([RelayConstants.graceSecs]).
+  final int grace;
+  /// Feed lines after `hello.feedAfter`, oldest first, each `replayed`.
+  final List<FeedMessage> feed;
   const WelcomeMessage(
-      {required this.token, this.memberId = '', this.mediaUrl, this.relayUrl, this.state});
+      {required this.token,
+      this.memberId = '',
+      this.mediaUrl,
+      this.relayUrl,
+      this.state,
+      this.proto = RelayConstants.protoMax,
+      this.resumed = false,
+      this.instance = '',
+      this.grace = RelayConstants.graceSecs,
+      this.feed = const []});
 
   Map<String, Object?> toJson() => {
         't': 'welcome',
+        'proto': proto,
         'token': token,
         'memberId': memberId,
+        'resumed': resumed,
+        'instance': instance,
+        'grace': grace,
         if (mediaUrl != null) 'mediaUrl': mediaUrl,
         if (relayUrl != null) 'relayUrl': relayUrl,
         if (state != null) 'state': state,
+        if (feed.isNotEmpty) 'feed': [for (final f in feed) f.toJson()],
       };
 
   factory WelcomeMessage.fromJson(Map<String, Object?> json) {
     if (json['t'] != 'welcome') throw const ProtocolException('not a welcome message');
     final state = json['state'];
+    final feed = json['feed'];
     return WelcomeMessage(
       token: (json['token'] as String?) ?? '',
       memberId: (json['memberId'] as String?) ?? '',
       mediaUrl: json['mediaUrl'] as String?,
       relayUrl: json['relayUrl'] as String?,
       state: state is Map ? Map<String, Object?>.from(state) : null,
+      proto: finiteInt(json['proto'], 'proto', fallback: 0),
+      resumed: json['resumed'] == true,
+      instance: json['instance'] is String ? json['instance'] as String : '',
+      grace: finiteInt(json['grace'], 'grace', fallback: 0),
+      feed: feed is List
+          ? [
+              for (final f in feed)
+                if (f is Map && f['t'] == 'feed') FeedMessage.fromJson(Map<String, Object?>.from(f)),
+            ]
+          : const [],
     );
   }
 }
 
-/// Sits [target] (a member id) out, or with [out] false brings oneself
-/// back. Out: connected, but not in the ready gate and not playing.
-class OutIntent {
-  final String target;
-  final bool out;
-  const OutIntent({required this.target, required this.out});
+/// Error codes of `err.code` (PROTOCOL.md "Errors"). Terminal ones
+/// ([version], [secret], [replaced], [stale], a refused `hello` with
+/// [rejected] or [bad]) are followed by a close ([CloseCodes]).
+enum ErrCode {
+  /// No common wire version: `min`/`max`/`server` say the server's.
+  version,
+  /// Wrong `hello.secret`.
+  secret,
+  /// Understood but refused (an avatar too large, a fetch the server
+  /// cannot do).
+  rejected,
+  /// Malformed (a bad hello, a non-finite number, a bad swap or queue item).
+  bad,
+  /// Another hello with this client id took the member over (the client
+  /// stops: "opened in another window").
+  replaced,
+  /// This hello is older (`hello.seq`) than the member's current one.
+  stale,
+  /// Not allowed for this member (e.g. setting someone else `in`).
+  forbidden,
+  /// Over a rate limit (reserved; nudges over the cap are dropped silently).
+  rate,
+  /// A list is full (Up next at [RelayConstants.maxQueueItems]).
+  full;
 
-  Map<String, Object?> toJson() => {'t': 'out', 'target': target, 'out': out};
-
-  factory OutIntent.fromJson(Map<String, Object?> json) {
-    if (json['t'] != 'out') throw const ProtocolException('not an out intent');
-    return OutIntent(target: (json['target'] as String?) ?? '', out: (json['out'] as bool?) ?? true);
+  static ErrCode? parse(Object? v) {
+    for (final c in values) {
+      if (c.name == v) return c;
+    }
+    return null;
   }
+}
+
+/// Close codes of the server's sockets (PROTOCOL.md "Close codes").
+abstract class CloseCodes {
+  /// Relay channel: not (or no longer) the source; the source stops.
+  static const relayNotSource = 4001;
+  /// Relay channel: its `info` differs from the media's first one (another
+  /// file); the relay ends and the source stops.
+  static const relayOtherMedia = 4002;
+  /// Relay channel: a newer channel for the same relay replaced it; the
+  /// source stops.
+  static const relayReplaced = 4003;
+  /// `/sync`: refused at hello, `err` `version`.
+  static const version = 4010;
+  /// `/sync`: refused at hello, `err` `secret`.
+  static const secret = 4011;
+  /// `/sync`: refused at hello, `err` `rejected` or `bad`.
+  static const refused = 4012;
+  /// `/sync`: another hello took the member over (`err` `replaced`).
+  static const replaced = 4013;
+  /// `/sync`: an older hello than the member's (`err` `stale`).
+  static const stale = 4014;
+  /// `/sync`: no frame for the silence limit; the member is `gone`.
+  static const silent = 4015;
+  /// `/sync`: the member left (`bye`, or grace over).
+  static const left = 1000;
+}
+
+/// Server to client: `{"t":"err","code":..., "message":..., "for":...}`.
+/// [message] is plain text for people (a proto 15 app shows it as is);
+/// [code] is for programs. For [ErrCode.version]: [min]/[max] the server's
+/// range and [server] its app version. [forType]: the `t` of the frame
+/// that failed, when there is one (`for` on the wire).
+class ErrorFrame {
+  final ErrCode? code;
+  final String message;
+  final String? forType;
+  final int? min;
+  final int? max;
+  final String? server;
+  const ErrorFrame({required this.code, required this.message, this.forType, this.min, this.max, this.server});
+
+  /// The stable refusal of a hello whose versions do not meet ours:
+  /// `{"t":"err","code":"version","min":16,"max":16,"server":"1.3.0",
+  /// "message":"proto mismatch: got 15, want 16..16"}`.
+  factory ErrorFrame.version({required int got, required String server}) => ErrorFrame(
+      code: ErrCode.version,
+      message: 'proto mismatch: got $got, want ${RelayConstants.protoMin}..${RelayConstants.protoMax}',
+      forType: 'hello',
+      min: RelayConstants.protoMin,
+      max: RelayConstants.protoMax,
+      server: server);
+
+  Map<String, Object?> toJson() => {
+        't': 'err',
+        if (code != null) 'code': code!.name,
+        'message': message,
+        if (forType != null) 'for': forType,
+        if (min != null) 'min': min,
+        if (max != null) 'max': max,
+        if (server != null) 'server': server,
+      };
+
+  /// A proto 15 server's `err` has no [code].
+  factory ErrorFrame.fromJson(Map<String, Object?> json) {
+    if (json['t'] != 'err') throw const ProtocolException('not an err frame');
+    final min = json['min'], max = json['max'];
+    return ErrorFrame(
+      code: ErrCode.parse(json['code']),
+      message: json['message'] is String ? json['message'] as String : '',
+      forType: json['for'] is String ? json['for'] as String : null,
+      min: min is num && min.isFinite ? min.toInt() : null,
+      max: max is num && max.isFinite ? max.toInt() : null,
+      server: json['server'] is String ? json['server'] as String : null,
+    );
+  }
+}
+
+/// Client to server: set [target] (a member id; empty = oneself) [state]
+/// `away` (anyone may, on anyone) or `in` (only oneself; else `err`
+/// `forbidden`). Coming back `in` goes through `joining`.
+class PresenceIntent {
+  final String target;
+  /// [Presence.watching] (`in`) or [Presence.away].
+  final Presence state;
+  final PresenceReason reason;
+  const PresenceIntent({this.target = '', required this.state, this.reason = PresenceReason.manual});
+
+  Map<String, Object?> toJson() =>
+      {'t': 'presence', if (target.isNotEmpty) 'target': target, 'state': state.wire, 'reason': reason.name};
+
+  factory PresenceIntent.fromJson(Map<String, Object?> json) {
+    if (json['t'] != 'presence') throw const ProtocolException('not a presence intent');
+    final state = Presence.parse(json['state']);
+    if (state != Presence.watching && state != Presence.away) {
+      throw const ProtocolException('presence state must be in or away');
+    }
+    return PresenceIntent(
+        target: json['target'] is String ? json['target'] as String : '',
+        state: state!,
+        reason: PresenceReason.parse(json['reason']));
+  }
+}
+
+/// Client to server: leave now (the Leave button, the app closing). The
+/// member leaves at once (feed `leave`, no grace) and the socket closes.
+class ByeMessage {
+  const ByeMessage();
+  Map<String, Object?> toJson() => {'t': 'bye'};
 }
 
 /// Client to server: poke [target] (a member id). The server passes it on
@@ -632,21 +1018,28 @@ class MemberView {
   /// none.
   final String avatarHash;
   final bool ready;
+  /// Counts for the ready gate now: in the set and its presence counts
+  /// ([PresencePolicy], [Purpose.gate]).
   final bool inSet;
   final double buffered;
-  final bool stale;
+  /// Where it stands ([Presence]).
+  final Presence presence;
+  /// When it went `gone`; null otherwise.
+  final DateTime? goneSince;
   /// Last `report.jf` of this member; empty when never reported.
   final Map<String, bool> jf;
   /// The hosting app's own member (sent the server's host key).
   final bool host;
-  /// Sitting out: connected, outside the ready gate, not playing.
-  final bool out;
   /// Why its player cannot open the current media (`report.error`); empty
   /// while it can. Errored: outside the ready gate.
   final String error;
   /// Bytes per second the server sent this member lately (its file, the
   /// Jellyfin relay or the relay); 0 when none.
   final int rate;
+  /// Its app version (`hello.app`); empty when it sent none.
+  final String app;
+  /// What its app can do (`hello.caps`).
+  final ClientCaps caps;
   const MemberView({
     required this.id,
     required this.name,
@@ -654,12 +1047,14 @@ class MemberView {
     required this.ready,
     required this.inSet,
     required this.buffered,
-    required this.stale,
+    this.presence = Presence.watching,
+    this.goneSince,
     this.jf = const {},
     this.host = false,
-    this.out = false,
     this.error = '',
     this.rate = 0,
+    this.app = '',
+    this.caps = const ClientCaps(),
   });
 
   Map<String, Object?> toJson() => {
@@ -669,28 +1064,105 @@ class MemberView {
         'ready': ready,
         'inSet': inSet,
         'buffered': buffered,
-        'stale': stale,
+        'presence': presence.wire,
+        if (presence == Presence.gone && goneSince != null) 'goneSince': goneSince!.toUtc().toIso8601String(),
         if (jf.isNotEmpty) 'jf': jf,
         if (host) 'host': true,
-        if (out) 'out': true,
         if (error.isNotEmpty) 'error': error,
         if (rate > 0) 'rate': rate,
+        if (app.isNotEmpty) 'app': app,
+        if (!caps.isEmpty) 'caps': caps.toJson(),
       };
 
-  factory MemberView.fromJson(Map<String, Object?> json) => MemberView(
-        id: (json['id'] as String?) ?? '',
-        name: (json['name'] as String?) ?? '',
-        avatarHash: (json['avatarHash'] as String?) ?? '',
-        ready: (json['ready'] as bool?) ?? false,
-        inSet: (json['inSet'] as bool?) ?? false,
-        buffered: finiteDouble(json['buffered'], 'buffered'),
-        stale: (json['stale'] as bool?) ?? false,
-        jf: jfAccessFromJson(json['jf']) ?? const {},
-        host: json['host'] == true,
-        out: json['out'] == true,
-        error: memberErrorFromJson(json['error']),
-        rate: MediaRelay._byteRate(json['rate']),
-      );
+  factory MemberView.fromJson(Map<String, Object?> json) {
+    final presence = Presence.parse(json['presence']) ?? Presence.watching;
+    return MemberView(
+      id: (json['id'] as String?) ?? '',
+      name: (json['name'] as String?) ?? '',
+      avatarHash: (json['avatarHash'] as String?) ?? '',
+      ready: (json['ready'] as bool?) ?? false,
+      inSet: (json['inSet'] as bool?) ?? false,
+      buffered: finiteDouble(json['buffered'], 'buffered'),
+      presence: presence,
+      goneSince: presence == Presence.gone ? DateTime.tryParse('${json['goneSince']}') : null,
+      jf: jfAccessFromJson(json['jf']) ?? const {},
+      host: json['host'] == true,
+      error: memberErrorFromJson(json['error']),
+      rate: MediaRelay._byteRate(json['rate']),
+      app: _short(json['app'], 32),
+      caps: ClientCaps.fromJson(json['caps']),
+    );
+  }
+}
+
+/// Why the server is HELD (`state.hold`), most pressing first: a joiner
+/// still loading within its bound ([joining], [until] when the bound
+/// ends), someone not ready ([ready]), someone's buffer short ([buffer]),
+/// the same while a relayed media's source is `gone` ([source]), or
+/// nobody in the set to start ([start]: someone has to ready up).
+enum HoldReason {
+  joining,
+  ready,
+  buffer,
+  source,
+  start;
+
+  static HoldReason? parse(Object? v) {
+    for (final r in values) {
+      if (r.name == v) return r;
+    }
+    return null;
+  }
+}
+
+/// `state.hold`: present while `transport` is `held` with media up.
+/// [members]: the member ids the gate waits for (empty with
+/// [HoldReason.start]). [until]: when that wait ends by itself (the
+/// joiners' bound), on the server's clock.
+class HoldInfo {
+  final HoldReason reason;
+  final List<String> members;
+  final DateTime? until;
+  const HoldInfo({required this.reason, this.members = const [], this.until});
+
+  Map<String, Object?> toJson() => {
+        'reason': reason.name,
+        'members': members,
+        if (until != null) 'until': until!.toUtc().toIso8601String(),
+      };
+
+  static HoldInfo? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final reason = HoldReason.parse(j['reason']);
+    if (reason == null) return null;
+    final m = j['members'];
+    return HoldInfo(
+        reason: reason,
+        members: m is List ? m.whereType<String>().toList() : const [],
+        until: j['until'] == null ? null : DateTime.tryParse('${j['until']}'));
+  }
+}
+
+/// `state.advance` (reserved, step 6): the shared countdown to Up next's
+/// first item when the media finishes. At [at] + [secs] (server clock) the
+/// server sets `queuePlay` to [id]; `{"t":"queue","op":"cancel"}` clears
+/// it for everyone. The server parses and broadcasts it but never starts
+/// one yet.
+class QueueAdvance {
+  final String id;
+  final DateTime at;
+  final int secs;
+  const QueueAdvance({required this.id, required this.at, required this.secs});
+
+  Map<String, Object?> toJson() => {'id': id, 'at': at.toUtc().toIso8601String(), 'secs': secs};
+
+  static QueueAdvance? fromJson(Object? j) {
+    if (j is! Map || j['id'] is! String) return null;
+    final at = DateTime.tryParse('${j['at']}');
+    final secs = j['secs'];
+    if (at == null || secs is! num || !secs.isFinite || secs < 0) return null;
+    return QueueAdvance(id: j['id'] as String, at: at, secs: secs.toInt());
+  }
 }
 
 class StateBroadcast {
@@ -733,6 +1205,10 @@ class StateBroadcast {
   /// The queued item someone asked to play now, waiting for the member
   /// who can put it up; null when none.
   final String? queuePlay;
+  /// Why it is held ([HoldInfo]); null unless `held` with media up.
+  final HoldInfo? hold;
+  /// The shared countdown to Up next (reserved, [QueueAdvance]).
+  final QueueAdvance? advance;
   const StateBroadcast({
     required this.eventId,
     required this.transport,
@@ -747,6 +1223,8 @@ class StateBroadcast {
     this.relayNext = false,
     this.queue = const [],
     this.queuePlay,
+    this.hold,
+    this.advance,
   });
 
   Map<String, Object?> toJson() => {
@@ -764,6 +1242,8 @@ class StateBroadcast {
         if (relayNext) 'relayNext': true,
         if (queue.isNotEmpty) 'queue': [for (final q in queue) q.toJson()],
         if (queuePlay != null) 'queuePlay': queuePlay,
+        if (hold != null) 'hold': hold!.toJson(),
+        if (advance != null) 'advance': advance!.toJson(),
       };
 
   factory StateBroadcast.fromJson(Map<String, Object?> json) {
@@ -791,31 +1271,62 @@ class StateBroadcast {
           ? (json['queue'] as List).map(QueueItem.fromJson).whereType<QueueItem>().toList()
           : const [],
       queuePlay: json['queuePlay'] is String ? json['queuePlay'] as String : null,
+      hold: HoldInfo.fromJson(json['hold']),
+      advance: QueueAdvance.fromJson(json['advance']),
     );
   }
 }
 
+/// One line of the activity feed. [actor] / [target] are display names
+/// (as they were then); [actorId] / [targetId] the member ids (`server`
+/// for the server's own lines, empty when none), so clients match people
+/// by id, not by name. [seq] increases by one per line for the server's
+/// life; [replayed] marks lines repeated in `welcome.feed` (log them, do
+/// not toast them).
 class FeedMessage {
   final String actor;
   final String action;
   final String? target;
   final String reason;
   final DateTime at;
+  final String actorId;
+  final String targetId;
+  final int seq;
+  final bool replayed;
   const FeedMessage({
     required this.actor,
     required this.action,
     this.target,
     this.reason = '',
     required this.at,
+    this.actorId = '',
+    this.targetId = '',
+    this.seq = 0,
+    this.replayed = false,
   });
+
+  FeedMessage copyWith({int? seq, bool? replayed}) => FeedMessage(
+      actor: actor,
+      action: action,
+      target: target,
+      reason: reason,
+      at: at,
+      actorId: actorId,
+      targetId: targetId,
+      seq: seq ?? this.seq,
+      replayed: replayed ?? this.replayed);
 
   Map<String, Object?> toJson() => {
         't': 'feed',
+        'seq': seq,
         'actor': actor,
+        if (actorId.isNotEmpty) 'actorId': actorId,
         'action': action,
         if (target != null) 'target': target,
+        if (targetId.isNotEmpty) 'targetId': targetId,
         'reason': reason,
         'at': at.toIso8601String(),
+        if (replayed) 'replayed': true,
       };
 
   factory FeedMessage.fromJson(Map<String, Object?> json) {
@@ -826,6 +1337,10 @@ class FeedMessage {
       target: json['target'] as String?,
       reason: (json['reason'] as String?) ?? '',
       at: DateTime.tryParse('${json['at']}') ?? DateTime.now().toUtc(),
+      actorId: json['actorId'] is String ? json['actorId'] as String : '',
+      targetId: json['targetId'] is String ? json['targetId'] as String : '',
+      seq: finiteInt(json['seq'], 'seq'),
+      replayed: json['replayed'] == true,
     );
   }
 }

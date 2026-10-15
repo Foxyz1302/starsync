@@ -1,6 +1,3 @@
-// restructure: rewrite in step 1 (Connection + Identity + Presence):
-// "proto mismatch rejected" (min/max range, refusal frame) and "silent
-// socket dropped and member removed" (Gone with grace); the rest stays.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -43,15 +40,15 @@ void main() {
 
     Future<String> hello(String secret,
         {int proto = RelayConstants.protoVersion,
+        int? protoMin,
         Duration timeout = const Duration(seconds: 5)}) async {
       final ch = WebSocketChannel.connect(
           Uri.parse('ws://127.0.0.1:${server.boundPort}/sync'));
       final msg = HelloMessage(
           proto: proto,
+          protoMin: protoMin,
           secret: secret,
-          user: const HelloUser(name: 'alice'),
-          media:
-              const HelloMedia(name: 'f.bin', size: 8192, duration: 10.0)).toJson();
+          user: const HelloUser(name: 'alice')).toJson();
       ch.sink.add(jsonEncode(msg));
       try {
         final first = await ch.stream.first.timeout(timeout);
@@ -73,7 +70,9 @@ void main() {
       final decoded = jsonDecode(body) as Map;
       expect(decoded['ok'], isTrue);
       expect(decoded['name'], 'test');
-      expect(decoded['proto'], RelayConstants.protoVersion);
+      expect(decoded['proto'], RelayConstants.protoMax);
+      expect([decoded['protoMin'], decoded['protoMax'], decoded['version'], decoded['tls']],
+          [RelayConstants.protoMin, RelayConstants.protoMax, appVersion, false]);
       expect(decoded['viewers'], 0);
       expect(decoded['bytesServed'], 0);
       expect(decoded.containsKey('media'), isFalse, reason: 'no media name leak');
@@ -81,7 +80,7 @@ void main() {
 
     test('wrong secret gets err, right secret gets welcome+token', () async {
       final bad = await hello('wrong');
-      expect(jsonDecode(bad)['t'], 'err');
+      expect([jsonDecode(bad)['t'], jsonDecode(bad)['code'], jsonDecode(bad)['message']], ['err', 'secret', 'wrong secret']);
 
       final good = await hello('shh');
       final decoded = jsonDecode(good) as Map;
@@ -96,10 +95,32 @@ void main() {
       expect(server.session.tokens.length, 1);
     });
 
-    test('proto mismatch rejected', () async {
-      final reply =
-          await hello('shh', proto: RelayConstants.protoVersion + 99);
-      expect(jsonDecode(reply)['t'], 'err');
+    test('version ranges: a common version is taken, none is refused with code version', () async {
+      final newer = jsonDecode(await hello('shh', protoMin: RelayConstants.protoMin, proto: RelayConstants.protoMax + 3));
+      expect([newer['t'], newer['proto']], ['welcome', RelayConstants.protoMax], reason: 'the highest common one');
+      final ahead = jsonDecode(await hello('shh', protoMin: RelayConstants.protoMax + 1, proto: RelayConstants.protoMax + 2));
+      expect([ahead['t'], ahead['code'], ahead['min'], ahead['max'], ahead['server']],
+          ['err', 'version', RelayConstants.protoMin, RelayConstants.protoMax, appVersion]);
+      expect(server.session.tokens, hasLength(1));
+    });
+
+    test('a proto 15 hello gets the stable refusal it can show, then the version close code', () async {
+      final ch = WebSocketChannel.connect(Uri.parse('ws://127.0.0.1:${server.boundPort}/sync'));
+      // What a 1.2.x app sends: no protoMin, a media object, a resume token.
+      ch.sink.add(jsonEncode({
+        't': 'hello',
+        'proto': 15,
+        'secret': 'shh',
+        'user': {'name': 'old', 'avatar': ''},
+        'media': {'name': '', 'size': 0, 'duration': 0},
+        'resume': 'deadbeef',
+      }));
+      final frames = await ch.stream.toList().timeout(const Duration(seconds: 5));
+      final err = jsonDecode('${frames.single}') as Map;
+      expect(err['t'], 'err');
+      expect(err['code'], 'version');
+      expect(err['message'], startsWith('proto mismatch: got 15'));
+      expect(ch.closeCode, CloseCodes.version);
       expect(server.session.tokens, isEmpty);
     });
 
@@ -136,7 +157,7 @@ void main() {
       await resp.drain();
     });
 
-    test('silent socket dropped and member removed', () async {
+    test('a silent socket is closed and its member is gone, not removed', () async {
       final ch = WebSocketChannel.connect(
           Uri.parse('ws://127.0.0.1:${server.boundPort}/sync'));
       final messages = <String>[];
@@ -148,9 +169,7 @@ void main() {
       final msg = HelloMessage(
           proto: RelayConstants.protoVersion,
           secret: 'shh',
-          user: const HelloUser(name: 'ghost'),
-          media: const HelloMedia(
-              name: 'f.bin', size: 8192, duration: 10.0)).toJson();
+          user: const HelloUser(name: 'ghost')).toJson();
       ch.sink.add(jsonEncode(msg));
       final deadline = DateTime.now().add(const Duration(seconds: 5));
       while (messages.isEmpty && DateTime.now().isBefore(deadline)) {
@@ -160,18 +179,16 @@ void main() {
           (jsonDecode(messages.firstWhere((m) => (jsonDecode(m) as Map)['t'] == 'welcome')) as Map)['token']
               as String;
       server.hub.engine.members[token]!.lastSeen =
-          DateTime.now().toUtc().subtract(const Duration(seconds: 61));
-      server.hub.dropSilentSockets();
+          DateTime.now().toUtc().subtract(const Duration(seconds: 16));
+      server.hub.engine.tick();
       final closeDeadline = DateTime.now().add(const Duration(seconds: 5));
-      while ((!wsClosed ||
-              server.hub.engine.members.containsKey(token) ||
-              server.session.tokens.containsKey(token)) &&
-          DateTime.now().isBefore(closeDeadline)) {
+      while (!wsClosed && DateTime.now().isBefore(closeDeadline)) {
         await Future.delayed(const Duration(milliseconds: 50));
       }
       expect(wsClosed, isTrue);
-      expect(server.hub.engine.members.containsKey(token), isFalse);
-      expect(server.session.tokens.containsKey(token), isFalse);
+      expect(ch.closeCode, CloseCodes.silent);
+      expect(server.hub.engine.members[token]!.presence, Presence.gone);
+      expect(server.session.tokens.containsKey(token), isTrue);
       try {
         await sub.cancel();
       } catch (_) {}
@@ -193,9 +210,7 @@ void main() {
       ch.sink.add(jsonEncode(HelloMessage(
               proto: RelayConstants.protoVersion,
               secret: 'shh',
-              user: const HelloUser(name: 'hb'),
-              media: const HelloMedia(
-                  name: 'f.bin', size: 8192, duration: 10.0))
+              user: const HelloUser(name: 'hb'))
           .toJson()));
       await Future.delayed(const Duration(seconds: 1));
       final hbToken = server.session.tokens.keys
@@ -223,8 +238,7 @@ void main() {
         ch.sink.add(jsonEncode(HelloMessage(
             proto: RelayConstants.protoVersion,
             secret: 'shh',
-            user: HelloUser(name: name),
-            media: const HelloMedia(name: 'f.bin', size: 8192, duration: 10.0)).toJson()));
+            user: HelloUser(name: name)).toJson()));
         final deadline = DateTime.now().add(const Duration(seconds: 5));
         while (!messages.any((m) => m['t'] == 'welcome')) {
           if (DateTime.now().isAfter(deadline)) fail('no welcome');
@@ -329,8 +343,7 @@ void main() {
         ch.sink.add(jsonEncode(HelloMessage(
             proto: RelayConstants.protoVersion,
             secret: 'shh',
-            user: HelloUser(name: 'alice', avatar: base64Encode(png)),
-            media: const HelloMedia(name: 'f.bin', size: 8192, duration: 10.0)).toJson()));
+            user: HelloUser(name: 'alice', avatar: base64Encode(png))).toJson()));
         final welcome = await waitFor((m) => m['t'] == 'welcome');
         final token = welcome['token'] as String;
         final first = member(Map<String, Object?>.from(welcome['state'] as Map));
@@ -376,7 +389,7 @@ void main() {
         ch.sink.add(jsonEncode(
             ProfileIntent(avatar: 'x' * (RelayConstants.maxAvatarBytes + 1)).toJson()));
         final err = await waitFor((m) => m['t'] == 'err');
-        expect(err['message'], 'rejected: avatar too large');
+        expect([err['code'], err['for'], err['message']], ['rejected', 'profile', 'rejected: avatar too large']);
       } finally {
         await sub.cancel();
         try {

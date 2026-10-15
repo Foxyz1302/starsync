@@ -6,6 +6,7 @@ import 'package:sync_relay_core/core.dart';
 
 import '../screens/home/ui.dart' show appName, displayVersion, shortVersion;
 import '../session/delivery.dart';
+import '../session/party.dart';
 import '../state/session_state.dart';
 import '../widgets/app_keys.dart';
 import '../widgets/app_menu.dart';
@@ -282,8 +283,11 @@ class _ServerLabel extends StatelessWidget {
     builder: (context) {
       final coord = SessionState.instance.coordinator;
       final r = coord.serverState.value;
-      final members = r?.members ?? const <MemberView>[];
-      final ready = members.where((m) => m.ready).length;
+      // The ready counter counts who the presence policy counts (not away,
+      // not gone, able to play it).
+      final counted = (r?.members ?? const <MemberView>[]).where(countsForReady).toList();
+      final ready = counted.where((m) => m.ready).length;
+      final stale = coord.stateStale.value;
       return Column(
         key: const ValueKey('server-label'),
         mainAxisSize: MainAxisSize.min,
@@ -294,7 +298,11 @@ class _ServerLabel extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.w600, height: 1.1),
           ),
           Text(
-            r == null ? 'connecting…' : 'ready $ready/${members.length}',
+            r == null
+                ? 'connecting…'
+                : stale
+                    ? 'reconnecting…'
+                    : 'ready $ready/${counted.length}',
             style: TextStyle(
               color: scheme.onSurfaceVariant,
               fontSize: 12,
@@ -586,10 +594,13 @@ class _MemberTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final coord = SessionState.instance.coordinator;
     final m = member;
-    final status = m.stale
-        ? 'reconnecting…'
-        : m.out
+    final since = m.goneSince;
+    final status = m.presence == Presence.gone
+        ? 'reconnecting…${since == null ? '' : ' (${sinceText(since, DateTime.now().toUtc())})'}'
+        : m.presence == Presence.away
         ? 'sitting out'
+        : m.presence == Presence.joining
+        ? 'joining…'
         : m.error.isNotEmpty
         ? "can't play this: ${m.error}"
         : info.buffering
@@ -628,11 +639,11 @@ class _MemberTile extends StatelessWidget {
           }
         },
         items: () => [
-          if (!m.out) AppMenuItem(value: 'force', label: m.ready ? 'Force unready' : 'Force ready'),
+          if (m.presence != Presence.away) AppMenuItem(value: 'force', label: m.ready ? 'Force unready' : 'Force ready'),
           if (!info.self) const AppMenuItem(value: 'nudge', label: 'Nudge'),
-          if (info.self && m.out)
+          if (info.self && m.presence == Presence.away)
             const AppMenuItem(value: 'back', label: 'Join back')
-          else if (!m.out)
+          else if (m.presence != Presence.away)
             const AppMenuItem(value: 'out', label: 'Sit out'),
         ],
       ),

@@ -81,11 +81,13 @@ settings), the Library / Schedule / Settings tabs, and the party. Offline
 the party side has Join a friend and Host; watching solo it says Solo,
 with Invite friends and Stop; in a server it shows everyone's avatar
 with a ring for their state (green ready, amber buffering, grey not ready,
-dimmed reconnecting, dimmed with a moon sitting out; a crown on whoever
+a little faded joining, dimmed reconnecting, dimmed with a moon sitting
+out; a crown on whoever
 hosts, a tower on whoever passes the video on). Click the avatars for the
 member list (force ready, Nudge, Sit out, "Copy invite address"; when you host it lists this computer's
 network addresses with the port, and friends outside your network need
-that port forwarded or a server they can all reach, like a VPS). Beside them the server and "ready n/m", the chat button with unread
+that port forwarded or a server they can all reach, like a VPS). Beside them the server and "ready n/m" (who is sitting out or
+reconnecting does not count), the chat button with unread
 count, and Leave. Empty strip space drags the window.
 
 The player fills the window under the strip. Pick a tab and it shrinks to
@@ -120,8 +122,25 @@ row in the member list, or × on the mini player) unloads the video on your
 end, and nobody waits for you any more; you stay in chat. Anyone can sit
 anyone out, the host too ("Alice sat you out" tells you who). The player
 then shows the cover, title and where the others are; Join back (or Space)
-loads the video there and readies you. Settings → Party & network → "When idle,
-sit out instead of just unready" does it after 10 idle minutes.
+loads the video there and readies you, in the background while the others
+play on (nobody is paused for you).
+
+**Auto sit-out.** Idle for 5 minutes while nothing plays, or the window
+minimised for 10 minutes (playing or not), sits you out by itself, so
+nobody waits for you; you are back as soon as you return (a key, the
+mouse, the window's focus). It never happens when you are alone, and an
+away you chose (or someone else's) stays until you join back. Settings →
+Party & network → "Auto sit-out" turns it off.
+
+**Reconnects.** A bad connection does not throw you out: the video keeps
+playing, the pill says "Connection unstable…" and then "Reconnecting…",
+and the app comes back on its own as the same member (ready, sitting out,
+your Up next items and the video you pass on all kept) for up to 10
+minutes; the others see you dimmed, "reconnecting…". Only a drop of a
+few seconds or more makes the lost / back sounds. Leave and closing the
+app tell the others at once; Update and restart keeps your place for the
+restarted app. Opening Starsync a second time (another window with the
+same profile) takes your place over, and the first one says so and stops.
 
 **Nudge.** Nudge in the member list pokes someone, sitting out or not:
 only they hear it (a sound, a pop-up, and the taskbar entry asks for

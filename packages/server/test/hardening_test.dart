@@ -1,5 +1,3 @@
-// restructure: rewrite in step 1 (Connection + Identity + Presence): "anyone
-// sits anyone out" (Away); the rest stays.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -25,7 +23,6 @@ class _Peer {
             proto: RelayConstants.protoVersion,
             secret: secret,
             user: HelloUser(name: name),
-            media: const HelloMedia(name: '', size: 0, duration: 0),
             hostKey: hostKey)
         .toJson()));
     await p.next('welcome');
@@ -81,6 +78,7 @@ void main() {
     a.send('{"t":"report","position":1e400,"buffered":1e400,"eventId":0}');
     final err = await a.next('err');
     expect('${err['message']}', contains('finite'));
+    expect([err['code'], err['for']], ['bad', 'seek']);
     expect(server.hub.engine.position, 0);
     // still alive: a valid seek round-trips through a broadcast
     a.send('{"t":"seek","position":5}');
@@ -125,7 +123,7 @@ void main() {
     await a.ws.close();
   });
 
-  test('anyone sits anyone out (host too); nudges reach only the target, capped', () async {
+  test('anyone sets anyone away (host too), only oneself comes back in; nudges reach only the target, capped', () async {
     await server.stop();
     server = SyncServer(AppConfig(port: 0, secret: '', name: 't', hostKey: 'hk'));
     await server.start();
@@ -137,19 +135,23 @@ void main() {
         server.hub.engine.members.values.firstWhere((m) => m.name == name).id;
     EngineMember of(String name) =>
         server.hub.engine.members.values.firstWhere((m) => m.name == name);
-    friend.send(jsonEncode(OutIntent(target: idOf('host'), out: true).toJson()));
+    friend.send(jsonEncode(PresenceIntent(target: idOf('host'), state: Presence.away).toJson()));
     var feed = await friend.next('feed');
-    while (feed['action'] != 'out') {
+    while (feed['action'] != 'away') {
       feed = await friend.next('feed');
     }
-    expect([feed['actor'], feed['target']], ['friend', 'host']);
-    expect(of('host').out, isTrue);
-    expect(of('host').inSet, isFalse);
+    expect([feed['actor'], feed['target'], feed['actorId'], feed['targetId']],
+        ['friend', 'host', idOf('friend'), idOf('host')]);
+    expect(of('host').presence, Presence.away);
+    expect(server.hub.engine.countsForGate(of('host')), isFalse);
     // Only oneself comes back.
-    friend.send(jsonEncode(OutIntent(target: idOf('host'), out: false).toJson()));
-    host.send(jsonEncode(OutIntent(target: idOf('host'), out: false).toJson()));
+    friend.send(jsonEncode(PresenceIntent(target: idOf('host'), state: Presence.watching).toJson()));
+    final err = await friend.next('err');
+    expect([err['code'], err['for']], ['forbidden', 'presence']);
+    expect(of('host').presence, Presence.away);
+    host.send(jsonEncode(const PresenceIntent(state: Presence.watching).toJson()));
     await Future.delayed(const Duration(milliseconds: 200));
-    expect(of('host').out, isFalse);
+    expect(of('host').presence, Presence.watching, reason: 'no media up: nothing to load');
 
     // 5 at once: 3 pass (per second), only to the target.
     for (var i = 0; i < 5; i++) {
@@ -224,8 +226,7 @@ void main() {
     ws.add(jsonEncode(HelloMessage(
             proto: RelayConstants.protoVersion,
             secret: '',
-            user: const HelloUser(name: 'a'),
-            media: const HelloMedia(name: '', size: 0, duration: 0))
+            user: const HelloUser(name: 'a'))
         .toJson()));
     final w = await p.next('welcome');
     expect('${w['mediaUrl']}', startsWith('http://127.0.0.1:${server.boundPort}/m/'));
@@ -239,8 +240,7 @@ void main() {
       ws2.add(jsonEncode(HelloMessage(
               proto: RelayConstants.protoVersion,
               secret: '',
-              user: const HelloUser(name: 'c'),
-              media: const HelloMedia(name: '', size: 0, duration: 0))
+              user: const HelloUser(name: 'c'))
           .toJson()));
       final w2 = await p2.next('welcome');
       expect('${w2['mediaUrl']}', startsWith('http://$lan:${server.boundPort}/m/'));

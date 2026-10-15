@@ -1,9 +1,6 @@
-// restructure: rewrite in step 1 (Connection + Identity + Presence): both
-// tests pin today's rules (a silent member is stale, then removed; a reset
-// socket loses its member, so the redial is a new one, P1); with grace they
-// expect `gone` and the same member back.
-//
-// A client reaching the server through FlakyProxy (DEVELOPMENT.md "Tests").
+// A client reaching the server through FlakyProxy (DEVELOPMENT.md "Tests"):
+// a dead link makes the member `gone` (kept with everything it had), and
+// the same app dialling again gets the same member back (P1).
 import 'dart:async';
 import 'dart:convert';
 
@@ -22,7 +19,7 @@ class _Client {
   Timer? _reports;
   late final StreamSubscription<dynamic> _sub;
 
-  _Client(int port, {String resume = ''})
+  _Client(int port, {int seq = 1})
       : ch = WebSocketChannel.connect(Uri.parse('ws://127.0.0.1:$port/sync')) {
     ch.ready.then((_) {}, onError: (_) {});
     _sub = ch.stream.listen((m) => frames.add(Map<String, Object?>.from(jsonDecode('$m') as Map)),
@@ -31,10 +28,14 @@ class _Client {
             proto: RelayConstants.protoVersion,
             secret: 'shh',
             user: const HelloUser(name: 'alice'),
-            media: const HelloMedia(name: 'f.bin', size: 1, duration: 10.0),
-            resume: resume)
+            client: clientId,
+            seq: seq)
         .toJson()));
   }
+
+  static const clientId = 'flakyLinkTestClient01';
+
+  void send(Map<String, Object?> j) => ch.sink.add(jsonEncode(j));
 
   Map<String, Object?>? get welcome => frames.where((f) => f['t'] == 'welcome').firstOrNull;
   String get token => welcome!['token'] as String;
@@ -73,7 +74,7 @@ void main() {
   setUp(() async {
     // Short limits so the demo runs in a couple of seconds.
     server = SyncServer(AppConfig(port: 0, secret: 'shh', name: 'test'),
-        liveness: const Liveness(staleAfter: Duration(milliseconds: 600), dropAfter: Duration(milliseconds: 1500)));
+        liveness: const Liveness(silence: Duration(milliseconds: 600)));
     await server.start();
     proxy = await FlakyProxy.start(server.boundPort);
   });
@@ -87,25 +88,34 @@ void main() {
     await server.stop();
   });
 
-  _Client dial({String resume = ''}) {
-    final c = _Client(proxy.port, resume: resume);
+  _Client dial({int seq = 1}) {
+    final c = _Client(proxy.port, seq: seq);
     clients.add(c);
     return c;
   }
 
-  test('a blackholed client goes stale, then is removed; it never hears of it', () async {
+  test('a blackholed client goes gone with its ready flag, queue item and relay; it comes back as itself', () async {
     final c = dial();
     await until(() => c.welcome != null, 'welcome');
     c.startReports();
     final engine = server.hub.engine;
     EngineMember? member() => engine.members[c.token];
+    c.send(const ReadyIntent(ready: true).toJson());
+    c.send(const QueueIntent.add(QueueItem(
+            media: HelloMedia(name: 'f.mkv', size: 10, duration: 0), how: QueueHow.file, title: 'f', key: 'key-of-f-1'))
+        .toJson());
+    c.send(const SwapIntent(media: HelloMedia(name: 'mine.mkv', size: 100, duration: 0, relay: MediaRelay())).toJson());
+    await until(() => engine.queue.length == 1 && server.hub.relay != null && member()!.ready, 'ready, queued, relayed');
     await Future<void>.delayed(const Duration(milliseconds: 1200));
-    expect(engine.isStale(member()!), isFalse, reason: 'reports through the proxy keep it fresh');
+    expect(member()!.presence, isNot(Presence.gone), reason: 'reports through the proxy keep it present');
 
     proxy.last!.blackhole();
     final seen = c.frames.length;
-    await until(() => member() != null && engine.isStale(member()!), 'stale');
-    await until(() => member() == null, 'removed');
+    await until(() => member()?.presence == Presence.gone, 'gone');
+    expect(member()!.ready, isTrue);
+    expect(engine.queue.items.single.by, c.memberId);
+    expect(server.hub.relay, isNotNull, reason: 'the relay lives through the grace (D6)');
+    expect(engine.media!.relay!.sourceGone, isTrue);
     expect(server.hub.sockets.containsKey(c.token), isFalse);
     // Half-open: the server's close never reached the client.
     await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -113,20 +123,30 @@ void main() {
     expect(c.frames.length, seen);
     expect(proxy.last!.isClosed, isFalse);
     expect(proxy.last!.dropped, greaterThan(0));
+
+    final again = dial(seq: 2);
+    await until(() => again.welcome != null, 'welcome after redial');
+    expect(again.welcome!['resumed'], isTrue);
+    expect([again.memberId, again.token], [c.memberId, c.token]);
+    expect(engine.members, hasLength(1));
+    expect(member()!.presence, Presence.joining, reason: 'media is up: it loads, then comes in (D2)');
+    expect(member()!.ready, isTrue);
+    expect(engine.media!.relay!.sourceGone, isFalse);
+    final actions = [for (final f in again.frames) if (f['t'] == 'feed') f['action']];
+    expect(actions, isNot(contains('join')), reason: 'a return, not a join');
   });
 
-  test('a reset client sees the drop at once and redials; today it comes back as a new member', () async {
+  test('a reset client sees the drop at once and redials into the same member', () async {
     final c = dial();
     await until(() => c.welcome != null, 'welcome');
-    final first = c.memberId;
     proxy.last!.reset();
     await until(() => c.ended, 'client sees the reset');
-    await until(() => !server.hub.engine.members.containsKey(c.token), 'server forgets the socket');
+    await until(() => server.hub.engine.members[c.token]?.presence == Presence.gone, 'server sees it gone');
 
-    final again = dial(resume: c.token);
+    final again = dial(seq: 2);
     await until(() => again.welcome != null, 'welcome after redial');
     expect(proxy.links, hasLength(2));
-    expect(again.memberId, isNot(first), reason: 'P1: no grace yet');
+    expect([again.memberId, again.token], [c.memberId, c.token]);
     expect(server.hub.engine.members, hasLength(1));
   });
 }

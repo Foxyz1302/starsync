@@ -4,8 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
-import '../screens/home/profile.dart';
+import '../session/identity.dart';
 import '../session/delivery.dart';
+import '../session/party.dart';
 import '../session/session_coordinator.dart';
 import '../state/session_state.dart';
 import 'motion.dart';
@@ -17,9 +18,12 @@ class AvatarInfo {
   final String name;
   final Color color;
   final ImageProvider? image;
-  final bool ready, buffering, relaying, stale, host, self;
-  /// Sitting out: dimmed, with an "away" mark.
-  final bool out;
+  final bool ready, buffering, relaying, host, self;
+  /// Where they stand: joining (a little faded), away (dimmed with a moon),
+  /// gone (dimmed, grey ring: reconnecting).
+  final Presence presence;
+  /// Since when they are gone; null otherwise.
+  final DateTime? goneSince;
   /// Why their player cannot open the media (`members[].error`): an error
   /// mark; empty when it can.
   final String error;
@@ -34,13 +38,19 @@ class AvatarInfo {
     this.ready = false,
     this.buffering = false,
     this.relaying = false,
-    this.stale = false,
+    this.presence = Presence.watching,
+    this.goneSince,
     this.host = false,
     this.self = false,
-    this.out = false,
     this.error = '',
     this.delivery = '',
   });
+
+  /// Sitting out.
+  bool get away => presence == Presence.away;
+
+  /// Disconnected, in their grace period.
+  bool get gone => presence == Presence.gone;
 }
 
 /// Stable colour for someone else (colours are not on the wire).
@@ -87,7 +97,8 @@ ImageProvider? memberAvatarImage(MemberView m, SessionCoordinator coord) {
 }
 
 /// Your own avatar from the profile (also offline).
-AvatarInfo selfAvatarInfo({bool ready = false, bool host = false, bool out = false, String error = ''}) {
+AvatarInfo selfAvatarInfo(
+    {bool ready = false, bool host = false, Presence presence = Presence.watching, String error = ''}) {
   final p = Profile.instance;
   final png = p.picture.value;
   final name = p.name.value;
@@ -98,7 +109,7 @@ AvatarInfo selfAvatarInfo({bool ready = false, bool host = false, bool out = fal
     ready: ready,
     host: host,
     self: true,
-    out: out,
+    presence: presence,
     error: error,
   );
 }
@@ -115,14 +126,14 @@ AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator 
     color: self ? Profile.instance.color.value : colorForName(m.name),
     image: memberAvatarImage(m, coord),
     ready: m.ready,
-    buffering: !m.stale && m.ready && m.error.isEmpty && playing && m.buffered < r!.bufferNeed,
+    buffering: countsForReady(m) && m.ready && playing && m.buffered < r!.bufferNeed,
     relaying: relay != null && relay.source.isNotEmpty && relay.source == m.id,
-    stale: m.stale,
+    presence: m.presence,
+    goneSince: m.goneSince,
     // The state marks the host (`members[].host`); your own app also
     // knows before the first state.
     host: m.host || (self && coord.hostFile != null),
     self: self,
-    out: m.out,
     error: m.error,
     delivery: delivery == null ? '' : memberDeliveryOf(m, r!, delivery).detail,
   );
@@ -150,8 +161,9 @@ class PartyWatch extends StatelessWidget {
 
 /// Circle avatar with a status ring outside it and a gap in the background
 /// colour, so overlapping neighbours never hide the status. Crown = host,
-/// tower = passing the video on, spinner = buffering, dimmed = stale,
-/// dimmed with a moon = sitting out, red "!" = cannot play the media.
+/// tower = passing the video on, spinner = buffering, a little faded =
+/// joining, dimmed with a grey ring = gone (reconnecting), dimmed with a
+/// moon = sitting out, red "!" = cannot play the media.
 class StatusAvatar extends StatelessWidget {
   final AvatarInfo info;
   final double size;
@@ -168,7 +180,7 @@ class StatusAvatar extends StatelessWidget {
     final bg = Theme.of(context).colorScheme.surfaceContainerLowest;
     final ringColor = !ring
         ? bg
-        : info.stale
+        : info.gone
             ? Colors.grey.shade700
             : info.buffering
                 ? Colors.amber
@@ -195,7 +207,11 @@ class StatusAvatar extends StatelessWidget {
                 decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
                 padding: EdgeInsets.all(stroke),
                 child: Opacity(
-                  opacity: info.stale || info.out ? 0.4 : 1,
+                  opacity: info.gone || info.away
+                      ? 0.4
+                      : info.presence == Presence.joining
+                          ? 0.7
+                          : 1,
                   child: CircleAvatar(
                     radius: size / 2,
                     backgroundColor: info.color,
@@ -224,7 +240,7 @@ class StatusAvatar extends StatelessWidget {
                 ),
               ),
             ),
-          if (info.out)
+          if (info.away)
             Positioned(
               key: const ValueKey('away-mark'),
               left: -3,
@@ -281,7 +297,7 @@ class _AvatarStackState extends State<AvatarStack> {
   @override
   Widget build(BuildContext context) {
     final size = widget.size;
-    int rank(AvatarInfo m) => m.host ? 0 : (m.out ? 3 : m.ready ? 1 : 2);
+    int rank(AvatarInfo m) => m.host ? 0 : (m.gone ? 4 : m.away ? 3 : m.ready ? 1 : 2);
     final sorted = [...widget.members]..sort((a, b) => rank(a) - rank(b));
     final visible = sorted.take(widget.shown).toList();
     final extra = sorted.length - visible.length;
@@ -356,13 +372,16 @@ class Pill extends StatelessWidget {
       );
 }
 
-/// Someone by display name (feed lines carry names, not ids): from the
-/// latest state when still there, else their initial on a stable colour.
-AvatarInfo avatarForName(String name, [SessionCoordinator? coord]) {
+/// Someone in a feed line or toast: by member [id] when it has one, else
+/// by display [name]; from the latest state when still there, else their
+/// initial on a stable colour.
+AvatarInfo avatarForName(String name, [SessionCoordinator? coord, String id = '']) {
   final c = coord ?? SessionState.instance.coordinator;
   final r = c.serverState.value;
-  for (final m in r?.members ?? const <MemberView>[]) {
-    if (m.name == name) return memberAvatarInfo(m, r, c);
+  final members = r?.members ?? const <MemberView>[];
+  // By id when the line has one (names change and repeat), else by name.
+  for (final m in members) {
+    if (id.isNotEmpty ? m.id == id : m.name == name) return memberAvatarInfo(m, r, c);
   }
   return AvatarInfo(name: name, color: colorForName(name));
 }

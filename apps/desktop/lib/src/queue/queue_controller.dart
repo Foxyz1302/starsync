@@ -93,7 +93,7 @@ class QueueController {
     effect(() {
       shownContinuation.value;
       coord.settledMediaId.value;
-      coord.selfOut.value;
+      coord.selfAway.value;
       final r = coord.serverState.value;
       untracked(() => _warm(r));
     });
@@ -107,6 +107,7 @@ class QueueController {
   Future<String?> add(PickedMedia pick, {bool next = false}) async {
     coord.markInput();
     if (coord.serverState.peek() == null) return 'not in a server';
+    if (coord.stateStale.peek()) return 'reconnecting — add it again once back';
     if (items.peek().length >= RelayConstants.maxQueueItems) {
       return 'Up next is full (${RelayConstants.maxQueueItems} items)';
     }
@@ -490,7 +491,7 @@ class QueueController {
         if (local == null) return "it isn't on this computer any more";
         // Only this app can pass it on, and a member sitting out has
         // nothing open: back first.
-        if (coord.selfOut.peek()) coord.joinBack();
+        if (coord.selfAway.peek()) coord.joinBack();
         return coord.swapPicked(local.pick, queueId: item.id);
     }
   }
@@ -528,7 +529,7 @@ class QueueController {
   /// puts up (its swap reads it). Null: nothing.
   _WarmTarget? _warmTarget(StateBroadcast? r) {
     final t = _warmTargetHere(r);
-    if (t == null || !coord.selfOut.peek()) return t;
+    if (t == null || !coord.selfAway.peek()) return t;
     return t.probe == null ? null : _WarmTarget(t.id, probe: t.probe);
   }
 
@@ -718,7 +719,7 @@ class QueueController {
     final seen = _lastState;
     if (r == null || (seen != null && seen.mediaId > r.mediaId)) r = seen;
     if (r == null) return;
-    final out = coord.selfOut.peek();
+    final out = coord.selfAway.peek();
     if (!out && r.media != null && coord.settledMediaId.peek() != r.mediaId) return;
     final want = out ? null : _preloadWant;
     final playback = coord.playback;

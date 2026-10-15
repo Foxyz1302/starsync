@@ -60,12 +60,10 @@ void main() {
       const msg = HelloMessage(
         proto: 1,
         secret: 'shh',
-        user: HelloUser(name: 'alice'),
-        media: HelloMedia(name: 'Ep01.mkv', size: 1500000000, duration: 1400.0),
-      );
+        user: HelloUser(name: 'alice'));
       final back = HelloMessage.fromJson(Map<String, Object?>.from(msg.toJson()));
       expect(back.user.name, 'alice');
-      expect(back.media.size, 1500000000);
+      expect(msg.toJson()['media'], isEmpty, reason: 'a 15 server needs it to say "proto mismatch"');
       expect(back.hostKey, isEmpty);
       expect(msg.toJson().containsKey('hostKey'), isFalse);
     });
@@ -75,9 +73,7 @@ void main() {
         proto: 1,
         secret: '',
         user: HelloUser(name: 'host'),
-        media: HelloMedia(name: '', size: 0, duration: 0),
-        hostKey: 'hk',
-      );
+        hostKey: 'hk');
       final back = HelloMessage.fromJson(Map<String, Object?>.from(msg.toJson()));
       expect(back.hostKey, 'hk');
     });
@@ -168,11 +164,9 @@ void main() {
       final hello = HelloMessage.fromJson(rt(const HelloMessage(
               proto: 6,
               secret: '',
-              user: HelloUser(name: 'a'),
-              media: HelloMedia(name: '', size: 0, duration: 0),
-              resume: 'tok')
+              user: HelloUser(name: 'a'))
           .toJson()));
-      expect(hello.resume, 'tok');
+      expect((hello.protoMin, hello.proto), (6, 6));
       final seek = SeekIntent.fromJson(rt(const SeekIntent(position: 3, seq: 9).toJson()));
       expect(seek.seq, 9);
       final report = ReportMessage.fromJson(rt(const ReportMessage(
@@ -209,5 +203,149 @@ void main() {
     // 3 s in: 3 s left, minus the 2 s end slack.
     expect(s.bufferNeedAt(t0.add(const Duration(seconds: 3))), closeTo(1.0, 1e-9));
     expect(s.bufferNeedAt(t0.add(const Duration(seconds: 5))), 0);
+  });
+
+  group('proto 16', () {
+    Map<String, Object?> rt(Map<String, Object?> j) => Map<String, Object?>.from(jsonDecode(jsonEncode(j)) as Map);
+
+    test('version ranges: the highest common one, or none', () {
+      expect(pickProto(16, 16, serverMin: 16, serverMax: 16), 16);
+      expect(pickProto(16, 18, serverMin: 16, serverMax: 17), 17);
+      expect(pickProto(15, 15, serverMin: 16, serverMax: 16), isNull);
+      expect(pickProto(17, 18, serverMin: 16, serverMax: 16), isNull);
+      expect(HelloMessage.protoRangeOf({'proto': 15, 'media': {}}), (min: 15, max: 15));
+      expect(HelloMessage.protoRangeOf({'proto': 17, 'protoMin': 16}), (min: 16, max: 17));
+      expect(HelloMessage.protoRangeOf({'protoMin': 16}), isNull);
+    });
+
+    test('the refusal stays readable by a proto 15 app', () {
+      final err = ErrorFrame.version(got: 15, server: '1.3.0').toJson();
+      expect(err, {
+        't': 'err',
+        'code': 'version',
+        'message': 'proto mismatch: got 15, want ${RelayConstants.protoMin}..${RelayConstants.protoMax}',
+        'for': 'hello',
+        'min': RelayConstants.protoMin,
+        'max': RelayConstants.protoMax,
+        'server': '1.3.0',
+      });
+      final back = ErrorFrame.fromJson(rt(err));
+      expect([back.code, back.min, back.server], [ErrCode.version, RelayConstants.protoMin, '1.3.0']);
+      expect(ErrorFrame.fromJson({'t': 'err', 'message': 'wrong secret'}).code, isNull, reason: 'a 15 server');
+    });
+
+    test('hello: identity, caps, feedAfter; a bad client id is refused', () {
+      const hello = HelloMessage(
+          secret: 's',
+          user: HelloUser(name: 'a'),
+          client: 'AbCdEfGhIjKlMnOpQrStUv',
+          seq: 7,
+          app: '1.3.0',
+          platform: 'linux',
+          caps: ClientCaps(source: true, resolve: true),
+          feedAfter: 41);
+      final json = hello.toJson();
+      expect([json['protoMin'], json['proto'], json['media']], [RelayConstants.protoMin, RelayConstants.protoMax, {}]);
+      expect(json.containsKey('resume'), isFalse);
+      final back = HelloMessage.fromJson(rt(json));
+      expect([back.client, back.seq, back.app, back.platform, back.feedAfter], ['AbCdEfGhIjKlMnOpQrStUv', 7, '1.3.0', 'linux', 41]);
+      expect(back.caps, const ClientCaps(source: true, resolve: true));
+      expect(ClientCaps.fromJson({'source': true, 'teleport': true}).toJson(), {'source': true});
+      for (final bad in ['short', 'has space in it 12345', 'x' * 65, 7]) {
+        expect(() => HelloMessage.fromJson({...json, 'client': bad}), throwsA(isA<ProtocolException>()));
+      }
+      expect(HelloMessage.fromJson({...json}..remove('client')).client, isEmpty);
+    });
+
+    test('welcome: proto, resumed, instance, grace, replayed feed', () {
+      final w = WelcomeMessage(
+          token: 't',
+          memberId: 'm1',
+          proto: 16,
+          resumed: true,
+          instance: 'boot1',
+          grace: 600,
+          feed: [FeedMessage(actor: 'a', action: 'join', at: DateTime.utc(2026), seq: 3, replayed: true)]);
+      final back = WelcomeMessage.fromJson(rt(w.toJson()));
+      expect([back.proto, back.resumed, back.instance, back.grace], [16, true, 'boot1', 600]);
+      expect([back.feed.single.seq, back.feed.single.replayed], [3, true]);
+    });
+
+    test('presence intent, bye', () {
+      const p = PresenceIntent(target: 'm2', state: Presence.away, reason: PresenceReason.idle);
+      expect(p.toJson(), {'t': 'presence', 'target': 'm2', 'state': 'away', 'reason': 'idle'});
+      final back = PresenceIntent.fromJson(rt(p.toJson()));
+      expect([back.target, back.state, back.reason], ['m2', Presence.away, PresenceReason.idle]);
+      expect(PresenceIntent.fromJson({'t': 'presence', 'state': 'in'}).target, isEmpty);
+      expect(() => PresenceIntent.fromJson({'t': 'presence', 'state': 'gone'}), throwsA(isA<ProtocolException>()));
+      expect(const ByeMessage().toJson(), {'t': 'bye'});
+    });
+
+    test('members carry presence, goneSince, app and caps; no out, no stale', () {
+      final since = DateTime.utc(2026, 1, 1, 12);
+      final v = MemberView(
+          id: 'm1',
+          name: 'a',
+          ready: true,
+          inSet: false,
+          buffered: 0,
+          presence: Presence.gone,
+          goneSince: since,
+          app: '1.3.0',
+          caps: const ClientCaps(jellyfin: true));
+      final json = v.toJson();
+      expect([json['presence'], json['goneSince'], json['app'], json['caps']],
+          ['gone', since.toIso8601String(), '1.3.0', {'jellyfin': true}]);
+      expect(json.containsKey('out') || json.containsKey('stale'), isFalse);
+      final back = MemberView.fromJson(rt(json));
+      expect([back.presence, back.goneSince, back.caps.jellyfin], [Presence.gone, since, true]);
+    });
+
+    test('media.ref rides along, at most 2 KiB; relay sourceGone', () {
+      const ref = MediaRef(kind: 'episode', title: 'Show', anilistId: 1, anilistEp: 6, tvdbId: 2, ep: 6, absolute: 30);
+      const media = HelloMedia(name: 'x', size: 0, duration: 0, url: 'https://x/y', ref: ref);
+      final back = HelloMedia.fromJson(rt(media.toJson()));
+      expect(back.ref, ref);
+      expect(back.ref!.season, isNull);
+      expect(MediaRef.fromJson({'kind': 'trailer'}), isNull);
+      expect(() => MediaRef.fromJson({'kind': 'movie', 'title': 'x' * 3000}), throwsA(isA<ProtocolException>()));
+      final since = DateTime.utc(2026, 1, 1);
+      final relay = MediaRelay(source: 'm2', sourceGone: true, sourceGoneSince: since);
+      final r = MediaRelay.fromJson(rt(relay.toJson()));
+      expect([r.sourceGone, r.sourceGoneSince], [true, since]);
+      expect(r.copyWith(sourceGone: false).toJson().containsKey('sourceGoneSince'), isFalse);
+    });
+
+    test('state carries hold and the reserved advance', () {
+      final at = DateTime.utc(2026);
+      final s = StateBroadcast(
+          eventId: 1,
+          transport: 'held',
+          position: 0,
+          serverTime: at,
+          mediaId: 1,
+          members: const [],
+          hold: HoldInfo(reason: HoldReason.joining, members: const ['m2'], until: at),
+          advance: QueueAdvance(id: 'q3', at: at, secs: 10));
+      final back = StateBroadcast.fromJson(rt(s.toJson()));
+      expect([back.hold!.reason, back.hold!.members, back.hold!.until], [HoldReason.joining, ['m2'], at]);
+      expect([back.advance!.id, back.advance!.secs], ['q3', 10]);
+    });
+
+    test('close codes are distinct', () {
+      const codes = [
+        CloseCodes.relayNotSource,
+        CloseCodes.relayOtherMedia,
+        CloseCodes.relayReplaced,
+        CloseCodes.version,
+        CloseCodes.secret,
+        CloseCodes.refused,
+        CloseCodes.replaced,
+        CloseCodes.stale,
+        CloseCodes.silent,
+        CloseCodes.left,
+      ];
+      expect(codes.toSet(), hasLength(codes.length));
+    });
   });
 }

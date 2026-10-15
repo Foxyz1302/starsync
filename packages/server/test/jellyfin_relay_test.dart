@@ -133,9 +133,7 @@ class _Client {
     c.send(HelloMessage(
       proto: RelayConstants.protoVersion,
       secret: '',
-      user: HelloUser(name: name),
-      media: const HelloMedia(name: '', size: 0, duration: 0),
-    ).toJson());
+      user: HelloUser(name: name)).toJson());
     return (c, await c._welcome.future.timeout(const Duration(seconds: 5)));
   }
 }

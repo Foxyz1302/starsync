@@ -38,12 +38,7 @@ class _Raw {
 
   static Future<_Raw> join(int port, String name, {String secret = ''}) async {
     final r = _Raw(await WebSocket.connect('ws://127.0.0.1:$port/sync'));
-    r.ws.add(jsonEncode(HelloMessage(
-            proto: RelayConstants.protoVersion,
-            secret: secret,
-            user: HelloUser(name: name),
-            media: const HelloMedia(name: '', size: 0, duration: 0))
-        .toJson()));
+    r.ws.add(jsonEncode(HelloMessage(secret: secret, user: HelloUser(name: name)).toJson()));
     await r.next('welcome');
     return r;
   }
@@ -135,8 +130,8 @@ void main() {
           .cast<Map>()
           .firstWhere((m) => m['name'] == 'host'))['id'];
       // Anyone may sit the host out; its player unloads, the server serves on.
-      friend.ws.add(jsonEncode(OutIntent(target: '$hostId', out: true).toJson()));
-      await _poll(() => session.coordinator.selfOut.peek(), 'host sat out');
+      friend.ws.add(jsonEncode(PresenceIntent(target: '$hostId', state: Presence.away).toJson()));
+      await _poll(() => session.coordinator.selfAway.peek(), 'host sat out');
 
       // The host nudges the friend: only the friend hears it.
       final friendId = ((state['members'] as List)

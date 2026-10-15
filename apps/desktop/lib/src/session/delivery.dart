@@ -1,6 +1,7 @@
 import 'package:sync_relay_core/core.dart';
 
 import '../jellyfin/session_media.dart';
+import 'party.dart';
 
 // Who fetches the current media and how it spreads, from the state alone:
 // the members card's source line and each member's route and buffer.
@@ -217,7 +218,7 @@ Delivery? deliveryOf(StateBroadcast r, {required String selfId, MemberNames? nam
   final source = r.members.where((m) => m.id == sourceId).firstOrNull;
   var via = 0, direct = 0;
   for (final m in r.members) {
-    if (m.out || m.id == sourceId) continue;
+    if (!isPresent(m) || m.id == sourceId) continue;
     switch (routeOf(m, kind, sourceId, ref, r.relay)) {
       case DeliveryRoute.server:
         via++;
@@ -277,7 +278,7 @@ DeliveryRoute? routeOf(MemberView m, DeliveryKind kind, String sourceId, Jellyfi
 
 /// [m]'s route and buffer for [d] (from [deliveryOf] on [r]).
 MemberDelivery memberDeliveryOf(MemberView m, StateBroadcast r, Delivery d) {
-  final counts = !m.out && !m.stale && m.error.isEmpty;
+  final counts = countsForReady(m);
   final need = r.bufferNeed;
   final ref = refOfStateMedia(r.media);
   final health = !counts
@@ -288,7 +289,7 @@ MemberDelivery memberDeliveryOf(MemberView m, StateBroadcast r, Delivery d) {
               ? BufferHealth.starving
               : BufferHealth.low;
   return MemberDelivery(
-    route: m.out ? null : routeOf(m, d.kind, d.sourceId, ref, r.relay),
+    route: m.presence == Presence.away ? null : routeOf(m, d.kind, d.sourceId, ref, r.relay),
     kind: d.kind,
     jellyfin: ref != null,
     rate: m.rate,

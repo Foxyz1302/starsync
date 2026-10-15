@@ -19,56 +19,74 @@ sealed class FeedEvent extends AppEvent {
 
   String get actor => feed.actor;
 
-  /// [feed] as its typed event. [selfName]: this member's name (the feed
-  /// names members by name); [readyCount]: members ready in the latest
-  /// state (the pitch of a `ready` sound).
-  factory FeedEvent.of(FeedMessage f, {String? selfName, int readyCount = 0}) => switch (f.action) {
-        'join' => MemberJoined(f),
-        'leave' => MemberLeft(f),
-        'stale' => MemberStale(f),
-        'out' => MemberSatOut(f, atYou: f.target != null && f.target == selfName && f.actor != selfName),
-        'back' => MemberBack(f),
-        'ready' => ReadyChanged(f, ready: true, readyIndex: readyCount),
-        'unready' => ReadyChanged(f, ready: false),
-        'force-ready' => ForcedReady(f, ready: true),
-        'force-unready' => ForcedReady(f, ready: false),
-        'force-play' => ForcedTransport(f, play: true),
-        'force-hold' => ForcedTransport(f, play: false),
-        'swap' => MediaSwapped(f),
-        'seek' => Seeked(f),
-        'pause' => Paused(f),
-        'resume' => Resumed(f),
-        'finished' => Finished(f),
-        'chat' => ChatPosted(f, own: f.actor == selfName),
-        'rename' => MemberRenamed(f),
-        'avatar' => AvatarChanged(f),
-        'queue-add' => QueueAdded(f),
-        'queue-remove' => QueueRemoved(f),
-        'queue-skip' => QueueSkipped(f),
-        'fetch-fail' => FetchFailed(f),
-        _ => OtherFeed(f),
-      };
+  /// [feed] as its typed event. [selfId]: this member's id (people are
+  /// matched by `actorId` / `targetId`, never by name); [readyCount]:
+  /// members ready in the latest state (the pitch of a `ready` sound).
+  factory FeedEvent.of(FeedMessage f, {String selfId = '', int readyCount = 0}) {
+    bool isSelf(String id) => selfId.isNotEmpty && id == selfId;
+    return switch (f.action) {
+      'join' => MemberJoined(f),
+      'leave' => MemberLeft(f),
+      'gone' => MemberGone(f),
+      'return' => MemberReturned(f),
+      'away' => MemberSatOut(f,
+          atYou: isSelf(f.targetId) && !isSelf(f.actorId),
+          autoSelf: isSelf(f.actorId) && f.targetId.isEmpty && f.reason.isNotEmpty),
+      'in' => MemberBack(f),
+      'ready' => ReadyChanged(f, ready: true, readyIndex: readyCount),
+      'unready' => ReadyChanged(f, ready: false),
+      'force-ready' => ForcedReady(f, ready: true),
+      'force-unready' => ForcedReady(f, ready: false),
+      'force-play' => ForcedTransport(f, play: true),
+      'force-hold' => ForcedTransport(f, play: false),
+      'swap' => MediaSwapped(f),
+      'seek' => Seeked(f),
+      'pause' => Paused(f),
+      'resume' => Resumed(f),
+      'finished' => Finished(f),
+      'chat' => ChatPosted(f, own: isSelf(f.actorId)),
+      'rename' => MemberRenamed(f),
+      'avatar' => AvatarChanged(f),
+      'queue-add' => QueueAdded(f),
+      'queue-remove' => QueueRemoved(f),
+      'queue-skip' => QueueSkipped(f),
+      'fetch-fail' => FetchFailed(f),
+      _ => OtherFeed(f),
+    };
+  }
 }
 
 class MemberJoined extends FeedEvent {
   const MemberJoined(super.feed);
 }
 
+/// Left for good (`reason` `bye`: the app closed or Leave; `grace`: gone
+/// too long).
 class MemberLeft extends FeedEvent {
   const MemberLeft(super.feed);
 }
 
-class MemberStale extends FeedEvent {
-  const MemberStale(super.feed);
+/// Lost signal: gone for a while, kept in its grace period.
+class MemberGone extends FeedEvent {
+  const MemberGone(super.feed);
 }
 
-/// Someone sat out (`target` sat out by `actor`); [atYou]: someone else
-/// sat this member out.
+/// Back within its grace after a [MemberGone].
+class MemberReturned extends FeedEvent {
+  const MemberReturned(super.feed);
+}
+
+/// Someone sat out (`away`: the actor itself, or `target` sat out by the
+/// actor; `reason` `idle` / `minimised` for an automatic one); [atYou]:
+/// someone else sat this member out; [autoSelf]: this app's auto sit-out
+/// set this member away.
 class MemberSatOut extends FeedEvent {
   final bool atYou;
-  const MemberSatOut(super.feed, {this.atYou = false});
+  final bool autoSelf;
+  const MemberSatOut(super.feed, {this.atYou = false, this.autoSelf = false});
 }
 
+/// Back from sitting out (`in`).
 class MemberBack extends FeedEvent {
   const MemberBack(super.feed);
 }
@@ -180,13 +198,8 @@ class RelayFailed extends AppEvent {
   const RelayFailed(this.error);
 }
 
-/// Idle: auto-unready (or sit-out, [sitsOut]) in 2 minutes.
-class IdleWarning extends AppEvent {
-  final bool sitsOut;
-  const IdleWarning({required this.sitsOut});
-}
-
-/// The connection to the server dropped (once per drop).
+/// The connection to the server dropped and stayed down a few seconds
+/// (once per drop).
 class ConnectionLost extends AppEvent {
   const ConnectionLost();
 }

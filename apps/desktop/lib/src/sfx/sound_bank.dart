@@ -261,7 +261,7 @@ const soundInfo = {
   SfxKind.kick: ('Sat out', 'Someone sits you out'),
   SfxKind.swap: ('New video', 'A different video or episode is put up'),
   SfxKind.chat: ('Message', 'A chat message from someone else'),
-  SfxKind.warn: ('Idle warning', 'Auto-unready soon unless you press Space'),
+  SfxKind.warn: ('Auto sit-out', 'You were idle or minimised and now sit out'),
   SfxKind.lost: ('Connection lost', 'The server stopped answering; reconnecting'),
   SfxKind.back: ('Reconnected', 'Back in the server after a drop'),
   SfxKind.nudge: ('Nudge', 'Someone nudges you; always plays (volume still applies)'),

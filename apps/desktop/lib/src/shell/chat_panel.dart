@@ -188,7 +188,7 @@ class ActivityRow extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                StatusAvatar(info: avatarForName(item.actor), size: 34, badges: false),
+                StatusAvatar(info: avatarForName(item.actor, null, item.actorId), size: 34, badges: false),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -261,7 +261,7 @@ Future<void> _messageMenu(BuildContext context, String text, String? link) async
     case 'join':
       return (Icons.login, Colors.green, 'joined');
     case 'leave':
-      final reason = f.reason == 'silent too long' ? ' · timed out' : (f.reason.isEmpty ? '' : ' · ${f.reason}');
+      final reason = f.reason == 'grace' ? ' · lost signal too long' : '';
       return (Icons.logout, Colors.grey, 'left$reason');
     case 'ready':
       return (Icons.check_circle, Colors.green, 'is ready');
@@ -279,12 +279,15 @@ Future<void> _messageMenu(BuildContext context, String text, String? link) async
       return (Icons.fast_forward, scheme.primary, 'seeked');
     case 'swap':
       return (Icons.swap_horiz, scheme.primary, 'changed the media');
-    case 'stale':
+    case 'gone':
       return (Icons.cloud_off, Colors.orange, 'lost signal');
-    case 'out':
+    case 'return':
+      return (Icons.cloud_done, Colors.green, 'is back');
+    case 'away':
       final who = f.target;
-      return (Icons.bedtime, Colors.blueGrey, who == null || who.isEmpty ? 'is sitting out' : 'sat $who out');
-    case 'back':
+      final why = f.reason.isEmpty ? '' : ' · ${f.reason}';
+      return (Icons.bedtime, Colors.blueGrey, '${who == null || who.isEmpty ? 'is sitting out' : 'sat $who out'}$why');
+    case 'in':
       return (Icons.login, Colors.green, 'joined back');
     case 'queue-add':
       return (Icons.playlist_add_rounded, scheme.primary, 'added ${f.target ?? ''} to Up next');

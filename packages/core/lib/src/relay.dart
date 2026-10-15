@@ -335,16 +335,26 @@ class _Pull {
 
 /// Close code the server uses for "you are not (or no longer) the source of
 /// the current media": the source stops instead of reconnecting.
-const relayCloseNotSource = 4001;
+const relayCloseNotSource = CloseCodes.relayNotSource;
+
+/// Close codes after which a source stops for good: not the source
+/// (4001), another media than the relay's (4002), replaced by a newer
+/// channel (4003).
+const relayStopCodes = {CloseCodes.relayNotSource, CloseCodes.relayOtherMedia, CloseCodes.relayReplaced};
 
 /// Serves [media] on the relay channel at [url] (`ws://host/r/<sid>/<token>/source`)
-/// until [close]. Reconnects with backoff when the channel drops; stops for
-/// good when the server closes it with [relayCloseNotSource].
+/// until [close]. Reconnects with backoff when the channel drops (the
+/// server keeps the relay through the source's grace and pulls what it
+/// still lacks); stops for good on [relayStopCodes]. [name] and
+/// [duration] (seconds, 0 unknown) go in its `info`, so a re-dial is
+/// recognised as the same media.
 class RelaySource {
   final Uri url;
   final RelayMedia media;
+  final String name;
+  final double duration;
   final Duration Function(int attempt) backoff;
-  RelaySource(this.url, this.media, {Duration Function(int attempt)? backoff})
+  RelaySource(this.url, this.media, {this.name = '', this.duration = 0, Duration Function(int attempt)? backoff})
       : backoff = backoff ?? ((a) => Duration(milliseconds: min(8000, 500 * (1 << min(a, 4)))));
 
   final window = RelayWindow();
@@ -384,6 +394,8 @@ class RelaySource {
     unawaited(_loop({
       't': 'info',
       if (relayTrackSpecs(tracks).isEmpty) 'size': infos.single['size'] else 'tracks': infos,
+      if (name.isNotEmpty) 'name': name,
+      if (duration > 0 && duration.isFinite) 'duration': duration,
     }));
   }
 
@@ -398,14 +410,17 @@ class RelaySource {
           break;
         }
         _ws = ws;
+        // A half-open channel (a dead link without a FIN) is noticed by
+        // its missing pong, closed, and dialled again.
+        ws.pingInterval = const Duration(seconds: RelayConstants.pingIntervalSecs);
         _log.info('relay channel up: $where${attempt > 0 ? ' (after $attempt retries)' : ''}');
         attempt = 0;
         ws.add(jsonEncode(info));
         await for (final m in ws) {
           if (m is String) _onText(ws, m);
         }
-        if (ws.closeCode == relayCloseNotSource) {
-          _log.info('relay channel: not the source any more, stopping ($where, sent $bytesSent bytes)');
+        if (relayStopCodes.contains(ws.closeCode)) {
+          _log.info('relay channel: ${ws.closeCode == CloseCodes.relayNotSource ? 'not the source any more' : ws.closeCode == CloseCodes.relayOtherMedia ? 'another media than the relay\'s' : 'replaced by a newer channel'}, stopping ($where, sent $bytesSent bytes)');
           _closed = true;
         } else if (!_closed) {
           _log.warning('relay channel down: $where, code ${ws.closeCode} ${ws.closeReason ?? ''}; reconnecting');

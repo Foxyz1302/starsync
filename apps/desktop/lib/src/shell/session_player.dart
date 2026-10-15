@@ -302,7 +302,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                   _miniOverlay(),
                 // Sitting out: nothing is loaded; the card covers the
                 // empty player (which stays mounted for joining back).
-                if (_coord.selfOut.value) _sitOut(),
+                if (_coord.selfAway.value) _sitOut(),
               ],
             ),
           );

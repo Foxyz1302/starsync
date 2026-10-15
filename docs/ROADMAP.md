@@ -35,15 +35,8 @@ Problems are numbered; delete a line when its fix ships.
 - D11 Login-only sites: error texts say which cookies were used.
 
 **Problems:**
-- P1 A reconnect makes you a new member: the relay, ready, sitting out,
-  your queue items and even your avatar are gone (log: Hoff m23 → m24 had
-  to put ep 06 up again).
-- P2 Joining a relay whose source left serves broken leftovers; mpv loops
-  on failed seeks; nobody is told the source is gone.
-- P3 A joiner during playback lands mid-scene (see D2).
-- P4 Reconnects time out repeatedly on a bad link; no clear
-  "reconnecting" state.
-- P6 Sat-out people count in the ready counter.
+- P2 Viewers of a relay whose source is gone: mpv loops on failed seeks
+  past what the server buffered (viewer-side recovery, step 5).
 - P7 Sat-out people get tracked as watched on Jellyfin.
 - P8 Sat-out people get the normal notifications.
 - P9 The watched rule (position coverage) misses real watches (D3).
@@ -85,31 +78,14 @@ the automatic continuation and countdown, relay state), the device
 (client id, library and folders, match corrections, watch history,
 settings, notification prefs, what this app is sourcing) and the
 integrations (Jellyfin played/resume, AniList list).
-1. Connection + Identity + Presence; proto 16 opened (version ranges on
-   both sides, refusal frame, identity, grace, presence, relay resume,
-   ids in the feed); later steps add fields, it is frozen at the 1.3.0
-   release. A drop is not the end of the session: keep the last state
-   (marked stale), the player, media and relay source; the UI reads the
-   connection state (no update band over a running video, no emptied
-   queue, no reopen); reconnect with backoff and jitter; silence 8–10 s
-   with "connection unstable" from ~3 s; lost/back sounds only after a
-   few seconds of drop. New feed actions mapped one-to-one onto today's
-   notices, matched by member id, not name. Presence shown in the strip
-   and party UI (joining, away, gone = dimmed "reconnecting"). The relay
-   source re-dials on return (client half of D6). Auto sit-out with a
-   `ShellPort.watchActivity` (focused/unfocused/minimised/hidden): never
-   when alone; while playing only minimised-for-a-while counts; the
-   client re-sends its intent after a non-resumed welcome. A joiner holds
-   only while not playing, at most ~15 s; while playing never (D2). The
-   app close sends `bye` and flushes it; update-and-restart does not.
-   `Profile` moves to identity. Fixes P1 P3 P4 P6, server half of P2;
-   D1 D2 D5 D6 (source).
 2. Status (one computed level, incl. the server's hold reason) + Notifier
    (`noticeFor(event, context)`: self presence, alone, window activity,
    playing, prefs, replayed; owns its toast timer; system notifications
    port; library snack bars moved in). Fixes P8 P11 P12 P21 P33, "source
-   left"; D4, D1 notifications, D9 alone policy ("alone" defined once in
-   core next to `PresencePolicy`).
+   left"; D4, D1 notifications, D9 alone policy (`isAlone` in core). Step 1
+   left over for it: the presence notices are today's (sat you out, a
+   toast when auto sit-out sets you away, lost signal and return only in
+   the activity log); a replayed feed only logs.
 3. Your server: one hub, listeners attached and detached without members
    reconnecting (old isolate path kept until that's proven); Invite as a
    value (filtered addresses, version gate from `/health.version`, an `fp`
@@ -159,144 +135,42 @@ both first); the dedicated server's fallback folder
 `~/.cache/watch-together`, the release token file
 `~/.config/watch-together-release-token`, Jellyfin's client name "Watch
 Together" (devices are listed under it) and `WatchTogetherApp`; dropping
-the 1.2.x launchers from the archive once nobody updates from 1.2.x. Auto
-sit-out: idle or minimised for a while sets you Away, activity sets you
-In; it replaces the 10-minute auto-unready.
+the 1.2.x launchers from the archive once nobody updates from 1.2.x.
+Left of step 1: Update and restart keeps the member `gone` for the
+restarted app, but the app starts on Home (it does not rejoin by itself)
+and does not remember what it was passing on, so a relay it served ends
+with its grace unless it is put up again; worth doing only if updates
+ever happen mid-session (D8 says never during playback).
 
 **Open decisions:**
 - Starting together: today someone has to stay unready so others can
   join first. Ideas: a short "starting in 30 s, ready up" countdown;
   waiting for everyone from the last session.
 
-- Grace length: ~10 min; a source in grace keeps its relay buffer.
 - Platform decision: "Desktop + mpv only" becomes "mpv only, desktop
   first" if Android goes ahead.
 - D10 was dropped on purpose (preload/warm relay/fresh player are folded
   into step 6, not a separate decision).
 
-### Protocol 16 (planned)
+### Protocol 16 (open parts)
 
-Lands in step 1, written into PROTOCOL.md then. Tags against proto 15:
-**new**, **changed**, **removed**. Rooms are out: one server, no room id.
-
-Versions and refusal:
-- `hello.proto` **changed**: the client's version; the server accepts
-  `[protoMin, protoMax]` (both 16 at 1.3.0; later additions raise
-  `protoMax` only, so they stay additive). `welcome.proto` **new**: the
-  version used on this connection.
-- Refusal **changed**, stable from 16 on: `{"t":"err","code":"version",
-  "min":16,"max":16,"server":"1.3.0","message":"proto mismatch: got 15,
-  want 16..16"}`, then close (a proto 15 app shows `message`). Every
-  `err` gets `code` **new**: `version`, `secret`, `rejected`, `bad`,
-  `replaced`.
-- `/health`: `protoMin`, `protoMax`, `tls` **new** (`proto` = `protoMax`).
-
-Handshake:
-- `hello.client` **new**: a random id per install (22 characters
-  base64url), private: never broadcast.
-- `hello.app` (`"1.3.0"`), `hello.platform` (`linux`, `windows`,
-  `android`), `hello.caps` **new**: what this app can do (`source`: serve
-  a relay; `resolve`: run yt-dlp; `jellyfin`: play with its own
-  account); unknown entries ignored.
-- `hello.resume` **removed** (the client id replaces it); `hello.media`
-  **removed** (unused).
-- `members[].app` **new**: the member's `hello.app`.
-
-Lasting member:
-- The server maps `client` to one member. A new socket with a known
-  client id takes that member over (`memberId` and `token` unchanged, so
-  `/m` `/r` `/j` URLs keep working); the older socket gets `err`
-  `replaced` and closes. `welcome.resumed` **new**: true when it did.
-- A socket close no longer removes the member **changed**: it goes
-  `gone` and is kept for the grace period (~10 min, `welcome.grace`
-  **new**, seconds) with its ready flag, presence, queue items and
-  relay. After the grace it leaves (feed `leave`).
-- `{"t":"bye"}` **new**: leave now (Leave button, app close).
-
-Presence:
-- `members[].presence` **new**: `joining` | `in` | `away` | `gone`;
-  `members[].goneSince` **new** (ISO, only while `gone`).
-  `members[].out` and `members[].stale` **removed** (`away`; a silent
-  socket is closed and its member is `gone`).
-- `{"t":"presence","target":"<memberId>","state":"away"|"in"}` **new**,
-  replaces `out` **removed**: anyone sets someone `away`; only the member
-  itself goes back `in`.
-- Feed **changed**: `away` (was `out`), `in` (was `back`), `gone` (was
-  `stale`), `return` **new** (back within the grace: no `join`), `leave`
-  (after the grace or `bye`), `join` (new members only).
-- Gate (one `PresencePolicy` in core, used by server and app): only `in`
-  counts for the gate, the ready counter and watched tracking; `away` and
-  `gone` never. A joiner is `joining` until its report holds the current
-  media with `bufferNeed` at the current position, then `in`. While
-  `playing` a joiner never holds (D2): it loads in the background and
-  comes in already in sync. While held it is in the set like a fresh
-  member today, for at most ~15 s, then out of the set until `in`. A
-  returning member (`gone` → back within grace) is `joining` again with
-  its ready flag kept, treated like a joiner; an `away` one stays
-  `away`.
-
-Relay (D6):
-- `media.relay.sourceGone` **new**: true while the source member is
-  `gone`. The relay and its buffer stay; viewers play what is buffered.
-- Source resume **changed**: the source's close no longer ends the relay;
-  only its leave (grace over, `bye`) or a swap does. Back in the grace,
-  it dials `/r/<sid>/<token>/source` again; an `info` equal to the first
-  continues (pulls restart from the first byte or piece not buffered, new
-  pull ids), a different one ends the relay (close 4002 **new**).
-
-Queue and what's next:
-- `queue[].by` **changed**: lasting (the member id survives reconnects);
-  a `through`/`file` item of a `gone` adder waits instead of being
-  skipped, until its adder leaves.
-- `queue[].auto` **new**: the continuation (next episode): `add` with
-  `auto:true`; at most one, after the others, replaced by a newer one,
-  dropped by a swap to something else.
-- `state.advance` **new**: `{"id":"q3","at":"<server time>","secs":10}`,
-  the shared countdown when the media finishes and an item is first; at
-  `at` + `secs` the server sets `queuePlay` to it.
-  `{"t":"queue","op":"cancel"}` **new** clears it for everyone (feed
-  `advance-cancel` **new**).
-
-Media identity:
-- `media.ref` **new**, in `swap.media`, `state.media` and
-  `queue[].media`: `{"kind":"episode"|"movie"|"extra","ids":{"anilist":1,
-  "tvdb":2},"show":"...","season":1,"episode":6}` (MediaRef); passed
-  through as is, at most 2 KiB.
-
-Transport: paths unchanged. A server with TLS serves the same endpoints
-over `wss://`/`https://` (`/health.tls`); apps use `wss://` when offered,
-`ws://` stays allowed.
-
-**Protocol 16 additions (second review):**
-- Client range too: `hello.protoMin`/`proto`; the server picks the
-  highest common version; read `proto` before strict hello parsing; 16
-  apps still send `hello.media:{}` so a 15 server answers "proto
-  mismatch"; a 16 app shows a 15 refusal as "the host runs an older
-  Starsync".
-- Ordered takeover: `hello.seq` (monotonic per client), older hellos get
-  `err stale`; `replaced` is terminal on the client ("opened in another
-  window"); `welcome.instance` per server boot (grace expired vs server
-  restarted).
-- Error codes `stale`, `forbidden`, `rate`, `full`, plus `err.for`; close
-  codes listed in one place. `/health.version` (no member names).
-- Silence: no frame for ~15 s closes the socket (member `gone`); the
-  `gone` feed line only after ~10 s gone (a quick return emits nothing);
-  `presence.reason` manual/idle/minimised/bye; away → in while playing
-  goes through `joining`; `joining` ends on a report error or timeout; a
-  second `/source` socket for the same token replaces the first.
-- Feed: `actorId`/`targetId`; `feed.seq` with `hello.feedAfter` and a
-  bounded replay in `welcome` (marked `replayed`: logged, not toasted).
-- `state.hold {reason ready|buffer|joining|source|start, members, until}`;
-  `members[].caps`.
-- Relay: `sourceGoneSince`; "same info" = size, duration, tracks, name.
-- Queue: `auto` items carry `for: <mediaId>`, added only by the current
-  swapper (or first in); `advance` holds while its performer or source is
-  gone; `cancel` drops the `auto` item too.
-- `MediaRef` gains `absolute`; `season` may be null.
-- `client` is redacted from every log; optionally derived per server
-  (HMAC of an install secret and the dialled host:port).
-- wss: only with a CA-valid certificate in 1.3.0; pinned self-signed via
-  the Invite `fp` later.
+Opened in step 1: [PROTOCOL.md](PROTOCOL.md) is proto 16 (version
+ranges and the refusal frame, error codes and close codes, lasting members by client id with takeover and `seq`, grace and
+`bye`, presence and `PresencePolicy`, `state.hold`, feed ids, `seq` and
+replay, relay `sourceGone` and source resume, lasting `queue[].by`,
+`auto` items and `cancel`, `media.ref`, `members[].app`/`caps`), server,
+core and app. Still open on the wire, frozen at the 1.3.0 release:
+- `state.advance` (step 6): the server starts the countdown when the
+  media finishes and an item is first, sets `queuePlay` at its end and
+  holds it while the item's performer or source is `gone`. Today it is
+  parsed and broadcast but never started; `auto` items and `cancel` are
+  live.
+- `media.ref` producers (step 4); the server carries it already.
+- `hello.client` optionally derived per server (HMAC of an install
+  secret and the dialled host:port).
+- TLS: `/health.tls` is always false; `wss://` only with a CA-valid
+  certificate in 1.3.0, pinned self-signed via the Invite `fp` later.
+- `err` code `rate`: reserved, nothing sends it.
 
 ## Backlog
 
@@ -331,8 +205,9 @@ over `wss://`/`https://` (`/health.tls`); apps use `wss://` when offered,
    filter on the Schedule from the user's AniList lists. This is the
    Schedule's personal tracking; AnimeFlow has no per-user follow.
 
-5. **Ops**: Check shaders on Windows; the relay e2e "source drops
-   uncleanly and resumes" fails about half the time under the full suite.
+5. **Ops**: Check shaders on Windows; run the relay e2e "the source drops
+   uncleanly and comes back" a few times under the full suite (its
+   predecessor failed about half the time there).
 
 6. **Windows: first real use.** Check the rename at 1.3.0: a 1.2.x
    install updates and restarts (`watch_together.exe`, a copy of
@@ -387,11 +262,8 @@ over `wss://`/`https://` (`/health.tls`); apps use `wss://` when offered,
    - HTTP: move the app's clients (Jellyfin, AniList, AnimeFlow, updater)
      to dio from `fox_utils` when touching them, for retries/interceptors.
    - TLS: document a reverse proxy in front of the server.
-   - Up next follow-ups (see ARCHITECTURE "Up next"): a member
-     whose reconnect lands as a new member loses its "through me" links
-     and files in the queue (skipped as gone); the key could follow the
-     member. A whole season or a pick list at once ("Add the rest of the
-     season").
+   - Up next follow-ups (see ARCHITECTURE "Up next"): a whole season or
+     a pick list at once ("Add the rest of the season").
    - Sidecar subtitles.
 
 ## Epic: Jellyfin
@@ -400,7 +272,8 @@ What is left (the rest is in [ARCHITECTURE.md](ARCHITECTURE.md), "Jellyfin
 in a session"):
 - Auto-advance cancel for everyone (the next episode and Up next): today
   Cancel is per screen (the designated swapper's Cancel stops the swap; a
-  seek stops all). A shared cancel needs a wire message.
+  seek stops all). The wire has it (`queue` `cancel`, `state.advance`);
+  the app uses it in step 6.
 - Sidecar (external) subtitle streams of Jellyfin items: only embedded
   tracks are mapped to mpv today.
 

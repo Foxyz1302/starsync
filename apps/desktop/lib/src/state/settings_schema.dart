@@ -5,8 +5,9 @@ import 'package:hive_ce/hive.dart';
 // changed formats); the restructure steps add theirs here.
 
 /// The layout this build reads. 1: the layout of 1.2.x, where versioning
-/// starts (a box without a version is at 1).
-const settingsSchemaVersion = 1;
+/// starts (a box without a version is at 1). 2: auto sit-out replaces the
+/// idle switch.
+const settingsSchemaVersion = 2;
 
 /// The box key holding the stored version.
 const settingsSchemaKey = 'schemaVersion';
@@ -20,9 +21,19 @@ class SettingsMigration {
   const SettingsMigration(this.to, this.what, this.apply);
 }
 
-/// Every step in order of [SettingsMigration.to] (2, 3, ...); empty while
-/// version 1 is current.
-const settingsMigrations = <SettingsMigration>[];
+/// Every step in order of [SettingsMigration.to] (2, 3, ...).
+const settingsMigrations = <SettingsMigration>[
+  SettingsMigration(2, 'auto sit-out replaces "when idle, sit out instead of just unready"', _autoSitOut),
+];
+
+/// 2: `idleSitsOut` only chose between two automatic steps after 10 idle
+/// minutes (unready, or sit out); both are auto sit-out now, on unless
+/// switched off (`autoSitOut`).
+Future<void> _autoSitOut(Box box) async {
+  if (!box.containsKey('idleSitsOut')) return;
+  await box.delete('idleSitsOut');
+  if (!box.containsKey('autoSitOut')) await box.put('autoSitOut', true);
+}
 
 /// Runs the [steps] past the box's stored version up to [current], in
 /// order, storing the version after each, then stores [current]. A box

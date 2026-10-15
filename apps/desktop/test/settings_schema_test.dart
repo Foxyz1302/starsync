@@ -16,10 +16,26 @@ void main() {
       await dir.delete(recursive: true);
     });
 
-    test('a box without a version is at 1 and gets stamped', () async {
+    test('a box without a version is at 1, runs the steps and gets stamped', () async {
       final box = await Hive.openBox('settings');
-      expect(await migrateSettings(box), isEmpty);
+      expect(await migrateSettings(box), hasLength(settingsSchemaVersion - 1));
       expect(box.get(settingsSchemaKey), settingsSchemaVersion);
+      expect(await migrateSettings(box), isEmpty);
+    });
+
+    test('2: the idle switch gives way to auto sit-out, on', () async {
+      for (final old in [true, false]) {
+        final box = await Hive.openBox('settings');
+        await box.put('idleSitsOut', old);
+        await migrateSettings(box);
+        expect(box.containsKey('idleSitsOut'), isFalse);
+        expect(box.get('autoSitOut'), isTrue);
+        await box.deleteFromDisk();
+      }
+      final kept = await Hive.openBox('settings');
+      await kept.putAll({'idleSitsOut': true, 'autoSitOut': false});
+      await migrateSettings(kept);
+      expect(kept.get('autoSitOut'), isFalse, reason: 'a choice already made stays');
     });
 
     test('steps run in order, only past the stored version', () async {

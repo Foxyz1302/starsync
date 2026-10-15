@@ -1,6 +1,5 @@
-// restructure: rewrite in step 1 (Connection + Identity + Presence): the
-// feed rows follow the new feed actions one-to-one (away/in/gone/return);
-// step 2 (Status + Notifier): every row, when noticeFor takes a context.
+// restructure: rewrite in step 2 (Status + Notifier): every row, when
+// noticeFor takes a context.
 //
 // The Notifier policy as a table: one row per AppEvent subtype, what
 // noticeFor makes of it (toast text and actor, sound, attention, activity-log
@@ -14,8 +13,21 @@ import 'package:starsync/src/sfx/sfx.dart';
 
 final _at = DateTime.utc(2026, 1, 1);
 
-FeedMessage _feed(String action, {String actor = 'Ann', String? target, String reason = ''}) =>
-    FeedMessage(actor: actor, action: action, target: target, reason: reason, at: _at);
+/// A feed line; people are named and identified (Ann is m1, Bob m2, this
+/// member, Me, m9).
+FeedMessage _feed(String action,
+        {String actor = 'Ann', String? target, String reason = '', bool replayed = false}) =>
+    FeedMessage(
+        actor: actor,
+        actorId: _ids[actor] ?? '',
+        action: action,
+        target: target,
+        targetId: _ids[target] ?? '',
+        reason: reason,
+        at: _at,
+        replayed: replayed);
+
+const _ids = {'Ann': 'm1', 'Bob': 'm2', 'Me': 'm9', 'server': 'server'};
 
 /// One row: the event, then what it must do.
 class _Row {
@@ -33,22 +45,36 @@ class _Row {
       {this.toast, this.actor, this.sound, this.readyIndex = 0, this.attention = false, this.logged = false});
 }
 
-/// The feed as the coordinator turns it into events: this member is 'Me',
-/// two members ready in the latest state.
-FeedEvent _of(FeedMessage f) => FeedEvent.of(f, selfName: 'Me', readyCount: 2);
+/// The feed as the coordinator turns it into events: this member is m9
+/// ('Me'), two members ready in the latest state.
+FeedEvent _of(FeedMessage f) => FeedEvent.of(f, selfId: 'm9', readyCount: 2);
 
 final _rows = <_Row>[
   // ---- the feed (FeedEvent.of, then noticeFor); every line is logged
   _Row('join', _of(_feed('join')), MemberJoined,
       toast: 'Ann joined', actor: 'Ann', sound: SfxKind.join, logged: true),
-  _Row('leave', _of(_feed('leave')), MemberLeft,
+  _Row('leave (bye)', _of(_feed('leave', reason: 'bye')), MemberLeft,
       toast: 'Ann left', actor: 'Ann', sound: SfxKind.leave, logged: true),
-  _Row('stale', _of(_feed('stale')), MemberStale, logged: true),
-  _Row('out, someone else sat out', _of(_feed('out', target: 'Bob')), MemberSatOut, logged: true),
-  _Row('out, sat yourself out', _of(_feed('out', actor: 'Me', target: 'Me')), MemberSatOut, logged: true),
-  _Row('out, someone sat you out', _of(_feed('out', target: 'Me')), MemberSatOut,
+  _Row('leave (grace over)', _of(_feed('leave', reason: 'grace')), MemberLeft,
+      toast: 'Ann left', actor: 'Ann', sound: SfxKind.leave, logged: true),
+  _Row('gone (lost signal)', _of(_feed('gone')), MemberGone, logged: true),
+  _Row('return', _of(_feed('return')), MemberReturned, logged: true),
+  _Row('away, someone sat themselves out', _of(_feed('away')), MemberSatOut, logged: true),
+  _Row('away, someone else auto sat out', _of(_feed('away', reason: 'idle')), MemberSatOut, logged: true),
+  _Row('away, someone sat someone else out', _of(_feed('away', target: 'Bob')), MemberSatOut, logged: true),
+  _Row('away, you sat yourself out', _of(_feed('away', actor: 'Me')), MemberSatOut, logged: true),
+  _Row('away, someone sat you out', _of(_feed('away', target: 'Me')), MemberSatOut,
       toast: 'Ann sat you out', actor: 'Ann', sound: SfxKind.kick, logged: true),
-  _Row('back', _of(_feed('back')), MemberBack, logged: true),
+  _Row('away, auto sit-out (idle)', _of(_feed('away', actor: 'Me', reason: 'idle')), MemberSatOut,
+      toast: 'You sit out (idle); you are back as soon as you return', sound: SfxKind.warn, logged: true),
+  _Row('away, auto sit-out (minimised)', _of(_feed('away', actor: 'Me', reason: 'minimised')), MemberSatOut,
+      toast: 'You sit out (minimised); you are back as soon as you return', sound: SfxKind.warn, logged: true),
+  _Row('in (back from away)', _of(_feed('in')), MemberBack, logged: true),
+  _Row('a replayed join: logged only', _of(_feed('join', replayed: true)), MemberJoined, logged: true),
+  _Row('a replayed chat: logged only', _of(_feed('chat', reason: 'hi', replayed: true)), ChatPosted, logged: true),
+  _Row('someone with your name is not you', _of(FeedMessage(
+      actor: 'Me', actorId: 'm4', action: 'away', target: 'Me', targetId: 'm9', at: _at)), MemberSatOut,
+      toast: 'Me sat you out', actor: 'Me', sound: SfxKind.kick, logged: true),
   _Row('ready', _of(_feed('ready')), ReadyChanged, sound: SfxKind.ready, readyIndex: 2, logged: true),
   _Row('unready', _of(_feed('unready')), ReadyChanged, sound: SfxKind.unready, logged: true),
   _Row('force-ready', _of(_feed('force-ready')), ForcedReady, sound: SfxKind.forceReady, logged: true),
@@ -87,10 +113,6 @@ final _rows = <_Row>[
   _Row('relay started', const RelayStarted(), RelayStarted,
       toast: 'Passing the video on through the server. Keep the app open while it plays.'),
   _Row('relay failed', const RelayFailed('closed'), RelayFailed, toast: 'Cannot pass the video on: closed'),
-  _Row('idle, unready', const IdleWarning(sitsOut: false), IdleWarning,
-      toast: 'idle — auto-unready in 2 min unless you press Space', sound: SfxKind.warn),
-  _Row('idle, sits out', const IdleWarning(sitsOut: true), IdleWarning,
-      toast: 'idle — sitting out in 2 min unless you press Space', sound: SfxKind.warn),
   _Row('connection lost', const ConnectionLost(), ConnectionLost, sound: SfxKind.lost),
   _Row('connection back', const ConnectionBack(), ConnectionBack, sound: SfxKind.back),
   _Row('jellyfin, sign-in expired', const JellyfinProgressFailed(signInExpired: true), JellyfinProgressFailed,

@@ -1,5 +1,21 @@
 import 'package:flutter/widgets.dart';
 
+/// Where the app window stands, for auto sit-out
+/// ([ShellPort.watchActivity]).
+enum WindowActivity {
+  /// The window has the keyboard focus.
+  focused,
+
+  /// Shown, but another window has the focus.
+  unfocused,
+
+  /// Minimised to the taskbar.
+  minimised,
+
+  /// Hidden (closing, or a platform that hides instead of minimising).
+  hidden,
+}
+
 /// What the clipboard holds for a paste: its files, else its text.
 typedef Paste = ({List<String> files, String? text});
 
@@ -21,6 +37,10 @@ abstract interface class ShellPort {
   /// Calls [onChange] whenever the window is maximized or restored;
   /// returns the call that stops it.
   void Function() watchMaximized(void Function(bool maximized) onChange);
+
+  /// Calls [onChange] whenever the window gains or loses the focus, is
+  /// minimised, restored or hidden; returns the call that stops it.
+  void Function() watchActivity(void Function(WindowActivity activity) onChange);
 
   /// Moves the window with the pointer (a press on the title area).
   Future<void> startDragging();

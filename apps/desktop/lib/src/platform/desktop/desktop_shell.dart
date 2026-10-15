@@ -55,6 +55,19 @@ class DesktopShell implements ShellPort {
     return () => windowManager.removeListener(l);
   }
 
+  final _activity = <void Function(WindowActivity)>{};
+
+  @override
+  void Function() watchActivity(void Function(WindowActivity activity) onChange) {
+    final l = _ActivityWatch(onChange);
+    _activity.add(onChange);
+    windowManager.addListener(l);
+    return () {
+      _activity.remove(onChange);
+      windowManager.removeListener(l);
+    };
+  }
+
   @override
   Future<void> startDragging() => windowManager.startDragging();
 
@@ -65,7 +78,13 @@ class DesktopShell implements ShellPort {
   Future<void> saveWindow() async => _memory?.save();
 
   @override
-  Future<void> hide() => windowManager.hide();
+  Future<void> hide() async {
+    // window_manager has no hide event: tell the watchers here.
+    for (final f in [..._activity]) {
+      f(WindowActivity.hidden);
+    }
+    await windowManager.hide();
+  }
 
   @override
   Future<void> quit() async {
@@ -130,4 +149,19 @@ class _MaximizeWatch with WindowListener {
   void onWindowMaximize() => onChange(true);
   @override
   void onWindowUnmaximize() => onChange(false);
+}
+
+/// Focus, blur, minimise and restore as [WindowActivity] (a restored
+/// window is shown; its focus event follows when it gets the keyboard).
+class _ActivityWatch with WindowListener {
+  final void Function(WindowActivity) onChange;
+  _ActivityWatch(this.onChange);
+  @override
+  void onWindowFocus() => onChange(WindowActivity.focused);
+  @override
+  void onWindowBlur() => onChange(WindowActivity.unfocused);
+  @override
+  void onWindowMinimize() => onChange(WindowActivity.minimised);
+  @override
+  void onWindowRestore() => onChange(WindowActivity.unfocused);
 }

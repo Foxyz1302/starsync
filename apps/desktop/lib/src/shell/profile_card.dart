@@ -6,9 +6,10 @@ import 'dart:ui' as ui;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:sync_relay_core/core.dart' show Presence;
 
 import '../jellyfin/accounts.dart';
-import '../screens/home/profile.dart';
+import '../session/identity.dart';
 import '../state/session_state.dart';
 import '../update/update_controller.dart';
 import 'avatar.dart';
@@ -80,8 +81,8 @@ class _ProfileCardState extends State<ProfileCard> {
           final hosting = online && !session.solo.value && coord.hostFile != null;
           final color = _p.color.value;
           final png = _p.picture.value;
-          final out = self?.out ?? false;
-          final me = selfAvatarInfo(ready: self?.ready ?? false, host: hosting, out: out);
+          final out = self?.presence == Presence.away;
+          final me = selfAvatarInfo(ready: self?.ready ?? false, host: hosting, presence: self?.presence ?? Presence.watching);
           return Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -13,6 +13,7 @@ import '../jellyfin/accounts_panel.dart';
 import '../schedule/animeflow.dart';
 import '../screens/home/about_page.dart';
 import '../screens/home/settings_page.dart';
+import '../session/auto_sit_out.dart' show AutoSitOutTimes;
 import '../sfx/sfx.dart';
 import '../sfx/sound_bank.dart';
 import '../state/session_state.dart';
@@ -100,15 +101,17 @@ class SettingsTab extends StatelessWidget {
             ),
           ),
           SettingsPanel(
-            title: 'When idle',
+            title: 'Away',
             child: SignalBuilder(
               builder: (context) => SwitchListTile(
-                key: const ValueKey('idle-sits-out'),
+                key: const ValueKey('auto-sit-out'),
                 contentPadding: EdgeInsets.zero,
-                title: const Text('When idle, sit out instead of just unready'),
-                subtitle: const Text('After 10 min away while ready and held, your player unloads the video until you join back (Space)'),
-                value: AppSettings.instance.idleSitsOut.value,
-                onChanged: AppSettings.instance.setIdleSitsOut,
+                title: const Text('Auto sit-out'),
+                subtitle: Text('Idle for ${AutoSitOutTimes.idle.inMinutes} min while nothing plays, or minimised '
+                    'for ${AutoSitOutTimes.minimised.inMinutes} min, sits you out so nobody waits for you; '
+                    "you're back as soon as you return. Never when you're alone"),
+                value: AppSettings.instance.autoSitOut.value,
+                onChanged: AppSettings.instance.setAutoSitOut,
               ),
             ),
           ),
@@ -778,7 +781,7 @@ class NotificationsInfo extends StatelessWidget {
               ),
               line('Sat out or nudged by someone', 'Only on your end, with their picture'),
               line('Ready, seeks and pauses', 'Only in Chat & activity (Tab), never as a pop-up'),
-              line('App notices', 'Shader changes, the idle warning'),
+              line('App notices', 'Shader changes, auto sit-out setting you away'),
             ],
           ),
         ),

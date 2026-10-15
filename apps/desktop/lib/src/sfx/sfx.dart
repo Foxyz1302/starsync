@@ -13,7 +13,7 @@ enum SfxKind {
   /// A new video or episode is put up.
   swap,
   chat,
-  /// Idle warning: auto-unready soon.
+  /// Auto sit-out set you away (idle, minimised).
   warn,
   /// The connection to the server dropped / came back.
   lost,

@@ -6,6 +6,31 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 enum SyncStatus { idle, connecting, open, closed, error }
 
+/// The server refused the hello: its `err` ([error]; a proto 15 server's
+/// has no code), or the socket closed before a welcome with [closeCode].
+class HelloRefused implements Exception {
+  final ErrorFrame? error;
+  final int? closeCode;
+  const HelloRefused({this.error, this.closeCode});
+
+  /// The refusal's code: the frame's, else read from the close code.
+  ErrCode? get code =>
+      error?.code ??
+      switch (closeCode) {
+        CloseCodes.version => ErrCode.version,
+        CloseCodes.secret => ErrCode.secret,
+        CloseCodes.replaced => ErrCode.replaced,
+        CloseCodes.stale => ErrCode.stale,
+        _ => null,
+      };
+
+  @override
+  String toString() => error?.message ?? 'closed before welcome ($closeCode)';
+}
+
+/// One `/sync` socket at a time: the hello and welcome, the frames as
+/// streams, the sends. [token], [memberId] and [lastState] outlive a
+/// dropped socket ([drop]); only [disconnect] forgets them.
 class SyncClient {
   /// Local clock; injectable so tests can run a client whose clock is off.
   final DateTime Function() _clock;
@@ -21,18 +46,26 @@ class SyncClient {
 
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
+  Completer<void>? _socketDone;
   final StreamController<StateBroadcast> _states = StreamController.broadcast();
   final StreamController<FeedMessage> _feeds = StreamController.broadcast();
   final StreamController<NudgeNotice> _nudges = StreamController.broadcast();
-  final StreamController<String> _errors = StreamController.broadcast();
+  final StreamController<ErrorFrame> _errors = StreamController.broadcast();
   final StreamController<SyncStatus> _status = StreamController.broadcast();
 
   Stream<StateBroadcast> get states => _states.stream;
+  /// Feed lines (chat included, with its text), and after a welcome the
+  /// lines it replayed (`replayed`).
   Stream<FeedMessage> get feeds => _feeds.stream;
   /// Someone poked this member (`nudge`).
   Stream<NudgeNotice> get nudges => _nudges.stream;
-  Stream<String> get errors => _errors.stream;
+  /// `err` frames after the welcome.
+  Stream<ErrorFrame> get errors => _errors.stream;
   Stream<SyncStatus> get status => _status.stream;
+
+  /// Called on every frame from the server (the welcome included), before
+  /// it is handled: the connection's silence clock.
+  void Function()? onFrame;
 
   /// The `/sync` URL last dialled; its host serves `/a/...` and the media.
   Uri? wsUri;
@@ -43,38 +76,51 @@ class SyncClient {
   /// relays); private like [token].
   String? relayUrl;
   StateBroadcast? lastState;
+  /// `welcome.instance` of the server last joined: a welcome of another
+  /// one is a restarted (or another) server.
+  String instance = '';
+  /// The highest `feed.seq` seen from [instance] (`hello.feedAfter`).
+  int lastFeedSeq = 0;
+  /// The close code of the last socket that closed (null: none given).
+  int? closeCode;
   Completer<WelcomeMessage>? _pendingWelcome;
 
+  /// A plain hello (tools and tests): [client] / [seq] as given.
   Future<WelcomeMessage> connect({
     required Uri wsUri,
     required String secret,
     required String name,
     String avatar = '',
-    HelloMedia? media,
     String hostKey = '',
-    String resume = '',
+    String client = '',
+    int seq = 0,
   }) =>
       connectWith(
         wsUri: wsUri,
         hello: HelloMessage(
-          proto: RelayConstants.protoVersion,
           secret: secret,
           user: HelloUser(name: name, avatar: avatar),
-          media: media ?? const HelloMedia(name: '', size: 0, duration: 0),
           hostKey: hostKey,
-          resume: resume,
+          client: client,
+          seq: seq,
         ),
       );
 
-  /// Dials [wsUri], sends [hello] and waits for the welcome (10 s).
-  Future<WelcomeMessage> connectWith({required Uri wsUri, required HelloMessage hello}) async {
-    await disconnect();
+  /// Dials [wsUri], sends [hello] and waits for the welcome (10 s). A
+  /// socket still open is dropped first. [onWelcome] runs once the welcome
+  /// is read, before its state and replayed feed go out on the streams.
+  /// Throws [HelloRefused] when the server refuses.
+  Future<WelcomeMessage> connectWith(
+      {required Uri wsUri, required HelloMessage hello, void Function(WelcomeMessage welcome)? onWelcome}) async {
+    await drop();
     clockSync.reset();
+    closeCode = null;
     this.wsUri = wsUri;
     _status.add(SyncStatus.connecting);
     final ch = WebSocketChannel.connect(wsUri);
     unawaited(ch.ready.then((_) {}, onError: (_) {}));
     _channel = ch;
+    final done = _socketDone = Completer<void>();
     final welcomeCompleter = Completer<WelcomeMessage>();
     _sub = ch.stream.listen(
       (raw) => _onText('$raw', welcomeCompleter),
@@ -85,8 +131,12 @@ class SyncClient {
         _status.add(SyncStatus.error);
       },
       onDone: () {
+        closeCode = ch.closeCode;
+        if (!done.isCompleted) done.complete();
         if (!welcomeCompleter.isCompleted) {
-          welcomeCompleter.completeError(StateError('closed before welcome'));
+          welcomeCompleter.completeError(ch.closeCode == null
+              ? StateError('closed before welcome')
+              : HelloRefused(closeCode: ch.closeCode));
         }
         _status.add(SyncStatus.closed);
       },
@@ -99,28 +149,47 @@ class SyncClient {
         const Duration(seconds: 10),
       );
       _pendingWelcome = null;
+      final sameServer = instance.isNotEmpty && welcome.instance == instance;
       token = welcome.token;
       memberId = welcome.memberId;
       mediaUrl = welcome.mediaUrl;
       relayUrl = welcome.relayUrl;
+      instance = welcome.instance;
+      // Another server's lines count from 1 again: its replay is not ours.
+      if (!sameServer) lastFeedSeq = 0;
+      onWelcome?.call(welcome);
       if (welcome.state != null) {
         try {
           lastState = StateBroadcast.fromJson(welcome.state!);
           _states.add(lastState!);
         } catch (_) {}
       }
+      if (sameServer) {
+        for (final f in welcome.feed) {
+          _addFeed(f.copyWith(replayed: true));
+        }
+      }
       _status.add(SyncStatus.open);
       sendPing();
       return welcome;
     } catch (e) {
       _pendingWelcome = null;
-      await disconnect();
+      await drop();
       _status.add(SyncStatus.error);
       rethrow;
     }
   }
 
+  void _addFeed(FeedMessage f) {
+    if (f.seq > lastFeedSeq) lastFeedSeq = f.seq;
+    // The server delivers every chat twice: a `chat` frame carrying the
+    // text (turned into a feed line below) and a textless feed line. Keep
+    // only the former: one send, one row, one toast, one sound.
+    if (f.action != 'chat') _feeds.add(f);
+  }
+
   void _onText(String raw, Completer<WelcomeMessage> welcomeCompleter) {
+    onFrame?.call();
     Map<String, Object?> decoded;
     try {
       final parsed = jsonDecode(raw);
@@ -138,9 +207,13 @@ class SyncClient {
           welcomeCompleter.completeError(e);
         }
       } else if (t == 'err') {
-        welcomeCompleter.completeError(
-          ProtocolException('${decoded['message'] ?? 'rejected'}'),
-        );
+        ErrorFrame frame;
+        try {
+          frame = ErrorFrame.fromJson(decoded);
+        } catch (_) {
+          frame = const ErrorFrame(code: null, message: 'rejected');
+        }
+        welcomeCompleter.completeError(HelloRefused(error: frame));
       }
       return;
     }
@@ -153,12 +226,7 @@ class SyncClient {
         } catch (_) {}
       case 'feed':
         try {
-          final f = FeedMessage.fromJson(decoded);
-          // Server delivers every chat twice: a ChatMessage carrying the
-          // text (converted to a feed entry in `case 'chat'` below) and a
-          // textless feed entry. Keep only the former: one send, one row,
-          // one toast, one sfx.
-          if (f.action != 'chat') _feeds.add(f);
+          _addFeed(FeedMessage.fromJson(decoded));
         } catch (_) {}
       case 'nudge':
         try {
@@ -173,20 +241,25 @@ class SyncClient {
               receivedMs: _clock().millisecondsSinceEpoch);
         } catch (_) {}
       case 'err':
-        _errors.add('${decoded['message'] ?? 'error'}');
-      case 'chat':
         try {
-          _feeds.add(
-            FeedMessage(
-              actor: '${decoded['from'] ?? '?'}',
-              action: 'chat',
-              reason: (decoded['text'] as String?) ?? '',
-              at: DateTime.now().toUtc(),
-            ),
-          );
+          _errors.add(ErrorFrame.fromJson(decoded));
         } catch (_) {}
+      case 'chat':
+        _feeds.add(
+          FeedMessage(
+            actor: '${decoded['from'] ?? '?'}',
+            actorId: decoded['fromId'] is String ? decoded['fromId'] as String : '',
+            action: 'chat',
+            reason: (decoded['text'] as String?) ?? '',
+            at: DateTime.now().toUtc(),
+          ),
+        );
     }
   }
+
+  /// A socket is open (it may be half-open: the connection's silence
+  /// check tells).
+  bool get isOpen => _channel != null;
 
   void _send(Map<String, Object?> json) {
     final ch = _channel;
@@ -209,7 +282,8 @@ class SyncClient {
     _send(SeekIntent(position: position, seq: seq).toJson());
   }
 
-  /// One clock sample; the coordinator sends one per second.
+  /// One clock sample; the connection sends one per second (it also keeps
+  /// this member under the server's silence limit).
   void sendPing() {
     _send(PingMessage(clientMs: _clock().millisecondsSinceEpoch).toJson());
   }
@@ -265,34 +339,58 @@ class SyncClient {
     _send(ArtMessage(mediaId: mediaId, poster: poster, banner: banner).toJson());
   }
 
-  /// Sits the member [target] out, or with [out] false brings this
-  /// member back (only oneself can come back).
-  void sendOut(String target, bool out) {
-    _send(OutIntent(target: target, out: out).toJson());
+  /// Sits someone out, or brings this member back in (see [PresenceIntent]).
+  void sendPresence(PresenceIntent intent) {
+    _send(intent.toJson());
   }
 
   void sendNudge(String target) {
     _send(NudgeIntent(target: target).toJson());
   }
 
-  Future<void> disconnect() async {
+  /// `bye`: this member leaves now. Waits (at most [wait]) for the server
+  /// to close the socket, so the frame went out before ours closes.
+  Future<void> sendBye({Duration wait = const Duration(milliseconds: 600)}) async {
+    final done = _socketDone;
+    if (_channel == null || done == null) return;
+    _send(const ByeMessage().toJson());
+    try {
+      await done.future.timeout(wait);
+    } catch (_) {}
+  }
+
+  /// Closes the socket (no [SyncStatus] for it) and keeps who this member
+  /// is ([token], [memberId], [lastState], [instance]): a reconnect takes
+  /// it over. The close is not waited for (a half-open link never
+  /// answers it).
+  Future<void> drop() async {
     final pending = _pendingWelcome;
     _pendingWelcome = null;
     if (pending != null && !pending.isCompleted) {
       pending.completeError(StateError('cancelled'));
-    }    try {
-      await _sub?.cancel();
-    } catch (_) {}
+    }
+    final sub = _sub;
     _sub = null;
-    try {
-      await _channel?.sink.close();
-    } catch (_) {}
+    final ch = _channel;
     _channel = null;
+    _socketDone = null;
+    try {
+      await sub?.cancel().timeout(const Duration(milliseconds: 500));
+    } catch (_) {}
+    if (ch != null) unawaited(ch.sink.close().timeout(const Duration(seconds: 2), onTimeout: () {}).catchError((_) {}));
+  }
+
+  /// [drop], then forgets the member and the server: the next connect is
+  /// a new session.
+  Future<void> disconnect() async {
+    await drop();
     token = '';
     memberId = '';
     mediaUrl = null;
     relayUrl = null;
     lastState = null;
+    instance = '';
+    lastFeedSeq = 0;
   }
 
   Future<void> dispose() async {

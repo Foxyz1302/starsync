@@ -30,25 +30,28 @@ bool _httpUrl(String? url) {
     if (clean == null) throw const ProtocolException('bad queue item');
     if (name.isEmpty) name = clean.title;
     item = QueueItem(
-        media: HelloMedia(name: name, size: 0, duration: 0, jellyfin: clean), how: QueueHow.jellyfin, title: '');
+        media: HelloMedia(name: name, size: 0, duration: 0, jellyfin: clean, ref: media.ref),
+        how: QueueHow.jellyfin,
+        title: '');
   } else {
     switch (raw.how) {
       case QueueHow.direct:
         if (!_httpUrl(media.url)) throw const ProtocolException('a queued link needs an http(s) url');
-        item = QueueItem(media: HelloMedia(name: name, size: 0, duration: 0, url: media.url), how: raw.how, title: '');
+        item = QueueItem(
+            media: HelloMedia(name: name, size: 0, duration: 0, url: media.url, ref: media.ref), how: raw.how, title: '');
       case QueueHow.server:
         if (!_httpUrl(media.url)) throw const ProtocolException('relay fetch needs an http(s) url');
         if (!serverHasPassword) throw const ProtocolException('server fetch needs a server password');
         privateUrl = media.url;
         item = QueueItem(
-            media: HelloMedia(name: name, size: 0, duration: 0, relay: const MediaRelay(fetch: true)),
+            media: HelloMedia(name: name, size: 0, duration: 0, relay: const MediaRelay(fetch: true), ref: media.ref),
             how: raw.how,
             title: '');
       case QueueHow.through:
       case QueueHow.file:
         if (!_key.hasMatch(raw.key)) throw const ProtocolException('a queued item of yours needs a key');
         item = QueueItem(
-            media: HelloMedia(name: name, size: media.size < 0 ? 0 : media.size, duration: 0),
+            media: HelloMedia(name: name, size: media.size < 0 ? 0 : media.size, duration: 0, ref: media.ref),
             how: raw.how,
             title: '',
             key: raw.key);
@@ -60,7 +63,11 @@ bool _httpUrl(String? url) {
   if (title.isEmpty) title = cleanQueueText(item.media.name.isEmpty ? 'media' : item.media.name);
   return (
     item: item.copyWith(
-        title: title, sub: cleanQueueText(sanitizeMediaName(raw.sub)), duration: raw.duration),
+        title: title,
+        sub: cleanQueueText(sanitizeMediaName(raw.sub)),
+        duration: raw.duration,
+        auto: raw.auto,
+        forMedia: raw.auto ? raw.forMedia : 0),
     privateUrl: privateUrl,
   );
 }
@@ -75,14 +82,15 @@ void handleQueueIntent(ServerHub hub, String token, RelicWebSocket ws, Map<Strin
     case 'add':
       final cleaned = cleanQueueAdd(intent.item!, serverHasPassword: hub.session.secret.isNotEmpty);
       final thumb = intent.thumb.isEmpty ? null : decodePicture(intent.thumb, RelayConstants.maxPosterBytes);
-      final error = engine.applyQueueAdd(token, cleaned.item,
+      final refused = engine.applyQueueAdd(token, cleaned.item,
           next: intent.next, privateUrl: cleaned.privateUrl, thumb: thumb);
-      if (error != null) {
-        _log.info('${hub.who(token)}: add "${cleaned.item.title}" (${cleaned.item.how.name}) refused: $error');
-        wsErr(ws, error);
+      if (refused != null) {
+        _log.info('${hub.who(token)}: add "${cleaned.item.title}" (${cleaned.item.how.name}) refused: ${refused.message}');
+        wsErr(ws, refused.code, refused.message, forType: 'queue');
         return;
       }
-      _log.info('${hub.who(token)}: add "${cleaned.item.title}" (${cleaned.item.how.name}${intent.next ? ', next' : ''})');
+      _log.info('${hub.who(token)}: add "${cleaned.item.title}" (${cleaned.item.how.name}'
+          '${cleaned.item.auto ? ', continues media ${cleaned.item.forMedia}' : intent.next ? ', next' : ''})');
       changed = true;
     case 'move':
       changed = engine.applyQueueMove(token, intent.id, intent.to);
@@ -92,6 +100,8 @@ void handleQueueIntent(ServerHub hub, String token, RelicWebSocket ws, Map<Strin
       changed = engine.applyQueuePlay(token, intent.id);
     case 'skip':
       changed = engine.applyQueuePlay(token, '');
+    case 'cancel':
+      changed = engine.applyQueueCancel(token);
   }
   if (intent.op != 'add') {
     _log.info('${hub.who(token)}: ${intent.op}${intent.id.isEmpty ? '' : ' ${intent.id}'}'

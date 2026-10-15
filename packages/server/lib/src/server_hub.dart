@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:relic/relic.dart';
@@ -19,15 +20,91 @@ class ServerHub {
   /// See [AppConfig.hostKey]; empty means nobody is the host.
   final String hostKey;
   final SyncEngine engine;
+  /// The `/sync` socket of each member that has one, by token; a `gone`
+  /// member has none.
   final Map<String, RelicWebSocket> sockets = {};
   /// The server's Jellyfin login for the `/j/...` relay; null = no relay.
   JellyfinCredential? jellyfin;
   /// Reads web pages for "the server fetches it"; null = files only.
   final YtDlp? ytDlp;
+  /// Random per server boot (`welcome.instance`).
+  final String instance = _randomId();
 
   ServerHub(this.sessions, this.expectedSecret,
       {SyncEngine? engine, this.hostKey = '', this.jellyfin, this.ytDlp})
-      : engine = engine ?? SyncEngine();
+      : engine = engine ?? SyncEngine() {
+    this.engine
+      ..onGone = _memberGone
+      ..onLeft = _memberLeft;
+  }
+
+  static String _randomId() {
+    final r = Random.secure();
+    return base64Url.encode(List<int>.generate(12, (_) => r.nextInt(256))).replaceAll('=', '');
+  }
+
+  /// A member went `gone`: a socket still open (silent) is closed; a
+  /// relay it serves goes on from its buffer (`media.relay.sourceGone`).
+  void _memberGone(EngineMember m) {
+    _hubLog.info('gone ${m.name} (${m.id})');
+    final ws = sockets.remove(m.token);
+    if (ws != null) unawaited(closeWith(ws, CloseCodes.silent, 'silent'));
+    refreshRelaySource();
+  }
+
+  /// A member left for good (`bye`, grace over): its token stops working,
+  /// a relay it serves ends.
+  void _memberLeft(EngineMember m) {
+    _hubLog.info('leave ${m.name} (${m.id})');
+    final ws = sockets.remove(m.token);
+    if (ws != null) unawaited(closeWith(ws, CloseCodes.left, 'left'));
+    session.tokens.remove(m.token);
+    final r = relay;
+    if (r != null && !r.fetch && r.sourceToken == m.token) {
+      _endRelay(r, 'its source left', sourceGone: true, since: m.goneSince ?? engine.now);
+    }
+  }
+
+  /// The current relay ends (its source left, or sent another media):
+  /// the buffer goes, `/r` answers 404, `media.relay` stays with `live`
+  /// false.
+  void _endRelay(ActiveRelay r, String why, {bool sourceGone = false, DateTime? since}) {
+    if (!identical(relay, r)) return;
+    _hubLog.info('relay of "${r.name}" ended: $why');
+    setRelay(null);
+    final m = engine.media;
+    final was = m?.relay;
+    if (m != null && was != null) {
+      engine.media = m.copyWith(
+          relay: was.copyWith(live: false, rate: 0, sourceGone: sourceGone, sourceGoneSince: since));
+    }
+  }
+
+  /// The source of [r] sent an `info` unlike its first (another media):
+  /// the relay ends (warm: dropped, made again from the next `info`).
+  void relayOtherMedia(ActiveRelay r) {
+    if (identical(warm, r)) {
+      _setWarm(null);
+    } else {
+      _endRelay(r, 'its source sent another media');
+    }
+    changed();
+  }
+
+  /// `media.relay.sourceGone` / `sourceGoneSince` follow the current
+  /// relay's source member (`gone` or back).
+  void refreshRelaySource() {
+    final r = relay, m = engine.media;
+    final was = m?.relay;
+    if (r == null || m == null || was == null || r.fetch || r.sourceToken == null) return;
+    final src = engine.members[r.sourceToken];
+    final gone = src == null || src.presence == Presence.gone;
+    if (gone == was.sourceGone) return;
+    _hubLog.info('relay of "${r.name}": source ${gone ? 'gone, viewers play what is buffered' : 'back'}');
+    engine.media = m.copyWith(relay: was.copyWith(sourceGone: gone, sourceGoneSince: src?.goneSince ?? engine.now));
+  }
+
+  bool get _sourceGone => engine.media?.relay?.sourceGone ?? false;
 
   /// The current media is a Jellyfin ref on the server [jellyfin] logs in to.
   bool get relayAvailable => _onLogin(session.media?.jellyfin);
@@ -61,8 +138,8 @@ class ServerHub {
         : '$head: $why';
   }
 
-  StateBroadcast stateBroadcast() =>
-      engine.broadcast(relay: relayAvailable, relayNext: relayNextAvailable, warm: _warmView());
+  StateBroadcast stateBroadcast() => engine.broadcast(
+      relay: relayAvailable, relayNext: relayNextAvailable, warm: _warmView(), sourceGone: _sourceGone);
 
   /// The relay of the current media (`/r/...`), if it is relayed.
   ActiveRelay? relay;
@@ -109,10 +186,17 @@ class ServerHub {
   ({String id, MediaRelay relay})? _warmView() {
     final w = warm, id = w?.queueId;
     if (w == null || id == null) return null;
+    final src = w.sourceToken == null ? null : engine.members[w.sourceToken];
+    final gone = src?.presence == Presence.gone;
     return (
       id: id,
       relay: MediaRelay(
-          source: w.fetch ? '' : w.sourceId, fetch: w.fetch, live: w.live, tracks: w.live ? w.tracks : const []),
+          source: w.fetch ? '' : w.sourceId,
+          fetch: w.fetch,
+          live: w.live,
+          tracks: w.live ? w.tracks : const [],
+          sourceGone: gone,
+          sourceGoneSince: gone ? src?.goneSince : null),
     );
   }
 
@@ -130,13 +214,15 @@ class ServerHub {
     if (warm == null && first != null) _setWarm(_newWarm(first));
   }
 
-  bool _othersHere(String? memberId) => engine.members.values.any((m) => m.id != memberId);
+  bool _othersHere(String? memberId) =>
+      engine.members.values.any((m) => m.id != memberId && m.presence != Presence.gone);
 
   /// A Jellyfin [ref] someone here cannot play while someone can, outside
   /// the server's login.
   bool _jellyfinNeedsWarm(JellyfinRef ref) =>
       !_onLogin(ref) &&
-      engine.members.values.any((m) => !m.out && m.jf[ref.serverId] != true) &&
+      engine.members.values
+          .any((m) => engine.policy.countsFor(m.presence, Purpose.preload) && m.jf[ref.serverId] != true) &&
       engine.members.values.any((m) => m.jf[ref.serverId] == true);
 
   bool _keepWarm(ActiveRelay w, QueueItem first) {
@@ -302,19 +388,12 @@ class ServerHub {
 
   bool isHostKey(String key) => hostKey.isNotEmpty && key == hostKey;
 
-  /// A member for the log: `name (id)`, never its token.
+  /// A member for the log: `name (id)`, never its token or client id.
   String who(String token) {
     final m = engine.members[token];
     if (m != null) return '${m.name} (${m.id})';
     final v = session.tokens[token];
     return v != null ? '${v.name} (no member)' : 'unknown member';
-  }
-
-  /// The member a reconnecting client may take over with its old token:
-  /// still known.
-  EngineMember? resumable(String token) {
-    if (token.isEmpty || !session.tokens.containsKey(token)) return null;
-    return engine.members[token];
   }
 
   Session get session => sessions.getOrCreate('default', expectedSecret);
@@ -326,6 +405,19 @@ class ServerHub {
     }
   }
 
+  /// Once a second: closed sockets, then the engine's sweep (silence,
+  /// joining, gone notices, grace), relay source, warm relay, rates, and
+  /// a state for everyone.
+  void heartbeat() {
+    sweepClosedSockets();
+    engine.tick();
+    refreshRelaySource();
+    syncWarm();
+    sampleRates();
+    broadcastState();
+    broadcastFeed();
+  }
+
   void broadcastFeed() {
     for (final feed in engine.feed.drain()) {
       final raw = jsonEncode(feed.toJson());
@@ -335,14 +427,8 @@ class ServerHub {
     }
   }
 
-  void dropSilentSockets() {
-    for (final token in engine.sweepDropped()) {
-      final ws = sockets[token];
-      if (ws != null) unawaited(ws.tryClose());
-      forgetSocket(token);
-    }
-  }
-
+  /// Relic's server-side `onDone` does not fire for every dead peer:
+  /// sockets are polled with `isClosed` too.
   void sweepClosedSockets() {
     for (final entry in sockets.entries.toList()) {
       var closed = false;
@@ -351,7 +437,7 @@ class ServerHub {
       } catch (_) {
         closed = true;
       }
-      if (closed) forgetSocket(entry.key);
+      if (closed) socketClosed(entry.key, entry.value);
     }
   }
 
@@ -365,24 +451,23 @@ class ServerHub {
     }
   }
 
-  void broadcastChat(String from, String text) {
+  void broadcastChat(String from, String text, {String fromId = ''}) {
     final clean = text.length > RelayConstants.maxChatLength
         ? text.substring(0, RelayConstants.maxChatLength)
         : text;
     final raw = jsonEncode(
-        ChatMessage(text: clean).toJson()..addAll({'from': from}));
+        ChatMessage(text: clean).toJson()..addAll({'from': from, if (fromId.isNotEmpty) 'fromId': fromId}));
     for (final ws in sockets.values.toList()) {
       ws.trySendText(raw);
     }
-    engine.feed.add(
-        FeedMessage(actor: from, action: 'chat', at: engine.now));
+    engine.feed.add(FeedMessage(actor: from, actorId: fromId, action: 'chat', at: engine.now));
     broadcastFeed();
   }
 
   /// The server's own fetch of [name] failed: everyone hears it (the
   /// swapper also gets the reason as an error), not just "getting it…".
   void fetchFailed(String name) {
-    engine.feed.add(FeedMessage(actor: 'server', action: 'fetch-fail', target: name, at: engine.now));
+    engine.feed.add(FeedMessage(actor: 'server', actorId: 'server', action: 'fetch-fail', target: name, at: engine.now));
     broadcastFeed();
   }
 
@@ -392,18 +477,19 @@ class ServerHub {
     broadcastFeed();
   }
 
-  /// Like [forgetSocket], but only while [ws] is still the member's socket:
-  /// after a resume the old socket's close must not remove the member.
-  void forgetSocketOf(String token, RelicWebSocket ws) {
+  /// [ws], [token]'s socket, closed: the member is `gone` (kept for the
+  /// grace). A socket that is no longer the member's (taken over) changes
+  /// nothing.
+  void socketClosed(String token, RelicWebSocket ws) {
     if (!identical(sockets[token], ws)) return;
-    forgetSocket(token);
+    sockets.remove(token);
+    engine.applyGone(token);
+    changed();
   }
 
-  void forgetSocket(String token) {
-    if (engine.members.containsKey(token)) _hubLog.info('leave ${who(token)}');
-    engine.applyLeave(token);
-    session.tokens.remove(token);
-    sockets.remove(token);
+  /// `bye`: [token]'s member leaves now.
+  void bye(String token) {
+    engine.applyLeave(token, reason: 'bye');
     changed();
   }
 
@@ -478,8 +564,20 @@ String sanitizeMediaName(String name) {
   return 'media';
 }
 
-void wsErr(RelicWebSocket ws, String message) {
-  ws.trySendText(jsonEncode({'t': 'err', 'message': message}));
+/// Sends `err` [code] with [message] (plain text for people) and, when a
+/// frame failed, its type as `for`. The socket stays open.
+void wsErr(RelicWebSocket ws, ErrCode code, String message, {String? forType}) {
+  ws.trySendText(jsonEncode(ErrorFrame(code: code, message: message, forType: forType).toJson()));
+}
+
+/// Closes [ws] with [code] (see [CloseCodes]); a socket that is already
+/// gone is fine.
+Future<void> closeWith(RelicWebSocket ws, int code, String reason) async {
+  try {
+    await ws.close(code, reason);
+  } catch (_) {
+    await ws.tryClose();
+  }
 }
 
 /// Jellyfin ids are path segments of upstream requests: keep them plain.
@@ -532,9 +630,12 @@ void mountSyncRoute(
       }
 
       void handleIntent(String text) {
+        // A socket another hello took over says nothing for the member.
+        if (token != null && !identical(hub.sockets[token], ws)) return;
         final session = hub.session;
         final viewer = token == null ? null : session.tokens[token];
         viewer?.touch(hub.engine.now);
+        if (token != null) hub.engine.touch(token);
         Map<String, Object?> decoded;
         try {
           final parsed = jsonDecode(text);
@@ -575,7 +676,12 @@ void mountSyncRoute(
                 final hidden = hub.engine.queue.privateUrlOf(queueId);
                 if (hidden != null && (parsed.url ?? '').isEmpty) {
                   parsed = HelloMedia(
-                      name: parsed.name, size: parsed.size, duration: parsed.duration, url: hidden, relay: parsed.relay);
+                      name: parsed.name,
+                      size: parsed.size,
+                      duration: parsed.duration,
+                      url: hidden,
+                      relay: parsed.relay,
+                      ref: parsed.ref);
                 }
               }
               if (parsed.jellyfin != null) {
@@ -594,6 +700,7 @@ void mountSyncRoute(
                         size: parsed.size,
                         duration: parsed.duration,
                         jellyfin: ref,
+                        ref: parsed.ref,
                         relay: relayReq == null
                             ? null
                             : promoted != null
@@ -601,7 +708,7 @@ void mountSyncRoute(
                                 : hub.relayFor(token, const MediaRelay()));
                 if (media == null || !hub.engine.applySwap(token, media, queueId: queueId)) {
                   promoted?.dispose();
-                  wsErr(ws, 'bad swap media');
+                  wsErr(ws, ErrCode.bad, 'bad swap media', forType: 'swap');
                   return;
                 }
                 session.media = SessionMedia(
@@ -627,14 +734,14 @@ void mountSyncRoute(
                 final link = Uri.tryParse(parsed.url ?? '');
                 if (relayReq.fetch &&
                     (link == null || !(link.isScheme('http') || link.isScheme('https')) || link.host.isEmpty)) {
-                  wsErr(ws, 'relay fetch needs an http(s) url');
+                  wsErr(ws, ErrCode.bad, 'relay fetch needs an http(s) url', forType: 'swap');
                   return;
                 }
                 // The server would fetch any address it can reach (its own
                 // network, a VPN) for whoever asks: only for members who
                 // know the password.
                 if (relayReq.fetch && session.secret.isEmpty) {
-                  wsErr(ws, 'server fetch needs a server password');
+                  wsErr(ws, ErrCode.rejected, 'server fetch needs a server password', forType: 'swap');
                   return;
                 }
                 // Up next's warm relay of this item carries on as its relay
@@ -645,16 +752,17 @@ void mountSyncRoute(
                     name: shown,
                     size: parsed.size,
                     duration: parsed.duration,
+                    ref: parsed.ref,
                     relay: promoted != null ? hub.promotedRelay(promoted, queueId!) : hub.relayFor(token, relayReq));
                 if (!hub.engine.applySwap(token, media, queueId: queueId)) {
                   promoted?.dispose();
-                  wsErr(ws, 'bad swap media');
+                  wsErr(ws, ErrCode.bad, 'bad swap media', forType: 'swap');
                   return;
                 }
                 session.media = SessionMedia(
                     name: shown, size: parsed.size, duration: parsed.duration, mediaId: hub.engine.mediaId);
                 void failed(String why) {
-                  wsErr(ws, hub.fetchFailText(why));
+                  wsErr(ws, ErrCode.rejected, hub.fetchFailText(why), forType: 'swap');
                   hub.fetchFailed(shown);
                 }
                 late final ActiveRelay active;
@@ -678,17 +786,18 @@ void mountSyncRoute(
                       name: sanitizeMediaName(parsed.name),
                       size: parsed.size,
                       duration: parsed.duration,
-                      url: parsed.url));
+                      url: parsed.url,
+                      ref: parsed.ref));
               final current = session.media;
               final matchesFile = current?.file != null &&
                   current!.name == intent.media.name &&
                   current.size == intent.media.size;
               if (!matchesFile && (intent.media.url ?? '').isEmpty) {
-                wsErr(ws, 'swap needs a url or the hosted file');
+                wsErr(ws, ErrCode.bad, 'swap needs a url or the hosted file', forType: 'swap');
                 return;
               }
               if (!hub.engine.applySwap(token, intent.media, queueId: queueId)) {
-                wsErr(ws, 'bad swap media');
+                wsErr(ws, ErrCode.bad, 'bad swap media', forType: 'swap');
                 return;
               }
               hub.setRelay(null);
@@ -714,7 +823,7 @@ void mountSyncRoute(
               final intent = ProfileIntent.fromJson(decoded);
               final avatar = intent.avatar;
               if (avatar != null && avatar.length > RelayConstants.maxAvatarBytes) {
-                wsErr(ws, 'rejected: avatar too large');
+                wsErr(ws, ErrCode.rejected, 'rejected: avatar too large', forType: 'profile');
                 return;
               }
               final name = intent.name == null ? null : cleanMemberName(intent.name!);
@@ -749,12 +858,19 @@ void mountSyncRoute(
                   .toJson()));
             case 'chat':
               final chat = ChatMessage.fromJson(decoded);
-              hub.broadcastChat(viewer?.name ?? '?', chat.text);
-            case 'out':
+              hub.broadcastChat(viewer?.name ?? '?', chat.text, fromId: hub.engine.members[token]?.id ?? '');
+            case 'presence':
               if (token == null) return;
-              final intent = OutIntent.fromJson(decoded);
-              hub.engine.applyOut(token, intent.target, intent.out);
+              final intent = PresenceIntent.fromJson(decoded);
+              final refused = hub.engine.applyPresence(token, intent.target, intent.state, reason: intent.reason);
+              if (refused != null) {
+                wsErr(ws, refused, 'only a member itself comes back in', forType: 'presence');
+              }
               hub.changed();
+            case 'bye':
+              if (token == null) return;
+              _hubLog.info('bye from ${hub.who(token)}');
+              hub.bye(token);
             case 'nudge':
               if (token == null) return;
               hub.nudge(token, NudgeIntent.fromJson(decoded).target);
@@ -764,7 +880,7 @@ void mountSyncRoute(
           }
         } on ProtocolException catch (e) {
           _hubLog.info('${token == null ? 'a socket' : hub.who(token)}: bad $type message: ${e.message}');
-          wsErr(ws, 'bad message: ${e.message}');
+          wsErr(ws, ErrCode.bad, 'bad message: ${e.message}', forType: type is String ? type : null);
         } catch (e, st) {
           _hubLog.warning('${token == null ? 'a socket' : hub.who(token)}: $type message failed: $e', e, st);
           return;
@@ -781,13 +897,13 @@ void mountSyncRoute(
           }
         },
         onError: (_) {
-          if (token != null) hub.forgetSocketOf(token, ws);
+          if (token != null) hub.socketClosed(token, ws);
         },
         onDone: () {
           if (!firstText.isCompleted) {
             firstText.completeError(StateError('closed before hello'));
           } else if (token != null) {
-            hub.forgetSocketOf(token, ws);
+            hub.socketClosed(token, ws);
           }
         },
       );
@@ -798,64 +914,121 @@ void mountSyncRoute(
         await close();
         return;
       }
-      HelloMessage hello;
+      Future<void> refuse(ErrorFrame err, int code, String log) async {
+        _hubLog.warning('reject: $log');
+        ws.trySendText(jsonEncode(err.toJson()));
+        try {
+          await sub.cancel();
+        } catch (_) {}
+        await closeWith(ws, code, err.code?.name ?? 'refused');
+      }
+
+      // The version first, read leniently: another version's hello may
+      // not parse as ours.
+      final Map<String, Object?> raw0;
       try {
         final decoded = jsonDecode(raw);
         if (decoded is! Map) throw const ProtocolException('hello must be an object');
-        hello = HelloMessage.fromJson(Map<String, Object?>.from(decoded));
+        raw0 = Map<String, Object?>.from(decoded);
       } catch (e) {
-        _hubLog.warning('reject: bad hello: $e');
-        wsErr(ws, 'bad hello: $e');
-        await close();
+        await refuse(ErrorFrame(code: ErrCode.bad, message: 'bad hello: $e', forType: 'hello'), CloseCodes.refused,
+            'bad hello: $e');
         return;
       }
-      if (hello.proto != RelayConstants.protoVersion) {
-        _hubLog.warning(
-            'reject ${hello.user.name}: proto mismatch: got ${hello.proto}, want ${RelayConstants.protoVersion}');
-        wsErr(ws, 'proto mismatch: got ${hello.proto}, want ${RelayConstants.protoVersion}');
-        await close();
+      final range = HelloMessage.protoRangeOf(raw0);
+      final proto = range == null ? null : pickProto(range.min, range.max);
+      if (proto == null) {
+        final got = range?.max ?? 0;
+        await refuse(ErrorFrame.version(got: got, server: appVersion), CloseCodes.version,
+            'proto mismatch: got ${range == null ? 'none' : '${range.min}..${range.max}'}, '
+            'want ${RelayConstants.protoMin}..${RelayConstants.protoMax}');
+        return;
+      }
+      HelloMessage hello;
+      try {
+        hello = HelloMessage.fromJson(raw0);
+      } catch (e) {
+        await refuse(ErrorFrame(code: ErrCode.bad, message: 'bad hello: $e', forType: 'hello'), CloseCodes.refused,
+            'bad hello: $e');
         return;
       }
       final session = hub.session;
       if (session.secret.isNotEmpty && hello.secret != session.secret) {
-        _hubLog.warning('reject ${hello.user.name}: wrong secret');
-        wsErr(ws, 'wrong secret');
-        await close();
+        await refuse(const ErrorFrame(code: ErrCode.secret, message: 'wrong secret', forType: 'hello'),
+            CloseCodes.secret, '${cleanMemberName(hello.user.name)}: wrong secret');
         return;
       }
-      final resumed = hub.resumable(hello.resume);
-      String memberId;
-      if (resumed != null) {
-        // Unclean drop the server has not noticed yet: take the member over
-        // (same token, id, ready flag) and drop the dead socket quietly.
-        token = hello.resume;
-        memberId = resumed.id;
-        final old = hub.sockets.remove(token);
-        if (old != null) unawaited(old.tryClose());
-        hub.engine.applyResume(token);
-        _hubLog.info('resume ${hello.user.name} ($memberId)');
+      if (hello.user.avatar.length > RelayConstants.maxAvatarBytes) {
+        await refuse(
+            const ErrorFrame(code: ErrCode.rejected, message: 'rejected: avatar too large', forType: 'hello'),
+            CloseCodes.refused,
+            '${cleanMemberName(hello.user.name)}: avatar too large');
+        return;
+      }
+      final known = hub.engine.byClient(hello.client);
+      if (known != null && hello.seq < known.seq) {
+        await refuse(
+            const ErrorFrame(
+                code: ErrCode.stale, message: 'an older connection of this app (a newer one holds it)', forType: 'hello'),
+            CloseCodes.stale,
+            '${known.name} (${known.id}): an older hello than the member\'s');
+        return;
+      }
+      final String memberId;
+      final bool resumed;
+      final about = '${hello.app.isEmpty ? 'no version' : hello.app}${hello.platform.isEmpty ? '' : ' on ${hello.platform}'}';
+      if (known != null) {
+        // This app again (a reconnect, or opened anew): it takes its
+        // member over, same token and id; an older socket still open is
+        // told and closed.
+        token = known.token;
+        memberId = known.id;
+        resumed = true;
+        final old = hub.sockets[known.token];
+        hub.sockets[known.token] = ws;
+        if (old != null && !identical(old, ws)) {
+          old.trySendText(jsonEncode(const ErrorFrame(
+                  code: ErrCode.replaced, message: 'this member was opened from another connection of the same app')
+              .toJson()));
+          unawaited(closeWith(old, CloseCodes.replaced, 'replaced'));
+        }
+        final back = hub.engine.applyTakeover(known.token,
+            seq: hello.seq, app: hello.app, platform: hello.platform, caps: hello.caps);
+        final name = cleanMemberName(hello.user.name);
+        session.tokens[known.token]?.name = name;
+        hub.engine.applyProfile(known.token, name: name, avatar: hello.user.avatar);
+        _hubLog.info('${back ? 'return' : 'takeover'} ${known.name} ($memberId), $about');
       } else {
         try {
           token = session.issueToken(hello.user.name, hello.user.avatar);
         } catch (e) {
-          _hubLog.warning('reject ${hello.user.name}: $e');
-          wsErr(ws, 'rejected: $e');
-          await close();
+          await refuse(ErrorFrame(code: ErrCode.rejected, message: 'rejected: $e', forType: 'hello'),
+              CloseCodes.refused, '${cleanMemberName(hello.user.name)}: $e');
           return;
         }
-        memberId = hub.engine.applyJoin(token, session.tokens[token]!.name, hello.user.avatar);
+        memberId = hub.engine.applyJoin(token, session.tokens[token]!.name, hello.user.avatar,
+            client: hello.client, seq: hello.seq, app: hello.app, platform: hello.platform, caps: hello.caps);
+        resumed = false;
+        hub.sockets[token] = ws;
+        _hubLog.info('join ${session.tokens[token]!.name} ($memberId), $about');
       }
-      final isHost = hub.isHostKey(hello.hostKey);
-      session.tokens[token]!.isHost = isHost;
-      hub.engine.members[token]?.host = isHost;
       final activeToken = token;
-      hub.sockets[activeToken] = ws;
+      final isHost = hub.isHostKey(hello.hostKey);
+      session.tokens[activeToken]!.isHost = isHost;
+      hub.engine.members[activeToken]?.host = isHost;
+      hub.refreshRelaySource();
       final media = session.media;
       final relay = hub.relayAvailable;
       final relayed = hub.relay;
+      final feedAfter = hello.feedAfter;
       final welcome = WelcomeMessage(
         token: activeToken,
         memberId: memberId,
+        proto: proto,
+        resumed: resumed,
+        instance: hub.instance,
+        grace: hub.engine.liveness.grace.inSeconds,
+        feed: feedAfter == null ? const [] : hub.engine.feed.after(feedAfter),
         // Jellyfin media resolves per member (own account first); only
         // relayed files and links start from the /r/ URL, and never for
         // the source itself (it plays its own copy).
@@ -885,7 +1058,6 @@ void mountSyncRoute(
         return;
       }
       welcomed = true;
-      _hubLog.info('join ${hello.user.name} ($memberId)');
       hub.changed();
       try {
         await sub.asFuture();

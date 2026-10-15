@@ -71,8 +71,7 @@ void main() {
       ch.sink.add(jsonEncode(HelloMessage(
               proto: RelayConstants.protoVersion,
               secret: 's',
-              user: HelloUser(name: name),
-              media: const HelloMedia(name: '', size: 0, duration: 0))
+              user: HelloUser(name: name))
           .toJson()));
       while (await msgs.moveNext()) {
         final m = jsonDecode('${msgs.current}') as Map;

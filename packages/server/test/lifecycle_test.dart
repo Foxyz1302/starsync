@@ -1,5 +1,3 @@
-// restructure: rewrite in step 1 (Connection + Identity + Presence): a
-// socket close no longer removes the member (explicit `bye`, grace).
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -74,14 +72,22 @@ void main() {
       await server.stop();
     });
 
-    test('clean client close removes member within seconds, not timeout',
-        () async {
+    test('a clean close is not a leave: the member is gone at once, kept', () async {
       final client = await _ProbeClient.hello(server.boundPort, 'alice');
-      await _pollBool(
-          () => server.hub.engine.members.length == 1, 'join visible');
+      await _pollBool(() => server.hub.engine.members.length == 1, 'join visible');
       await client.ws.close();
-      await _pollBool(
-          () => server.hub.engine.members.isEmpty, 'member removed');
+      await _pollBool(() => server.hub.engine.members.values.single.presence == Presence.gone, 'gone');
+      expect(server.session.tokens, hasLength(1), reason: 'its token works through the grace');
+      expect(server.hub.sockets, isEmpty);
+    });
+
+    test('bye leaves at once: member, token and socket go', () async {
+      final client = await _ProbeClient.hello(server.boundPort, 'alice');
+      await _pollBool(() => server.hub.engine.members.length == 1, 'join visible');
+      client.ws.add(jsonEncode(const ByeMessage().toJson()));
+      final outcome = await client.closed.future.timeout(const Duration(seconds: 5));
+      expect(outcome, contains('code=${CloseCodes.left}'));
+      expect(server.hub.engine.members, isEmpty);
       expect(server.session.tokens, isEmpty);
       expect(server.hub.sockets, isEmpty);
     });

@@ -19,6 +19,7 @@ import '../sfx/synth_sfx.dart';
 import '../session/health.dart';
 import '../session/notifier.dart';
 import '../session/connection.dart' show Connection;
+import '../session/identity.dart' show ClientIdentity;
 import '../session/session_coordinator.dart';
 import '../widgets/avatar_pipeline.dart';
 import 'connect_prefs.dart';
@@ -175,7 +176,9 @@ class SessionState {
   /// Every toast, sound and activity-log line goes through it.
   late final Notifier notifier = Notifier(sfx: sfx, attention: ports.shell.requestAttention);
   /// The link to the server; lost/back go to the notifier.
-  late final Connection connection = Connection(notify: notifier.notify);
+  /// The link to the server, with this install's stored identity
+  /// (`hello.client` / `seq`); lost/back go to the notifier.
+  late final Connection connection = Connection(notify: notifier.notify, identity: ClientIdentity.stored());
   late final SessionCoordinator coordinator =
       SessionCoordinator(notifier: notifier, connection: connection, ytDlp: ports.links);
   final lastForm = ConnectForm();
@@ -513,8 +516,10 @@ class SessionState {
     await server?.stop();
   }
 
-  Future<void> leave() async {
-    await coordinator.leave();
+  /// Out of the session (Leave, the app closing). [bye] false: Update
+  /// and restart, the restarted app takes the member back within its grace.
+  Future<void> leave({bool bye = true}) async {
+    await coordinator.leave(bye: bye);
     await stopServer();
     solo.value = false;
     coordinator.solo = false;

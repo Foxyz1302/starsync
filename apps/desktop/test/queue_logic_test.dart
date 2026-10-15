@@ -5,9 +5,15 @@ import 'package:sync_relay_core/core.dart';
 import 'package:starsync/src/queue/queue_logic.dart';
 
 MemberView member(String id,
-        {bool stale = false, bool out = false, Map<String, bool> jf = const {}, String name = ''}) =>
+        {bool gone = false, bool away = false, Map<String, bool> jf = const {}, String name = ''}) =>
     MemberView(
-        id: id, name: name.isEmpty ? id : name, ready: false, inSet: true, buffered: 0, stale: stale, out: out, jf: jf);
+        id: id,
+        name: name.isEmpty ? id : name,
+        ready: false,
+        inSet: true,
+        buffered: 0,
+        presence: gone ? Presence.gone : away ? Presence.away : Presence.watching,
+        jf: jf);
 
 QueueItem item(QueueHow how, {String by = 'm2', String byName = 'Bob'}) => QueueItem(
       id: 'q1',
@@ -22,12 +28,14 @@ QueueItem item(QueueHow how, {String by = 'm2', String byName = 'Bob'}) => Queue
 
 void main() {
   group('queuePerformer', () {
-    test('a link passed on or a file: only its adder; gone means skipped', () {
+    test('a link passed on or a file: only its adder; gone waits for it, left means skipped', () {
       for (final how in [QueueHow.through, QueueHow.file]) {
-        expect(queuePerformer(item(how), [member('m1'), member('m2', out: true)]).id, 'm2');
-        final gone = queuePerformer(item(how), [member('m1'), member('m3')]);
-        expect(gone.id, isNull);
-        expect(gone.why, 'Bob left');
+        expect(queuePerformer(item(how), [member('m1'), member('m2', away: true)]).id, 'm2');
+        final waits = queuePerformer(item(how), [member('m1'), member('m2', gone: true)]);
+        expect((waits.id, waits.why), (null, null), reason: 'a gone adder may come back within its grace');
+        final left = queuePerformer(item(how), [member('m1'), member('m3')]);
+        expect(left.id, isNull);
+        expect(left.why, 'Bob left');
       }
     });
 
@@ -38,22 +46,22 @@ void main() {
           queuePerformer(item(QueueHow.jellyfin), [member('m10', jf: access), member('m3', jf: access), member('m2')])
               .id,
           'm3');
-      expect(queuePerformer(item(QueueHow.jellyfin), [member('m3', jf: access, out: true), member('m2')]).why,
+      expect(queuePerformer(item(QueueHow.jellyfin), [member('m3', jf: access, away: true), member('m2')]).why,
           isNotNull);
     });
 
     test('a link everyone opens or the server fetches: the adder, else the lowest active member', () {
       for (final how in [QueueHow.direct, QueueHow.server]) {
         expect(queuePerformer(item(how), [member('m1'), member('m2')]).id, 'm2');
-        expect(queuePerformer(item(how), [member('m4'), member('m2', stale: true), member('m3')]).id, 'm3');
-        final nobody = queuePerformer(item(how), [member('m2', out: true)]);
+        expect(queuePerformer(item(how), [member('m4'), member('m2', gone: true), member('m3')]).id, 'm3');
+        final nobody = queuePerformer(item(how), [member('m2', away: true)]);
         expect((nobody.id, nobody.why), (null, null), reason: 'nobody around is not a skip');
       }
     });
   });
 
-  test('the janitor is the lowest member that is not stale', () {
-    expect(queueJanitor([member('m9'), member('m1', stale: true), member('m2')]), 'm2');
+  test('the janitor is the lowest member that is not gone', () {
+    expect(queueJanitor([member('m9'), member('m1', gone: true), member('m2')]), 'm2');
   });
 
   test('labels', () {

@@ -1,5 +1,3 @@
-// restructure: rewrite in step 1 (Connection + Identity + Presence): queue
-// `by` and adder-only keys follow the lasting client id.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -15,14 +13,15 @@ class _Peer {
     ws.listen((m) => msgs.add(Map<String, Object?>.from(jsonDecode('$m') as Map)));
   }
 
-  static Future<_Peer> join(int port, String name) async {
+  static Future<_Peer> join(int port, String name, {String client = '', int seq = 0}) async {
     final ws = await WebSocket.connect('ws://127.0.0.1:$port/sync');
     final p = _Peer(ws);
     p.send(HelloMessage(
             proto: RelayConstants.protoVersion,
             secret: 's',
             user: HelloUser(name: name),
-            media: const HelloMedia(name: '', size: 0, duration: 0))
+            client: client,
+            seq: seq)
         .toJson());
     await p.until((m) => m['t'] == 'welcome');
     return p;
@@ -121,5 +120,25 @@ void main() {
     final s = await a.state((s) => s.queue.isNotEmpty);
     expect(s.queue.single.media.url, isNull, reason: 'an adder-only item carries no path or link');
     expect(s.queue.single.key, 'k1234567890');
+  });
+
+  test("an adder's items keep its lasting id through a drop and wait while it is gone", () async {
+    const install = 'queueTestInstallId0001';
+    final a = await _Peer.join(server.boundPort, 'alice', client: install, seq: 1);
+    final b = await _Peer.join(server.boundPort, 'bob');
+    a.send(const QueueIntent.add(QueueItem(
+            media: HelloMedia(name: 'f.mkv', size: 10, duration: 0), how: QueueHow.file, title: 'f', key: 'k1234567890'))
+        .toJson());
+    final added = (await b.state((s) => s.queue.isNotEmpty)).queue.single;
+    final aliceId = added.by;
+    await a.ws.close();
+    // Gone: still a member, so whoever would put the item up waits for it
+    // instead of skipping it.
+    final whileGone = await b.state((s) => s.members.any((m) => m.id == aliceId && m.presence == Presence.gone));
+    expect(whileGone.queue.single.by, aliceId);
+    final again = await _Peer.join(server.boundPort, 'alice', client: install, seq: 2);
+    final back = await again.state((s) => s.members.any((m) => m.id == aliceId && m.presence != Presence.gone));
+    expect(back.queue.single.by, aliceId, reason: 'the same member: its items are its own again');
+    expect(back.members.where((m) => m.name == 'alice'), hasLength(1));
   });
 }

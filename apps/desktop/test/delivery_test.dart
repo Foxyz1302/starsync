@@ -7,7 +7,7 @@ import 'package:starsync/src/session/delivery.dart';
 import 'package:starsync/src/shell/delivery_line.dart';
 
 MemberView _m(String id, String name, {double buffered = 30, bool host = false, int rate = 0}) =>
-    MemberView(id: id, name: name, ready: true, inSet: true, buffered: buffered, stale: false, host: host, rate: rate);
+    MemberView(id: id, name: name, ready: true, inSet: true, buffered: buffered, host: host, rate: rate);
 
 StateBroadcast _state(Map<String, Object?>? media, List<MemberView> members, {String transport = 'playing'}) =>
     StateBroadcast(
@@ -87,7 +87,7 @@ void main() {
   test('Jellyfin: own accounts direct, the rest via server', () {
     const ref = {'serverId': 'srv', 'itemId': '0123456789abcdef0123456789abcdef', 'title': 'Pilot'};
     MemberView jf(String id, String name, bool own) =>
-        MemberView(id: id, name: name, ready: true, inSet: true, buffered: 30, stale: false, jf: {'srv': own});
+        MemberView(id: id, name: name, ready: true, inSet: true, buffered: 30, jf: {'srv': own});
     final all = [jf('m1', 'Foxyz', true), jf('m2', 'Bob', true)];
     final media = {'name': 'Pilot', 'jellyfin': ref, 'relay': const MediaRelay(source: 'm1', live: true).toJson()};
     final d = deliveryOf(_state(media, all), selfId: 'm2')!;

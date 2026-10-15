@@ -117,7 +117,7 @@ void relogLine(String tag, String line) {
 // `"name":"value"` or `Name="value"` (Jellyfin's MediaBrowser header).
 const _secretNames = r'(?:x-emby-token|x-mediabrowser-token|x-emby-authorization|authorization|set-cookie|cookie|'
     r'api_?key|access_?token|refresh_?token|id_?token|auth_?token|token|password|passwd|secret|host_?key|'
-    r'sessdata|bili_jct|client_?secret)';
+    r'sessdata|bili_jct|client_?secret|client_?id|client)';
 final _jsonSecret = RegExp('"($_secretNames)"\\s*:\\s*"(?:[^"\\\\]|\\\\.)*"', caseSensitive: false);
 final _quotedSecret = RegExp('\\b($_secretNames)\\s*=\\s*"[^"]*"', caseSensitive: false);
 // Header-like `Name: value` runs to the end of the line (a cookie
@@ -135,7 +135,8 @@ final _userInfo = RegExp(r'^([a-z]+://)[^/@\s]+@', caseSensitive: false);
 /// [s] with nothing secret left: every URL's query string down to its
 /// parameter names (signed CDN links, `api_key`), user:password@ in URLs,
 /// member tokens in `/r/ /m/ /j/ /a/ /i/ /l/` paths, and the values of
-/// passwords, tokens, API keys, cookies and auth headers. Applied to
+/// passwords, tokens, API keys, cookies, auth headers and the per-install
+/// client id (`hello.client`). Applied to
 /// every log line ([formatLogLine]).
 String redactLog(String s) {
   if (s.isEmpty) return s;

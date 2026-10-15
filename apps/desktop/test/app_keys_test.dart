@@ -43,7 +43,7 @@ void main() {
       position: 0,
       serverTime: DateTime.now().toUtc(),
       mediaId: 0,
-      members: [MemberView(id: 'a', name: 'Alex', ready: false, inSet: false, buffered: 0, stale: false)],
+      members: [MemberView(id: 'a', name: 'Alex', ready: false, inSet: false, buffered: 0)],
     );
     session.route.value = AppRoute.session;
     await tester.pumpAndSettle();

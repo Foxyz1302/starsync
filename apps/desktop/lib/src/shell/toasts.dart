@@ -80,7 +80,7 @@ class _PartyToastsState extends State<PartyToasts> {
         final playing = coord.serverState.value?.transport == 'playing';
         final popups = AppSettings.instance.chatPopups.value;
         for (final t in fresh) {
-          final toast = shellToastFor(t, (n) => avatarForName(n, coord));
+          final toast = shellToastFor(t, (n) => avatarForName(n, coord, t.actorId));
           // Chat per Settings → Notifications (it is in the chat either way).
           if (toast.chat && !popups.shows(playing: playing)) continue;
           _add(toast);

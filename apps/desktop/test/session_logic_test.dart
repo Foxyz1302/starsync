@@ -1,78 +1,108 @@
-// restructure: rewrite in step 1 (Connection + Identity + Presence):
-// IdleTracker and unreadyForNewMedia give way to auto sit-out;
-// linkDisplayName stays.
+// Pure session logic: auto sit-out on a fake clock, link names, the
+// unready-on-swap rule.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:starsync/src/session/idle.dart';
+import 'package:sync_relay_core/core.dart' show Presence, PresenceReason;
+import 'package:starsync/src/platform/ports/shell_port.dart' show WindowActivity;
+import 'package:starsync/src/session/auto_sit_out.dart';
 import 'package:starsync/src/session/session_coordinator.dart';
 
 void main() {
-  group('IdleTracker', () {
+  group('AutoSitOut', () {
     final t0 = DateTime.utc(2026, 1, 1, 12);
+    const idle = AutoSitOutTimes.idle;
+    const minimised = AutoSitOutTimes.minimised;
 
-    List<IdleEvent> run(IdleTracker idle, DateTime from, Duration span,
-        {required bool playing, bool selfReady = true}) {
-      final out = <IdleEvent>[];
+    /// Ticks once a second from [from] for [span]; the steps that were not
+    /// [AutoStay], at their second.
+    List<(int, String)> run(AutoSitOut a, DateTime from, Duration span,
+        {Presence self = Presence.watching, bool playing = false, bool alone = false, bool enabled = true}) {
+      final out = <(int, String)>[];
       for (var s = 0; s <= span.inSeconds; s++) {
-        final e = idle.tick(from.add(Duration(seconds: s)),
-            playing: playing, selfReady: selfReady);
-        if (e != IdleEvent.none) out.add(e);
+        final step = a.tick(from.add(Duration(seconds: s)),
+            self: self, playing: playing, alone: alone, enabled: enabled);
+        switch (step) {
+          case AutoAway(:final reason):
+            out.add((s, 'away ${reason.name}'));
+          case AutoBack():
+            out.add((s, 'back'));
+          case AutoStay():
+            break;
+        }
       }
       return out;
     }
 
-    test('long watch then pause: no instant warn+unready', () {
-      final idle = IdleTracker(t0);
-      // 15 min of playback without any input.
-      expect(run(idle, t0, const Duration(minutes: 15), playing: true), isEmpty);
-      final paused = t0.add(const Duration(minutes: 15));
-      // First minute after the pause: nothing fires.
-      expect(run(idle, paused, const Duration(minutes: 1), playing: false),
-          isEmpty);
+    test('not playing: idle for the idle time sets you away (idle)', () {
+      final a = AutoSitOut(t0);
+      expect(run(a, t0, idle), [(idle.inSeconds, 'away idle')]);
     });
 
-    test('pause measures from when playback stopped', () {
-      final idle = IdleTracker(t0);
-      run(idle, t0, const Duration(minutes: 15), playing: true);
-      // Last playing tick was at +15 min; count seconds from there.
-      final paused = t0.add(const Duration(minutes: 15));
-      final events = <(int, IdleEvent)>[];
-      for (var s = 1; s <= 11 * 60; s++) {
-        final e = idle.tick(paused.add(Duration(seconds: s)),
-            playing: false, selfReady: true);
-        if (e != IdleEvent.none) events.add((s, e));
-      }
-      expect(events, [(8 * 60, IdleEvent.warn), (10 * 60, IdleEvent.unready)]);
+    test('never when alone, never when switched off', () {
+      expect(run(AutoSitOut(t0), t0, const Duration(minutes: 30), alone: true), isEmpty);
+      expect(run(AutoSitOut(t0), t0, const Duration(minutes: 30), enabled: false), isEmpty);
+      final m = AutoSitOut(t0)..window(WindowActivity.minimised, t0);
+      expect(run(m, t0, const Duration(minutes: 30), alone: true, playing: true), isEmpty);
     });
 
-    test('unready always trails the warning by 2 min', () {
-      final idle = IdleTracker(t0);
-      // Idle 20 min while unready (nothing to lose, nothing fires)...
-      expect(
-          run(idle, t0, const Duration(minutes: 20),
-              playing: false, selfReady: false),
-          isEmpty);
-      // ...then someone force-readies us: warn now, unready 2 min later.
-      final forced = t0.add(const Duration(minutes: 20, seconds: 1));
-      expect(idle.tick(forced, playing: false, selfReady: true), IdleEvent.warn);
-      expect(
-          idle.tick(forced.add(const Duration(seconds: 1)),
-              playing: false, selfReady: true),
-          IdleEvent.none);
-      expect(
-          idle.tick(forced.add(const Duration(minutes: 2)),
-              playing: false, selfReady: true),
-          IdleEvent.unready);
+    test('while playing idle input does not count, minimised for a while does', () {
+      final a = AutoSitOut(t0);
+      expect(run(a, t0, const Duration(minutes: 30), playing: true), isEmpty, reason: 'watching is activity');
+      final at = t0.add(const Duration(minutes: 30));
+      a.window(WindowActivity.minimised, at);
+      expect(run(a, at, minimised, playing: true), [(minimised.inSeconds, 'away minimised')]);
     });
 
-    test('input resets the clock and the warning', () {
-      final idle = IdleTracker(t0);
-      expect(idle.tick(t0.add(const Duration(minutes: 8)),
-          playing: false, selfReady: true), IdleEvent.warn);
-      idle.activity(t0.add(const Duration(minutes: 9)));
-      expect(idle.tick(t0.add(const Duration(minutes: 11)),
-          playing: false, selfReady: true), IdleEvent.none);
-      expect(idle.tick(t0.add(const Duration(minutes: 17)),
-          playing: false, selfReady: true), IdleEvent.warn);
+    test('a pause after a long watch starts a fresh idle clock', () {
+      final a = AutoSitOut(t0);
+      run(a, t0, const Duration(minutes: 30), playing: true);
+      final paused = t0.add(const Duration(minutes: 30, seconds: 1));
+      expect(run(a, paused, idle - const Duration(seconds: 2)), isEmpty);
+    });
+
+    test('back on input or focus, only from an automatic away', () {
+      final a = AutoSitOut(t0);
+      expect(run(a, t0, idle), [(idle.inSeconds, 'away idle')]);
+      final at = t0.add(idle);
+      // The away shows in the next states; nothing until the user is back.
+      expect(run(a, at, const Duration(minutes: 5), self: Presence.away), isEmpty);
+      final later = at.add(const Duration(minutes: 5, seconds: 1));
+      a.input(later);
+      expect(run(a, later, const Duration(seconds: 1), self: Presence.away), [(0, 'back')]);
+
+      // Minimised away: restoring is not enough, the focus brings it back.
+      final b = AutoSitOut(t0)..window(WindowActivity.minimised, t0);
+      expect(run(b, t0, minimised, playing: true), [(minimised.inSeconds, 'away minimised')]);
+      final m = t0.add(minimised);
+      b.window(WindowActivity.unfocused, m);
+      expect(run(b, m, const Duration(seconds: 3), self: Presence.away), isEmpty);
+      b.window(WindowActivity.focused, m);
+      expect(run(b, m, const Duration(seconds: 1), self: Presence.away), [(0, 'back')]);
+    });
+
+    test('a manual away (own or someone else\'s) is never returned automatically', () {
+      // Someone else sat you out: activity does not bring you back.
+      final a = AutoSitOut(t0);
+      a.input(t0);
+      expect(run(a, t0, const Duration(minutes: 20), self: Presence.away), isEmpty);
+      // Auto away, then the user sits out by hand: it stays.
+      final b = AutoSitOut(t0);
+      expect(run(b, t0, idle), [(idle.inSeconds, 'away idle')]);
+      b.manual();
+      final at = t0.add(idle);
+      b.input(at);
+      expect(run(b, at, const Duration(minutes: 1), self: Presence.away), isEmpty);
+    });
+
+    test('an away not yet echoed is not sent again', () {
+      final a = AutoSitOut(t0);
+      // The state still says `in` for a few seconds after the away went out.
+      expect(run(a, t0, idle + const Duration(seconds: 8)), [(idle.inSeconds, 'away idle')]);
+      expect(a.autoAway, isTrue);
+    });
+
+    test('the reasons on the wire', () {
+      expect(PresenceReason.idle.name, 'idle');
+      expect(PresenceReason.minimised.name, 'minimised');
     });
   });
 

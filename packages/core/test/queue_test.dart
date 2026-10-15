@@ -83,7 +83,8 @@ void main() {
     for (var i = 0; i < RelayConstants.maxQueueItems; i++) {
       expect(engine.applyQueueAdd('a', link('$i')), isNull);
     }
-    expect(engine.applyQueueAdd('a', link('over')), contains('full'));
+    final refused = engine.applyQueueAdd('a', link('over'))!;
+    expect([refused.code, refused.message], [ErrCode.full, contains('full')]);
     expect(engine.queue.length, RelayConstants.maxQueueItems);
   });
 
@@ -117,5 +118,57 @@ void main() {
         jsonDecode(jsonEncode(QueueIntent.add(link('x'), next: true).toJson())) as Map));
     expect((intent.op, intent.next, intent.item!.title), ('add', true, 'x'));
     expect(() => QueueIntent.fromJson(const {'t': 'queue', 'op': 'nope'}), throwsA(isA<ProtocolException>()));
+  });
+
+  group('auto (the continuation)', () {
+    QueueItem next(String title) => link(title).copyWith(auto: true, forMedia: engine.mediaId);
+
+    setUp(() {
+      engine.applySwap('a', const HelloMedia(name: 'Ep01', size: 0, duration: 0, url: 'https://example.com/1'));
+    });
+
+    test('only the swapper (or, without it, the first in) adds it, for the current media', () {
+      expect(engine.applyQueueAdd('b', next('Ep02'))!.code, ErrCode.forbidden);
+      expect(engine.applyQueueAdd('a', link('Ep02').copyWith(auto: true, forMedia: 99))!.code, ErrCode.bad);
+      expect(engine.applyQueueAdd('a', next('Ep02')), isNull);
+      engine.applyPresence('a', '', Presence.away);
+      expect(engine.applyQueueAdd('b', next('Ep02b')), isNull, reason: 'the swapper is away: bob is the first in');
+      expect(titles(), ['Ep02b'], reason: 'a newer one replaces it');
+    });
+
+    test('it stays after the others; a swap of something else and cancel drop it', () {
+      engine.applyQueueAdd('a', next('Ep02'));
+      engine.applyQueueAdd('b', link('x'));
+      engine.applyQueueAdd('b', link('y'), next: true);
+      expect(titles(), ['y', 'x', 'Ep02']);
+      expect(engine.queue.move(idOf('y'), 99), isTrue);
+      expect(engine.queue.move(idOf('Ep02'), 0), isFalse);
+      expect(titles(), ['x', 'y', 'Ep02'], reason: 'nothing moves past it');
+      final json = engine.broadcast().toJson();
+      final last = ((json['queue'] as List).last as Map);
+      expect([last['auto'], last['for']], [true, engine.mediaId]);
+      expect(QueueItem.fromJson(jsonDecode(jsonEncode(last)))!.forMedia, engine.mediaId);
+      engine.applySwap('b', const HelloMedia(name: 'other', size: 0, duration: 0, url: 'https://example.com/o'),
+          queueId: idOf('y'));
+      expect(titles(), ['x'], reason: 'a swap to something else drops it');
+      engine.applyQueueAdd('b', link('z'));
+      expect(engine.applyQueueAdd('b', next('Ep03')), isNull);
+      engine.feed.drain();
+      expect(engine.applyQueueCancel('a'), isTrue);
+      expect(titles(), ['x', 'z']);
+      final line = engine.feed.drain().single;
+      expect([line.action, line.actorId, line.target], ['advance-cancel', 'm1', 'Ep03']);
+      expect(engine.applyQueueCancel('a'), isFalse);
+      expect(QueueIntent.fromJson(const QueueIntent.cancel().toJson()).op, 'cancel');
+    });
+
+    test('a swap that puts it up keeps the queue going', () {
+      engine.applyQueueAdd('a', next('Ep02'));
+      final id = idOf('Ep02');
+      engine.applySwap('a', const HelloMedia(name: 'Ep02', size: 0, duration: 0, url: 'https://example.com/2'),
+          queueId: id);
+      expect(engine.queue.isEmpty, isTrue);
+      expect(engine.media!.name, 'Ep02');
+    });
   });
 }
