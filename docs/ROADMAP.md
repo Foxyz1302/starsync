@@ -59,9 +59,8 @@ the automatic continuation and countdown, relay state), the device
 (client id, library and folders, match corrections, watch history,
 settings, notification prefs, what this app is sourcing) and the
 integrations (Jellyfin played/resume, AniList list).
-7. Release 1.3.0: publish the manifest (protocol 16 makes it a required
-   update for 1.2.x) and update the VPS dedicated server in the same
-   window; check a 1.2.x app gets a clear "update the app" message.
+Released as 1.3.0. Left: check that a 1.2.x app gets a clear "update
+the app" message and updates (Windows: the first real use, backlog 5).
 Composition root (in place, ARCHITECTURE "Composition root"): the
 remaining `.instance` singletons move into `AppGraph` as the steps touch
 them; `singletons_test` holds the count (today: AppSettings 49,
