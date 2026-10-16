@@ -302,6 +302,14 @@ in the same file; a dedicated server prints its folder at start
 (`--log-dir`). Users send theirs with Settings → About → "Copy
 diagnostics".
 
+A Windows friend without a terminal habit: `tool/windows_report.cmd`
+(one file: a cmd header that runs the PowerShell below it). Dropped into
+the Starsync folder and double-clicked, it collects the app's logs,
+Windows' crash events (1000/1001/1026), that install's file list (and
+any other found on Desktop, Downloads, Documents, AppData, Program
+Files) and a 20 s test start with its exit code, zips them to the
+Desktop and copies the zip (Ctrl+V into Discord).
+
 Start with the session log when there is one: `session-YYYY-MM-DD.log`
 in the server's folder (the hosting app's logs folder, or the dedicated
 server's `--log-dir`), every member's lines and the server's merged in
