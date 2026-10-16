@@ -1,10 +1,10 @@
 {
-  "version": "1.2.0",
-  "protocol": 15,
-  "url": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.2.0/watch-together-1.2.0-linux-x64.tar.gz",
-  "notes": "- release.sh: notes via git log -n (head broke the pipe under pipefail past 20 commits)",
+  "version": "1.3.0",
+  "protocol": 16,
+  "url": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.3.0/starsync-1.3.0-linux-x64.tar.gz",
+  "notes": "Starsync 1.3.0: the app is now called Starsync (rebuilt inside for stability); a shared countdown to what plays next; watched counts only time you actually watched; faster relay seeks; fixes for exit freezes, Windows shaders and X11 rendering. Everyone must update to keep watching together.",
   "assets": {
-    "linux-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.2.0/watch-together-1.2.0-linux-x64.tar.gz",
-    "windows-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.2.0/watch-together-1.2.0-windows-x64.zip"
+    "linux-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.3.0/starsync-1.3.0-linux-x64.tar.gz",
+    "windows-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.3.0/starsync-1.3.0-windows-x64.zip"
   }
 }
