@@ -282,9 +282,16 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
      fetch of member-resolved links (the member need not upload or stay)
      is worth building.
 
-7. **Jellyfin** (epic, below).
+7. **Tray** (like Discord): close to the tray instead of quitting, so
+   the app stays on the server and its system notifications keep coming;
+   a tray menu (Open, Quit; maybe Leave the server). Quit stays the
+   orderly shutdown (P32). Linux trays vary (StatusNotifierItem; GNOME
+   shows none without an extension), so close-to-tray needs a fallback
+   to quitting where no tray exists.
 
-8. **Smaller items**
+8. **Jellyfin** (epic, below).
+
+9. **Smaller items**
    - Video output robustness: if media_kit's hardware path regresses to
      software (see ARCHITECTURE, Media: render mode), vendor a
      media_kit_video fix that builds the EGL display from GDK's native
