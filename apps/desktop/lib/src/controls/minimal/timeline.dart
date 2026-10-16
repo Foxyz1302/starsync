@@ -28,6 +28,9 @@ abstract final class MinimalTimelineSpec {
   /// What is left of it while they are hidden.
   static const lineSize = 3.0;
 
+  /// The played part's accent tint.
+  static const played = 0.4;
+
   /// The position line.
   static const lineWidth = 2.0;
   static const fontSize = 15.0;
@@ -467,13 +470,10 @@ class MinimalTimelinePainter extends CustomPainter {
     final w = size.width, h = size.height;
     final x = lineX(w);
     final band = Offset.zero & size;
-    // The band, darker as it grows; hidden, a faint track.
-    canvas.drawRect(band, Paint()..color = Color.lerp(const Color(0x40FFFFFF), MinimalStyle.band, visibility)!);
-    // Played: an accent tint, solid once the band is a line.
-    canvas.drawRect(
-      Rect.fromLTRB(0, 0, x, h),
-      Paint()..color = accent.withValues(alpha: 0.28 + 0.72 * (1 - visibility)),
-    );
+    // The same colours shown and hidden: hidden, it is the band shrunk to
+    // a line, so growing and shrinking never switches colour.
+    canvas.drawRect(band, Paint()..color = MinimalStyle.band);
+    canvas.drawRect(Rect.fromLTRB(0, 0, x, h), Paint()..color = accent.withValues(alpha: MinimalTimelineSpec.played));
     _stripes(canvas, w, h);
     _chapters(canvas, w, h);
     if (visibility > 0) {
@@ -500,7 +500,8 @@ class MinimalTimelinePainter extends CustomPainter {
     canvas.save();
     canvas.clipRect(Rect.fromLTRB(ax, 0, w, h));
     final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.10 + 0.08 * (1 - visibility))
+      // Stronger on the line, where only a few pixels of each show.
+      ..color = Colors.white.withValues(alpha: 0.12 + 0.22 * (1 - visibility))
       ..strokeWidth = 1.5 * scale;
     for (var c = (ax / period).floorToDouble() * period - h; c <= w; c += period) {
       canvas.drawLine(Offset(c, h), Offset(c + h, 0), paint);
@@ -509,7 +510,7 @@ class MinimalTimelinePainter extends CustomPainter {
   }
 
   void _chapters(Canvas canvas, double w, double h) {
-    final cut = Paint()..color = Colors.black.withValues(alpha: 0.55);
+    final cut = Paint()..color = Colors.black.withValues(alpha: 0.3);
     for (final f in chapters) {
       if (f <= 0) continue;
       final cx = w * f;

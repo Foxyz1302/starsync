@@ -2204,7 +2204,7 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   glass capsules (`MinimalCapsule`, the pills' tint and hairline;
   `MinimalButton` rounded squares, the play button a filled accent
   circle) above `MinimalTimeline`, a 36 px band across the bottom: the
-  played part tinted in the theme's primary, the position a white line,
+  played part tinted in the theme's primary (40 %), the position a white line,
   the part not downloaded yet (from `buffered`, or the position when
   that is behind, to the end) in thin stripes, chapter starts as dots on
   the top edge with a dark cut through the band (a press within reach of
@@ -2214,7 +2214,11 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   not reach the end). Hover: a faint line and a glass tip with the time
   (the chapter title above it). A press seeks, every drag move seeks,
   after release the line stays at the target until the position catches
-  up (at most 2 s). Hidden, it shrinks (120 ms) to a 3 px progress line.
+  up (at most 2 s). Hidden, it shrinks (120 ms) to a 3 px progress line
+that is the band itself, smaller: the same dark band, the same played
+tint (40 % of the accent), so growing or shrinking never changes colour;
+the stripes are stronger on the line (a few pixels of each show) so the
+part not downloaded still reads; chapter cuts are a light dark line.
   We know only the end of mpv's cache, so a dropped back buffer is not
   shown.
 - **Settings** (`AppSettings`, `model/controls_prefs.dart`, all live):
