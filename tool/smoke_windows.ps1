@@ -64,6 +64,8 @@ if (-not ($lines -contains 'start')) {
 if ($lines | Where-Object { $_ -like 'skip *' }) { Write-Warning "skipped: $($lines -like 'skip *')"; exit 0 }
 if ($lines | Where-Object { $_ -like 'fail *' }) { Write-Error "smoke failed: $($lines -like 'fail *')"; exit 1 }
 if (-not ($lines | Where-Object { $_ -like 'opened *' })) { Write-Error 'the media never opened'; exit 1 }
+if (-not ($lines -contains 'closing')) { Write-Error "the app ended on its own before closing (exit $($p.ExitCode))"; exit 1 }
+if (-not ($lines -contains 'quitting')) { Write-Error 'the close did not reach its end (killed on the way?)'; exit 1 }
 if (-not $exited) { Write-Error "the app did not close within $Limit s (P32)"; exit 1 }
 if ($left) { Write-Error "a starsync process was left behind (P32)"; exit 1 }
 Write-Host "smoke ok: opened and closed in $secs s, no process left"

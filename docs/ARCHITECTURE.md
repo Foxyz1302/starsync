@@ -2293,7 +2293,9 @@ app kills itself (`Process.killPid`, no exit handlers; it only gets there
 if the close did not go through); the runners end the process 15 s after
 the first close request (Linux: a `delete-event` handler connected before
 window_manager's; Windows: the first `WM_CLOSE`), and Windows also 3 s
-after the window is destroyed, while the engine and plugins go.
+after the window is destroyed, while the engine and plugins go (only
+with an engine: `Win32Window::Create` runs `OnDestroy` before the window
+exists, and a timer armed there ended every start at 3 s).
 
 ## Logging
 

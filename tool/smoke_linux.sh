@@ -34,6 +34,8 @@ grep -qx start "$OUT" 2>/dev/null || { [[ $exited == 1 ]] && { echo "skipped: th
 grep -q '^skip ' "$OUT" && { echo "skipped: $(grep '^skip ' "$OUT")"; exit 0; }
 grep -q '^fail ' "$OUT" && { echo "smoke failed: $(grep '^fail ' "$OUT")" >&2; exit 1; }
 grep -q '^opened ' "$OUT" || { echo "the media never opened" >&2; exit 1; }
+grep -qx closing "$OUT" || { echo "the app ended on its own before closing" >&2; exit 1; }
+grep -qx quitting "$OUT" || { echo "the close did not reach its end (killed on the way?)" >&2; exit 1; }
 [[ $exited == 1 ]] || { echo "the app did not close within $LIMIT s (P32)" >&2; exit 1; }
 [[ -z "$left" ]] || { echo "a starsync process was left behind (P32)" >&2; exit 1; }
 echo "smoke ok: opened and closed in $secs s, no process left"

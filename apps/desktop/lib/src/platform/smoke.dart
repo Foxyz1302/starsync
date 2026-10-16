@@ -12,9 +12,14 @@ import 'ports/player_host.dart';
 // in a session player with a video output through the media pipeline,
 // play a second and close the normal way ([shutDownApp]). Progress goes to
 // `STARSYNC_SMOKE_OUT` (one line per step: `start`, `opened <ms> render=<mode>`,
-// `closing`, or `skip <why>` / `fail <why>`), so the script can tell a
-// runner that cannot show a window (skip) from a close that hangs or
-// leaves a process behind (fail).
+// `closing`, `quitting`, or `skip <why>` / `fail <why>`), so the script can
+// tell a runner that cannot show a window (skip) from a close that hangs or
+// leaves a process behind, or a process that ends on its own (fail). It
+// stays up [smokeUptime] first: a start that dies by itself (the 1.3.0
+// Windows exit timer) ends before `closing`.
+
+/// How long the smoke run keeps the app up before closing it.
+const smokeUptime = Duration(seconds: 10);
 
 /// The smoke run's media, or null for a normal start.
 String? get smokeMedia {
@@ -65,6 +70,9 @@ Future<void> runSmoke(AppGraph graph, String media) async {
   } catch (e) {
     step('fail $e');
   }
+  final wait = smokeUptime - sw.elapsed;
+  if (wait > Duration.zero) await Future.delayed(wait);
   step('closing');
-  await shutDownApp();
+  // Reached only through the app's own close (not a kill on the way).
+  await shutDownApp(beforeQuit: () async => step('quitting'));
 }

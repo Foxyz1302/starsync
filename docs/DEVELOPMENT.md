@@ -210,10 +210,12 @@ updater tests, the release build and the close smoke run on that build
 `STARSYNC_SMOKE=<clip>` (a 5 s clip from ffmpeg, else a WAV the script
 writes) under its own profile (`STARSYNC_PROFILE=smoke`), opens the clip
 in a player with a video output through the media pipeline
-(`platform/smoke.dart`), plays a second and closes the normal way; the
-steps go to `STARSYNC_SMOKE_OUT` (`start`, `opened <ms> render=<mode>`,
-`closing`, or `skip` / `fail` with why). It fails when the app does not
-exit within 45 s or leaves a `starsync` process, skips with a warning
+(`platform/smoke.dart`), plays it, stays up 10 s from its start and
+closes the normal way; the steps go to `STARSYNC_SMOKE_OUT` (`start`,
+`opened <ms> render=<mode>`, `closing`, `quitting` just before the
+window closes, or `skip` / `fail` with why). It fails when the app ends
+by itself before `closing` or never reaches `quitting`, does not exit
+within 45 s or leaves a `starsync` process, skips with a warning
 when the runner cannot bring the app or its video output up, and prints
 the `smoke:`, `close:` and `mpv: render` lines of the app log.
 `tool/smoke_linux.sh` is the same on Linux (needs a display; after

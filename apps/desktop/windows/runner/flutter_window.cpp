@@ -80,7 +80,11 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   // The engine and the plugins go now; the app released its players first.
-  ExitAfter(3000);
+  // Win32Window::Create runs this too, before there is an engine: only a
+  // real teardown may end the process (else every start dies at 3 s).
+  if (flutter_controller_) {
+    ExitAfter(3000);
+  }
   window_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
