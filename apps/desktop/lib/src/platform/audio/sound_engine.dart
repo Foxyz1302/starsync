@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_soloud/flutter_soloud.dart';
@@ -50,6 +51,13 @@ class SoundEngine {
 
   Future<bool>? _ready;
   var _disposed = false;
+
+  /// A file that exists only while the audio device is opening (set by the
+  /// app). Found at the next start, the last open took the app down (a
+  /// native crash in the driver or miniaudio, seen on Windows): sounds stay
+  /// off rather than crash every start, until [retry] (Settings' preview).
+  String? crashMark;
+  var _skipped = false;
   /// Per slot: the loaded key and its sound (null: failed to load).
   final Map<String, (String, Future<Object?>)> _slots = {};
   /// Load names are unique: SoLoud hands back the old sound for a name it
@@ -61,13 +69,41 @@ class SoundEngine {
 
   Future<bool> _init() async {
     if (_disposed) return false;
+    final mark = crashMark == null ? null : File(crashMark!);
+    try {
+      if (mark != null && mark.existsSync()) {
+        _skipped = true;
+        _log.warning('no sounds: opening the audio device crashed the app last time '
+            '(${mark.path}); a sound preview in Settings tries again');
+        return false;
+      }
+      mark?.writeAsStringSync('opening the audio device');
+    } catch (_) {}
+    _log.info('opening the audio device');
     try {
       await _backend.init();
+      _log.info('audio device open');
       return true;
     } catch (e) {
       _log.warning('no sounds: audio init failed: $e');
       return false;
+    } finally {
+      try {
+        if (mark != null && mark.existsSync()) mark.deleteSync();
+      } catch (_) {}
     }
+  }
+
+  /// Opens the device again after a crash mark kept sounds off (the user
+  /// asked for a sound). A real crash leaves the mark again.
+  void retry() {
+    if (!_skipped) return;
+    _skipped = false;
+    try {
+      final m = crashMark;
+      if (m != null) File(m).deleteSync();
+    } catch (_) {}
+    _ready = null;
   }
 
   /// Plays the sound of [slot] at [volume] (linear gain). [key] names what

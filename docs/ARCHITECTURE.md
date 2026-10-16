@@ -1946,7 +1946,12 @@ panel) and chat messages (Copy message, and a link in it).
   switched off in `soundsOff`. The device opens 2 s after startup
   (`warmUp`), so neither startup nor the first sound waits on it; if it
   can't open, the engine logs `no sounds: audio init failed` once and drops
-  every play. App close disposes the engine (deinit, 500 ms bound)
+  every play. Opening it is logged (`opening the audio device`,
+  `audio device open`) and leaves `<support>/audio-init.pending` until it
+  returns: a native crash there (a driver, miniaudio) leaves the file, and
+  the next start skips sounds (`no sounds: opening the audio device
+  crashed the app last time`) instead of crashing again; a sound preview
+  in Settings deletes it and tries once more. App close disposes the engine (deinit, 500 ms bound)
   before leaving the server. Settings → Notifications & sounds has the volume, the
   overall sound set (`soundPreset`), and per sound a preview, its own set
   (`soundPresetFor`, else the overall one) and a switch; a preview always
