@@ -250,7 +250,8 @@ User pushes tags; CI does the rest.
 2. Review, then `git push --follow-tags`.
 3. `.gitea/workflows/release.yml` runs one job per platform: Linux builds
    with `tool/package_linux.sh`, Windows (runner `yuuka-windows`, host mode,
-   PowerShell only) with `tool/package_windows.ps1`. Each then runs
+   PowerShell only; `tool/setup_flutter_windows.ps1` also adds Visual
+   Studio's C++ ATL component once, which the notifications plugin needs) with `tool/package_windows.ps1`. Each then runs
    `dart tool/release_publish.dart vX.Y.Z <archive>`, which creates the
    release if the other job hasn't yet and uploads (or replaces) its asset.
    By hand: package, then the same `dart tool/release_publish.dart` line.
