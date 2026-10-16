@@ -72,9 +72,10 @@ void main() {
   final clients = <_Client>[];
 
   setUp(() async {
-    // Short limits so the demo runs in a couple of seconds.
+    // Short limits so the demo runs in a few seconds; silence well above
+    // a busy CI runner's stalls (600 ms marked a reporting client gone).
     server = SyncServer(AppConfig(port: 0, secret: 'shh', name: 'test'),
-        liveness: const Liveness(silence: Duration(milliseconds: 600)));
+        liveness: const Liveness(silence: Duration(milliseconds: 1500)));
     await server.start();
     proxy = await FlakyProxy.start(server.boundPort);
   });
@@ -106,7 +107,7 @@ void main() {
         .toJson());
     c.send(const SwapIntent(media: HelloMedia(name: 'mine.mkv', size: 100, duration: 0, relay: MediaRelay())).toJson());
     await until(() => engine.queue.length == 1 && server.hub.relay != null && member()!.ready, 'ready, queued, relayed');
-    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    await Future<void>.delayed(const Duration(milliseconds: 2000));
     expect(member()!.presence, isNot(Presence.gone), reason: 'reports through the proxy keep it present');
 
     proxy.last!.blackhole();
