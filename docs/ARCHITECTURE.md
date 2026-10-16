@@ -550,6 +550,12 @@ set (M + S). A missing file, a path containing the list separator, a
 read-back mismatch, or an mpv `libmpv_render` error while shaders are on
 turns shaders off (saved) with a toast.
 
+A player with a video output opens media only once that output is up:
+media_kit sets mpv's `vo=libmpv` before the output's render context
+exists, and a media opened in between gets no video output ("No render
+context set", black picture with sound). On X11 the context comes up
+later, which widens that gap (joining with media already up).
+
 Render mode: media_kit's Linux/Windows video output creates mpv's render
 context (OpenGL, else its software renderer) when the `VideoController` is
 created, and nothing in its API says which. The host therefore requests

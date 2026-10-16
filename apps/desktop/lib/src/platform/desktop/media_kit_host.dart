@@ -185,6 +185,14 @@ class MediaKitHost implements PlayerHost {
     // configured), which used to override SYNC_RELAY_HWDEC.
     final controller = VideoController(p.mk, configuration: VideoControllerConfiguration(hwdec: hwdec));
     final v = _MkVideo(p, controller);
+    // mpv gets `vo=libmpv` before the output's render context exists; a
+    // media opened in between fails its video output ("No render context
+    // set") and plays black. Opens wait for the output (seen on X11, where
+    // the context comes up later, when joining with media already up).
+    p._videoReady = controller.platform.future
+        .then((_) {})
+        .timeout(const Duration(seconds: 5), onTimeout: () {})
+        .catchError((Object _) {});
     if (probe) unawaited(_probeRender(p, v));
     return v;
   }
@@ -381,6 +389,7 @@ class _MkPlayer implements HostedPlayer {
   StreamSubscription<int?>? _firstFrame;
   bool _probing = false;
   bool _retired = false;
+  Future<void>? _videoReady; // set once a video output is attached
 
   dynamic get _mpv => mk.platform;
 
@@ -426,9 +435,11 @@ class _MkPlayer implements HostedPlayer {
   set onUserSeek(void Function(Duration position)? f) => mk.onUserSeek = f;
 
   @override
-  Future<void> open(String url, {Map<String, String> headers = const {}, bool play = false}) =>
-      // An empty map, not null: media_kit caches headers per URI.
-      mk.open(Media(url, httpHeaders: headers), play: play);
+  Future<void> open(String url, {Map<String, String> headers = const {}, bool play = false}) async {
+    if (_videoReady case final ready?) await ready;
+    // An empty map, not null: media_kit caches headers per URI.
+    await mk.open(Media(url, httpHeaders: headers), play: play);
+  }
 
   @override
   Future<void> play() => mk.play();
