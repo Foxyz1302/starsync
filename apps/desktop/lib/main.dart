@@ -49,8 +49,6 @@ Future<void> main(List<String> args) async {
   await AppSettings.instance.ensureLoaded();
   // The composition root: every system, made once.
   final graph = AppGraph.build();
-  // Sounds stay off after an audio-device crash (see SoundEngine.crashMark).
-  graph.sfx.engine.crashMark = '${dirs.support}${Platform.pathSeparator}audio-init.pending';
   final ports = graph.ports;
   // Close button / Alt+F4: the orderly close ([shutDownApp]), so others
   // see "left", your server shuts down and no player outlives the engine.

@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -148,46 +147,4 @@ void main() {
       expect(b.deinits, 1);
     });
   });
-
-  group('crash mark', () {
-    late Directory dir;
-    setUp(() => dir = Directory.systemTemp.createTempSync('sound_mark'));
-    tearDown(() => dir.deleteSync(recursive: true));
-
-    test('exists only while the device opens', () async {
-      final mark = '${dir.path}/audio-init.pending';
-      var seen = false;
-      final b = _MarkBackend(() => seen = File(mark).existsSync());
-      final e = SoundEngine(backend: b)..crashMark = mark;
-      expect(await e.warmUp(), isTrue);
-      expect(seen, isTrue, reason: 'there while opening');
-      expect(File(mark).existsSync(), isFalse, reason: 'gone once open');
-    });
-
-    test('left by a crash: sounds stay off, a preview tries again', () async {
-      final mark = '${dir.path}/audio-init.pending';
-      File(mark).writeAsStringSync('opening the audio device');
-      final b = _FakeBackend();
-      final e = SoundEngine(backend: b)..crashMark = mark;
-      await e.play('chat', 'k', _bytes, volume: 1);
-      expect(b.inits, 0, reason: 'never opened after a crash');
-      expect(b.plays, isEmpty);
-      e.retry();
-      await e.play('chat', 'k', _bytes, volume: 1);
-      expect(b.inits, 1);
-      expect(b.plays, hasLength(1));
-      expect(File(mark).existsSync(), isFalse);
-    });
-  });
-}
-
-class _MarkBackend extends _FakeBackend {
-  final void Function() onInit;
-  _MarkBackend(this.onInit);
-
-  @override
-  Future<void> init() async {
-    onInit();
-    await super.init();
-  }
 }

@@ -37,11 +37,8 @@ class SynthSfx implements SfxService {
 
   /// Plays [kind] even when it is switched off (Settings' preview), always
   /// freshly rendered: an edited spec plays after a hot reload.
-  Future<void> preview(SfxKind kind, {int readyIndex = 1, SoundPreset? preset}) {
-    // Asked for: try the device again even after a crash kept it closed.
-    engine.retry();
-    return _play(kind, readyIndex, preset ?? presetFor(kind), fresh: true);
-  }
+  Future<void> preview(SfxKind kind, {int readyIndex = 1, SoundPreset? preset}) =>
+      _play(kind, readyIndex, preset ?? presetFor(kind), fresh: true);
 
   /// One slot per sound and ready step: a new preset replaces it.
   Future<void> _play(SfxKind kind, int readyIndex, SoundPreset preset, {bool fresh = false}) {
