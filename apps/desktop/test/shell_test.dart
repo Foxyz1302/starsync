@@ -418,6 +418,25 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('the mini player clears the full player\'s controls (media_kit keeps the last ones on null)',
+      (tester) async {
+    coord.playback.alive.value = true;
+    final given = <PlayerMode, Object?>{};
+    PlayerMode mode() => tester.state<AppShellState>(find.byType(AppShell)).mode;
+    await pumpShell(tester, const Size(1280, 800), video: (context, controls) {
+      given[mode()] = controls;
+      return const ColoredBox(color: Color(0xFF7A3B2E));
+    });
+    online(party);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('tab-settings')));
+    await tester.pumpAndSettle();
+    expect(mode(), PlayerMode.mini);
+    expect(given[PlayerMode.full], isNotNull);
+    expect(given[PlayerMode.mini], isNotNull, reason: 'null would keep the full controls');
+    expect(given[PlayerMode.mini], isNot(same(given[PlayerMode.full])));
+  });
+
   testWidgets('status pill: who is not ready, with the ready count', (tester) async {
     coord.playback.alive.value = true;
     await pumpShell(tester, const Size(1280, 800));

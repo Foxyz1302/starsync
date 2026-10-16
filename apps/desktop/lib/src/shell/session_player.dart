@@ -8,6 +8,8 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../controls/controls_probe.dart';
+import '../controls/minimal/style.dart';
+import '../controls/model/controls_layout.dart';
 import '../controls/model/controls_model.dart';
 import '../controls/session_controls.dart';
 import '../controls/volume.dart';
@@ -291,7 +293,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
             _videoGen = gen;
             _videoKey = GlobalKey<VideoState>();
           }
-          final VideoControlsBuilder? controls = _full ? _sessionControls : null;
+          // Never null for the mini: media_kit keeps the last controls
+          // when given null, so the full player's would stay under it.
+          final VideoControlsBuilder controls = _full ? _sessionControls : _noControls;
           final video = widget.videoBuilder?.call(context, controls) ?? _video(controls);
           // The wheel anywhere on the full player steps the volume
           // (lists, menus and popovers under the mouse scroll instead).
@@ -568,11 +572,13 @@ class _SessionPlayerState extends State<SessionPlayer> {
         ),
       );
 
-  /// Mini: title, expand and close on hover; ready, time and a seekable
-  /// bar at the bottom. A thin progress line stays while not hovered.
+  /// Mini: title, expand and close on hover; the status, play (the full
+  /// player's play button: ready in a server) and the time, and a bar that
+  /// seeks. A thin progress line stays while not hovered.
   Widget _miniOverlay() {
     final coord = _coord;
     final playback = coord.playback;
+    const scale = 0.8;
     return MouseRegion(
       onEnter: (_) => setState(() => _miniHover = true),
       onExit: (_) => setState(() => _miniHover = false),
@@ -589,55 +595,73 @@ class _SessionPlayerState extends State<SessionPlayer> {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [Colors.black54, Colors.transparent, Colors.black87],
+                    stops: [0, 0.35, 0.55, 1],
+                    colors: [Color(0x99000000), Color(0x00000000), Color(0x00000000), Color(0xCC000000)],
                   ),
                 ),
                 child: Column(
                   children: [
-                    Row(
-                      children: [
-                        const SizedBox(width: 10),
-                        const Expanded(child: NowPlayingTitle(cover: false, compact: true)),
-                        IconButton(
-                          focusNode: _noFocus,
-                          onPressed: widget.onExpand,
-                          tooltip: 'Expand',
-                          icon: const Icon(Icons.open_in_full, color: Colors.white, size: 18),
-                        ),
-                        IconButton(
-                          focusNode: _noFocus,
-                          onPressed: widget.onClose,
-                          tooltip: 'Sit out (stay in the server)',
-                          icon: const Icon(Icons.close, color: Colors.white, size: 18),
-                        ),
-                      ],
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 6, 6, 0),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Expanded(
+                            child: Padding(
+                              padding: EdgeInsets.only(top: 4),
+                              child: NowPlayingTitle(cover: false, compact: true),
+                            ),
+                          ),
+                          MinimalButton(
+                              icon: Icons.open_in_full_rounded,
+                              tooltip: 'Expand',
+                              scale: scale,
+                              onPressed: widget.onExpand),
+                          MinimalButton(
+                              icon: Icons.close_rounded,
+                              tooltip: 'Sit out (stay in the server)',
+                              scale: scale,
+                              onPressed: widget.onClose),
+                        ],
+                      ),
                     ),
                     const Spacer(),
                     SignalBuilder(builder: (context) {
-                      final ready = coord.selfMember.value?.ready ?? false;
+                      final snap = _model.snapshot.value;
                       final pos = playback.position.value, dur = playback.duration.value;
-                      return Row(
-                        children: [
-                          IconButton(
-                            focusNode: _noFocus,
-                            tooltip: ready ? 'Ready (click: not ready)' : 'Not ready (click: ready)',
-                            onPressed: coord.toggleReady,
-                            icon: Icon(
-                              ready ? Icons.check_circle : Icons.radio_button_unchecked,
-                              color: ready ? Colors.greenAccent : Colors.white,
+                      final status = playerStatusNow(coord)?.short;
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 12, 2),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (status != null && status.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(4, 0, 0, 2),
+                                child: Text(status,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(color: Color(0xFFFFC857), fontSize: 12)),
+                              ),
+                            Row(
+                              children: [
+                                MinimalButton(
+                                  icon: controlIcon(BarControl.playPause, snap),
+                                  tooltip: controlTooltip(BarControl.playPause, snap),
+                                  accent: true,
+                                  scale: scale,
+                                  onPressed: _model.togglePlay,
+                                ),
+                                const SizedBox(width: 8),
+                                Text('${formatClock(pos)} / ${formatClock(dur)}',
+                                    style: const TextStyle(
+                                        color: MinimalStyle.dim,
+                                        fontSize: 12,
+                                        fontFeatures: [FontFeature.tabularFigures()])),
+                              ],
                             ),
-                          ),
-                          Text('${formatClock(pos)} / ${formatClock(dur)}',
-                              style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                          const Spacer(),
-                          Flexible(
-                            child: Text(playerStatusNow(_coord)?.short ?? '',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.amber, fontSize: 12)),
-                          ),
-                          const SizedBox(width: 10),
-                        ],
+                          ],
+                        ),
                       );
                     }),
                     _MiniSeekBar(onSeek: playback.userSeek),
@@ -653,6 +677,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
     );
   }
 }
+
+/// The mini player's empty controls slot (see [SessionPlayer]'s video).
+Widget _noControls(VideoState state) => const SizedBox.shrink();
 
 /// A floating pill's visibility: only while the controls are up (the
 /// mouse moved) or the mouse is on it. With [announce] it is also up for
@@ -768,7 +795,9 @@ const _shaderKeys = [
   LogicalKeyboardKey.digit6,
 ];
 
-/// Mini player progress: a 2 px line, or (hovered) a 4 px bar that seeks.
+/// Mini player progress across the bottom edge: a 3 px line, or (hovered)
+/// a 4 px bar with its track and the cached part that seeks (taller to
+/// hit). Plain rectangles: the player's rounded clip shapes the ends.
 class _MiniSeekBar extends StatelessWidget {
   final bool thin;
   final ValueChanged<Duration>? onSeek;
@@ -777,26 +806,59 @@ class _MiniSeekBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final playback = AppScope.of(context).coordinator.playback;
+    final accent = Theme.of(context).colorScheme.primary;
     return SignalBuilder(builder: (context) {
       final d = playback.duration.value;
-      final p = playback.position.value;
-      final v = d.inMilliseconds == 0 ? 0.0 : (p.inMilliseconds / d.inMilliseconds).clamp(0.0, 1.0);
-      final bar = LinearProgressIndicator(
-        value: v,
-        minHeight: thin ? 2 : 4,
-        backgroundColor: thin ? Colors.transparent : Colors.white24,
+      double f(Duration x) => d.inMilliseconds == 0 ? 0.0 : (x.inMilliseconds / d.inMilliseconds).clamp(0.0, 1.0);
+      final bar = SizedBox(
+        height: thin ? 3 : 4,
+        width: double.infinity,
+        child: CustomPaint(
+          painter: _MiniBarPainter(
+            played: f(playback.position.value),
+            cached: thin ? null : f(playback.buffered.value),
+            accent: accent,
+          ),
+        ),
       );
       if (thin || onSeek == null || d == Duration.zero) return bar;
       void seekAt(double x, double width) => onSeek!(d * (x / width).clamp(0.0, 1.0));
       return LayoutBuilder(
-        builder: (context, box) => GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (e) => seekAt(e.localPosition.dx, box.maxWidth),
-          onHorizontalDragEnd: null,
-          onHorizontalDragUpdate: (e) => seekAt(e.localPosition.dx, box.maxWidth),
-          child: Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: bar),
+        builder: (context, box) => MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (e) => seekAt(e.localPosition.dx, box.maxWidth),
+            onHorizontalDragUpdate: (e) => seekAt(e.localPosition.dx, box.maxWidth),
+            child: Padding(padding: const EdgeInsets.only(top: 8), child: bar),
+          ),
         ),
       );
     });
   }
+}
+
+class _MiniBarPainter extends CustomPainter {
+  final double played;
+
+  /// End of the cache ahead (a track is drawn only with it).
+  final double? cached;
+  final Color accent;
+  const _MiniBarPainter({required this.played, required this.cached, required this.accent});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    final c = cached;
+    if (c != null) {
+      canvas.drawRect(Offset.zero & size, Paint()..color = Colors.white.withValues(alpha: 0.18));
+      if (c > played) {
+        canvas.drawRect(Rect.fromLTRB(w * played, 0, w * c, h), Paint()..color = Colors.white.withValues(alpha: 0.3));
+      }
+    }
+    canvas.drawRect(Rect.fromLTRB(0, 0, w * played, h), Paint()..color = accent);
+  }
+
+  @override
+  bool shouldRepaint(_MiniBarPainter old) => old.played != played || old.cached != cached || old.accent != accent;
 }

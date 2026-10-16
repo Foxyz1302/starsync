@@ -1958,7 +1958,13 @@ panel) and chat messages (Copy message, and a link in it).
   snaps to the nearest corner with the shared curve). A mode change fades
   the layer out, moves it while invisible and fades it in (with the tabs
   when the full player comes or goes), so the video is never mounted twice
-  nor remounted. A tab sends the full player to mini; × on the mini sits
+  nor remounted. The mini has no control skin: its `Video` gets an empty
+  controls builder (never null: media_kit keeps the last controls on
+  null, which left the full player's bars under the mini). Hovered it
+  shows the title with expand and ×, the status line, the full player's
+  play button (`controlIcon`/`togglePlay`: ready in a server) with the
+  time, and a 4 px bar (track, cached, played) that seeks; otherwise a
+  3 px played line along the bottom edge. A tab sends the full player to mini; × on the mini sits
   out (the player unloads and shows the join-back card, `SitOutCard`, over
   the still mounted `Video`); × on that card closes the player, the strip
   brings it back, and joining back with it closed shows the mini. Fullscreen
