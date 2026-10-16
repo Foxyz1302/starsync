@@ -245,6 +245,10 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
 3. **AniList account**: sign in (OAuth via a localhost callback), "My list"
    filter on the Schedule from the user's AniList lists. This is the
    Schedule's personal tracking; AnimeFlow has no per-user follow.
+   **AniList browser** (wanted next once 1.3.0 holds up): view shows and
+   browse older ones (search, seasons, details), and request one from
+   there on AnimeFlow; later on Sonarr too, which is what a public
+   release of the app would use.
 
 4. **Ops**: Check shaders on Windows; run the relay e2e "the source drops
    uncleanly and comes back" a few times under the full suite (its
@@ -291,12 +295,11 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
 8. **Jellyfin** (epic, below).
 
 9. **Smaller items**
-   - Video output robustness: if media_kit's hardware path regresses to
-     software (see ARCHITECTURE, Media: render mode), vendor a
-     media_kit_video fix that builds the EGL display from GDK's native
-     display. The video freeze after GPU idle is not explained by this;
-     next suspect is media_kit's context switching on the raster thread
-     with NVIDIA.
+   - The video freeze after GPU idle: next suspect is media_kit's context
+     switching on the raster thread with NVIDIA.
+   - Timelines: draw mpv's real cached ranges (`demuxer-cache-state`
+     `seekable-ranges`, read through media_kit's `observeProperty`), not
+     only the end of the cache ahead, like uosc.
    - Link conveniences: a link swap in session updates the remembered media;
      show the open link with an open-in-browser button.
    - Time UI: remaining time, scrubber preview.
