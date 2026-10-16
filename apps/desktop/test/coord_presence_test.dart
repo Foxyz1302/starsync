@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:signals/signals.dart' show effect;
 import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_core/testing.dart';
 import 'package:sync_relay_server/server.dart';
@@ -440,6 +441,39 @@ void main() {
       expect(hub.relay!.buffers.single.bytesToViewers, greaterThan(0), reason: 'bob reads the new relay');
     } finally {
       await second?.stop();
+    }
+  });
+
+  test('moving to another server never shows the last one\'s media', timeout: const Timeout(Duration(minutes: 1)),
+      () async {
+    final home = SyncServer(const AppConfig(port: 0, secret: 'pw', name: 'home'));
+    final empty = SyncServer(const AppConfig(port: 0, secret: 'pw', name: 'empty'));
+    await home.start();
+    await empty.start();
+    final origin = await _origin(await _media());
+    try {
+      final alice = await member(home.boundPort, 'alice');
+      expect(await alice.swapPicked(LinkMedia('http://127.0.0.1:${origin.port}/ep.mkv', anyway: true)), isNull);
+      await _poll(() => alice.serverState.peek()?.media != null, 'media up at home');
+      // The shell opens the player on any state with media as soon as the
+      // app is in a server again: nothing from the last one may be left
+      // while the new one is dialled.
+      final seen = <String>[];
+      final stop = effect(() {
+        if (alice.connection.state.value is ConnConnecting) {
+          seen.add(alice.serverState.peek()?.media?['name'] as String? ?? '');
+        }
+      });
+      await alice.connect(ConnectParams(host: '127.0.0.1', port: empty.boundPort, secret: 'pw', name: 'alice'));
+      await _poll(() => alice.serverState.peek() != null, 'the new server\'s state');
+      stop();
+      expect(seen, isNotEmpty);
+      expect(seen.where((n) => n.isNotEmpty), isEmpty, reason: 'no media from the last server');
+      expect(alice.serverState.peek()?.media, isNull);
+    } finally {
+      await home.stop();
+      await empty.stop();
+      await origin.close(force: true);
     }
   });
 

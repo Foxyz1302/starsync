@@ -517,6 +517,9 @@ class SessionCoordinator {
     final epoch = connection.invalidate();
     await _teardown(silent: true);
     if (!connection.isCurrent(epoch)) throw const ConnectCancelled();
+    // The last server's state is not this one's: kept, its media opened the
+    // player (full, on a friend's server) over an empty new server.
+    serverState.value = null;
     connection.begin(params);
     _wsHost = params.host;
     _wsPort = params.port;
