@@ -56,7 +56,7 @@ import 'welcome.dart';
 class AppShell extends StatefulWidget {
   final UpdateController? updates;
   final bool autoUpdateCheck;
-  /// The card once after an update; defaults to [WhatsNew.instance] when
+  /// The card once after an update; defaults to the graph's [WhatsNew] when
   /// [autoUpdateCheck] is on (off in tests unless given).
   final WhatsNew? whatsNew;
   /// Off in tests: the drag area, window buttons and fullscreen need
@@ -293,16 +293,16 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   /// What's new once after an update: due now (notes kept by the install)
   /// or once a check reads this version's manifest.
   Future<void> _startWhatsNew() async {
-    await AppSettings.instance.ensureLoaded();
+    await _graph.coordinator.settings.ensureLoaded();
     if (!mounted) return;
-    final w = _whatsNewSource = widget.whatsNew ?? WhatsNew.instance;
+    final w = _whatsNewSource = widget.whatsNew ?? _graph.whatsNew;
     w.due.addListener(_maybeWhatsNew);
     // Not over the full player while a video is on: once it ends or minimises.
     _stops.add(effect(() {
       _watching.value;
       untracked(() => _later(_maybeWhatsNew));
     }));
-    w.start(widget.updates ?? UpdateController.instance);
+    w.start(widget.updates ?? _graph.updates);
     _maybeWhatsNew();
   }
 

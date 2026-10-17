@@ -21,6 +21,8 @@ import '../sfx/sound_bank.dart';
 import '../sfx/synth_sfx.dart';
 import '../state/connect_prefs.dart';
 import '../state/settings.dart';
+import '../update/update_controller.dart';
+import '../update/whats_new.dart';
 import '../watch/watch_history.dart';
 import '../watch/watch_tracker.dart';
 
@@ -57,6 +59,12 @@ class AppGraph {
   /// Watch tracking and the device's watch history (D3).
   final WatchTracker watch;
 
+  /// The app's updater (checks, the update band, install and restart).
+  final UpdateController updates;
+
+  /// What's new once after an update; keeps the notes the updater saves.
+  final WhatsNew whatsNew;
+
   AppGraph._({
     required this.ports,
     required this.sfx,
@@ -68,6 +76,8 @@ class AppGraph {
     required this.navigation,
     required this.library,
     required this.watch,
+    required this.updates,
+    required this.whatsNew,
   });
 
   /// The desktop app's graph. Tests pass their own [ports], [identity]
@@ -146,6 +156,9 @@ class AppGraph {
       ..push = ({String? name, String? avatar}) {
         if (navigation.online.peek()) coordinator.updateProfile(name: name, avatar: avatar);
       };
+    final updates = UpdateController.instance;
+    final whatsNew = WhatsNew(store: SettingsWhatsNewStore(settings));
+    updates.beforeRestart ??= whatsNew.installing;
     return AppGraph._(
       ports: p,
       sfx: sfx,
@@ -157,6 +170,8 @@ class AppGraph {
       navigation: navigation,
       library: matcher,
       watch: watch,
+      updates: updates,
+      whatsNew: whatsNew,
     );
   }
 

@@ -83,9 +83,9 @@ class AboutPanel extends StatelessWidget {
               UpdateStatusLine(controller: updates),
               // This version's notes, once kept (the install, a check).
               ValueListenableBuilder(
-                valueListenable: (updates ?? UpdateController.instance).latest,
+                valueListenable: (updates ?? AppScope.of(context).updates).latest,
                 builder: (context, _, _) {
-                  final notes = (whatsNew ?? WhatsNew.instance).current;
+                  final notes = (whatsNew ?? AppScope.of(context).whatsNew).current;
                   if (notes == null) return const SizedBox.shrink();
                   return Padding(
                     padding: const EdgeInsets.only(top: 8),

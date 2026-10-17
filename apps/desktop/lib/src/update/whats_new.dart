@@ -61,7 +61,7 @@ abstract class WhatsNewStore {
 
 class SettingsWhatsNewStore implements WhatsNewStore {
   final AppSettings settings;
-  SettingsWhatsNewStore([AppSettings? settings]) : settings = settings ?? AppSettings.instance;
+  SettingsWhatsNewStore(this.settings);
   @override
   String? get seen => settings.whatsNewSeen;
   @override
@@ -88,14 +88,14 @@ class MemoryWhatsNewStore implements WhatsNewStore {
   Future<void> setNotes(ReleaseNotes notes) async => this.notes = notes;
 }
 
+/// Made once by `AppGraph` (the shell and About read it from there).
 class WhatsNew {
-  static final instance = WhatsNew();
 
   final String currentVersion;
 
   final WhatsNewStore store;
 
-  WhatsNew({this.currentVersion = appVersion, WhatsNewStore? store}) : store = store ?? SettingsWhatsNewStore();
+  WhatsNew({this.currentVersion = appVersion, required this.store});
 
   /// The card to show now (once); null when there is none.
   final due = ValueNotifier<ReleaseNotes?>(null);

@@ -16,7 +16,7 @@ import 'src/platform/smoke.dart';
 import 'src/screens/home/ui.dart';
 import 'src/session/app_events.dart' show UpdateAvailable;
 import 'src/state/settings.dart';
-import 'src/update/update_controller.dart' show UpdateController, UpdatePhase, launchArgs;
+import 'src/update/update_controller.dart' show UpdatePhase, launchArgs;
 
 Future<void> main(List<String> args) async {
   launchArgs = List.unmodifiable(args);
@@ -77,7 +77,7 @@ Future<void> main(List<String> args) async {
   // Linux: the launcher entry and icon Wayland needs (release installs).
   unawaited(installDesktopEntry());
   // A found update is an event too (the band shows it).
-  final updates = UpdateController.instance;
+  final updates = graph.updates;
   updates.status.addListener(() {
     final s = updates.status.value;
     final version = s.manifest?.version;

@@ -5,7 +5,6 @@ import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
 import '../platform/app_shutdown.dart';
-import 'whats_new.dart';
 
 // In-app update flow behind the update bar (UpdateBar). Same code path as
 // `--upgrade` (core's updater, downloadAndApply); this adds state for the
@@ -60,8 +59,8 @@ class UpdateController {
   final RestartFn restart;
   final bool skipDevBuilds;
   /// Awaited after the apply, before [restart]: keeps the new version's
-  /// notes for its first start ([WhatsNew.installing]).
-  final Future<void> Function(UpdateManifest manifest)? beforeRestart;
+  /// notes for its first start ([WhatsNew.installing], wired by `AppGraph`).
+  Future<void> Function(UpdateManifest manifest)? beforeRestart;
 
   UpdateController(
       {this.currentVersion = appVersion,
@@ -70,8 +69,7 @@ class UpdateController {
       this.installRoot,
       this.restart = _closeAndRestart,
       this.skipDevBuilds = true,
-      Future<void> Function(UpdateManifest manifest)? beforeRestart})
-      : beforeRestart = beforeRestart ?? WhatsNew.instance.installing;
+      this.beforeRestart});
 
   final status = ValueNotifier(const UpdateStatus(UpdatePhase.idle));
   /// The manifest of the last check that read one, newer or not (What's
