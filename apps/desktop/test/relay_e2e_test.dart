@@ -159,12 +159,12 @@ class _BareSource {
   }
 }
 
-/// Serves one file with ranges; [requests] counts hits.
+/// Serves one file with ranges; [requests] lists hits (user agent, URL).
 Future<(HttpServer, List<String>)> _origin(String file) async {
   final s = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   final requests = <String>[];
   s.listen((req) async {
-    requests.add(req.uri.toString());
+    requests.add('${req.headers.value('user-agent')} ${req.uri}');
     final size = await File(file).length();
     final r = resolveMediaRequest(rangeHeader: req.headers.value('range'), size: size, filename: 'v.mkv');
     req.response.statusCode = r.status;
@@ -274,6 +274,12 @@ void main() {
       expect(alice.serverState.peek()!.toJson().toString(), isNot(contains('SECRET')));
       await playTogether([alice, bob]);
       expect(server.hub.relay!.buffers.single.bytesToViewers, greaterThan(0));
+      // Read once: bob's player plays his shared reader's loopback, so
+      // every hit at the origin is that reader's (Dart's), none mpv's.
+      final one = bob.media.shared.currentFor(link);
+      expect(one, isNotNull);
+      expect(one!.bytesIn, greaterThan(0));
+      expect(hits.where((h) => !h.startsWith('Dart/')), isEmpty, reason: '$hits');
 
       final before = hits.length;
       expect(await alice.swapPicked(LinkMedia(link, relay: LinkRelay.server)), isNull);

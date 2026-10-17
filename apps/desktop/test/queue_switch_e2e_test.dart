@@ -343,6 +343,13 @@ void main() {
           final relay = stateMediaRelay(a.serverState.peek()!);
           expect(relay?.queueId, id, reason: 'the warm relay became the media\'s');
           expect(relay?.fetch, mode == LinkRelay.server);
+          if (mode == LinkRelay.me) {
+            // Read once: alice's preload and the warm relay read one shared
+            // reader, and the swap carried it on as the media's.
+            final one = a.media.shared.currentFor(linkUrl);
+            expect(one, isNotNull, reason: 'alice reads the link once');
+            expect(one!.bytesIn, greaterThan(0));
+          }
           if (preload) {
             for (final x in all.values) {
               expect(x.switchTrace.of(x.serverState.peek()!.mediaId), contains(SwitchTrace.preloaded),

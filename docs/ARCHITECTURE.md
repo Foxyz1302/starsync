@@ -638,8 +638,9 @@ ready.
   can, so this is Android's plug-in point).
 - Resolve: a Jellyfin item through this app's account (or the plan
   resolved ahead for Up next, `warmJellyfin`), else the server's login,
-  else the member passing it on, else blocked (`openJellyfin`); a web
-  page through the app's own yt-dlp (`LinkResolver.probe`: yt-dlp's
+  else the member passing it on, else blocked (`openJellyfin`); a link
+  this member passes on through its shared reader's loopback URL ("Read
+  once" under "Relay"); a web page through the app's own yt-dlp (`LinkResolver.probe`: yt-dlp's
   stream URLs, an EDL of video and audio, the CDN's headers with its
   cookies, the subtitles; see "yt-dlp"), failing in plain words with the
   cookies that were used (`ResolveFailure`, D11); a relay not fed yet is
@@ -681,6 +682,10 @@ ready.
 - Being a relay source (`RelayFeeder`, `session/relay_feeder.dart`): the
   current media's channel and Up next's warm relay (see "Relay"), with
   the step-1 re-dial (a source rides through this app's own drop). A
+  link it passes on is read once for its player and the relay
+  (`SharedLinks`, `session/shared_links.dart`; "Read once" under
+  "Relay"): the swap check's reader, else Up next's warm one, else a new
+  one; it lives while the media does (a sit-out keeps it for the relay). A
   Jellyfin item this member put up is passed on only once someone
   present needs it (`jellyfinRelayNeeded`: the server's login does not
   cover it and a present member does not play that server with its own
@@ -840,8 +845,8 @@ and URL, played together by viewers as an mpv EDL
 `relayViewerUrl` / `mpvEdl`). media_kit opens an `edl://` URL unchanged
 (it writes it to a playlist and `loadlist`s it) and mpv keeps both
 streams in sync across seeks; one URL keeps the app's "one media URL"
-path (sync, swap, reopen) as is. The source member plays the page
-itself (its own resolve, see "yt-dlp") like any other link.
+path (sync, swap, reopen) as is. The source member's own player reads
+the same tracks through its shared reader ("Read once" below).
 
 A page with only segmented streams (HLS `m3u8_native`, DASH
 `http_dash_segments`, e.g. X's HLS, generic `.m3u8`/`.mpd`) is relayed as
@@ -873,6 +878,64 @@ How bytes move:
   this machine). Viewers only ever talk HTTP to the server, so the source
   never sees mpv's request pattern. The tracks of a media share the
   channel and its flow control (they compete for the same uplink).
+- **Read once** (a link passed on: `SharedSource`,
+  `packages/server/lib/src/shared_source.dart`, kept by the app's
+  `SharedLinks`): the source reads each track from the site once. Per
+  track a `RelayBuffer` on the source (64 MiB ahead and 16 MiB behind
+  for all tracks, split by size like the server's, plus the pins:
+  `sharedAheadBytes` / `sharedBackBytes`), filled by one sequential
+  upstream reader, serves two readers: the source's own player, through
+  a loopback endpoint (`http://127.0.0.1:<port>/<random secret>/<track>`,
+  an mpv EDL for several tracks, no headers: the site's stay in the
+  reader) answered with the server's own byte-answer code
+  (`writeRelayRange`, below: headers within 4 s, `connection: close`),
+  and the server's pulls (`SharedSource.upload`, served by the usual
+  `RelaySource`). The player opens at once; the endpoint waits for the
+  tracks' sizes. The two readers are kept within one window
+  (`RelayBuffer.together`): while both have a request open, the one more
+  than the track's `ahead` past the other waits without asking upstream,
+  so one sequential read serves both instead of handing over at every
+  slice. The server's read-ahead thus stops about 64 MiB past the
+  source's player, and a source whose upload lags holds its own player
+  there (viewers would wait at that point anyway); either reader alone
+  reads freely, pinned slices always come. A seek (shared, so both
+  readers go together) is a new upstream read there, as on the server.
+  Upstream (`ResumingBytes`): a cut resumes from the byte it reached
+  after 100 ms; an answer without a byte (412, 429, 5xx, a refused or
+  dead connection, nothing for 20 s) backs off 0.5 s doubling to 8 s;
+  60 s without a byte fails the read, and the buffer's own backoff asks
+  again. 403/410/412 first resolve the page again (see "yt-dlp"). The
+  source's player plays the relay's tracks, so the source and the
+  viewers watch one format, and the reader sends the headers and cookies
+  yt-dlp gave for it. The putter's swap check is this reader (its sizes
+  are the media's: no second read); an Up next link passed on feeds its
+  warm relay from its own reader, the preload player reads its loopback
+  URL (one prepared on the site before the reader existed is prepared
+  again), and the swap carries both on. Reload video opens the loopback
+  URL again (the reader resolves an expired page itself). Not read once:
+  a page with a pieces track (HLS/DASH, X's): its player plays yt-dlp's
+  pick from the site and the relay reads the pieces itself, two fetches;
+  a file passed on (disk) and a Jellyfin item (see "Media pipeline")
+  keep their own paths. Measured (server `single_fetch_e2e`, opt-in: a
+  real server and `RelaySource`, mpv 0.41 with the app's pins on
+  loopback, a fake CDN with Bilibili's Referer rule and two tracks:
+  60 s of 720p h264 at 4 Mbit/s and 128 kbit/s aac; 20 s of play, then
+  a seek to 45 s and back to 5 s):
+
+  | CDN / source | First frame: source, viewer | Viewer stalls | Viewer seek to 45 s | CDN requests (player + relay) | CDN MiB | 412s |
+  |---|---|---|---|---|---|---|
+  | clean, two fetches | 0.22 s, 0.46 s | 0 | 0.27 s | 8 (2 + 6) | 51.8 | 0 |
+  | clean, read once | 0.27 s, 0.33 s | 0 | 0.29 s | 6 (0 + 6) | 25.9 | 0 |
+  | cuts every 0 to 2 MiB, two fetches | 0.22 s, 0.38 s | 1 | 0.27 s | 64 (28 + 36) | 55.9 | 0 |
+  | cuts, read once (29 resumes) | 0.22 s, 0.27 s | 0 | 0.27 s | 33 (0 + 33) | 25.9 | 0 |
+  | cuts + 412 lockout (> 40 requests in 10 s), two fetches | 0.21 s, 0.39 s | 1 | 4.03 s | 49 (23 + 26) | 35.3 | 6 |
+  | cuts + lockout, read once | 0.26 s, 0.33 s | 0 | 0.29 s | 33 (0 + 33) | 25.9 | 0 |
+  | 768 KiB/s per connection, two fetches | 0.40 s, 0.59 s | 1 | 0.80 s | 12 (5 + 7) | 34.0 | 0 |
+  | 768 KiB/s, read once | 0.40 s, 0.47 s | 1 | 0.76 s | 7 (0 + 7) | 16.9 | 0 |
+
+  The source's own seeks took about what the viewer's did; back to 5 s
+  took 0.25 to 0.29 s everywhere. The source's player stalled only on
+  the slow CDN (once, in both modes).
 - Upstream GETs (`HttpRelayBytes.read`) are split into back-to-back
   ranges of at most yt-dlp's `http_chunk_size` for the format, else
   10 MiB (`relayUpstreamChunkBytes`); a buffer pull stays one read.
@@ -918,7 +981,9 @@ How bytes move:
   source's upstream dropping, a CDN refusing) is followed by the next
   one after 250 ms, doubling up to 8 s (`relayRetryDelay`), back to none
   once a slice or a pull completes: a failing CDN is not asked again
-  every round trip (that drew Bilibili's 412/403). A viewer reads the
+  every round trip (that drew Bilibili's 412/403). Read-ahead never
+  fetches the slice that would be evicted next, and a long pull evicts
+  as its slices come, so a buffer stays within its budget. A viewer reads the
   slice being filled as its bytes arrive, not once it is whole (mpv's
   demuxer, blocked in a read, takes a seek only once that read returns).
   Nothing is fetched while nobody watches through the relay (a Jellyfin
@@ -1126,7 +1191,8 @@ all three link modes. Nothing is bundled or installed by hand.
   format's `http_headers` plus its `cookies` as a Cookie header; the
   requested subtitles but Bilibili's danmaku, an XML comment feed); and
   what a relay reads (`pickTracks`), each format with its URL,
-  `http_headers` and `http_chunk_size`. For a relay only plain http(s)
+  `http_headers` plus its `cookies` as a Cookie header (what a player
+  sends) and `http_chunk_size`. For a relay only plain http(s)
   formats without DRM count:
   - the best single file (`pickSingleFile`: video and audio not `none`, a
     video container, tallest up to 1080p, else the shortest above), unless
@@ -1176,11 +1242,14 @@ all three link modes. Nothing is bundled or installed by hand.
   track's playlist must be readable, else the swap is refused ("Live
   streams can't be passed on", DRM, or nothing a relay can read) with a
   hint to use "Everyone fetches it". The swap names the tracks; its relay
-  source reads them with yt-dlp's headers (`PageRelayMedia`). On
+  source reads them with yt-dlp's headers and cookies (`PageRelayMedia`),
+  and the putter's own player plays those same tracks through the one
+  reader ("Read once" under "Relay"), not yt-dlp's `requested_formats`:
+  the putter sees the relay's pick (HEVC first) like the viewers. On
   403/410/412 (expired format URLs, 6 h on YouTube; signed segment URLs;
   Bilibili's 412) from any track it resolves the page again once for all
-  tracks (not again within 60 s: a further refusal fails the read and the
-  server's backoff asks later), finds the same
+  tracks (not again within 60 s: a further refusal fails the read and is
+  backed off), finds the same
   format ids with the same sizes and piece counts and roles (playlists
   re-read and re-mapped by index; else "the video changed on the page")
   and goes on from where it stopped. Format URLs are bound to the

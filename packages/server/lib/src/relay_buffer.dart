@@ -158,11 +158,13 @@ class _Pull {
 }
 
 class _Viewer {
+  final String name;
   int pos = 0;
   int open = 0; // requests in flight
   int newest = 0; // sequence of its newest request
   (int slice, int req)? blocking; // where its newest request waits
   DateTime lastActive = DateTime.now();
+  _Viewer(this.name);
 }
 
 /// The server side of the relay for one media: an in-memory buffer of
@@ -181,6 +183,9 @@ class _Viewer {
 /// - Only a viewer's newest request moves its position or asks the feed
 ///   for anything; older ones still get bytes once they are buffered, and
 ///   stop holding the feed once superseded (a seek elsewhere).
+/// - [together]: two viewers kept within [ahead] of each other (see the
+///   field).
+/// - Read-ahead never fetches a slice that would be the next one evicted.
 /// Everything lives in memory: dropping the buffer is the cleanup.
 class RelayBuffer implements TrackBuffer {
   /// Set by the relay when a media's tracks share the budget.
@@ -190,11 +195,22 @@ class RelayBuffer implements TrackBuffer {
   final Duration waitLimit;
   /// Pull ids; the tracks of one media share one sequence (one channel).
   final int Function() _newId;
+  /// Two viewers that read one stream at about one position (the source's
+  /// own player and its upload to the server, see [SharedSource]) and
+  /// must not pull the feed two ways: while both have a request open, a
+  /// read of the one more than [ahead] past the other waits without
+  /// asking the feed for anything (and without the wait limit), and its
+  /// position does not count for read-ahead or eviction. So one
+  /// sequential feed serves both, from one window, instead of handing
+  /// over at every slice boundary. Pinned slices are always read. Null:
+  /// every viewer drives on its own (the server's viewers).
+  final (String, String)? together;
   RelayBuffer({
     this.ahead = RelayConstants.relayAheadBytes,
     this.back = RelayConstants.relayBackBytes,
     this.pin = RelayConstants.relayPinBytes,
     this.waitLimit = const Duration(seconds: RelayConstants.relayWaitSecs),
+    this.together,
     int Function()? nextId,
   }) : _newId = nextId ?? _counter();
 
@@ -213,6 +229,8 @@ class RelayBuffer implements TrackBuffer {
   // The driving requests waiting on each blocked slice.
   final _blockedBy = <int, Set<int>>{};
   final _viewers = <String, _Viewer>{};
+  // Reads held back by [together], woken when a position moves.
+  var _moved = Completer<void>();
   @override
   FeedClock clock = FeedClock();
   _Pull? _pullNow;
@@ -282,10 +300,28 @@ class RelayBuffer implements TrackBuffer {
     _waiters.clear();
     if (!_ready.isCompleted) _ready.complete();
     _wake();
+    _wakeHeld();
   }
 
   void _wake() {
     if (!_kick.isCompleted) _kick.complete();
+  }
+
+  void _wakeHeld() {
+    if (together == null) return;
+    final m = _moved;
+    _moved = Completer<void>();
+    m.complete();
+  }
+
+  /// [v] is one of [together] and more than [ahead] past the other while
+  /// that one has a request open: it does not drive.
+  bool _held(_Viewer v) {
+    final t = together;
+    if (t == null) return false;
+    final other = v.name == t.$1 ? t.$2 : (v.name == t.$2 ? t.$1 : null);
+    final o = other == null ? null : _viewers[other];
+    return o != null && o.open > 0 && v.pos > o.pos + ahead;
   }
 
   // ------------------------------------------------------------ feed input
@@ -314,6 +350,8 @@ class RelayBuffer implements TrackBuffer {
         _slices[s] = pl.takeSlice();
         // A whole slice came: the source works again.
         _failures = 0;
+        // A long pull stays within the budget as it goes.
+        _evict();
       }
       // Whole, or more of it: whoever waits on it reads on.
       for (final c in _waiters.remove(s) ?? const <Completer<void>>[]) {
@@ -362,7 +400,24 @@ class RelayBuffer implements TrackBuffer {
       return true;
     }
     if (_slices.containsKey(next)) return true;
-    return !_wanted(next);
+    if (!_wanted(next)) return true;
+    // Read-ahead nobody waits on stops where the next slice would be the
+    // next one evicted (else a full buffer fetches and drops it in turn).
+    final s = next - 1;
+    return !_blocked.containsKey(s) && !_blocked.containsKey(next) && !_roomFor(next);
+  }
+
+  /// Slice [s] can come in without being the next one evicted: the
+  /// buffer has room, or holds a slice farther from the viewers.
+  bool _roomFor(int s) {
+    if ((_slices.length + 1) * slice <= ahead + back + 2 * pin) return true;
+    final at = _positions();
+    final d = _distance(s, at);
+    if (d < 0) return true;
+    for (final c in _slices.keys) {
+      if (!_waiters.containsKey(c) && _distance(c, at) > d) return true;
+    }
+    return false;
   }
 
   void _endPull(_Pull pl) {
@@ -374,8 +429,8 @@ class RelayBuffer implements TrackBuffer {
 
   Iterable<_Viewer> get _active {
     final now = DateTime.now();
-    return _viewers.values
-        .where((v) => v.open > 0 || now.difference(v.lastActive) < const Duration(seconds: 60));
+    return _viewers.values.where(
+        (v) => (v.open > 0 || now.difference(v.lastActive) < const Duration(seconds: 60)) && !_held(v));
   }
 
   bool _pinned(int s) => s * slice < pin || s * slice >= size - pin;
@@ -388,13 +443,17 @@ class RelayBuffer implements TrackBuffer {
     return off >= pos.reduce(min) - back && off <= pos.reduce(max) + ahead;
   }
 
-  int _distance(int s) {
+  /// The active viewers' positions, for [_distance].
+  List<int> _positions() => [for (final v in _active) v.pos];
+
+  /// How far slice [s] is from the viewers at [positions]; -1 pinned.
+  int _distance(int s, List<int> positions) {
     if (_pinned(s)) return -1;
     final off = s * slice;
     var d = 1 << 62;
-    for (final v in _active) {
+    for (final p in positions) {
       // Behind a viewer costs more than ahead (it was already watched).
-      d = min(d, off >= v.pos ? off - v.pos : (v.pos - off) * 4);
+      d = min(d, off >= p ? off - p : (p - off) * 4);
     }
     return d;
   }
@@ -403,9 +462,11 @@ class RelayBuffer implements TrackBuffer {
     final limit = ahead + back + 2 * pin;
     var total = _slices.length * slice;
     if (total <= limit) return;
-    final order = _slices.keys.toList()..sort((a, b) => _distance(b).compareTo(_distance(a)));
+    final at = _positions();
+    final dist = {for (final s in _slices.keys) s: _distance(s, at)};
+    final order = dist.keys.toList()..sort((a, b) => dist[b]!.compareTo(dist[a]!));
     for (final s in order) {
-      if (total <= limit || _distance(s) < 0) break;
+      if (total <= limit || dist[s]! < 0) break;
       if (_waiters.containsKey(s)) continue;
       _slices.remove(s);
       total -= slice;
@@ -427,7 +488,7 @@ class RelayBuffer implements TrackBuffer {
     final starts = active.map((v) => v.pos).toList()..sort();
     for (final p in starts) {
       for (var s = p ~/ slice; s * slice <= p + ahead && s < _nSlices; s++) {
-        if (!_slices.containsKey(s)) return s;
+        if (!_slices.containsKey(s)) return _roomFor(s) ? s : null;
       }
     }
     return null;
@@ -481,7 +542,7 @@ class RelayBuffer implements TrackBuffer {
   /// request is its viewer's newest ([driving] says while it still is), so
   /// it may move the feed.
   Future<Uint8List?> _waitBytes(_Viewer v, int s, int from, int req, bool Function() driving) async {
-    final deadline = DateTime.now().add(waitLimit);
+    var deadline = DateTime.now().add(waitLimit);
     try {
       while (true) {
         final whole = _slices[s];
@@ -492,6 +553,13 @@ class RelayBuffer implements TrackBuffer {
           if (part != null) return part;
         }
         if (_disposed || DateTime.now().isAfter(deadline)) return null;
+        if (!_pinned(s) && driving() && _held(v)) {
+          // Too far past its partner: waits for it, asking nothing.
+          _unblock(s, req);
+          deadline = DateTime.now().add(waitLimit);
+          await _moved.future.timeout(const Duration(seconds: 2), onTimeout: () {});
+          continue;
+        }
         if (driving()) {
           _blocked.putIfAbsent(s, () => DateTime.now().microsecondsSinceEpoch);
           _blockedBy.putIfAbsent(s, () => {}).add(req);
@@ -539,7 +607,7 @@ class RelayBuffer implements TrackBuffer {
   /// viewer went away) ends it; a slice that never arrives ends it with an
   /// error after [waitLimit]; the buffer's [dispose] with [RelayEnded].
   Stream<Uint8List> read(String viewer, int start, int end, {void Function(int n)? onSent}) async* {
-    final v = _viewers.putIfAbsent(viewer, _Viewer.new);
+    final v = _viewers.putIfAbsent(viewer, () => _Viewer(viewer));
     final tail = start >= size - pin;
     final me = ++_reqSeq;
     if (!tail) {
@@ -553,6 +621,7 @@ class RelayBuffer implements TrackBuffer {
     v.open++;
     v.lastActive = DateTime.now();
     _wake();
+    _wakeHeld();
     try {
       var off = start;
       while (off <= end) {
@@ -569,10 +638,12 @@ class RelayBuffer implements TrackBuffer {
         v.lastActive = DateTime.now();
         if (!tail && v.newest == me) v.pos = off;
         _wake();
+        _wakeHeld();
       }
     } finally {
       v.open--;
       v.lastActive = DateTime.now();
+      _wakeHeld();
     }
   }
 }

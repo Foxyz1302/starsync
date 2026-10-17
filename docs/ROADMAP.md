@@ -170,6 +170,17 @@ seek or a new link; the start of a freshly put-up link was never
 measured on its own. Levers if it still shows: start the window from
 the last rate, prefetch from the source as soon as a link goes up,
 a smaller gate buffer when only the relay is behind.
+Left of the read-once source (ARCHITECTURE "Relay", "Read once"): a
+human check against real Bilibili and YouTube (the 412 storm gone, the
+putter's picture the relay's format, a Windows putter's loopback), and
+the source's first frame and seeks over a 12 Mbit/s uplink
+(`tool/shaper`): a putter whose upload lags now holds its own player
+about 64 MiB past it. Not built: pieces tracks (HLS/DASH, X's) are
+still fetched twice (the putter's player from the site, the relay's
+pieces on their own; the same idea needs a `PieceBuffer` and a loopback
+playlist); Jellyfin items a member passes on are still streamed twice
+when the relay is needed. The e2e's media (26 MiB) fits the putter's
+buffer whole, so the 64 + 16 MiB bound is only unit-tested.
 Left of step 4 (library): a human check of the Files library on the
 real folder (`/mnt/torrents/Torrents/Binux/`: Bleach over three folders
 with 66–107 missing, SAO S3 Alicization with OP/ED, Re.Zero S04E17, the

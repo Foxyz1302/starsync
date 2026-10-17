@@ -689,6 +689,9 @@ class QueueController {
 
   // The warm relay this app feeds (`<queue id>|<token>`), started once.
   String _fedWarm = '';
+  // The link whose warm reader is being set up: its preload waits for it
+  // (it then reads that reader, not the site).
+  String? _feedingLink;
 
   /// Feeds the server's warm relay of Up next's first item from here when
   /// it names this member as its source (a link passed on, a file), or a
@@ -712,15 +715,22 @@ class QueueController {
           coord.media.feeder.feedWarm(head.id, RelayMedia.single(FileRelayBytes(File(pick.path))));
         } else if (pick is LinkMedia) {
           _fedWarm = key;
+          _feedingLink = pick.url;
           unawaited(() async {
             try {
               // The probe [_resolveWarm] keeps: no second yt-dlp run.
               final probe = await coord.ytDlp.probe(pick.url, keep: _warmKeep).timeout(const Duration(seconds: 60));
               final y = await coord.ytDlp.ytDlp;
               if (_fedWarm != key) return;
-              coord.media.feeder.feedWarm(head.id, LinkRelayMedia(Uri.parse(pick.url), ytDlp: y, probe: probe));
+              // Read once for the preload and the warm relay.
+              await coord.media.feedWarmLink(head.id, pick.url, probe, y);
             } catch (e) {
               debugPrint('queue: feeding ${head.id}: $e');
+            } finally {
+              if (_feedingLink == pick.url) {
+                _feedingLink = null;
+                _syncPreload(coord.serverState.peek());
+              }
             }
           }());
         }
@@ -814,6 +824,7 @@ class QueueController {
       return;
     }
     if (!media.preloadEnabled) return;
+    if (want.url == _feedingLink) return;
     final key = '${want.url}|${want.headers}';
     final fresh = _preloadFresh;
     // Asked for already: in flight, there, or failed (tried again with the

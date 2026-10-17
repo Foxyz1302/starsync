@@ -262,6 +262,25 @@ void main() {
     expect(pick(['avc1.640033', 'vp09.00.40.08']), 'v1');
   });
 
+  test('what a relay reads sends what a player sends: each format\'s headers with its cookies', () {
+    const cookies = 'SESSDATA=abc; Domain=.bilibili.com; Path=/; Secure; Expires=1999999999; buvid3=xyz; Domain=.bilibili.com';
+    Map<String, Object?> f(String id, String vcodec, String acodec, int? height) => {
+          'format_id': id, 'url': 'https://cdn/$id.m4s', 'protocol': 'https', 'ext': 'mp4',
+          'vcodec': vcodec, 'acodec': acodec, 'height': height,
+          'http_headers': {'Referer': 'https://www.bilibili.com/', 'User-Agent': 'UA'},
+          'cookies': cookies,
+        };
+    final v = f('30080', 'avc1.640032', 'none', 1080), a = f('30280', 'none', 'mp4a.40.2', null);
+    final info = YtDlpInfo.parse({'title': 'Page', 'formats': [v, a], 'requested_formats': [v, a]});
+    const want = {'Referer': 'https://www.bilibili.com/', 'User-Agent': 'UA', 'Cookie': 'SESSDATA=abc; buvid3=xyz'};
+    expect([for (final t in info.tracks) t.format.id], ['30080', '30280']);
+    for (final t in info.tracks) {
+      expect(t.format.headers, want, reason: t.kind);
+    }
+    expect(info.play!.headers, want);
+    expect(info.formats['30080']!.describe(), isNot(contains('SESSDATA')), reason: 'the log names headers only');
+  });
+
   test('what a player opens: yt-dlp\'s pick, an EDL for video + audio, headers with the cookies, subtitles but danmaku', () {
     final split = YtDlpInfo.parse({
       'title': 'Page',

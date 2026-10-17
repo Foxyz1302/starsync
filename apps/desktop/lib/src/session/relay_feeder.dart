@@ -17,7 +17,12 @@ import 'party.dart' show isPresent;
 class RelayFeeder {
   final ServerAddress Function() server;
   final void Function(AppEvent event) notify;
-  RelayFeeder({required this.server, required this.notify});
+
+  /// The warm relay of Up next item `queueId` stopped without being
+  /// carried on as the media's (the server dropped it, or [stopWarm]).
+  final void Function(String queueId) onWarmEnded;
+  RelayFeeder({required this.server, required this.notify, void Function(String queueId)? onWarmEnded})
+      : onWarmEnded = onWarmEnded ?? ((_) {});
 
   RelaySource? _source;
   int _mediaId = -1;
@@ -32,6 +37,9 @@ class RelayFeeder {
   /// The tracks of Up next item [queueId] when this member feeds its warm
   /// relay and has opened them (empty otherwise).
   List<RelayTrack> warmTracks(String queueId) => _warm?.queueId == queueId ? _warm!.src.tracks : const [];
+
+  /// This member feeds the warm relay of Up next item [queueId].
+  bool feedsWarm(String queueId) => _warm?.queueId == queueId;
 
   /// Serves [media] for media [mediaId] on this member's relay channel.
   /// The server only pulls while someone watches through it. When the
@@ -111,18 +119,26 @@ class RelayFeeder {
         await src.start();
       } catch (e) {
         debugPrint('warm relay source of $queueId failed: $e');
-        if (identical(_warm?.src, src)) _warm = null;
+        if (identical(_warm?.src, src)) {
+          _warm = null;
+          onWarmEnded(queueId);
+        }
         return;
       }
       await src.done;
-      if (identical(_warm?.src, src)) _warm = null;
+      if (identical(_warm?.src, src)) {
+        _warm = null;
+        onWarmEnded(queueId);
+      }
     }());
   }
 
   void stopWarm() {
     final w = _warm;
     _warm = null;
-    if (w != null) unawaited(w.src.close());
+    if (w == null) return;
+    unawaited(w.src.close());
+    onWarmEnded(w.queueId);
   }
 
   /// Leave, or a media this member no longer serves.

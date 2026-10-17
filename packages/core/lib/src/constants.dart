@@ -38,6 +38,11 @@ abstract class RelayConstants {
   /// first bytes, under mpv's 5 s `network-timeout`: a header that never
   /// comes in time costs ffmpeg the file's size for good.
   static const int relayHeaderWaitMs = 4000;
+  /// The source's own buffer of a link it reads once for its player and
+  /// the upload (`SharedSource`), all tracks together besides the pins:
+  /// the two read within [sharedAheadBytes] of each other.
+  static const int sharedAheadBytes = 64 << 20;
+  static const int sharedBackBytes = 16 << 20;
   /// The warm relay (Up next's first relayed item, before it goes up)
   /// keeps this much ahead of and behind its viewers' preloads, besides
   /// the pins: about what a preload player reads ahead (48 MiB), never the

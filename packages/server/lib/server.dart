@@ -8,3 +8,4 @@ export 'src/relay_buffer.dart';
 export 'src/relay_routes.dart';
 export 'src/relay_stats.dart';
 export 'src/session_log.dart';
+export 'src/shared_source.dart';

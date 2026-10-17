@@ -38,6 +38,7 @@ import 'notifier.dart';
 import 'now_playing.dart';
 import 'now_playing_info.dart';
 import 'party.dart';
+import 'shared_links.dart';
 import 'status.dart';
 import 'switch_trace.dart';
 
@@ -1279,11 +1280,21 @@ class SessionCoordinator {
       // Up next's item this app already feeds (its warm relay): read.
       final warm = queueId == null ? const <RelayTrack>[] : this.media.feeder.warmTracks(queueId);
       final fed = warm.isNotEmpty;
-      final check = fed ? null : LinkRelayMedia(uri, ytDlp: y, probe: probe);
+      // Read once for the player and the relay (SharedLinks): the check's
+      // reader is the one the media then uses. Pieces tracks: a check of
+      // their own.
+      final share = !fed && SharedLinks.fits(probe);
+      final check = fed || share ? null : LinkRelayMedia(uri, ytDlp: y, probe: probe);
       var size = 0;
       final List<RelayTrackSpec> specs;
       try {
-        final tracks = fed ? warm : await check!.open().timeout(const Duration(seconds: 15));
+        final tracks = fed
+            ? warm
+            : share
+                ? await (await this.media.shared.forSwap(url, LinkRelayMedia(uri, ytDlp: y, probe: probe), probe))
+                    .upload
+                    .open()
+                : await check!.open().timeout(const Duration(seconds: 15));
         for (final t in tracks) {
           // A playlist is read (DRM and live refused) but has no size.
           final pieces = t.pieces;

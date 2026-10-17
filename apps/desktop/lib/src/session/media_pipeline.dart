@@ -15,6 +15,7 @@ import 'app_events.dart';
 import 'delivery.dart' show stateMediaRelay;
 import 'media_plan.dart';
 import 'relay_feeder.dart';
+import 'shared_links.dart';
 import 'switch_trace.dart';
 
 export 'media_plan.dart';
@@ -37,7 +38,9 @@ final _log = createLogger('session');
 //   coordinator's report).
 //
 // Being a relay source ([RelayFeeder]) and the viewer's side of a source
-// that drops ([recover]) live here too.
+// that drops ([recover]) live here too. A link this member passes on is
+// read from the site once ([SharedLinks]): its player opens the shared
+// reader's loopback URL and the relay serves the same bytes.
 
 /// What the coordinator does next after [MediaPipeline.switchTo]: a
 /// Jellyfin item resolves and opens through [MediaPipeline.openJellyfin]
@@ -77,6 +80,10 @@ class MediaPipeline {
   final PlaybackController playback;
   final SwitchTrace trace;
   late final RelayFeeder feeder;
+
+  /// The links this member passes on, read once for its player and the
+  /// relay.
+  final shared = SharedLinks();
   MediaSession session;
 
   /// The player could not open the current media (raw words: the
@@ -98,7 +105,10 @@ class MediaPipeline {
   })  : playback = playback ?? PlaybackController(host),
         trace = trace ?? SwitchTrace(),
         session = session ?? MediaSession.none {
-    feeder = RelayFeeder(server: () => this.session.server(), notify: (e) => notify(e));
+    feeder = RelayFeeder(
+        server: () => this.session.server(),
+        notify: (e) => notify(e),
+        onWarmEnded: (queueId) => shared.dropWarm(queueId));
   }
 
   // ------------------------------------------------------------ players
@@ -202,6 +212,12 @@ class MediaPipeline {
   /// stream opened with headers (a Jellyfin item's, with its token). Throws
   /// a [ResolveFailure] in plain words, with the cookies used (D11).
   Future<_Target> _resolve(String url, Map<String, String>? headers, {bool fresh = false}) async {
+    if (headers == null || headers.isEmpty) {
+      // A link this member passes on: the shared reader's loopback URL
+      // (it resolves an expired URL again itself, so [fresh] is moot).
+      final link = await shared.playerFor(url);
+      if (link != null) return _Target(link.source.playerUrl, const {}, subtitles: link.subtitles, shared: true);
+    }
     if (!_isPage(url) || (headers != null && headers.isNotEmpty)) return _Target(url, headers ?? const {});
     final l = links;
     if (l == null) throw const ResolveFailure('no link resolver here');
@@ -343,6 +359,7 @@ class MediaPipeline {
       };
     }
     if (headers != null && headers.isNotEmpty) return 'Jellyfin, own sign-in';
+    if (shared.has(url)) return 'link passed on, read once here';
     return 'link, fetched here';
   }
 
@@ -398,6 +415,7 @@ class MediaPipeline {
     final name = (r.media?['name'] as String?) ?? '';
     final queueId = stateMediaRelay(r)?.queueId ?? '';
     final duration = (r.media?['duration'] as num?)?.toDouble() ?? 0;
+    if (source is! OwnLink) await shared.closeCurrent();
     switch (source) {
       case JellyfinSource():
         return SwitchJellyfin(source);
@@ -407,8 +425,11 @@ class MediaPipeline {
             announce: true, queueId: queueId, name: name, duration: duration);
         await open(path);
       case OwnLink(:final url, :final origin):
-        feeder.serve(r.mediaId, LinkRelayMedia(Uri.parse(url), ytDlp: origin.ytDlp, probe: origin.probe),
-            announce: true, queueId: queueId, name: name, duration: duration);
+        // Read from the site once: the relay serves what the player reads
+        // (pieces tracks keep the two fetches).
+        RelayMedia link() => LinkRelayMedia(Uri.parse(url), ytDlp: origin.ytDlp, probe: origin.probe);
+        final one = await shared.current(url, origin.probe, link, queueId: queueId);
+        feeder.serve(r.mediaId, one?.upload ?? link(), announce: true, queueId: queueId, name: name, duration: duration);
         await open(url);
       case RelayedSource(:final url, :final waiting, :final fetch, :final sourceId):
         if (waiting) {
@@ -462,7 +483,8 @@ class MediaPipeline {
         feeder.serve(r.mediaId, RelayMedia.single(FileRelayBytes(File(path))),
             queueId: queueId, name: name, duration: duration);
       case OwnLink(:final url, :final origin):
-        feeder.serve(r.mediaId, LinkRelayMedia(Uri.parse(url), ytDlp: origin.ytDlp, probe: origin.probe),
+        feeder.serve(r.mediaId,
+            shared.currentFor(url)?.upload ?? LinkRelayMedia(Uri.parse(url), ytDlp: origin.ytDlp, probe: origin.probe),
             queueId: queueId, name: name, duration: duration);
       case JellyfinSource(:final ref, :final origin):
         if (origin == null || ownJellyfin == null) return;
@@ -538,6 +560,7 @@ class MediaPipeline {
     _activeOrigin = null;
     _jellyfinFeed = null;
     feeder.stopAll();
+    unawaited(shared.closeAll());
   }
 
   /// The same media under a restarted server's numbering: the player keeps
@@ -558,6 +581,7 @@ class MediaPipeline {
     _jellyfinFeed = null;
     settledMediaId.value = -1;
     feeder.stopAll();
+    unawaited(shared.closeAll());
   }
 
   // ----------------------------------------------------------- Jellyfin
@@ -738,6 +762,24 @@ class MediaPipeline {
   String warmRelayUrl(QueueItem item, MediaRelay relay) =>
       session.server().relayUrl(item.media.name.isEmpty ? item.title : item.media.name, item.id, relay.tracks);
 
+  /// Feeds the warm relay of Up next item [queueId], the link [url] this
+  /// member passes on, from one shared reader (pieces tracks: from their
+  /// own fetch, as [LinkRelayMedia]). A preload of [url] that reads the
+  /// site itself (it was prepared before the reader existed) is prepared
+  /// again on the reader, so the item is fetched once.
+  Future<void> feedWarmLink(String queueId, String url, LinkProbe probe, YtDlp ytDlp) async {
+    if (feeder.feedsWarm(queueId)) return;
+    RelayMedia link() => LinkRelayMedia(Uri.parse(url), ytDlp: ytDlp, probe: probe);
+    final one = await shared.warm(queueId, url, probe, link);
+    if (feeder.feedsWarm(queueId)) return;
+    feeder.feedWarm(queueId, one?.upload ?? link());
+    final pre = _pre;
+    if (one != null && pre != null && pre.url == url && pre.headers.isEmpty && !pre.shared && !pre.failed) {
+      _log.info('Up next ${logUrl(url)}: preparing it again on the shared reader');
+      unawaited(prepare(url, fresh: true));
+    }
+  }
+
   /// Opens [url] early in a hidden player (paused at the start, muted, a
   /// small cache, its own video output when the view is up), replacing any
   /// other; completes once [need] seconds are buffered or the whole media
@@ -754,6 +796,7 @@ class MediaPipeline {
     final pre = _pre = _Prepared(url, headers ?? const {});
     try {
       final target = await _resolve(url, headers, fresh: fresh);
+      pre.shared = target.shared;
       if (!identical(_pre, pre)) {
         pre.fail();
         return false;
@@ -840,6 +883,7 @@ class MediaPipeline {
   Future<void> dispose() async {
     await release();
     feeder.stopAll();
+    await shared.closeAll();
     await playback.dispose();
   }
 }
@@ -864,6 +908,9 @@ class _Prepared {
   StreamSubscription<PlayerLogLine>? logSub;
   List<YtDlpSubtitle> subtitles = const [];
 
+  /// It reads a shared reader's loopback URL, not the site.
+  bool shared = false;
+
   /// Completes once the media is handed to mpv (or it failed).
   final opened = Completer<void>();
   bool failed = false;
@@ -885,7 +932,10 @@ class _Target {
   final String url;
   final Map<String, String> headers;
   final List<YtDlpSubtitle> subtitles;
-  const _Target(this.url, this.headers, {this.subtitles = const []});
+
+  /// A link this member passes on, read through its shared reader.
+  final bool shared;
+  const _Target(this.url, this.headers, {this.subtitles = const [], this.shared = false});
 }
 
 /// A page could not be resolved: why ([message], yt-dlp's words) and which

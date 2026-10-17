@@ -94,7 +94,10 @@ Three suites, run from each package's folder:
 - `cd packages/server && dart test` (well under a minute): live servers
   on loopback: auth and version refusal, identity, takeover and grace
   (`presence_test` on a fake clock), media and relay byte serving with
-  source drops, Jellyfin relay against a fake, queue (and the shared
+  source drops, the read-once source (`shared_source_test`: its loopback
+  range answers, a cut and resume with backoff, seeks of either reader,
+  the two kept within one window, its memory bound), Jellyfin relay
+  against a fake, queue (and the shared
   countdown on a fake clock), session log,
   isolate `serve`, sharing (`share_test`: a listener attached and detached
   under the same members and Up next, the host key standing in for the
@@ -114,7 +117,10 @@ Three suites, run from each package's folder:
 
 Opt-in, skipped unless set: `JELLYFIN_TEST_*` (core `jellyfin_live` and
 server `jellyfin_relay_live` against a real Jellyfin; read their headers),
-`YTDLP_LIVE=1` (downloads yt-dlp and resolves a real tweet). Everything
+`YTDLP_LIVE=1` (downloads yt-dlp and resolves a real tweet),
+`WT_SINGLE_FETCH=1` (server `single_fetch_e2e`: a link passed on read
+once against twice, two real mpv against a fake CDN that cuts and locks
+out; minutes; `WT_SF_SCENARIOS`, `WT_SF_PLAY` narrow it). Everything
 else is offline: Jellyfin and link hosts are local fakes.
 
 Real-mpv tests: `sync_playback_e2e`, `coord_presence` (drops through a
@@ -129,7 +135,9 @@ stand-in yt-dlp and a Referer-checking CDN: the EDL, the headers and
 cookies, subtitles without danmaku, a 403, the D11 error),
 `media_switch_e2e` (commands during a switch wait and apply once, no mpv
 errors), `relay_e2e` (a dedicated server with no file of its
-own: a guest's file, links passed on or fetched by the server, a late
+own: a guest's file, links passed on (read once: the source's player on
+its loopback reader, nothing from mpv at the origin) or fetched by the
+server, a late
 source, a source that drops and resumes; a seek past what a slow source
 has sent, timed; a source that drops while a viewer seeks past
 the buffer and another joins: no seek loop, "Waiting for", all resume

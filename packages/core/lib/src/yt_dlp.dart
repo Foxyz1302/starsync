@@ -65,15 +65,21 @@ class YtDlpFormat {
   /// Relayed as pieces (see relay_pieces.dart), not as a byte stream.
   bool get isPieces => _piecesProtocols.contains(protocol);
 
+  /// From one of yt-dlp's formats: its `http_headers` plus its `cookies`
+  /// as a Cookie header, the same a player gets ([YtDlpPlay.parse]).
   static YtDlpFormat _of(Map f) {
     final headers = f['http_headers'];
     final opts = f['downloader_options'];
     final chunk = opts is Map ? opts['http_chunk_size'] : null;
     final h = f['height'] is num ? (f['height'] as num).toInt() : 0;
+    final cookie = cookieHeaderOf(f['cookies']);
     return YtDlpFormat(
       id: '${f['format_id'] ?? ''}',
       url: Uri.parse(f['url'] as String),
-      headers: headers is Map ? {for (final e in headers.entries) '${e.key}': '${e.value}'} : const {},
+      headers: {
+        if (headers is Map) for (final e in headers.entries) '${e.key}': '${e.value}',
+        if (cookie.isNotEmpty) 'Cookie': cookie,
+      },
       height: h == 0 ? null : h,
       ext: '${f['ext']}',
       chunkSize: chunk is num && chunk > 0 ? chunk.toInt() : null,

@@ -592,73 +592,87 @@ void mountRelayRoutes(
   app.get('/r/:sid/:token/:mediaId/:seg/p/:piece', (final req) => viewer(req, tracked: true, piece: true));
 }
 
-/// A relayed byte range written on the raw connection: the status line
-/// and headers go out with the first body bytes, or after [headerWait]
-/// without them (dart:io would hold them until body bytes come, and an
-/// ffmpeg whose request gets no headers within its 5 s timeout has lost
-/// the file's size: every later seek fails with "size -38"). Then the
-/// body as the buffer has it; a read waiting on missing bytes keeps the
-/// connection open meanwhile. Always `connection: close` and closed after
-/// the body: ffmpeg asks for close, and one that is not told so reuses the
+/// A relayed byte range on the raw connection ([writeRelayRange]).
+Hijack _rangeResponse(int status, Map<String, String> headers, int length, Stream<Uint8List>? body,
+        {required void Function(Object e) onBroke}) =>
+    Hijack((ch) => writeRelayRange(ch.stream, ch.sink, status, headers, length, body, onBroke: onBroke));
+
+/// Writes a relayed byte range on a raw connection ([input] / [out]: the
+/// server's `/r` answers, and the source's own loopback endpoint in
+/// shared_source.dart): the status line and headers go out with the
+/// first body bytes, or after [headerWait] without them (an HTTP stack
+/// would hold them until body bytes come, and an ffmpeg whose request
+/// gets no headers within its 5 s timeout has lost the file's size:
+/// every later seek fails with "size -38"). Then the body as the buffer
+/// has it; a read waiting on missing bytes keeps the connection open
+/// meanwhile. Always `connection: close` and closed after the body:
+/// ffmpeg asks for close, and one that is not told so reuses the
 /// connection the server closed for its next seek and fails it the same
 /// way. A relay that ends ([RelayEnded]) closes the connection plainly;
 /// any other failure ([onBroke]) resets it. The client going away cancels
-/// the read.
-Hijack _rangeResponse(int status, Map<String, String> headers, int length, Stream<Uint8List>? body,
-    {required void Function(Object e) onBroke, Duration headerWait = const Duration(milliseconds: RelayConstants.relayHeaderWaitMs)}) {
-  return Hijack((ch) async {
-    final out = ch.sink;
-    final head = StringBuffer('HTTP/1.1 $status ${status == 206 ? 'Partial Content' : 'OK'}\r\n')
-      ..write('date: ${HttpDate.format(DateTime.now())}\r\n');
-    headers.forEach((k, v) {
-      if (k != 'content-length' && k != 'connection') head.write('$k: $v\r\n');
-    });
-    head.write('content-length: $length\r\nconnection: close\r\n\r\n');
-    final it = body == null ? null : StreamIterator(body);
-    // A read cancelled while it waits ends with what it was waiting for
-    // (its relay ending, say): moot then.
-    Future<void> stop() async => it?.cancel().catchError((_) {});
-    // The client closing (a seek elsewhere, the player gone) ends the read.
-    final input = ch.stream.listen(null,
-        onDone: () => unawaited(stop()), onError: (_) => unawaited(stop()), cancelOnError: true);
-    var reset = false;
-    // The first bytes go out with the headers when they come in time.
-    Future<bool>? first = it?.moveNext();
-    if (first != null) {
-      await Future.any([first.then((_) {}, onError: (_) {}), Future<void>.delayed(headerWait)]);
-    }
-    try {
-      out.add(latin1.encode('$head'));
-      if (out is IOSink) await out.flush();
-      while (it != null) {
-        final bool more;
-        try {
-          final next = first ?? it.moveNext();
-          first = null;
-          more = await next;
-        } catch (e) {
-          onBroke(e);
-          reset = e is! RelayEnded;
-          break;
-        }
-        if (!more) break;
-        out.add(it.current);
-        if (out is IOSink) await out.flush();
-      }
-    } catch (_) {
-      // The client went away mid-write: nothing to say.
-      reset = true;
-    } finally {
-      await input.cancel().catchError((_) {});
-      await stop();
-      if (reset && out is Socket) {
-        out.destroy();
-      } else {
-        await out.close().catchError((_) {});
-      }
-    }
+/// the read. Never throws.
+Future<void> writeRelayRange(Stream<List<int>> input, StreamSink<List<int>> out, int status,
+    Map<String, String> headers, int length, Stream<Uint8List>? body,
+    {required void Function(Object e) onBroke,
+    Duration headerWait = const Duration(milliseconds: RelayConstants.relayHeaderWaitMs)}) async {
+  final head = StringBuffer('HTTP/1.1 $status ${_reason(status)}\r\n')
+    ..write('date: ${HttpDate.format(DateTime.now())}\r\n');
+  headers.forEach((k, v) {
+    if (k != 'content-length' && k != 'connection') head.write('$k: $v\r\n');
   });
+  head.write('content-length: $length\r\nconnection: close\r\n\r\n');
+  final it = body == null ? null : StreamIterator(body);
+  // A read cancelled while it waits ends with what it was waiting for
+  // (its relay ending, say): moot then.
+  Future<void> stop() async => it?.cancel().catchError((_) {});
+  // The client closing (a seek elsewhere, the player gone) ends the read.
+  final listening = input.listen(null,
+      onDone: () => unawaited(stop()), onError: (_) => unawaited(stop()), cancelOnError: true);
+  var reset = false;
+  // The first bytes go out with the headers when they come in time.
+  Future<bool>? first = it?.moveNext();
+  if (first != null) {
+    await Future.any([first.then((_) {}, onError: (_) {}), Future<void>.delayed(headerWait)]);
+  }
+  try {
+    out.add(latin1.encode('$head'));
+    if (out is IOSink) await out.flush();
+    while (it != null) {
+      final bool more;
+      try {
+        final next = first ?? it.moveNext();
+        first = null;
+        more = await next;
+      } catch (e) {
+        onBroke(e);
+        reset = e is! RelayEnded;
+        break;
+      }
+      if (!more) break;
+      out.add(it.current);
+      if (out is IOSink) await out.flush();
+    }
+  } catch (_) {
+    // The client went away mid-write: nothing to say.
+    reset = true;
+  } finally {
+    await listening.cancel().catchError((_) {});
+    await stop();
+    if (reset && out is Socket) {
+      out.destroy();
+    } else {
+      await out.close().catchError((_) {});
+    }
+  }
 }
+
+String _reason(int status) => switch (status) {
+      200 => 'OK',
+      206 => 'Partial Content',
+      404 => 'Not Found',
+      416 => 'Range Not Satisfiable',
+      _ => 'Status',
+    };
 
 Response _plain(int status) => Response(status, body: Body.fromString('status $status'));
 
