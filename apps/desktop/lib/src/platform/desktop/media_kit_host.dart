@@ -203,6 +203,20 @@ class MediaKitHost implements PlayerHost {
   // refused request makes ffmpeg retry and warn on every try); ffmpeg's
   // HTTP status to [httpErrors]; the GL init lines while probing.
   void _route(_MkPlayer p, PlayerLogLine log) {
+    // Windows: the controller can be "ready" before mpv's render context
+    // exists, and an open in that gap fails its video output ("No render
+    // context set"). Open the same media again once, a moment later.
+    if (log.prefix == 'cplayer' && log.text.contains('initializing the selected video_out')) {
+      final last = p._lastOpen;
+      if (last != null && !p._voRetried && !p._retired) {
+        p._voRetried = true;
+        _mpvLog.info('render: the video output was not up for the open; opening it again');
+        unawaited(Future.delayed(const Duration(milliseconds: 500), () async {
+          if (p._retired || !identical(p._lastOpen, last)) return;
+          await p.mk.open(Media(last.url, httpHeaders: last.headers), play: last.play);
+        }).catchError((Object e) => _mpvLog.warning('render: opening again failed: $e')));
+      }
+    }
     if (log.prefix == 'ffmpeg') {
       final http = RegExp(r'HTTP error \d{3}.*').firstMatch(log.text);
       if (http != null) _http.add(http[0]!.trim());
@@ -390,6 +404,9 @@ class _MkPlayer implements HostedPlayer {
   bool _probing = false;
   bool _retired = false;
   Future<void>? _videoReady; // set once a video output is attached
+  // The last open, for one retry when mpv's video output was not up yet.
+  ({String url, Map<String, String> headers, bool play})? _lastOpen;
+  bool _voRetried = false;
 
   dynamic get _mpv => mk.platform;
 
@@ -437,6 +454,8 @@ class _MkPlayer implements HostedPlayer {
   @override
   Future<void> open(String url, {Map<String, String> headers = const {}, bool play = false}) async {
     if (_videoReady case final ready?) await ready;
+    _lastOpen = (url: url, headers: headers, play: play);
+    _voRetried = false;
     // An empty map, not null: media_kit caches headers per URI.
     await mk.open(Media(url, httpHeaders: headers), play: play);
   }

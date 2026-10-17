@@ -554,7 +554,12 @@ A player with a video output opens media only once that output is up:
 media_kit sets mpv's `vo=libmpv` before the output's render context
 exists, and a media opened in between gets no video output ("No render
 context set", black picture with sound). On X11 the context comes up
-later, which widens that gap (joining with media already up).
+later, which widens that gap (joining with media already up). On Windows
+the controller can report ready before mpv's render context exists, so
+an open that still fails its video output that way (`cplayer`: "Error
+opening/initializing the selected video_out") is opened again once,
+500 ms later (`render: the video output was not up for the open`); the
+player error it raised clears when the media loads.
 
 Render mode: media_kit's Linux/Windows video output creates mpv's render
 context (OpenGL, else its software renderer) when the `VideoController` is
