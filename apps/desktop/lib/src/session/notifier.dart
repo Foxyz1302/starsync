@@ -98,12 +98,15 @@ class NoticeContext {
   final WindowActivity window;
   final bool playing;
   final NotifyPrefs prefs;
+  /// The chat panel is open: chat is read there, not in pop-ups.
+  final bool chatOpen;
   const NoticeContext({
     this.self,
     this.alone = false,
     this.window = WindowActivity.focused,
     this.playing = false,
     this.prefs = const NotifyPrefs(),
+    this.chatOpen = false,
   });
 
   bool get away => self == Presence.away;
@@ -317,6 +320,8 @@ Notice noticeFor(AppEvent e, [NoticeContext c = const NoticeContext()]) {
   }
   if (cat == NoticeCategory.start && !c.away && !c.window.background) toast = false;
   if (cat == NoticeCategory.chat && !c.prefs.chat.shows(playing: c.playing)) toast = false;
+  // The open chat shows it already; the sound still plays.
+  if (cat == NoticeCategory.chat && c.chatOpen && !c.window.background) toast = false;
   SystemNote? system;
   if (toast && !own && c.window.background && cat.system && cat.reachesAway(c.prefs)) {
     final actor = n.actor;
@@ -351,6 +356,9 @@ class Notifier {
   /// The window's activity ([ShellPort.watchActivity], wired in `main`).
   WindowActivity window = WindowActivity.focused;
 
+  /// The chat panel is open (set by the shell).
+  bool chatOpen = false;
+
   Notifier({
     this.sfx = const NoopSfxService(),
     Future<void> Function()? attention,
@@ -379,7 +387,8 @@ class Notifier {
 
   NoticeContext get context {
     final s = session();
-    return NoticeContext(self: s.self, alone: s.alone, window: window, playing: s.playing, prefs: prefs());
+    return NoticeContext(
+        self: s.self, alone: s.alone, window: window, playing: s.playing, prefs: prefs(), chatOpen: chatOpen);
   }
 
   void notify(AppEvent e) {

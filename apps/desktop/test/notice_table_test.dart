@@ -66,6 +66,8 @@ const _alone = NoticeContext(self: Presence.watching, alone: true);
 const _background = NoticeContext(self: Presence.watching, window: WindowActivity.unfocused);
 const _minimisedAway = NoticeContext(self: Presence.away, window: WindowActivity.minimised);
 const _playing = NoticeContext(self: Presence.watching, playing: true);
+const _chatOpen = NoticeContext(self: Presence.watching, chatOpen: true);
+const _chatOpenBackground = NoticeContext(self: Presence.watching, chatOpen: true, window: WindowActivity.unfocused);
 const _chatPaused = NoticeContext(self: Presence.watching, playing: true, prefs: NotifyPrefs(chat: ChatPopups.paused));
 const _chatOff = NoticeContext(self: Presence.watching, window: WindowActivity.unfocused, prefs: NotifyPrefs(chat: ChatPopups.off));
 
@@ -115,6 +117,10 @@ final _rows = <_Row>[
   _Row('finished', _of(_feed('finished', actor: 'server')), Finished, logged: true),
   _Row('chat from someone', _of(_feed('chat', reason: 'hi')), ChatPosted,
       toast: 'Ann: hi', actor: 'Ann', sound: SfxKind.chat, logged: true),
+  _Row('chat with the chat open: only its sound', _of(_feed('chat', reason: 'hi')), ChatPosted,
+      context: _chatOpen, sound: SfxKind.chat, logged: true),
+  _Row('chat open but the window in the background: pops up and goes out', _of(_feed('chat', reason: 'hi')), ChatPosted,
+      context: _chatOpenBackground, toast: 'Ann: hi', actor: 'Ann', sound: SfxKind.chat, logged: true, system: ('Ann', 'hi')),
   _Row('own chat', _of(_feed('chat', actor: 'Me', reason: 'hi')), ChatPosted,
       toast: 'Me: hi', actor: 'Me', logged: true),
   _Row('rename', _of(_feed('rename', target: 'Annie')), MemberRenamed, logged: true),

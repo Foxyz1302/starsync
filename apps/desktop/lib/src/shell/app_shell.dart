@@ -287,6 +287,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     if (_fullscreen) _toggleFullscreen();
     setState(() {
       _chatOpen = false;
+      _graph.notifier.chatOpen = false;
       _unread = 0;
     });
     _show(PlayerMode.none);
@@ -362,6 +363,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
 
   void _toggleChat() => setState(() {
         _chatOpen = !_chatOpen;
+        _graph.notifier.chatOpen = _chatOpen;
         _unread = 0;
         if (!_chatOpen) _chatFocus.unfocus();
       });

@@ -1675,8 +1675,10 @@ background, default off). The coordinator gives the session's part
   like, "starting now"); the app's notices, problems and your own show.
 - "Starting now" pops up only while you sit out or the window is in the
   background.
-- Chat pop-ups follow the setting (it is in the chat either way); the
-  chat sound has its own switch.
+- Chat pop-ups follow the setting (it is in the chat either way), and
+  none show while the chat panel is open in a focused window
+  (`Notifier.chatOpen`, set by the shell); the chat sound has its own
+  switch and still plays.
 - The window in the background (unfocused, minimised, hidden): what
   reaches a member who sits out (chat, nudges, "starting now", Up next,
   joins and leaves when chosen) also goes out as a system notification
