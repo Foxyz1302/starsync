@@ -81,6 +81,7 @@ class PieceBuffer implements TrackBuffer {
   /// null before a minute of it has arrived.
   double? get bytesPerSec => _knownSecs >= 60 ? _knownBytes / _knownSecs : null;
   DateTime? _retryAt;
+  var _failures = 0; // failed pulls in a row (backoff)
   var _disposed = false;
   Completer<void> _kick = Completer();
   final Completer<void> _ready = Completer();
@@ -167,6 +168,7 @@ class PieceBuffer implements TrackBuffer {
     final pl = _pull;
     if (pl == null || pl.id != id || _disposed) return;
     _pull = null;
+    _failures = 0;
     final data = pl.buf.takeBytes();
     final i = pl.piece;
     _pieces[i] = data;
@@ -182,12 +184,18 @@ class PieceBuffer implements TrackBuffer {
     _wake();
   }
 
+  static final _pullFailThrottle = LogThrottle(burst: 3);
+
   @override
   void feedFail(int id, String reason) {
     if (_pull?.id != id) return;
-    _log.warning('relay piece pull $id failed: $reason');
     _pull = null;
-    _retryAt = DateTime.now().add(const Duration(seconds: 1));
+    final delay = relayRetryDelay(++_failures);
+    _retryAt = DateTime.now().add(delay);
+    final pass = _pullFailThrottle.allow('${identityHashCode(this)}');
+    if (pass != null) {
+      _log.warning('${pass}relay piece pull $id failed ($_failures in a row, next in ${delay.inMilliseconds} ms): $reason');
+    }
     _wake();
   }
 

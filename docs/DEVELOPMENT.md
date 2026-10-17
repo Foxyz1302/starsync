@@ -227,11 +227,12 @@ Traps:
   so shell tests run the real player layout without it; otherwise test pure
   logic (`StateDiff`, coordinator without widgets).
 - A `SyncServer` started inside a test: relic reports an error writing a
-  response (a relay response cut short when its relay is dropped at a
-  swap or stop) to the zone the server started in, which fails the
-  test; outside tests it is only logged. Start it in `runZonedGuarded`
-  and fail on anything else (`queue_switch_e2e`, `relay_e2e`): a viewer's
-  read is still in flight at the `stop` in tearDown.
+  response (one cut short at `stop`: `/m`, `/j`; the relay's byte
+  answers are written on the raw connection and end on their own) to
+  the zone the server started in, which fails the test; outside tests it
+  is only logged. Start it in `runZonedGuarded` and fail on anything
+  else (`queue_switch_e2e`, `relay_e2e`): a viewer's read can still be
+  in flight at the `stop` in tearDown.
 - The Link page probes a filled-in link (network, yt-dlp), which never
   answers on the widget-test clock: pass `AppShell(linkProbe:)` /
   `LibraryTab(probe:)` a fake, or `pumpAndSettle` never returns.

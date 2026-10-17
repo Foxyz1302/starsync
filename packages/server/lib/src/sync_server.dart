@@ -121,6 +121,7 @@ class SyncServer {
         })),
       );
     });
+    _app.use('/', closeWhenAsked);
     final requests = MediaRequestLog();
     void logRequest(String token, MediaLog log) => requests(hub.who(token), log);
     mountSessionMediaRoute(_app, sessions, onLog: logRequest);

@@ -58,6 +58,14 @@ Problems are numbered; delete a line when its fix ships.
 - P36 After a reconnect the app re-dials the warm relay of an Up next
   item that was already played ("relay channel refused: not the source of
   Up next item q8"): harmless, the feeder should end with its item.
+- P37 A relay viewer whose read waits on bytes the source does not send
+  for longer than ffmpeg's reconnect budget (4 tries per read, about
+  40 s with the 4 s header rule) gets an I/O error that mpv takes as the
+  end of the file. Measured with mpv 0.41 / ffmpeg 9.0.2 and the source
+  away about a minute across a seek: it played on; one read stalled past
+  the budget ends the file. Options: a longer `reconnect_delay_max` for
+  relay URLs only, or the end-of-file path reopening a relay viewer
+  that stopped short while the server plays.
 
 **Restructure** (in order; reviewed against the code). Truth lives in
 three places: the server (members, presence, gate, transport, queue incl.

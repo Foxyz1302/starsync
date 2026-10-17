@@ -561,6 +561,12 @@ opening/initializing the selected video_out") is opened again once,
 500 ms later (`render: the video output was not up for the open`); the
 player error it raised clears when the media loads.
 
+A player whose HTTP stream lost the file's size (ffmpeg's "Seek failed
+(to N, size -38)": a request of its that got no headers in time, from a
+server without the relay's header rule, or the connection reuse above)
+fails every seek until a fresh open, so the coordinator runs "Reload
+video" once per media for it (`mpvStreamLost`, `onStreamLost`).
+
 Render mode: media_kit's Linux/Windows video output creates mpv's render
 context (OpenGL, else its software renderer) when the `VideoController` is
 created, and nothing in its API says which. The host therefore requests
@@ -899,7 +905,7 @@ How bytes move:
   kept; segments are evicted by distance (behind costs 4x), sizes
   estimated from the bytes per second of the pieces in so far (before
   that 4 Mbit/s video, 160 kbit/s audio, which also splits the budget).
-  A failed pull is retried after 1 s. Measured (mpv 0.41 through the
+  A failed pull is retried with backoff, as for bytes. Measured (mpv 0.41 through the
   dedicated server, loopback, ~30 MB/s upstream): Mux's TS HLS (1080p,
   one muxed playlist) opened in 0.8 s, seeks 0.07 to 1.1 s; Akamai's DASH
   (1080p + aac, two playlists, EDL) 1.3 s, seeks 0.03 to 1.4 s; an X
@@ -908,7 +914,11 @@ How bytes move:
   opened in 0.02 s from the buffer.
 - Filling a byte buffer: a viewer blocked on a slice first (oldest wait
   first, handing the source over at slice boundaries), then the pinned
-  slices, then read-ahead from the slowest viewer. A viewer reads the
+  slices, then read-ahead from the slowest viewer. A failed pull (the
+  source's upstream dropping, a CDN refusing) is followed by the next
+  one after 250 ms, doubling up to 8 s (`relayRetryDelay`), back to none
+  once a slice or a pull completes: a failing CDN is not asked again
+  every round trip (that drew Bilibili's 412/403). A viewer reads the
   slice being filled as its bytes arrive, not once it is whole (mpv's
   demuxer, blocked in a read, takes a seek only once that read returns).
   Nothing is fetched while nobody watches through the relay (a Jellyfin
@@ -969,7 +979,23 @@ How bytes move:
   its source before opening its own player, and the source reads its
   tracks' sizes at once.
 - Source away (D6): viewers keep playing from the buffer; a request
-  waits up to 60 s for missing bytes. The source member going `gone`
+  waits up to 60 s for missing bytes.
+- A viewer's byte answer is written on the raw connection (relic
+  `Hijack`, `_rangeResponse`): its headers go out with the first bytes,
+  or after 4 s without them (`relayHeaderWaitMs`). ffmpeg gives up on a
+  request whose headers do not come within mpv's 5 s `network-timeout`
+  and then has lost the file's size for good (8.x and 9.0 do not restore
+  it): every later seek fails with "Seek failed (to N, size -38)". With
+  the headers in time, a stalled read only times out and is reconnected
+  (`reconnect_*`, see "Media pipeline"), and plays on once the bytes come.
+  The answer always says `connection: close` and closes after its body:
+  ffmpeg asks for close, and ffmpeg 8.x, not told so, sends its next seek
+  on the connection after reading a range to its end (an mp4 with a box
+  after `mdat`, like X's clips: the 58-byte tail, then back to the
+  start) and fails it the same way. Other answers say so too when asked
+  (`closeWhenAsked`, every server route). A swap that ends the relay
+  closes its viewers' answers plainly (`RelayEnded`, not logged as a
+  broken read). The source member going `gone`
   does not end the relay: it lives through the source's grace
   (`media.relay.sourceGone`, `ServerHub.refreshRelaySource`). The source
   (`RelaySource`, kept by the media pipeline's `RelayFeeder` through the
@@ -1150,9 +1176,11 @@ all three link modes. Nothing is bundled or installed by hand.
   track's playlist must be readable, else the swap is refused ("Live
   streams can't be passed on", DRM, or nothing a relay can read) with a
   hint to use "Everyone fetches it". The swap names the tracks; its relay
-  source reads them with yt-dlp's headers (`PageRelayMedia`). On 403/410
-  (expired format URLs, 6 h on YouTube; signed segment URLs) from any
-  track it resolves the page again once for all tracks, finds the same
+  source reads them with yt-dlp's headers (`PageRelayMedia`). On
+  403/410/412 (expired format URLs, 6 h on YouTube; signed segment URLs;
+  Bilibili's 412) from any track it resolves the page again once for all
+  tracks (not again within 60 s: a further refusal fails the read and the
+  server's backoff asks later), finds the same
   format ids with the same sizes and piece counts and roles (playlists
   re-read and re-mapped by index; else "the video changed on the page")
   and goes on from where it stopped. Format URLs are bound to the

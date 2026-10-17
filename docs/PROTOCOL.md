@@ -543,8 +543,12 @@ anything else means one file.
   one-file URL of a media with `tracks`) or piece (or `p/` of a byte
   track), 410 unknown session, 503 + `retry-after` the source never
   connected or the server could not read the link (60 s), or a piece did
-  not arrive within 60 s. A byte request whose bytes do not arrive within
-  60 s ends early. Bytes count toward `bytesServed`.
+  not arrive within 60 s. A byte request's headers come with its first
+  bytes, or after 4 s without them (under mpv's 5 s timeout); its body
+  then waits for missing bytes, up to 60 s for each, else the connection
+  is reset. Every byte answer says `connection: close` and closes after
+  its body; a swap that ends the relay closes it early without a reset.
+  Bytes count toward `bytesServed`.
 - `GET /r/<sid>/<token>/source` (WebSocket): the source's relay channel,
   dialled by the source (works behind NAT); `?q=<queueId>` for the warm
   relay of that item (or the media's relay started from it). Only that

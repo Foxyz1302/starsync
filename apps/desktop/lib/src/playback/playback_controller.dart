@@ -63,6 +63,10 @@ class PlaybackController {
   /// e.g. a CDN's 403), at most once per [beginOpen].
   void Function(String error)? onLoadError;
 
+  /// The current media's HTTP stream lost its size (see [mpvStreamLost]):
+  /// at most once per player and media; the coordinator opens it again.
+  void Function()? onStreamLost;
+
   /// Seeks from the controls (seek bar, the video widget's own) go here
   /// instead of to mpv.
   void Function(Duration position)? onUserSeek;
@@ -71,6 +75,7 @@ class PlaybackController {
   // load error was reported.
   String? _httpError;
   bool _loadErrorSent = false;
+  bool _streamLostSent = false;
 
   /// The current player. Only while [alive].
   HostedPlayer get player => _player!;
@@ -144,6 +149,7 @@ class PlaybackController {
     _chapterJson = '';
     _httpError = null;
     _loadErrorSent = false;
+    _streamLostSent = false;
     _shaders = '';
     _loaded = loaded && p.state.duration > Duration.zero;
     _opened = loaded;
@@ -196,6 +202,7 @@ class PlaybackController {
     _chapterJson = '';
     _httpError = null;
     _loadErrorSent = false;
+    _streamLostSent = false;
     _loaded = false;
     chapters.value = const [];
     tracks.value = const [];
@@ -286,7 +293,14 @@ class PlaybackController {
   // error while shaders are on is a shader that failed to load or compile
   // (mpv then renders without it).
   void _onLog(PlayerLogLine log) {
-    if (log.prefix == 'ffmpeg') return;
+    if (log.prefix == 'ffmpeg') {
+      if (!_streamLostSent && mpvStreamLost(log)) {
+        _streamLostSent = true;
+        _log.warning('the media stream lost its size, every seek fails: [ffmpeg] ${log.text.trim()}');
+        onStreamLost?.call();
+      }
+      return;
+    }
     if (!_loadErrorSent && mpvLoadFailed(log, duration.peek())) {
       _loadErrorSent = true;
       final http = _httpError;

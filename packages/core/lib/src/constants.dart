@@ -31,6 +31,13 @@ abstract class RelayConstants {
   /// A viewer request waits this long for its bytes (source away) before
   /// the server gives up on it.
   static const int relayWaitSecs = 60;
+  /// Failed pulls in a row back off: 250 ms doubling up to this, back to
+  /// none once bytes come again.
+  static const int relayRetryMaxMs = 8000;
+  /// A relay viewer's response headers wait at most this long for its
+  /// first bytes, under mpv's 5 s `network-timeout`: a header that never
+  /// comes in time costs ffmpeg the file's size for good.
+  static const int relayHeaderWaitMs = 4000;
   /// The warm relay (Up next's first relayed item, before it goes up)
   /// keeps this much ahead of and behind its viewers' preloads, besides
   /// the pins: about what a preload player reads ahead (48 MiB), never the

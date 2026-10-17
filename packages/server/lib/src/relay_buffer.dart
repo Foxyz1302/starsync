@@ -9,6 +9,21 @@ import 'relay_stats.dart';
 
 final _log = createLogger('relay');
 
+/// A viewer's read ended because its relay went (a swap, server stop):
+/// not a failure, the response just ends.
+class RelayEnded implements Exception {
+  const RelayEnded();
+  @override
+  String toString() => 'relay ended';
+}
+
+/// The wait before the next pull after [failures] failed ones in a row:
+/// 250 ms doubling to [RelayConstants.relayRetryMaxMs] (a source whose
+/// upstream keeps failing must not be asked again and again at once).
+Duration relayRetryDelay(int failures) => failures <= 0
+    ? Duration.zero
+    : Duration(milliseconds: min(RelayConstants.relayRetryMaxMs, 250 * (1 << min(failures - 1, 10))));
+
 /// One track's buffer on the server: a byte stream ([RelayBuffer]) or
 /// pieces ([PieceBuffer]).
 abstract interface class TrackBuffer {
@@ -209,6 +224,9 @@ class RelayBuffer implements TrackBuffer {
 
   var _reqSeq = 0;
   var _disposed = false;
+  // Failed pulls in a row, and when the next pull may start (backoff).
+  var _failures = 0;
+  DateTime? _retryAt;
   Completer<void> _kick = Completer();
   final Completer<void> _ready = Completer();
 
@@ -292,7 +310,11 @@ class RelayBuffer implements TrackBuffer {
       off += take;
       pl.pos += take;
       final done = pl.pos == _sliceEnd(s) + 1;
-      if (done) _slices[s] = pl.takeSlice();
+      if (done) {
+        _slices[s] = pl.takeSlice();
+        // A whole slice came: the source works again.
+        _failures = 0;
+      }
       // Whole, or more of it: whoever waits on it reads on.
       for (final c in _waiters.remove(s) ?? const <Completer<void>>[]) {
         c.complete();
@@ -309,16 +331,26 @@ class RelayBuffer implements TrackBuffer {
     final pl = _pull;
     if (pl != null && pl.id == id) {
       _pull = null;
+      _failures = 0;
       _wake();
     }
   }
 
   @override
   void feedFail(int id, String reason) {
-    if (_pull?.id != id) return;
-    _log.warning('relay pull $id failed: $reason');
-    feedEnd(id);
+    final pl = _pull;
+    if (pl == null || pl.id != id) return;
+    _pull = null;
+    final delay = relayRetryDelay(++_failures);
+    _retryAt = DateTime.now().add(delay);
+    final pass = _pullFailThrottle.allow('${identityHashCode(this)}');
+    if (pass != null) {
+      _log.warning('${pass}relay pull $id failed ($_failures in a row, next in ${delay.inMilliseconds} ms): $reason');
+    }
+    _wake();
   }
+
+  static final _pullFailThrottle = LogThrottle(burst: 3);
 
   // ------------------------------------------------------------- scheduling
 
@@ -412,6 +444,12 @@ class RelayBuffer implements TrackBuffer {
           await _sleep();
           continue;
         }
+        final retry = _retryAt;
+        if (retry != null && DateTime.now().isBefore(retry)) {
+          await _sleep(retry.difference(DateTime.now()));
+          continue;
+        }
+        _retryAt = null;
         _evict();
         final s = _nextMissing();
         if (s == null) {
@@ -431,10 +469,10 @@ class RelayBuffer implements TrackBuffer {
     }
   }
 
-  Future<void> _sleep() async {
+  Future<void> _sleep([Duration limit = const Duration(seconds: 5)]) async {
     _kick = Completer();
     // Also wake periodically: viewers age out of [_active].
-    await _kick.future.timeout(const Duration(seconds: 5), onTimeout: () {});
+    await _kick.future.timeout(limit, onTimeout: () {});
   }
 
   /// The bytes of slice [s] from [from] (offset in the slice) as soon as
@@ -499,7 +537,7 @@ class RelayBuffer implements TrackBuffer {
 
   /// Streams [start]..[end] to [viewer]. Cancelling the subscription (the
   /// viewer went away) ends it; a slice that never arrives ends it with an
-  /// error after [waitLimit].
+  /// error after [waitLimit]; the buffer's [dispose] with [RelayEnded].
   Stream<Uint8List> read(String viewer, int start, int end, {void Function(int n)? onSent}) async* {
     final v = _viewers.putIfAbsent(viewer, _Viewer.new);
     final tail = start >= size - pin;
@@ -520,6 +558,7 @@ class RelayBuffer implements TrackBuffer {
       while (off <= end) {
         final s = off ~/ slice;
         final data = await _waitBytes(v, s, off - s * slice, me, () => tail || v.newest == me);
+        if (_disposed) throw const RelayEnded();
         if (data == null) throw StateError('relay: bytes at $off did not arrive');
         final n = min(data.length, end - off + 1);
         if (n <= 0) continue;

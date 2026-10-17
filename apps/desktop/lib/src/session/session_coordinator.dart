@@ -426,6 +426,7 @@ class SessionCoordinator {
     if (_playerReady) return;
     try {
       playback.onLoadError = _setPlayerError;
+      playback.onStreamLost = _streamLost;
       playback.onUserSeek = (d) => _userSeek(d.inMicroseconds / 1e6);
       _bufferSub ??= playback.buffered.subscribe((_) => _onBuffered());
       await media.start();
@@ -479,6 +480,19 @@ class SessionCoordinator {
   }
 
   bool _reloadingVideo = false;
+  // The media whose lost stream was reloaded already (once per media).
+  int _streamReloadedFor = -1;
+
+  /// The player's HTTP stream lost the file's size (an old server, a
+  /// request that timed out): every seek on it would fail until a fresh
+  /// open. "Reload video" once per media, as the user would.
+  void _streamLost() {
+    if (_streamReloadedFor == _mediaId || _mediaId < 0) return;
+    _streamReloadedFor = _mediaId;
+    _log.info('media $_mediaId: the stream lost its size; reloading the video once');
+    unawaited(reloadVideo());
+  }
+
   void Function()? _bufferSub;
 
   /// "Reload video" (button, Ctrl+R, status menu): fresh

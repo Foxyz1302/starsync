@@ -393,6 +393,64 @@ void main() {
       expect(carol.welcome.mediaUrl, mpvEdl(['$carolBase/0/$name.m3u8', '$carolBase/1/$name']));
     });
 
+    test('a slow source: the headers still come in time, the bytes once they arrive', () async {
+      final alice = await join('alice');
+      final bob = await join('bob');
+      await swapRelay(alice);
+      final gated = _GatedBytes(FileRelayBytes(file));
+      await startSource(alice, from: RelayMedia.single(gated));
+      await _until(() => server.hub.relay!.live, 'live');
+      final url = Uri.parse(viewerUrl(bob, mediaIdOf(alice)));
+      final start = 2 * RelayBuffer.slice + 10;
+      final sw = Stopwatch()..start();
+      final res = await _RawResponse.get(url, range: 'bytes=$start-');
+      // No bytes: the headers go out on their own before mpv's 5 s timeout.
+      final head = await res.head.timeout(const Duration(seconds: 6));
+      expect(sw.elapsedMilliseconds, lessThan(5000));
+      expect(head, startsWith('HTTP/1.1 206'));
+      expect(head, contains('content-range: bytes $start-${bytes.length - 1}/${bytes.length}'));
+      expect(head, contains('content-length: ${bytes.length - start}'));
+      expect(head, contains('connection: close'));
+      expect(res.body, isEmpty);
+      gated.open();
+      expect(await res.done.timeout(const Duration(seconds: 10)), isTrue, reason: 'closed plainly');
+      expect(res.body, bytes.sublist(start));
+    });
+
+    test('a range read to its end says connection: close (ffmpeg 8 reuses it otherwise)', () async {
+      final alice = await join('alice');
+      final bob = await join('bob');
+      await swapRelay(alice);
+      await startSource(alice);
+      final url = Uri.parse(viewerUrl(bob, mediaIdOf(alice)));
+      // The 58-byte tail box of an mp4 whose moov comes first, as ffmpeg asks.
+      final res = await _RawResponse.get(url, range: 'bytes=${bytes.length - 58}-');
+      expect(await res.head, contains('connection: close'));
+      expect(await res.done.timeout(const Duration(seconds: 5)), isTrue);
+      expect(res.body, bytes.sublist(bytes.length - 58));
+      // Any other answer to a request that asks for close says so too.
+      final health = await _RawResponse.get(Uri.parse('http://127.0.0.1:${server.boundPort}/health'));
+      expect(await health.head, contains('connection: close'));
+      await health.done;
+    });
+
+    test('a swap ends a viewer\'s waiting read plainly', () async {
+      final alice = await join('alice');
+      final bob = await join('bob');
+      await swapRelay(alice);
+      await startSource(alice, from: RelayMedia.single(_GatedBytes(FileRelayBytes(file))));
+      await _until(() => server.hub.relay!.live, 'live');
+      final res = await _RawResponse.get(Uri.parse(viewerUrl(bob, mediaIdOf(alice))), range: 'bytes=1000-');
+      await res.head.timeout(const Duration(seconds: 6));
+      alice.send({
+        't': 'swap',
+        'media': {'name': 'x', 'size': 0, 'duration': 0, 'url': 'http://example.invalid/x.mkv'},
+      });
+      // Closed, not reset.
+      expect(await res.done.timeout(const Duration(seconds: 5)), isTrue);
+      expect(res.body, isEmpty);
+    });
+
     test('Jellyfin swap can carry a relay', () async {
       final alice = await join('alice');
       final before = alice.raw.length;
@@ -704,6 +762,28 @@ void main() {
       await old.cancel();
     });
 
+    test('a source that keeps failing is asked again with backoff, at once again after bytes', () async {
+      final failing = _FailingBytes(FileRelayBytes(file));
+      final b = RelayBuffer(ahead: 2 * RelayBuffer.slice, back: RelayBuffer.slice, pin: RelayBuffer.slice);
+      final f = LocalRelayFeed(RelayTrack('', failing), b);
+      b.attach(f, bytes.length);
+      addTearDown(() async {
+        b.dispose();
+        await f.close();
+      });
+      final reader = b.read('a', 0, 99).toList();
+      await Future<void>.delayed(const Duration(milliseconds: 2500));
+      // 0, 0.25, 0.75, 1.75 s: not one pull per round trip.
+      expect(failing.reads, inInclusiveRange(3, 5));
+      failing.failing = false;
+      final got = await reader.timeout(const Duration(seconds: 10));
+      expect([for (final c in got) ...c], bytes.sublist(0, 100));
+      expect(relayRetryDelay(0), Duration.zero);
+      expect(relayRetryDelay(1), const Duration(milliseconds: 250));
+      expect(relayRetryDelay(3), const Duration(seconds: 1));
+      expect(relayRetryDelay(50), const Duration(milliseconds: RelayConstants.relayRetryMaxMs));
+    });
+
     test('dispose frees everything and ends waiting readers', () async {
       await read('a', 0, 10);
       buf.dispose();
@@ -761,4 +841,81 @@ class _FakeYtDlp extends YtDlp {
   @override
   Future<YtDlpInfo> resolve(String url, {Duration timeout = const Duration(seconds: 25)}) async =>
       YtDlpInfo(title: 'page', tracks: tracks, formats: {for (final t in tracks) t.format.id: t.format});
+}
+
+/// Bytes that come only once [open] is called (a source whose upstream
+/// stalls).
+class _GatedBytes implements RelayBytes {
+  final RelayBytes inner;
+  final _gate = Completer<void>();
+  _GatedBytes(this.inner);
+  void open() => _gate.complete();
+  @override
+  Future<int> size() => inner.size();
+  @override
+  Stream<List<int>> read(int start, int end) async* {
+    await _gate.future;
+    yield* inner.read(start, end);
+  }
+
+  @override
+  Future<void> close() => inner.close();
+}
+
+/// Reads that fail at once while [failing] (an upstream dropping every
+/// connection); [reads] counts them.
+class _FailingBytes implements RelayBytes {
+  final RelayBytes inner;
+  var failing = true;
+  var reads = 0;
+  _FailingBytes(this.inner);
+  @override
+  Future<int> size() => inner.size();
+  @override
+  Stream<List<int>> read(int start, int end) {
+    reads++;
+    if (failing) return Stream.error(const HttpException('Connection closed while receiving data'));
+    return inner.read(start, end);
+  }
+
+  @override
+  Future<void> close() => inner.close();
+}
+
+/// One HTTP/1.1 GET on its own socket, as ffmpeg sends it
+/// (`Connection: close`): the header block as soon as it comes, the body
+/// as it comes, and how the connection ended ([done]: true when the
+/// server closed it plainly, false on a reset).
+class _RawResponse {
+  final _head = Completer<String>();
+  Future<String> get head => _head.future;
+  final body = <int>[];
+  final _done = Completer<bool>();
+  Future<bool> get done => _done.future;
+
+  static Future<_RawResponse> get(Uri url, {String? range}) async {
+    final r = _RawResponse();
+    final s = await Socket.connect(url.host, url.port);
+    final buf = <int>[];
+    s.listen((d) {
+      if (r._head.isCompleted) {
+        r.body.addAll(d);
+        return;
+      }
+      buf.addAll(d);
+      final text = latin1.decode(buf);
+      final at = text.indexOf('\r\n\r\n');
+      if (at < 0) return;
+      r._head.complete(text.substring(0, at).toLowerCase().replaceFirst('http/1.1', 'HTTP/1.1'));
+      r.body.addAll(buf.sublist(at + 4));
+    }, onError: (_) {
+      if (!r._done.isCompleted) r._done.complete(false);
+    }, onDone: () {
+      if (!r._done.isCompleted) r._done.complete(true);
+      s.destroy();
+    });
+    s.write('GET ${url.path} HTTP/1.1\r\nHost: ${url.host}\r\n${range == null ? '' : 'Range: $range\r\n'}'
+        'Connection: close\r\n\r\n');
+    return r;
+  }
 }

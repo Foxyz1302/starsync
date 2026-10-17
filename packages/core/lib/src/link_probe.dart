@@ -282,9 +282,12 @@ Future<String> _readText(HttpClientResponse res) async {
 /// audio, or segmented playlists). A byte track is range-read with
 /// yt-dlp's headers in GETs of the format's `http_chunk_size`; a pieces
 /// track's playlist (or DASH fragments) is read on first use, then each
-/// piece is one GET. Format URLs expire: on 403/410 from any track the page
-/// is resolved again once for all tracks (same format ids, same sizes and
-/// piece counts) and the read goes on from where it stopped.
+/// piece is one GET. Format URLs expire: on 403/410/412 from any track the
+/// page is resolved again once for all tracks (same format ids, same sizes
+/// and piece counts) and the read goes on from where it stopped. Another
+/// expiry within [refreshGap] of that resolve fails the read instead (the
+/// server backs off and asks again), so a site refusing the fresh URLs too
+/// is not resolved again and again.
 class PageRelayMedia implements RelayMedia {
   final Uri page;
   final YtDlp ytDlp;
@@ -296,7 +299,10 @@ class PageRelayMedia implements RelayMedia {
   final _http = HttpClient();
   var _gen = 0;
   Future<void>? _refreshing;
-  PageRelayMedia(this.page, this.ytDlp, {List<YtDlpTrack>? tracks}) : _picked = tracks;
+  DateTime? _refreshedAt;
+  final Duration refreshGap;
+  PageRelayMedia(this.page, this.ytDlp, {List<YtDlpTrack>? tracks, this.refreshGap = const Duration(seconds: 60)})
+      : _picked = tracks;
 
   Future<YtDlpInfo> _info() async {
     final info = await ytDlp.resolve(page.toString());
@@ -335,14 +341,22 @@ class PageRelayMedia implements RelayMedia {
     return fetchHlsPlaylist(_http, f.url, f.headers);
   }
 
-  static bool _expired(Object e) => e is UpstreamHttpException && (e.status == 403 || e.status == 410);
+  /// A format URL the site no longer takes: 403, 410, or Bilibili's 412.
+  static bool _expired(Object e) =>
+      e is UpstreamHttpException && (e.status == 403 || e.status == 410 || e.status == 412);
 
   /// Resolves the page again: the same format ids with the same sizes and
   /// piece shapes, else the video changed.
-  Future<void> _refresh(int gen) {
+  Future<void> _refresh(int gen, Object cause) {
     if (gen != _gen) return Future.value();
+    final last = _refreshedAt;
+    if (_refreshing == null && last != null && DateTime.now().difference(last) < refreshGap) {
+      // Resolved a moment ago and refused again: not once more.
+      return Future.error(cause);
+    }
     return _refreshing ??= () async {
-      _log.info('relay of ${logUrl(page)}: a format URL expired (403/410), resolving the page again');
+      _refreshedAt = DateTime.now();
+      _log.info('relay of ${logUrl(page)}: a format URL expired (HTTP ${cause is UpstreamHttpException ? cause.status : '?'}), resolving the page again');
       try {
         const changed = LinkProbeException('the video changed on the page');
         final info = await _info();
@@ -384,7 +398,7 @@ class PageRelayMedia implements RelayMedia {
       return _sizes[i] = await _open(i).size();
     } catch (e) {
       if (!_expired(e)) rethrow;
-      await _refresh(gen);
+      await _refresh(gen, e);
       return _sizes[i] = await _open(i).size();
     }
   }
@@ -397,7 +411,7 @@ class PageRelayMedia implements RelayMedia {
       return _pieces[i] = await _loadPieces(_picked![i].format);
     } catch (e) {
       if (!_expired(e)) rethrow;
-      await _refresh(gen);
+      await _refresh(gen, e);
       return _pieces[i] ??= await _loadPieces(_picked![i].format);
     }
   }
@@ -416,7 +430,7 @@ class PageRelayMedia implements RelayMedia {
       } catch (e) {
         if (retried || !_expired(e)) rethrow;
         retried = true;
-        await _refresh(gen);
+        await _refresh(gen, e);
       }
     }
   }
@@ -435,7 +449,7 @@ class PageRelayMedia implements RelayMedia {
       } catch (e) {
         if (retried || !_expired(e)) rethrow;
         retried = true;
-        await _refresh(gen);
+        await _refresh(gen, e);
       }
     }
   }

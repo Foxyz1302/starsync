@@ -249,3 +249,23 @@ MimeType _mimeOf(String? contentType) {
     return MimeType.octetStream;
   }
 }
+
+/// Says `connection: close` on a response to a request that asked for it
+/// (ffmpeg always does). dart:io closes such a connection after the
+/// response but, behind relic, without saying so; ffmpeg (8.x) then sends
+/// its next seek on that dead connection after reading a range to its end
+/// (an mp4's tail) and the seek fails for good ("size -38").
+Handler closeWhenAsked(Handler next) => (req) async {
+      final res = await next(req);
+      if (res is! Response) return res;
+      bool asked;
+      try {
+        asked = req.headers.connection?.isClose ?? false;
+      } catch (_) {
+        asked = false;
+      }
+      if (!asked) return res;
+      return res.copyWith(
+          headers: res.headers.transform(
+              (h) => h.connection = const ConnectionHeader.directives([ConnectionHeaderType.close])));
+    };

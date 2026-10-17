@@ -184,6 +184,13 @@ abstract interface class PlayerHost {
   int get live;
 }
 
+/// [log] says ffmpeg's HTTP stream lost the file's size and so every
+/// seek on it fails ("Seek failed (to 3417735, size -38)": -38 is ENOSYS,
+/// what ffmpeg answers for the size once a reconnect's or a seek's request
+/// failed). Only a fresh open gets it back.
+bool mpvStreamLost(PlayerLogLine log) =>
+    log.prefix == 'ffmpeg' && log.text.contains('Seek failed') && log.text.contains('size -38)');
+
 /// [log] says the media could not be opened: before a [duration] is known,
 /// mpv's fatal "nothing to play" or a demuxer error.
 bool mpvLoadFailed(PlayerLogLine log, Duration duration) {
