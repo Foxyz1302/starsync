@@ -199,6 +199,35 @@ class ProgressLineSetting extends StatelessWidget {
   }
 }
 
+/// The video output at the player's size on screen ([AppSettings.screenResVideo]).
+class ScreenResSetting extends StatelessWidget {
+  final ReadonlySignal<RenderMode>? renderMode;
+  const ScreenResSetting({super.key, this.renderMode});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context).coordinator.settings;
+    return SignalBuilder(builder: (context) {
+      final software = switch (renderMode?.value) {
+        RenderMode.software || RenderMode.softwareGl => true,
+        _ => false,
+      };
+      return SettingRow(
+        label: 'Sharp video and subtitles',
+        help: software
+            ? 'No effect: video uses software rendering'
+            : "Scale the picture and draw subtitles at your screen's resolution, not the video's. "
+                'Off: lighter on a weak GPU',
+        control: Switch(
+          key: const ValueKey('screen-res-video'),
+          value: s.screenResVideo.value,
+          onChanged: s.setScreenResVideo,
+        ),
+      );
+    });
+  }
+}
+
 /// Saves a shader choice (also used on the next join) and puts it on the
 /// running player, if any; the player announces the result.
 void applyShaderChoice(SessionCoordinator coord, ShaderPreset preset, ShaderQuality? quality) {
@@ -403,6 +432,7 @@ List<Widget> playerSettingRows({ReadonlySignal<RenderMode>? renderMode}) => [
       const PlayerDesignSetting(),
       const ProgressLineSetting(),
       ShaderPresetSetting(renderMode: renderMode),
+      ScreenResSetting(renderMode: renderMode),
       const HwdecSetting(),
     ];
 

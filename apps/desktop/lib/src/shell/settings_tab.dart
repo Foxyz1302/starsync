@@ -13,7 +13,7 @@ import '../jellyfin/accounts_panel.dart';
 import '../schedule/animeflow.dart';
 import '../screens/home/about_page.dart';
 import '../screens/home/settings_page.dart';
-import '../screens/home/ui.dart' show appName, displayVersion;
+import '../screens/home/ui.dart' show appName, devTools, displayVersion;
 import '../session/auto_sit_out.dart' show AutoSitOutTimes;
 import '../sfx/sfx.dart';
 import '../sfx/sound_bank.dart';
@@ -52,6 +52,8 @@ class SettingsTab extends StatelessWidget {
   final JellyfinAccounts? jellyfin;
   /// AnimeFlow's `/me` for the integrations page (tests pass a fake).
   final Future<AnimeFlowMe> Function()? animeFlowMe;
+  /// Dev builds: About → Developer → Danmaku preview.
+  final VoidCallback? onDanmakuPreview;
   const SettingsTab({
     super.key,
     required this.section,
@@ -60,6 +62,7 @@ class SettingsTab extends StatelessWidget {
     this.updates,
     this.jellyfin,
     this.animeFlowMe,
+    this.onDanmakuPreview,
   });
 
   List<Widget> _page(BuildContext context) {
@@ -162,7 +165,10 @@ class SettingsTab extends StatelessWidget {
       case SettingsSection.shortcuts:
         return const [SettingsPanel(title: 'Keyboard shortcuts', child: ShortcutList())];
       case SettingsSection.about:
-        return [AboutPanel(updates: updates)];
+        return [
+          AboutPanel(updates: updates),
+          if (devTools) DeveloperPanel(onDanmakuPreview: onDanmakuPreview),
+        ];
     }
   }
 

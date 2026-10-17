@@ -12,6 +12,7 @@ Links you put up are downloaded once for everyone, plus What's new and fixes for
 ### Added
 
 - What's new: the update band shows what changed, and after an update the app shows the full list once (also in Settings → About)
+- Sharper subtitles and picture: the video and its subtitles are drawn at your screen's resolution instead of the video's (Settings → Player → Sharp video and subtitles, on by default)
 
 ### Changed
 

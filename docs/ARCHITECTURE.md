@@ -567,6 +567,30 @@ server without the relay's header rule, or the connection reuse above)
 fails every seek until a fresh open, so the coordinator runs "Reload
 video" once per media for it (`mpvStreamLost`, `onStreamLost`).
 
+Output size ("Sharp video and subtitles", `AppSettings.screenResVideo`,
+on by default, live; Settings → Player and the player settings card):
+media_kit renders mpv into a texture the size of the video and Flutter
+scales it, so libass subtitles, mpv's scaler and the shaders all work on
+a 720p image for a 720p file. With the setting on and the GPU renderer
+(`renderMode` gpu; never in software rendering, where every pixel is CPU
+work, nor before the probe knows), the session view
+(`shell/video_view.dart`, `VideoOutputSizer` around the `Video`) sends its
+size in physical pixels to the host (`PlayerHost.setOutputSize`): at
+once the first time, then once a resize has held 180 ms
+(`outputResizeDelay`: a window drag, fullscreen, full ↔ mini). The host
+applies it to every live output and to each new one once it is up
+(`NativeVideoController.setSize`); mpv then letterboxes inside it and
+draws subtitles at that size (text subtitles may sit in the black bars,
+as in mpv). media_kit's controller sets an output back to the video's
+size whenever the video's parameters change (each new file), so the host
+sends the size again after it, under the controller's own lock; a fresh
+player's first frame or two show at the video's size. A paused player
+draws no frame for the new size: the host nudges `video-pan-x` by a
+millionth and back so mpv redraws. Off: each output at its video's own
+size again (`setOutputSize(null)`). Measured on a GTX 1080, 1280x720
+H.264 at 2560x1080 fullscreen: no difference past the noise in the
+process's GPU (`nvidia-smi pmon`, 9 to 12 % either way) or CPU.
+
 Render mode: media_kit's Linux/Windows video output creates mpv's render
 context (OpenGL, else its software renderer) when the `VideoController` is
 created, and nothing in its API says which. The host therefore requests
@@ -606,7 +630,8 @@ their own): creates players by role (`session`: the full cache, `warn`;
 no outputs, no cache, no log) with every pin set before the caller's
 first command (`pinMismatches` lists the read-backs that differ), gives
 a player its video output (`HostedVideo`, with the hwdec policy:
-`SYNC_RELAY_HWDEC`, else the setting, `auto-copy` on Windows), runs the
+`SYNC_RELAY_HWDEC`, else the setting, `auto-copy` on Windows) at the
+view's size when asked (`setOutputSize`, see "Output size"), runs the
 render-mode probe and its diagnostics (`renderMode`, also after leaving),
 routes mpv's log, and owns the order players go in: `retire` (pause, let
 the view drop the texture: two frames and a route pop, then dispose; a
@@ -2112,7 +2137,8 @@ panel) and chat messages (Copy message, and a link in it).
   between kinds. The mini shows its short line in its hover bar. ⚙ →
   Player settings (both skins) opens the player settings card (`controls/
   player_settings.dart`, `showPopover`, on `AppGlass`): player design, progress line
-  when hidden, upscaling shader, hardware decoding (set live on mpv's
+  when hidden, upscaling shader, sharp video and subtitles (the output
+  at screen size, see "Media"), hardware decoding (set live on mpv's
   `hwdec`), subtitle and audio track. The rows (`playerSettingRows`) are
   the same widgets Settings → Player shows; all apply live. Settings →
   Player also has the controls' own choices (`controlsSettingRows`, see

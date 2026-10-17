@@ -148,6 +148,12 @@ abstract interface class PlayerHost {
   /// start).
   HostedVideo video(HostedPlayer player, {bool probe = false});
 
+  /// The pixel size every video output renders at: the view's, so mpv
+  /// scales the picture and draws subtitles at screen resolution
+  /// (Settings → Player, "Sharp video"). Null: each output at its video's
+  /// own size. Applies to live outputs and to new ones once they are up.
+  void setOutputSize(int? width, int? height);
+
   /// How video renders, as last learned (kept after leaving).
   ReadonlySignal<RenderMode> get renderMode;
 

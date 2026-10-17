@@ -75,6 +75,9 @@ class MediaKitHost implements PlayerHost {
       : _hwdecSetting = hwdecSetting ?? (() => AppSettings.instance.hwdec.peek());
 
   final _live = <_MkPlayer>{};
+  final _videos = <_MkVideo>{};
+  // The size outputs render at ([setOutputSize]); null: the video's own.
+  (int, int)? _outputSize;
   final _renderMode = signal(RenderMode.unknown);
   final _http = StreamController<String>.broadcast();
   final _throttle = LogThrottle(burst: 5);
@@ -89,6 +92,16 @@ class MediaKitHost implements PlayerHost {
 
   @override
   ReadonlySignal<RenderMode> get renderMode => _renderMode;
+
+  @override
+  void setOutputSize(int? width, int? height) {
+    final size = width != null && height != null && width > 0 && height > 0 ? (width, height) : null;
+    if (size == _outputSize) return;
+    _outputSize = size;
+    for (final v in _videos.toList()) {
+      unawaited(v.applySize());
+    }
+  }
 
   @override
   Stream<String> get httpErrors => _http.stream;
@@ -185,6 +198,9 @@ class MediaKitHost implements PlayerHost {
     // configured), which used to override SYNC_RELAY_HWDEC.
     final controller = VideoController(p.mk, configuration: VideoControllerConfiguration(hwdec: hwdec));
     final v = _MkVideo(p, controller);
+    _videos.add(v);
+    p._video = v;
+    if (_outputSize != null) unawaited(v.applySize());
     // mpv gets `vo=libmpv` before the output's render context exists; a
     // media opened in between fails its video output ("No render context
     // set") and plays black. Opens wait for the output (seen on X11, where
@@ -340,6 +356,10 @@ class MediaKitHost implements PlayerHost {
     final p = player as _MkPlayer;
     if (!_live.remove(p)) return;
     p._retired = true;
+    if (p._video case final v?) {
+      _videos.remove(v);
+      await v._paramsSub?.cancel();
+    }
     await p._logSub?.cancel();
     try {
       await p.mk.dispose();
@@ -407,6 +427,7 @@ class _MkPlayer implements HostedPlayer {
   // The last open, for one retry when mpv's video output was not up yet.
   ({String url, Map<String, String> headers, bool play})? _lastOpen;
   bool _voRetried = false;
+  _MkVideo? _video;
 
   dynamic get _mpv => mk.platform;
 
@@ -529,4 +550,53 @@ class _MkVideo implements HostedVideo {
 
   @override
   Future<void> get ready => controller.platform.future;
+
+  // What this output was last set to: null with [_sized] the video's own
+  // size again; nothing sent yet while [_sized] is false.
+  (int, int)? _sent;
+  bool _sized = false;
+  StreamSubscription<VideoParams>? _paramsSub;
+  Future<void> _sizeOp = Future.value();
+
+  /// Renders at the host's output size (or the video's own when it has
+  /// none). media_kit's controller sets the output back to the video's
+  /// size whenever the video's parameters change (a new file, a track
+  /// with another size); the fixed size is sent again after it, under
+  /// the controller's own lock so it lands last.
+  Future<void> applySize({bool again = false}) => _sizeOp = _sizeOp.then((_) async {
+        if (player.disposed) return;
+        try {
+          // NativeVideoController (Linux, Windows): not exported, reached
+          // through its public fields.
+          final dynamic native = await controller.platform.future;
+          final want = player.host._outputSize;
+          if (_sized && want == _sent && !again) return;
+          if (want == null) {
+            if (!_sized) return; // never resized: already the video's size
+            await native.setSize();
+          } else {
+            // setSize skips a size it believes is set; after media_kit's own
+            // reset it is not.
+            native.width = null;
+            await native.setSize(width: want.$1, height: want.$2);
+          }
+          _sent = want;
+          _sized = true;
+          // The output takes its new size with the next frame mpv draws;
+          // paused, none comes: a pan too small to see makes mpv redraw.
+          if (!player.state.playing) {
+            await player.setProperty('video-pan-x', '0.000001');
+            await player.setProperty('video-pan-x', '0');
+          }
+          _paramsSub ??= player.mk.stream.videoParams.listen((params) async {
+            if ((params.dw ?? 0) == 0 || _sent == null) return;
+            try {
+              await (native.lock.synchronized(() async {}) as Future);
+            } catch (_) {}
+            unawaited(applySize(again: true));
+          });
+        } catch (e) {
+          debugPrint('video output size: $e');
+        }
+      });
 }

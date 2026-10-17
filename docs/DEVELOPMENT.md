@@ -75,6 +75,61 @@ Harnesses in `tool/` (own `pubspec.yaml`, `dart run tool/<name>.dart`):
 `range_logger` (serve a file and log every Range request), `shaper`
 (bandwidth cap, latency, `--kill-after` for outage tests), `fake_viewer`
 and `e2e_check` (simulated viewers against a live server).
+`tool/make_sub_test.sh [out.mkv] [seconds]` (ffmpeg) writes a 720p test
+video for subtitle placement and sharpness (default
+`~/Videos/starsync-sub-test.mkv`): an .ass track with a top sign
+(`\an8`) and bottom dialogue (English and Japanese), and an SRT track.
+
+## Dev tools
+
+Test builds and runs from source (a version with `-dev`) and debug runs
+(`devTools`, `screens/home/ui.dart`) get Settings → About → Developer;
+releases never show it. What is there is an experiment to look at, not
+a decided feature:
+
+- **Danmaku preview** (`lib/src/danmaku/`): chat lines and short notices
+  (joins, leaves, Up next adds, "starting now") flying right to left
+  across the upper part of the picture. `DanmakuLayer` is the reusable
+  widget: lanes in a band of the height (`DanmakuStyle.bandTop` /
+  `bandBottom`, default 10 to 45 %, under top signs, never down into the
+  dialogue); each line takes the topmost free lane (`DanmakuLanes`, pure:
+  the last line in a lane must have fully entered with a gap, and the
+  new one, at its own speed, cannot catch it before it leaves); at most
+  `maxOnScreen` fly, the rest wait in order (dropped after 15 s, 60 at
+  most); every line crosses in `crossSecs`, so long ones move faster;
+  white text with a dark outline and no box, the sender's avatar
+  (`StatusAvatar`: picture, else initial) and coloured name first, the
+  app's own notices without one, own lines in an accent frame; the
+  layer's own clock, so lines fly on while paused. Each line is a widget
+  moved by a `Flow`: per frame only paint runs. The button opens it over
+  the full player when one is up (under the controls; the panel top
+  right holds them up), else on a page with a moving stand-in picture
+  and a mock control bar of the skin in use. The panel (`DanmakuPanel`)
+  fires samples (chat, own, join, leave, Up next, starting, a burst), a
+  random stream (Poisson arrivals at a rate, short to long lines, CJK
+  and emoji; in a session half the senders are the party's real
+  members), this session's own chat and notice toasts, and every
+  `DanmakuStyle` knob live (crossing time, cap, lane band, opacity,
+  size, outline, avatars, own frame), plus mock subtitles (a top sign
+  and bottom dialogue). Tests: `danmaku_test`.
+- **Lift subtitles above the chat line and controls**
+  (`AppSettings.liftSubtitles`, off): Enter in the full player opens a
+  stand-in for the planned chat line (a one-line box at the bottom in
+  place of the control bar; Enter sends to the chat, Esc closes). While
+  it is open, or the control bar is up, bottom subtitles move above it
+  and back down when it goes (`SubtitleLifter`, `video_view.dart`): mpv
+  `sub-pos`, animated over the shell's 320 ms curve in 0.1 steps, only as
+  far as the letterbox under the picture leaves no room
+  (`subtitleLiftPos`). What each mpv property does, on
+  `make_sub_test.sh`'s file (mpv 0.41, libmpv as the app uses it):
+  `sub-pos` moves bottom ASS dialogue and SRT lines up and leaves `\an8`
+  signs in place (with `sub-ass-override` at its default `scale` or
+  `yes`; `no` ignores it for ASS); `sub-margin-y` moves SRT only (ASS
+  only with `sub-ass-override=force`, which restyles every line, signs
+  too); `sub-ass-style-overrides=MarginV=...` moves top signs down as
+  well; `video-margin-ratio-bottom` shrinks and moves the picture
+  itself (with `sub-ass-force-margins` the dialogue goes into the new
+  black band).
 
 ## Tests
 
@@ -109,7 +164,9 @@ Three suites, run from each package's folder:
   version gate, the media plan's table with the Jellyfin relay rule and
   the "Waiting for" status (`media_plan_test`), watch tracking and the
   device history (`watch_tracker_test`), what continues a file of a
-  local show (`queue_logic_test`)), `singletons_test` (the `.instance` count, see
+  local show (`queue_logic_test`), the video view's output size and
+  subtitle lift and the dev-tools gate (`video_view_test`), danmaku lanes
+  (`danmaku_test`)), `singletons_test` (the `.instance` count, see
   ARCHITECTURE "Composition root"; lower its baseline when a use goes) and the real-mpv `*_e2e`
   tests plus `coord_presence`. The whole suite takes a couple of minutes;
   run it only before a restructure step lands, otherwise only the files

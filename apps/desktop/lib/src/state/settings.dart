@@ -46,6 +46,8 @@ const _keyNotifyPeople = 'notifyPeople';
 const _keyShareDiagnostics = 'shareDiagnostics';
 const _keyWhatsNewSeen = 'whatsNewSeen';
 const _keyWhatsNewNotes = 'whatsNewNotes';
+const _keyScreenResVideo = 'screenResVideo';
+const _keyLiftSubtitles = 'liftSubtitles';
 
 enum HwdecMode { auto, off, custom }
 
@@ -89,6 +91,14 @@ class AppSettings {
   /// Send this app's log lines to the server's session log while in a
   /// session (never chat). Off: nothing is sent but a note that it is off.
   final shareDiagnostics = signal(true);
+  /// The video output renders at the player's size on screen, so mpv
+  /// scales the picture (and runs shaders) and draws subtitles at screen
+  /// resolution; off: at the video's own size, scaled by Flutter. Applies
+  /// live (GPU rendering only).
+  final screenResVideo = signal(true);
+  /// Dev builds only, an experiment: bottom subtitles move up while the
+  /// controls are up (mpv `sub-pos`). Applies live.
+  final liftSubtitles = signal(false);
   /// Chat message toasts (default: all). Applies live.
   final chatPopups = signal(ChatPopups.all);
   /// Joins and leaves also notify while sitting out or with the window in
@@ -175,6 +185,10 @@ class AppSettings {
       if (hideRe is bool) hideReReleases.value = hideRe;
       final line = box.get(_keyProgressLine);
       if (line is bool) progressLine.value = line;
+      final screenRes = box.get(_keyScreenResVideo);
+      if (screenRes is bool) screenResVideo.value = screenRes;
+      final lift = box.get(_keyLiftSubtitles);
+      if (lift is bool) liftSubtitles.value = lift;
       final share = box.get(_keyShareDiagnostics);
       if (share is bool) shareDiagnostics.value = share;
       final popups = box.get(_keyChatPopups);
@@ -277,6 +291,16 @@ class AppSettings {
   void setProgressLine(bool on) {
     progressLine.value = on;
     _put(_keyProgressLine, on);
+  }
+
+  void setScreenResVideo(bool on) {
+    screenResVideo.value = on;
+    _put(_keyScreenResVideo, on);
+  }
+
+  void setLiftSubtitles(bool on) {
+    liftSubtitles.value = on;
+    _put(_keyLiftSubtitles, on);
   }
 
   void setShareDiagnostics(bool on) {

@@ -13,9 +13,11 @@ import '../controls/model/controls_layout.dart';
 import '../controls/model/controls_model.dart';
 import '../controls/session_controls.dart';
 import '../controls/volume.dart';
+import '../danmaku/danmaku_preview.dart';
 import '../platform/desktop/media_kit_host.dart' show videoControllerOf;
 import '../queue/queue_ui.dart';
 import '../playback/media_marks.dart' show SkipKind, SkipOffer, formatClock;
+import '../screens/home/ui.dart' show devTools;
 import '../screens/session/jellyfin_widgets.dart';
 import '../screens/session/player_controls.dart';
 import '../session/app_events.dart' show ShaderMessage;
@@ -24,6 +26,7 @@ import '../shaders/shader_presets.dart';
 import '../app/app_graph.dart';
 import '../state/settings.dart';
 import '../widgets/app_keys.dart';
+import '../widgets/app_menu.dart' show AppGlass;
 import '../widgets/text_focus.dart';
 import '../widgets/window_buttons.dart';
 import 'avatar.dart';
@@ -32,6 +35,7 @@ import 'now_playing_title.dart';
 import 'player_status.dart';
 import 'sit_out_card.dart';
 import 'start_banner.dart';
+import 'video_view.dart';
 
 /// Where the session's video is shown: nowhere, the floating mini player,
 /// or filling the body (and, with fullscreen, the window).
@@ -69,6 +73,9 @@ class SessionPlayer extends StatefulWidget {
   /// Follows whether the full player's controls are up (the shell lifts
   /// its toasts above them); the player keeps its own when null.
   final ValueNotifier<bool>? controlsShown;
+  /// Dev builds: the danmaku preview, shown over the full player while
+  /// it is active.
+  final DanmakuPreview? danmaku;
   const SessionPlayer({
     super.key,
     required this.mode,
@@ -86,6 +93,7 @@ class SessionPlayer extends StatefulWidget {
     this.videoBuilder,
     this.windowControls = true,
     this.controlsShown,
+    this.danmaku,
   });
 
   @override
@@ -104,6 +112,11 @@ class _SessionPlayerState extends State<SessionPlayer> {
   bool _miniHover = false;
   // Whether the controls are up (their frame reports it).
   final _ownShown = ValueNotifier(true);
+  // Dev builds with "Lift subtitles": Enter opens a stand-in for the
+  // planned chat line at the bottom, in place of the control bar.
+  final _chatLine = ValueNotifier(false);
+  final _chatLineText = TextEditingController();
+  final _chatLineFocus = FocusNode();
   ValueNotifier<bool> get _controlsShown => widget.controlsShown ?? _ownShown;
   // The mouse on a floating element, or the Up next popover open, keeps
   // the controls up.
@@ -166,6 +179,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
     _stopPopoverWatch();
     _noFocus.dispose();
     _ownShown.dispose();
+    _chatLine.dispose();
+    _chatLineText.dispose();
+    _chatLineFocus.dispose();
     _hold.dispose();
     _model.dispose();
     super.dispose();
@@ -197,6 +213,12 @@ class _SessionPlayerState extends State<SessionPlayer> {
       return false;
     }
     if (textInputFocused()) return false;
+    if (devTools &&
+        _coord.settings.liftSubtitles.peek() &&
+        (event.logicalKey == LogicalKeyboardKey.enter || event.logicalKey == LogicalKeyboardKey.numpadEnter)) {
+      _openChatLine();
+      return true;
+    }
     final now = DateTime.now().toUtc();
     if (_lastKeyAt != null && now.difference(_lastKeyAt!).inMilliseconds < 350) {
       return false;
@@ -306,11 +328,15 @@ class _SessionPlayerState extends State<SessionPlayer> {
               fit: StackFit.expand,
               children: [
                 video,
+                // Dev experiment: bottom subtitles above the controls.
+                if (devTools) _subtitleLifter(),
                 if (_full) ...[
                   _blockedCard(),
                   _actionArea(),
                   if (widget.fullscreen) ...[if (!_coord.alone.value) _pausedParty(), _unreadChip()],
                   _volumeReadout(),
+                  if (devTools) _chatLineOverlay(),
+                  if (widget.danmaku case final d?) _danmakuPanel(d),
                 ] else
                   _miniOverlay(),
                 // Sitting out: nothing is loaded; the card covers the
@@ -324,11 +350,111 @@ class _SessionPlayerState extends State<SessionPlayer> {
     );
   }
 
-  Widget _video(VideoControlsBuilder? controls) => Video(
-        key: _videoKey,
-        controller: videoControllerOf(_coord.playback.video),
-        subtitleViewConfiguration: const SubtitleViewConfiguration(visible: false),
-        controls: controls,
+  Widget _video(VideoControlsBuilder? controls) => VideoOutputSizer(
+        playback: _coord.playback,
+        sharp: _coord.settings.screenResVideo,
+        child: Video(
+          key: _videoKey,
+          controller: videoControllerOf(_coord.playback.video),
+          subtitleViewConfiguration: const SubtitleViewConfiguration(visible: false),
+          controls: controls,
+        ),
+      );
+
+  /// What covers the bottom of the full player, for the subtitle lift:
+  /// the chat line, else the control bar while it is up.
+  Widget _subtitleLifter() => SignalBuilder(builder: (context) {
+        final controls = _bottomControlsHeight();
+        return SubtitleLifter(
+          playback: _coord.playback,
+          changes: Listenable.merge([_controlsShown, _chatLine]),
+          lift: _coord.settings.liftSubtitles,
+          cover: () => _chatLine.value
+              ? _chatLineHeight + _edge
+              : _controlsShown.value
+                  ? controls
+                  : 0,
+          active: _full,
+        );
+      });
+
+  // ------------------------------------------------- chat line (stand-in)
+
+  static const _chatLineHeight = 44.0;
+
+  void _openChatLine() {
+    _chatLine.value = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _chatLineFocus.requestFocus());
+  }
+
+  void _closeChatLine() {
+    _chatLine.value = false;
+    _chatLineText.clear();
+    _chatLineFocus.unfocus();
+  }
+
+  void _sendChatLine(String text) {
+    final t = text.trim();
+    if (t.isNotEmpty) {
+      _coord.sendChat(t);
+      // The preview, when it is up, shows it as your own line.
+      final d = widget.danmaku;
+      if (d != null && d.active.peek()) d.controller.add(d.own(t));
+    }
+    _closeChatLine();
+  }
+
+  /// A one-line chat box at the bottom of the full player (Enter opens
+  /// it, Enter sends, Esc closes): the planned chat line, to try the
+  /// subtitle lift with.
+  Widget _chatLineOverlay() => Positioned(
+        left: _edge,
+        right: _edge,
+        bottom: _edge,
+        height: _chatLineHeight,
+        child: ValueListenableBuilder<bool>(
+          valueListenable: _chatLine,
+          builder: (context, open, child) => IgnorePointer(
+            ignoring: !open,
+            child: AnimatedSlide(
+              offset: open ? Offset.zero : const Offset(0, 0.4),
+              duration: easeTime,
+              curve: ease,
+              child: AnimatedOpacity(opacity: open ? 1 : 0, duration: easeTime, curve: ease, child: child),
+            ),
+          ),
+          child: CallbackShortcuts(
+            bindings: {const SingleActivator(LogicalKeyboardKey.escape): _closeChatLine},
+            child: AppGlass.pill(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                child: Row(
+                  children: [
+                    Icon(Icons.chat_bubble_outline, size: 18, color: Colors.white.withValues(alpha: 0.7)),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        key: const ValueKey('chat-line'),
+                        controller: _chatLineText,
+                        focusNode: _chatLineFocus,
+                        onSubmitted: _sendChatLine,
+                        onTapOutside: (_) => _closeChatLine(),
+                        style: const TextStyle(color: Colors.white, fontSize: 15),
+                        cursorColor: Colors.white,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          border: InputBorder.none,
+                          hintText: 'Say something  ·  Enter sends, Esc closes',
+                          hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 15),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       );
 
   /// Fullscreen hides the strip and its window buttons: the top bar
@@ -355,12 +481,25 @@ class _SessionPlayerState extends State<SessionPlayer> {
       fit: StackFit.expand,
       children: [
         const StartBanner(),
-        SessionControls(
-          model: _model,
-          shown: _controlsShown,
-          hold: _hold,
-          onDoubleClick: widget.onToggleFullscreen,
-          windowButtons: _fullscreenWindowButtons(),
+        // Under the controls, over the picture.
+        if (widget.danmaku case final d?)
+          SignalBuilder(
+            builder: (context) => d.active.value ? DanmakuPreviewLayers(preview: d) : const SizedBox.shrink(),
+          ),
+        // The chat line takes the control bar's place while it is open.
+        ValueListenableBuilder<bool>(
+          valueListenable: _chatLine,
+          builder: (context, chatLine, child) => IgnorePointer(
+            ignoring: chatLine,
+            child: AnimatedOpacity(opacity: chatLine ? 0 : 1, duration: easeTime, curve: ease, child: child),
+          ),
+          child: SessionControls(
+            model: _model,
+            shown: _controlsShown,
+            hold: _hold,
+            onDoubleClick: widget.onToggleFullscreen,
+            windowButtons: _fullscreenWindowButtons(),
+          ),
         ),
       ],
     );
@@ -377,6 +516,26 @@ class _SessionPlayerState extends State<SessionPlayer> {
   }
 
   static double get _topBarHeight => controlsTopHeight(AppSettings.instance.controlsSkin.peek());
+
+  /// The danmaku preview's panel, top right under the top bar; the mouse
+  /// on it keeps the controls up.
+  Widget _danmakuPanel(DanmakuPreview d) => Positioned(
+        right: _edge,
+        top: _topBarHeight + 8,
+        child: SignalBuilder(
+          builder: (context) => fadeThrough(
+            expand: false,
+            alignment: Alignment.topRight,
+            d.active.value
+                ? ControlsHoldRegion(
+                    key: const ValueKey('danmaku-panel'),
+                    hold: _hold,
+                    child: DanmakuSessionPanel(preview: d, coord: _coord),
+                  )
+                : const SizedBox.shrink(key: ValueKey('danmaku-none')),
+          ),
+        ),
+      );
 
   /// The volume flash after a wheel or key step: a pill under the top bar.
   Widget _volumeReadout() => Positioned(

@@ -18,6 +18,48 @@ import 'update_indicator.dart';
 const uoscCredit = 'Player timeline and controls inspired by uosc by tomasklaen, LGPL-2.1 '
     '(github.com/tomasklaen/uosc).';
 
+/// Dev builds only ([devTools]): previews and experiments not decided
+/// yet (DEVELOPMENT.md "Dev tools").
+class DeveloperPanel extends StatelessWidget {
+  final VoidCallback? onDanmakuPreview;
+  const DeveloperPanel({super.key, this.onDanmakuPreview});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final s = AppScope.of(context).coordinator.settings;
+    return SettingsPanel(
+      title: 'Developer',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Test builds only: try what is not decided yet.', style: t.bodySmall?.copyWith(color: Colors.grey)),
+          const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            key: const ValueKey('danmaku-preview'),
+            onPressed: onDanmakuPreview,
+            icon: const Icon(Icons.subtitles_outlined, size: 18),
+            label: const Text('Danmaku preview'),
+          ),
+          const SizedBox(height: 8),
+          SignalBuilder(
+            builder: (context) => SwitchListTile(
+              key: const ValueKey('lift-subtitles'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Lift subtitles above the chat line and controls'),
+              subtitle: const Text('Enter in the player opens a stand-in chat line at the bottom. '
+                  'While it or the control bar is up, bottom subtitles move above it (mpv sub-pos); '
+                  'signs at the top stay where they are.'),
+              value: s.liftSubtitles.value,
+              onChanged: s.setLiftSubtitles,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Name, version, update state, What's new in this version, the source
 /// link and the logs (Settings → About).
 class AboutPanel extends StatelessWidget {

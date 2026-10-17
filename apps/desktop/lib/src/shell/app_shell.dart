@@ -7,6 +7,7 @@ import 'package:signals/signals_flutter.dart';
 
 import '../controls/frame.dart' show DoubleClickListener;
 import '../controls/session_controls.dart' show controlsBottomHeight;
+import '../danmaku/danmaku_preview.dart';
 import '../files/folder_store.dart';
 import '../files/ui/files_page.dart' show showFilesFolder;
 import '../jellyfin/accounts.dart';
@@ -248,6 +249,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     for (final stop in _stops) {
       stop();
     }
+    _danmaku?.dispose();
     HardwareKeyboard.instance.removeHandler(_onKey);
     _whatsNewSource?.due.removeListener(_maybeWhatsNew);
     _updateTimer?.cancel();
@@ -357,6 +359,22 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   }
 
   void _expand() => _show(PlayerMode.full);
+
+  /// Dev builds: the danmaku preview, made on first use.
+  DanmakuPreview? _danmaku;
+
+  /// Over the full player when a player is up, else on its own page with
+  /// a stand-in picture.
+  void _openDanmakuPreview() {
+    final d = _danmaku ??= DanmakuPreview();
+    if (_online.peek() && _graph.coordinator.playback.alive.peek()) {
+      setState(() => d.active.value = true);
+      _show(PlayerMode.full);
+    } else {
+      d.active.value = false;
+      showDanmakuPreviewPage(context, d);
+    }
+  }
 
   void _collapse() {
     if (_fullscreen) _toggleFullscreen();
@@ -765,6 +783,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
           onEditProfile: () => showProfileCard(context, onOpenSettings: _openSettings, updates: widget.updates),
           updates: widget.updates,
           jellyfin: _jellyfin,
+          onDanmakuPreview: _openDanmakuPreview,
         ),
     };
     final full = _shown == PlayerMode.full;
@@ -908,6 +927,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
                   videoBuilder: widget.videoBuilder,
                   windowControls: widget.windowControls,
                   controlsShown: _controlsShown,
+                  danmaku: _danmaku,
                 ),
               ),
             ),

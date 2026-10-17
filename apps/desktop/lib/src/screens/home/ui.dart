@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:sync_relay_core/core.dart' show appVersion, isDevBuild;
 
@@ -25,6 +26,14 @@ String displayVersion({String version = appVersion, String pubspec = _pubspecVer
 /// The version in a few characters, always on screen (under the strip's
 /// Settings tab): "1.2.1", "1.2.1-dev.2", "dev run".
 String shortVersion({String version = appVersion}) => version == '0.0.0-dev' ? 'dev run' : version;
+
+/// Dev tools (Settings → About → Developer, the experiments they switch
+/// on) only in test builds and runs from source (a `-dev` version) and
+/// debug runs, never in a release.
+bool devToolsFor({String version = appVersion, bool debug = kDebugMode}) => debug || version.contains('-dev');
+
+/// [devToolsFor] this build.
+final bool devTools = devToolsFor();
 
 const kRadius = 12.0;
 const kGap = 16.0;
