@@ -190,6 +190,47 @@ void main() {
         isTrue);
   });
 
+  test('manifest changes: structured lists, notes kept, old manifests without', () {
+    final base = {
+      'version': '1.3.3',
+      'protocol': RelayConstants.protoVersion,
+      'url': 'https://x/y.tar.gz',
+      'notes': 'One line for older apps.',
+    };
+    final old = UpdateManifest.fromJson(base);
+    expect(old.changes, isNull);
+    expect(old.notes, 'One line for older apps.');
+
+    final m = UpdateManifest.fromJson({
+      ...base,
+      'changes': {
+        'added': ['Danmaku style notifications', '  ', 7],
+        'fixed': ['Various bug fixes'],
+        'later': ['unknown kinds are ignored'],
+      },
+    });
+    expect(m.notes, 'One line for older apps.');
+    expect(m.changes!.added, ['Danmaku style notifications']);
+    expect(m.changes!.changed, isEmpty);
+    expect(m.changes!.fixed, ['Various bug fixes']);
+    expect(m.changes!.length, 2);
+    expect(ReleaseChanges.fromJson(m.changes!.toJson())!.toJson(), m.changes!.toJson());
+
+    // Junk or empty `changes` (and a non-string `notes`) do not break the manifest.
+    for (final junk in [null, 'text', [], {}, {'added': 'no list'}]) {
+      expect(UpdateManifest.fromJson({...base, 'changes': junk}).changes, isNull);
+    }
+    expect(UpdateManifest.fromJson({...base, 'notes': 3}).notes, '');
+  });
+
+  test('the repo manifest parses, and keeps a one-line string notes for 1.2.x/1.3.x', () {
+    final json = jsonDecode(File('../../updates/manifest.json').readAsStringSync()) as Map<String, Object?>;
+    // Older apps read `(json['notes'] as String?)`: it must stay a string.
+    expect(json['notes'], isA<String>());
+    expect((json['notes'] as String).contains('\n'), isFalse);
+    expect(UpdateManifest.fromJson(json, platform: 'linux-x64').version, json['version']);
+  });
+
   test('manifest picks the asset for this platform', () {
     final json = {
       'version': '0.2.2',

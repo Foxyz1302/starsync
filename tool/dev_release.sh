@@ -10,6 +10,8 @@
 # following it (1.2.0-dev.2, ...) until the release moves the pubspec.
 # Token: RELEASE_TOKEN, else the file ~/.config/watch-together-release-token
 # (a Gitea access token with repository read/write; keep the file 0600).
+# The manifest's `changes` (What's new) and the dev release's page are
+# CHANGELOG.md's Unreleased.
 # Prints the one-time command that moves a stable install onto test builds.
 set -euo pipefail
 
@@ -66,14 +68,20 @@ MANIFEST_PROTO="$(sed -n 's/.*protoMax = \([0-9]*\).*/\1/p' "$ROOT/packages/core
 MANIFEST_URL="$BASE_URL/$(basename "$TARBALL")" \
 MANIFEST_SHA="$(sha256sum "$TARBALL" | cut -d' ' -f1)" \
 MANIFEST_NOTES="Test build: $NOTES" \
+MANIFEST_CHANGES="$(dart "$ROOT/tool/changelog.dart" json unreleased 2>/dev/null || echo '{}')" \
 python3 -I - "$MANIFEST" <<'EOF'
 import json, os, sys
 e = os.environ
 url = e['MANIFEST_URL']
+manifest = {'version': e['MANIFEST_VER'], 'protocol': int(e['MANIFEST_PROTO']),
+            'url': url, 'sha256': e['MANIFEST_SHA'], 'notes': e['MANIFEST_NOTES'],
+            'assets': {'linux-x64': url}}
+# What's new in a test build: CHANGELOG.md's Unreleased, when it has items.
+changes = json.loads(e['MANIFEST_CHANGES']).get('changes') or {}
+if any(changes.values()):
+    manifest['changes'] = changes
 with open(sys.argv[1], 'w') as f:
-    json.dump({'version': e['MANIFEST_VER'], 'protocol': int(e['MANIFEST_PROTO']),
-               'url': url, 'sha256': e['MANIFEST_SHA'], 'notes': e['MANIFEST_NOTES'],
-               'assets': {'linux-x64': url}}, f, indent=2)
+    json.dump(manifest, f, indent=2, ensure_ascii=False)
 EOF
 
 if [[ "$PUBLISH" != "1" ]]; then

@@ -2540,8 +2540,8 @@ company `foxyz`, product `Starsync`; the window class is
 One implementation, `packages/core/lib/src/updater.dart` (pure Dart, tested
 in `packages/core/test/updater_test.dart`), with two front ends: the app and
 the dedicated server. Both binaries ship in the same archive, so either one
-updates the whole install folder. Reads a manifest (`version`, `protocol`, `url`, optional `sha256`, `notes`)
-from `updateManifestUrl`, compares versions, downloads the tarball, checks
+updates the whole install folder. Reads a manifest (`version`, `protocol`, `url`, optional `sha256`, `notes`,
+optional `changes`) from `updateManifestUrl`, compares versions, downloads the tarball, checks
 sha256 when present, then extracts into a staging dir inside the install
 folder (same filesystem, so moves are renames; the folder must be
 user-writable). Each top-level entry is moved aside and the new one moved in,
@@ -2582,9 +2582,11 @@ does the same from the app binary. In the app, `UpdateController`
 (`apps/desktop/lib/src/update/`) runs the same code for the update bar
 (`UpdateBar`, `screens/home/update_indicator.dart`): a band across the
 window under the strip while an update is available: "Starsync X.Y.Z is
-ready", the notes, Later (hidden until the next check or start) and
-"Update and restart" (download, apply, then the app close above with Hive
-closed and the new binary started), its progress in the band. A release
+ready", the first three changes (each with its kind's icon; the notes
+when the manifest has no `changes`), What's new, Later (hidden until the
+next check or start) and "Update and restart" (download, apply, then the
+app close above with Hive closed and the new binary started), its
+progress in the band. A release
 that is behind also says which version it runs; a copy that is not a
 packaged install says to replace the folder by hand. The shell keeps the
 band off the full player while a video is on (not finished); it shows on
@@ -2598,6 +2600,27 @@ this repo, written by `tool/release.sh`. Test builds (`X.Y.Z-dev.N`,
 prerelease (`tool/dev_release.sh`), and take the newer of the two
 (`fetchLatestManifest`); the release X.Y.Z outranks its test builds, so
 testers land back on stable. `0.0.0-dev` (a dev run) checks nothing.
+
+**What's new.** The manifest's `notes` is one line (all 1.2.x and 1.3.x
+read; they ignore other keys) and `changes` (`{"added": [...], "changed":
+[...], "fixed": [...]}`, `ReleaseChanges`, read leniently: anything
+malformed is no `changes`) the version's lists; both come from
+`CHANGELOG.md` ([Changelog](DEVELOPMENT.md#changelog)). The card
+(`WhatsNewCard`, `widgets/whats_new_card.dart`) shows them as Added /
+Changed / Fixed sections, each with its icon and colour, on `AppGlass` in
+a popover, the rows easing in one after another, the list scrolling in a
+short window; notes alone show as one paragraph. Three ways open it: the
+band's What's new (the offered version, with Update and restart), the
+first start of a new version, and Settings → About ("What's new in X.Y.Z",
+once this version's notes are known). The first start (`WhatsNew`,
+`update/whats_new.dart`): before restarting, the update keeps the new
+version's notes in settings (`UpdateController.beforeRestart`); an update
+made otherwise (1.3.x's updater, `--upgrade`, by hand) gets them from the
+first check whose manifest is this very version (`UpdateController.latest`).
+The card shows once per version (`whatsNewSeen` in settings), never on a
+fresh install (the settings box was empty), and not over the full player
+while a video is on (it waits until the video ends or the player
+leaves full).
 
 ## Decisions
 

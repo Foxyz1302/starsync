@@ -17,11 +17,14 @@ import '../session/app_events.dart' show ActionFailed, ScheduleResult;
 import '../screens/home/health_probe.dart';
 import '../screens/home/media_picker.dart';
 import '../session/identity.dart';
+import '../screens/home/ui.dart' show appName;
 import '../screens/home/update_indicator.dart';
 import '../app/app_graph.dart';
 import '../session/navigation.dart' show Place;
 import '../state/settings.dart';
 import '../update/update_controller.dart';
+import '../update/whats_new.dart';
+import '../widgets/whats_new_card.dart';
 import 'chat_panel.dart';
 import 'connect_cards.dart';
 import 'handoff.dart';
@@ -52,6 +55,9 @@ import 'welcome.dart';
 class AppShell extends StatefulWidget {
   final UpdateController? updates;
   final bool autoUpdateCheck;
+  /// The card once after an update; defaults to [WhatsNew.instance] when
+  /// [autoUpdateCheck] is on (off in tests unless given).
+  final WhatsNew? whatsNew;
   /// Off in tests: the drag area, window buttons and fullscreen need
   /// window_manager.
   final bool windowControls;
@@ -67,6 +73,7 @@ class AppShell extends StatefulWidget {
     super.key,
     this.updates,
     this.autoUpdateCheck = true,
+    this.whatsNew,
     this.windowControls = true,
     this.healthGet = defaultHealthGet,
     this.jellyfin,
@@ -158,6 +165,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     // Reads linked servers and checks their tokens in the background.
     _jellyfin.ensureLoaded();
     if (widget.autoUpdateCheck) _autoCheck();
+    if (widget.whatsNew != null || widget.autoUpdateCheck) unawaited(_startWhatsNew());
     HardwareKeyboard.instance.addHandler(_onKey);
     final nav = _graph.navigation;
     final coord = _graph.coordinator;
@@ -241,6 +249,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       stop();
     }
     HardwareKeyboard.instance.removeHandler(_onKey);
+    _whatsNewSource?.due.removeListener(_maybeWhatsNew);
     _updateTimer?.cancel();
     _fade.dispose();
     _online.dispose();
@@ -274,6 +283,36 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       if (s.autoCheckUpdates.peek()) unawaited(runUpdateCheck(widget.updates, true));
     });
     if (s.autoCheckUpdates.peek()) await runUpdateCheck(widget.updates);
+  }
+
+  WhatsNew? _whatsNewSource;
+  bool _whatsNewOpen = false;
+
+  /// What's new once after an update: due now (notes kept by the install)
+  /// or once a check reads this version's manifest.
+  Future<void> _startWhatsNew() async {
+    await AppSettings.instance.ensureLoaded();
+    if (!mounted) return;
+    final w = _whatsNewSource = widget.whatsNew ?? WhatsNew.instance;
+    w.due.addListener(_maybeWhatsNew);
+    // Not over the full player while a video is on: once it ends or minimises.
+    _stops.add(effect(() {
+      _watching.value;
+      untracked(() => _later(_maybeWhatsNew));
+    }));
+    w.start(widget.updates ?? UpdateController.instance);
+    _maybeWhatsNew();
+  }
+
+  void _maybeWhatsNew() {
+    final w = _whatsNewSource;
+    final notes = w?.due.value;
+    if (w == null || notes == null || !mounted || _whatsNewOpen) return;
+    if (_shown == PlayerMode.full && _watching.peek()) return;
+    _whatsNewOpen = true;
+    w.shown();
+    unawaited(showWhatsNew(context, notes, overline: '$appName · updated')
+        .whenComplete(() => _whatsNewOpen = false));
   }
 
   void _wentOnline() {
@@ -313,6 +352,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     }
     if (!mounted || seq != _modeSeq) return;
     setState(() => _shown = m);
+    if (m != PlayerMode.full) _later(_maybeWhatsNew);
     await _fade.animateTo(1, duration: fadeThroughTime * (1 - fadeOutPart), curve: ease);
   }
 

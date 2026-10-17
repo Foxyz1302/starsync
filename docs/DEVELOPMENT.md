@@ -254,17 +254,22 @@ Traps:
 User pushes tags; CI does the rest.
 
 1. `tool/release.sh [patch|minor|major] [--dry-run]`: derives the next
-   version from the latest tag, bumps the three pubspecs in lockstep, writes
-   `updates/manifest.json` (per-platform `assets` URLs are predictable; `url`
-   stays the Linux tarball for builds <= 0.2.1), commits `Release vX.Y.Z`,
-   makes an annotated tag.
+   version from the latest tag, refuses when the [changelog](#changelog)'s
+   Unreleased has no items (warns when it has no summary) and prints it,
+   renames Unreleased to `X.Y.Z` under a fresh empty Unreleased, bumps the
+   three pubspecs in lockstep, writes `updates/manifest.json` (per-platform
+   `assets` URLs are predictable; `url` stays the Linux tarball for builds
+   <= 0.2.1; `notes` is the section's summary, `changes` its lists), commits
+   `Release vX.Y.Z` (with `CHANGELOG.md`), makes an annotated tag.
+   `--dry-run` stops after printing.
 2. Review, then `git push --follow-tags`.
 3. `.gitea/workflows/release.yml` runs one job per platform: Linux builds
    with `tool/package_linux.sh`, Windows (runner `yuuka-windows`, host mode,
    PowerShell only; `tool/setup_flutter_windows.ps1` also adds Visual
    Studio's C++ ATL component once, which the notifications plugin needs) with `tool/package_windows.ps1`. Each then runs
    `dart tool/release_publish.dart vX.Y.Z <archive>`, which creates the
-   release if the other job hasn't yet and uploads (or replaces) its asset.
+   release if the other job hasn't yet (its text: the version's changelog
+   section) and uploads (or replaces) its asset.
    By hand: package, then the same `dart tool/release_publish.dart` line.
 
 Test builds (Linux, no tag, no CI): `tool/dev_release.sh [--minor|--major]
@@ -274,7 +279,8 @@ repository read/write) builds the working tree here as `<next>-dev.N` (N
 one past the published one; `<next>` the pubspec's next patch, or next
 minor / major when asked, and once such a line is published later runs
 follow it until a release moves the pubspec) and replaces the assets of the
-`dev` prerelease with the tarball and its `manifest.json`. Dev builds
+`dev` prerelease with the tarball and its `manifest.json` (`changes`:
+the changelog's Unreleased, which also becomes the prerelease's text). Dev builds
 update from it ([Updater](ARCHITECTURE.md#updater)). A stable install
 moves onto it once with the command the script prints (run with the app
 open: it finds the install from the running process and copies the new
@@ -284,6 +290,23 @@ Tokens come from the environment (`RELEASE_TOKEN`, or Actions-provided
 `GITHUB_TOKEN`/`GITEA_TOKEN`). The manifest has no `sha256` by default; the
 updater skips the check when absent. Workflows live in `.gitea/workflows`
 (the forge reads `.gitea` before `.github`).
+
+### Changelog
+
+`CHANGELOG.md` is what people read: the update band's first items, the
+What's new card ([Updater](ARCHITECTURE.md#updater)) and the release page.
+A user-facing change adds a line to its `## Unreleased` section in the same
+commit, under `### Added`, `### Changed` or `### Fixed` (no other
+headings), as a `- ` item in plain words for the people watching, not
+commit-speak ("Chat pop-ups stay away while the chat panel is open", not
+"Notifier: suppress toasts when panel open"). Internal changes (tests,
+refactors, docs, CI) get no line. The paragraph under the version heading
+is an optional one-line summary: it becomes the manifest's `notes`, the
+only thing 1.2.x/1.3.x apps show (without it, the first items); refresh it
+before cutting. Versions carry no date (the tag and release page have it).
+`tool/changelog.dart` reads and cuts the file (`cut X.Y.Z`, `json
+<version|unreleased>`, `markdown <version|unreleased>`); its tests are
+`tool/test/changelog_test.dart` (`cd tool && dart test`).
 
 ## Debugging your server
 

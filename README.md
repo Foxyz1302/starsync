@@ -46,9 +46,11 @@ Documents folder) and leaves the originals where they were.
 
 Update from the app: the app looks for a new version at start and every
 few hours, and when one exists a band across the top of the window says so
-(never over a playing video). "Update and restart" downloads,
-verifies, applies in place and restarts; "Later" hides it until the next
-check; the install folder must be writable by you. The version you run is
+(never over a playing video), with its first changes. "What's new" lists
+them all ([CHANGELOG.md](CHANGELOG.md)); the first start after an update
+shows that list once, and Settings → About has it again. "Update and
+restart" downloads, verifies, applies in place and restarts; "Later" hides
+it until the next check; the install folder must be writable by you. The version you run is
 at the bottom of every Settings page (and in the Settings tab's tooltip). Settings has Check now and an auto-check toggle. From a terminal:
 `./starsync-server --upgrade` (no display needed, so it works on a
 server box too), `./starsync --upgrade`, or the shipped `update.sh` /

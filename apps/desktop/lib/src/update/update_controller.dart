@@ -5,6 +5,7 @@ import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:sync_relay_core/core.dart';
 
 import '../platform/app_shutdown.dart';
+import 'whats_new.dart';
 
 // In-app update flow behind the update bar (UpdateBar). Same code path as
 // `--upgrade` (core's updater, downloadAndApply); this adds state for the
@@ -58,6 +59,9 @@ class UpdateController {
   final Directory? installRoot;
   final RestartFn restart;
   final bool skipDevBuilds;
+  /// Awaited after the apply, before [restart]: keeps the new version's
+  /// notes for its first start ([WhatsNew.installing]).
+  final Future<void> Function(UpdateManifest manifest)? beforeRestart;
 
   UpdateController(
       {this.currentVersion = appVersion,
@@ -65,9 +69,14 @@ class UpdateController {
       this.executablePath,
       this.installRoot,
       this.restart = _closeAndRestart,
-      this.skipDevBuilds = true});
+      this.skipDevBuilds = true,
+      Future<void> Function(UpdateManifest manifest)? beforeRestart})
+      : beforeRestart = beforeRestart ?? WhatsNew.instance.installing;
 
   final status = ValueNotifier(const UpdateStatus(UpdatePhase.idle));
+  /// The manifest of the last check that read one, newer or not (What's
+  /// new picks up this version's notes from it).
+  final latest = ValueNotifier<UpdateManifest?>(null);
   /// Outcome of the last finished check, for Settings/About wording
   /// ("Up to date", "Check failed: ..."); null until one finishes.
   final lastCheck = ValueNotifier<String?>(null);
@@ -108,6 +117,7 @@ class UpdateController {
     try {
       final m = await fetchLatestManifest(
           currentVersion: currentVersion, url: manifestUrl);
+      latest.value = m;
       if (!isNewerVersion(currentVersion, m.version)) {
         _log.info('up to date ($currentVersion, latest ${m.version})');
         lastCheck.value = 'Up to date';
@@ -173,6 +183,11 @@ class UpdateController {
     _log.info('updated to ${m.version}, restarting');
     status.value =
         UpdateStatus(UpdatePhase.restarting, manifest: m, canInstall: true);
+    try {
+      await beforeRestart?.call(m);
+    } catch (e) {
+      _log.warning('keeping the notes of ${m.version}: $e');
+    }
     // Started by an old name (1.2.x's restart, an old launcher): the new
     // binary next to it.
     await restart(relaunchExecutable(_exe), launchArgs);

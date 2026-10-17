@@ -44,6 +44,8 @@ const keyAutoSitOut = 'autoSitOut';
 const _keyChatPopups = 'chatPopups';
 const _keyNotifyPeople = 'notifyPeople';
 const _keyShareDiagnostics = 'shareDiagnostics';
+const _keyWhatsNewSeen = 'whatsNewSeen';
+const _keyWhatsNewNotes = 'whatsNewNotes';
 
 enum HwdecMode { auto, off, custom }
 
@@ -107,6 +109,13 @@ class AppSettings {
   /// `SfxKind` name -> `SoundPreset` name, per-sound overrides.
   final soundPresetFor = signal<Map<String, String>>(const {});
 
+  /// What's new (`update/whats_new.dart`): the version whose card was
+  /// shown, and the notes last kept (a version's `ReleaseNotes` as JSON).
+  String? whatsNewSeen;
+  Map<String, Object?>? whatsNewNotes;
+  /// The box was empty when this run opened it: a new install.
+  bool freshInstall = false;
+
   /// Video shaders: one choice, used on join and changed both here and
   /// in the session (Ctrl+0..6, the shader button).
   final shaderPreset = signal(ShaderPreset.off);
@@ -131,6 +140,7 @@ class AppSettings {
   Future<void> _loadNow() async {
     try {
       final box = _box = await Hive.openBox(settingsBoxName);
+      freshInstall = box.isEmpty;
       for (final line in await migrateSettings(box)) {
         debugPrint(line);
       }
@@ -194,6 +204,10 @@ class AppSettings {
       shaderQuality.value =
           ShaderQuality.values.where((q) => q.name == quality).firstOrNull ??
               ShaderQuality.hq;
+      final seen = box.get(_keyWhatsNewSeen);
+      if (seen is String) whatsNewSeen = seen;
+      final notes = box.get(_keyWhatsNewNotes);
+      if (notes is Map) whatsNewNotes = {for (final e in notes.entries) '${e.key}': e.value};
       final files = box.get(_keyCustomShaders);
       if (files is List) {
         customShaders.value = List.unmodifiable(files.whereType<String>());
@@ -326,6 +340,16 @@ class AppSettings {
   void setCustomShaders(List<String> paths) {
     customShaders.value = List.unmodifiable(paths);
     _put(_keyCustomShaders, [...paths]);
+  }
+
+  Future<void> setWhatsNewSeen(String version) {
+    whatsNewSeen = version;
+    return _put(_keyWhatsNewSeen, version);
+  }
+
+  Future<void> setWhatsNewNotes(Map<String, Object?> notes) {
+    whatsNewNotes = notes;
+    return _put(_keyWhatsNewNotes, notes);
   }
 
   Future<void> _put(String key, Object value) async {

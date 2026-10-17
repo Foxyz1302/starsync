@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:sync_relay_core/core.dart' show isDevBuild;
+import 'package:sync_relay_core/core.dart' show UpdateManifest, isDevBuild;
 
 import '../../update/update_controller.dart';
+import '../../update/whats_new.dart';
 import '../../widgets/update_banner.dart';
+import '../../widgets/whats_new_card.dart';
 import 'ui.dart';
 
 /// The band across the top of the window while an update is up for
-/// grabs: "Starsync 1.2.1 is ready", its notes, Update and restart and
-/// Later (gone until the next check or start). The shell keeps it off
+/// grabs: "Starsync 1.2.1 is ready", its first changes (or its one-line
+/// notes), What's new (the whole list, [showWhatsNew]), Update and restart
+/// and Later (gone until the next check or start). The shell keeps it off
 /// the full player while a video is on ([AppShell]).
 class UpdateBar extends StatelessWidget {
   final UpdateController? controller;
@@ -31,6 +34,8 @@ class UpdateBar extends StatelessWidget {
         final behind = isDevBuild(current) ? null : 'You are running $current';
         final String title;
         String detail;
+        // The offered version's first changes instead of its notes.
+        var preview = false;
         switch (s.phase) {
           case UpdatePhase.downloading:
             title = 'Downloading $appName ${m.version}… ${((s.progress ?? 0) * 100).round()}%';
@@ -51,9 +56,11 @@ class UpdateBar extends StatelessWidget {
             } else if (m.isRequired) {
               title = '$appName ${m.version} is required to join servers on it';
               detail = m.notes;
+              preview = m.changes != null;
             } else {
               title = '$appName ${m.version} is ready';
               detail = m.notes;
+              preview = m.changes != null;
             }
             detail = [?behind, detail].where((t) => t.isNotEmpty).join(' · ');
         }
@@ -88,7 +95,9 @@ class UpdateBar extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(color: fg, fontWeight: FontWeight.w600)),
-                      if (detail.isNotEmpty)
+                      if (preview)
+                        WhatsNewPreview(changes: m.changes!, color: fg, lead: behind)
+                      else if (detail.isNotEmpty)
                         Tooltip(
                           message: detail,
                           waitDuration: const Duration(milliseconds: 600),
@@ -102,6 +111,14 @@ class UpdateBar extends StatelessWidget {
                 ),
                 if (!busy) ...[
                   const SizedBox(width: 12),
+                  if (m.changes != null || m.notes.trim().isNotEmpty)
+                    TextButton.icon(
+                      key: const ValueKey('update-whats-new'),
+                      style: TextButton.styleFrom(foregroundColor: fg),
+                      onPressed: () => _openWhatsNew(context, c, m, s.canInstall),
+                      icon: const Icon(Icons.auto_awesome, size: 16),
+                      label: const Text("What's new"),
+                    ),
                   if (!m.isRequired)
                     TextButton(
                       key: const ValueKey('update-later'),
@@ -125,6 +142,27 @@ class UpdateBar extends StatelessWidget {
       },
     );
   }
+}
+
+/// The offered version's card, with Update and restart when it installs here.
+void _openWhatsNew(BuildContext context, UpdateController c, UpdateManifest m, bool canInstall) {
+  showWhatsNew(
+    context,
+    ReleaseNotes.of(m),
+    overline: canInstall ? '$appName · ready to install' : '$appName · new release',
+    action: canInstall
+        ? Builder(
+            builder: (context) => FilledButton(
+              key: const ValueKey('whats-new-install'),
+              onPressed: () {
+                Navigator.of(context).maybePop();
+                c.install();
+              },
+              child: const Text('Update and restart'),
+            ),
+          )
+        : null,
+  );
 }
 
 /// The existing update card in a dialog; closes itself when the card

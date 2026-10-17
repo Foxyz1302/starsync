@@ -19,6 +19,7 @@ import 'package:starsync/src/shell/toasts.dart';
 import 'package:starsync/src/session/session_coordinator.dart' show ToastItem;
 import 'package:starsync/src/state/settings.dart';
 import 'package:starsync/src/update/update_controller.dart';
+import 'package:starsync/src/update/whats_new.dart';
 
 import 'package:starsync/src/session/invite.dart' show Invite;
 import 'package:starsync/src/session/navigation.dart' show Place;
@@ -88,7 +89,8 @@ void main() {
     session.notifier.clear();
   });
 
-  Future<void> pumpShell(WidgetTester tester, Size size, {UpdateController? updates, VideoViewBuilder? video}) async {
+  Future<void> pumpShell(WidgetTester tester, Size size,
+      {UpdateController? updates, VideoViewBuilder? video, WhatsNew? whatsNew}) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -97,6 +99,7 @@ void main() {
       home: AppShell(
         updates: updates ?? UpdateController(currentVersion: '0.0.0-dev'),
         autoUpdateCheck: false,
+        whatsNew: whatsNew,
         windowControls: false,
         videoBuilder: video ?? (context, controls) => const FakeVideo(),
         // A real probe (network, yt-dlp) never answers on the test clock.
@@ -149,6 +152,25 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('update-bar')), findsOneWidget);
+    });
+  });
+
+  group('what\'s new', () {
+    testWidgets('the first start after an update shows the card once', (tester) async {
+      final store = MemoryWhatsNewStore(
+          seen: '1.3.2',
+          notes: const ReleaseNotes(version: '1.3.3', changes: ReleaseChanges(fixed: ['Various bug fixes'])));
+      await pumpShell(tester, const Size(1280, 800), whatsNew: WhatsNew(currentVersion: '1.3.3', store: store));
+      expect(find.text("What's new in 1.3.3"), findsOneWidget);
+      expect(find.text('STARSYNC · UPDATED'), findsOneWidget);
+      expect(store.seen, '1.3.3');
+      await tester.tap(find.byKey(const ValueKey('whats-new-close')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('whats-new-card')), findsNothing);
+      // The next start: nothing.
+      await tester.pumpWidget(const SizedBox());
+      await pumpShell(tester, const Size(1280, 800), whatsNew: WhatsNew(currentVersion: '1.3.3', store: store));
+      expect(find.byKey(const ValueKey('whats-new-card')), findsNothing);
     });
   });
 

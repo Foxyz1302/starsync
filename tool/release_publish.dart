@@ -3,7 +3,8 @@
 // The Linux and Windows CI jobs both run this, possibly at the same time,
 // so a lost create race falls back to the release the other job made.
 // The manifest is written by tool/release.sh at release time (predictable
-// asset URLs), so this never touches git history beyond reading notes.
+// asset URLs). The release page's text is the version's CHANGELOG.md
+// section (tool/changelog.dart).
 // Usage: dart tool/release_publish.dart vX.Y.Z <archive>
 //   (run after tool/package_linux.sh or tool/package_windows.ps1)
 //   dart tool/release_publish.dart dev <archive> <manifest.json>
@@ -12,6 +13,8 @@
 // GITEA_TOKEN. dart: imports only — runs without `pub get`.
 import 'dart:convert';
 import 'dart:io';
+
+import 'changelog.dart';
 
 Future<void> main(List<String> args) async {
   final dev = args.isNotEmpty && args[0] == 'dev';
@@ -42,17 +45,7 @@ Future<void> main(List<String> args) async {
   final token = _token();
   final api = _apiBase(root);
 
-  final prev = _git(root, ['describe', '--tags', '--abbrev=0', '$tag^'],
-      allowFail: true);
-  final notes = prev.isEmpty
-      ? 'Starsync $ver.'
-      : _git(root, [
-          'log',
-          '$prev..$tag',
-          '--format=- %s',
-          '--invert-grep',
-          '--grep=^Release v'
-        ]).split('\n').take(20).join('\n');
+  final body = _changelog(root)?.section(ver)?.releaseBody(ver) ?? 'Starsync $ver.';
 
   final http = HttpClient();
   try {
@@ -63,7 +56,7 @@ Future<void> main(List<String> args) async {
       rel = await c.post('$api/releases', {
         'tag_name': tag,
         'name': tag,
-        'body': 'Starsync $ver\n\n$notes',
+        'body': body,
         'draft': false,
         'prerelease': false,
       });
@@ -130,6 +123,12 @@ Future<void> _publishDev(String root, List<File> files) async {
         }) ??
         _die('could not create or find release dev');
     final id = rel['id'];
+    // The page says what the build has: Unreleased.
+    final ver = jsonDecode(files.last.readAsStringSync())['version'];
+    final next = _changelog(root)?.section(unreleased);
+    if (next != null && !next.isEmpty) {
+      await c.patch('$api/releases/$id', {'body': 'Latest test build; dev builds update from here.\n\n${next.releaseBody('$ver')}'});
+    }
     final old = [for (final a in (rel['assets'] as List? ?? const [])) if (a is Map) a];
     Future<void> upload(File f) {
       final name = f.uri.pathSegments.last;
@@ -150,6 +149,16 @@ Future<void> _publishDev(String root, List<File> files) async {
     stdout.writeln('published to dev.');
   } finally {
     http.close();
+  }
+}
+
+Changelog? _changelog(String root) {
+  final f = File('$root/CHANGELOG.md');
+  try {
+    return Changelog.parse(f.readAsStringSync());
+  } on Object catch (e) {
+    stderr.writeln('warning: CHANGELOG.md not used: $e');
+    return null;
   }
 }
 
@@ -201,6 +210,12 @@ class _Api {
     if (code == 409) return null;
     _check('POST', url, code, text);
     return jsonDecode(text) as Map<String, Object?>;
+  }
+
+  Future<void> patch(String url, Object json) async {
+    final (code, text) = await _send('PATCH', url,
+        body: utf8.encode(jsonEncode(json)), type: 'application/json');
+    _check('PATCH', url, code, text);
   }
 
   Future<void> delete(String url) async {

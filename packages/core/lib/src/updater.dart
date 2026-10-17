@@ -78,18 +78,50 @@ const _stagingDir = '.update-staging';
 const _backupDir = '.update-backup';
 const _downloadFile = '.update-download';
 
+/// What a release changed, in the words of CHANGELOG.md: the manifest's
+/// `changes` ({"added": [...], "changed": [...], "fixed": [...]}).
+/// Manifests from before it have only `notes`.
+class ReleaseChanges {
+  final List<String> added;
+  final List<String> changed;
+  final List<String> fixed;
+  const ReleaseChanges({this.added = const [], this.changed = const [], this.fixed = const []});
+
+  /// Null for anything that is not a map, or one with no items; entries
+  /// that are not strings (or blank) are dropped, unknown keys ignored.
+  static ReleaseChanges? fromJson(Object? json) {
+    if (json is! Map) return null;
+    List<String> list(String key) => List.unmodifiable([
+          if (json[key] case final List l)
+            for (final item in l)
+              if (item is String && item.trim().isNotEmpty) item.trim(),
+        ]);
+    final c = ReleaseChanges(added: list('added'), changed: list('changed'), fixed: list('fixed'));
+    return c.isEmpty ? null : c;
+  }
+
+  Map<String, Object?> toJson() => {'added': added, 'changed': changed, 'fixed': fixed};
+
+  bool get isEmpty => added.isEmpty && changed.isEmpty && fixed.isEmpty;
+  int get length => added.length + changed.length + fixed.length;
+}
+
 class UpdateManifest {
   final String version;
   final int protocol;
   final String url;
   final String? sha256;
+  /// One line for every app (1.2.x and 1.3.x show only this).
   final String notes;
+  /// Null in manifests from before the changelog (show [notes] then).
+  final ReleaseChanges? changes;
   const UpdateManifest(
       {required this.version,
       required this.protocol,
       required this.url,
       this.sha256,
-      required this.notes});
+      required this.notes,
+      this.changes});
 
   // `assets` maps platform → archive URL. Top-level `url` is the Linux
   // tarball, kept for builds from before `assets` existed (<= 0.2.1).
@@ -115,7 +147,8 @@ class UpdateManifest {
         protocol: protocol,
         url: url,
         sha256: sha is String && sha.isNotEmpty ? sha : null,
-        notes: (json['notes'] as String?) ?? '');
+        notes: json['notes'] is String ? json['notes'] as String : '',
+        changes: ReleaseChanges.fromJson(json['changes']));
   }
 
   // Newer wire protocol: this build can't join servers running it.

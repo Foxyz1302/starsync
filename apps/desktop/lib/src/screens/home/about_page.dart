@@ -6,6 +6,8 @@ import '../../shell/mark_problem.dart';
 import '../../app/app_graph.dart';
 import '../../state/settings.dart';
 import '../../update/update_controller.dart';
+import '../../update/whats_new.dart';
+import '../../widgets/whats_new_card.dart';
 import '../../widgets/app_menu.dart';
 import '../../widgets/copy_open.dart';
 import 'settings_page.dart';
@@ -16,11 +18,12 @@ import 'update_indicator.dart';
 const uoscCredit = 'Player timeline and controls inspired by uosc by tomasklaen, LGPL-2.1 '
     '(github.com/tomasklaen/uosc).';
 
-/// Name, version, update state, the source link and the logs (Settings →
-/// About).
+/// Name, version, update state, What's new in this version, the source
+/// link and the logs (Settings → About).
 class AboutPanel extends StatelessWidget {
   final UpdateController? updates;
-  const AboutPanel({super.key, this.updates});
+  final WhatsNew? whatsNew;
+  const AboutPanel({super.key, this.updates, this.whatsNew});
 
   @override
   Widget build(BuildContext context) {
@@ -36,6 +39,23 @@ class AboutPanel extends StatelessWidget {
                   style: t.bodyMedium?.copyWith(color: Colors.grey)),
               const SizedBox(height: 4),
               UpdateStatusLine(controller: updates),
+              // This version's notes, once kept (the install, a check).
+              ValueListenableBuilder(
+                valueListenable: (updates ?? UpdateController.instance).latest,
+                builder: (context, _, _) {
+                  final notes = (whatsNew ?? WhatsNew.instance).current;
+                  if (notes == null) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: FilledButton.tonalIcon(
+                      key: const ValueKey('about-whats-new'),
+                      onPressed: () => showWhatsNew(context, notes),
+                      icon: const Icon(Icons.auto_awesome, size: 18),
+                      label: Text("What's new in ${notes.version}"),
+                    ),
+                  );
+                },
+              ),
               const SizedBox(height: kGap),
               Row(
                 children: [
