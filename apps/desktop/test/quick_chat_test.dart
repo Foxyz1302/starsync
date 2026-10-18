@@ -5,9 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart' show VideoState;
 import 'package:starsync/src/controls/frame.dart';
-import 'package:starsync/src/danmaku/danmaku.dart';
 import 'package:starsync/src/session/navigation.dart' show Place;
-import 'package:starsync/src/session/notifier.dart' show NoticeCategory, ToastItem;
 import 'package:starsync/src/shell/quick_chat.dart';
 import 'package:starsync/src/shell/session_player.dart';
 import 'package:starsync/src/state/settings.dart';
@@ -20,7 +18,7 @@ final _graph = testGraph();
 
 // The quick chat box over the full player: Enter opens it whatever plays,
 // keys go to it (not to the player), the cursor and the controls stay as
-// the mouse left them, a send shows your own line (echo, or danmaku), Esc
+// the mouse left them, a send clears the draft and closes the box (your line comes back as your own chat toast or danmaku line, like everyone's), Esc
 // and the idle time close it with the draft kept, the draft is the chat
 // panel's. The picture is a black box with the session's controls on it
 // (never a media_kit `Video`).
@@ -158,7 +156,7 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('a send shows your own line: the echo with toasts, and the controls stay hidden', (tester) async {
+  testWidgets('a send goes to the chat, clears the draft and closes the box; the controls stay hidden', (tester) async {
     await mount(tester);
     await hideControls(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -169,18 +167,6 @@ void main() {
     expect(quick.open.value, isFalse);
     expect(draft.text, isEmpty, reason: 'sent: the shared draft is cleared');
     await tester.pump(const Duration(milliseconds: 400));
-    final echo = find.byKey(const ValueKey('quick-chat-echo'));
-    expect(echo, findsOneWidget);
-    expect(find.descendant(of: echo, matching: find.text('hello there')), findsOneWidget);
-    expect(frame(tester).visible, isFalse, reason: 'held down while the echo is in their place');
-    // Your own chat toast coming back is not shown again.
-    final own = ToastItem(
-        id: 99, text: 'Me: hello there', at: DateTime.now(), actor: 'Me', chat: true, own: true,
-        category: NoticeCategory.chat);
-    expect(quick.echoed(own), isTrue);
-    await tester.pump(QuickChat.echoTime);
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(echo, findsNothing);
     expect(frame(tester).visible, isFalse);
     // Empty Enter just closes.
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -188,23 +174,6 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump(const Duration(milliseconds: 400));
     expect(quick.open.value, isFalse);
-    expect(echo, findsNothing);
-    await unmount(tester);
-  });
-
-  testWidgets('with danmaku your own line flies instead of the echo', (tester) async {
-    s.notifyStyle.value = NotifyStyle.danmaku;
-    await mount(tester);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pump();
-    await tester.enterText(field, 'flying');
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pump(const Duration(milliseconds: 16));
-    await tester.pump(const Duration(milliseconds: 16));
-    expect(find.byKey(const ValueKey('quick-chat-echo')), findsNothing);
-    final line = find.descendant(of: find.byType(DanmakuLayer), matching: find.textContaining('flying', findRichText: true));
-    expect(line, findsWidgets);
-    await tester.pump(const Duration(seconds: 10));
     await unmount(tester);
   });
 

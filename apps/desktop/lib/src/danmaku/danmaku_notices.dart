@@ -59,7 +59,7 @@ class DanmakuNotices extends StatefulWidget {
   final DanmakuController controller;
   final AvatarInfo Function(String name, String id)? avatar;
 
-  /// Toasts shown another way already (your own quick chat echo).
+  /// Toasts to leave out (none today; a hook for callers).
   final bool Function(ToastItem t)? skip;
   const DanmakuNotices({
     super.key,

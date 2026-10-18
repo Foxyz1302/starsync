@@ -11,6 +11,8 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ### Changed
 
+- A message sent from the quick chat box now shows as your own chat bubble with everyone else's, instead of a separate echo where the box was
+
 ### Fixed
 
 ## 1.4.0

@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
-import '../session/notifier.dart' show ToastItem;
 import '../widgets/app_menu.dart' show AppMenuStyle;
 import 'avatar.dart';
 import 'motion.dart';
@@ -15,15 +14,12 @@ import 'motion.dart';
 // panel. It types into the same draft as the chat panel's field.
 
 /// The box's state, owned by the shell (it outlives the player's modes):
-/// open or not, the draft ([draft], the chat panel's controller), its
-/// focus, the echo of what was just sent, and the sends whose own chat
-/// toast should not show again ([echoed]).
+/// open or not, the draft ([draft], the chat panel's controller) and its
+/// focus. What you send comes back like everyone's chat: your own chat
+/// toast (or danmaku line), no separate echo.
 class QuickChat {
   /// Closes by itself after this long without typing; the draft stays.
   static const idleClose = Duration(seconds: 8);
-
-  /// How long the echo of a sent line stays where the box was.
-  static const echoTime = Duration(milliseconds: 2600);
 
   /// The draft, shared with the chat panel's field.
   final TextEditingController draft;
@@ -31,19 +27,9 @@ class QuickChat {
   final focus = FocusNode(debugLabel: 'quick chat');
   final open = ValueNotifier(false);
 
-  /// The line just sent, shown briefly in the box's place (null: none).
-  final echo = ValueNotifier<String?>(null);
-
-  /// Bumped on each send ([lastSent]): the player flies your own line
-  /// when danmaku is the notification style (and drops the echo).
-  final sends = ValueNotifier(0);
-  String lastSent = '';
-
   /// Without typing this long, the box closes ([idleClose]).
   final Duration idle;
   Timer? _idleTimer;
-  Timer? _echoTimer;
-  final _recent = <(String, DateTime)>[];
 
   QuickChat({TextEditingController? draft, this.idle = idleClose})
       : draft = draft ?? TextEditingController(),
@@ -55,18 +41,13 @@ class QuickChat {
     draft.removeListener(_typed);
     if (_ownsDraft) draft.dispose();
     _idleTimer?.cancel();
-    _echoTimer?.cancel();
     focus.dispose();
     open.dispose();
-    echo.dispose();
-    sends.dispose();
   }
 
   /// Opens the box with the draft as it was, caret at its end, and gives
   /// it the keyboard at once (keys typed right after go to it).
   void show() {
-    _echoTimer?.cancel();
-    echo.value = null;
     open.value = true;
     draft.selection = TextSelection.collapsed(offset: draft.text.length);
     focus.requestFocus();
@@ -90,30 +71,14 @@ class QuickChat {
     _idleTimer = Timer(idle, close);
   }
 
-  /// Enter: the trimmed draft to send (cleared, the box closes and the
-  /// echo shows it), or null when blank (the box just closes).
+  /// Enter: the trimmed draft to send (cleared, the box closes), or null
+  /// when blank (the box just closes).
   String? submit() {
     final text = draft.text.trim();
     close();
     if (text.isEmpty) return null;
     draft.clear();
-    final now = DateTime.now();
-    _recent.removeWhere((r) => now.difference(r.$2) > const Duration(seconds: 20));
-    _recent.add((text, now));
-    lastSent = text;
-    echo.value = text;
-    _echoTimer?.cancel();
-    _echoTimer = Timer(echoTime, () => echo.value = null);
-    sends.value++;
     return text;
-  }
-
-  /// [t] is your own chat toast for a line this box already showed (as
-  /// its echo or your own danmaku line): it should not pop up again.
-  bool echoed(ToastItem t) {
-    if (!t.chat || !t.own) return false;
-    final now = DateTime.now();
-    return _recent.any((r) => now.difference(r.$2) < const Duration(seconds: 20) && t.text.endsWith(': ${r.$1}'));
   }
 }
 
@@ -302,69 +267,6 @@ class _QuickChatBoxState extends State<QuickChatBox> {
         ),
       );
     });
-  }
-}
-
-/// What you just sent, in the box's place for [QuickChat.echoTime]: your
-/// avatar and the line on the same glass, then it fades. Shown when the
-/// notifications are toasts (with danmaku your own line flies instead).
-class QuickChatEcho extends StatelessWidget {
-  final QuickChat chat;
-  const QuickChatEcho({super.key, required this.chat});
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = Theme.of(context).colorScheme.primary;
-    return IgnorePointer(
-      child: ValueListenableBuilder<String?>(
-        valueListenable: chat.echo,
-        builder: (context, text, _) => AnimatedSwitcher(
-          duration: easeTime,
-          switchInCurve: ease,
-          switchOutCurve: Curves.easeIn,
-          transitionBuilder: (child, a) => FadeTransition(
-            opacity: a,
-            child: SlideTransition(
-              position: Tween(begin: const Offset(0, 0.25), end: Offset.zero).animate(a),
-              child: child,
-            ),
-          ),
-          child: text == null
-              ? const SizedBox.shrink(key: ValueKey('no-echo'))
-              : Align(
-                  key: ValueKey('echo-$text'),
-                  alignment: Alignment.bottomCenter,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 640),
-                    child: Container(
-                      key: const ValueKey('quick-chat-echo'),
-                      padding: const EdgeInsets.fromLTRB(11, 10, 16, 10),
-                      decoration: BoxDecoration(
-                        color: AppMenuStyle.glass,
-                        borderRadius: BorderRadius.circular(QuickChatBox.height / 2),
-                        border: Border.all(color: accent.withValues(alpha: 0.7), width: 1),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          StatusAvatar(info: selfAvatarInfo(), size: 22, badges: false, ring: false),
-                          const SizedBox(width: 12),
-                          Flexible(
-                            child: Text(text,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3)),
-                          ),
-                          const SizedBox(width: 10),
-                          Icon(Icons.check_rounded, size: 16, color: accent),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-        ),
-      ),
-    );
   }
 }
 

@@ -2351,11 +2351,9 @@ panel) and chat messages (Copy message, and a link in it).
   640 px (or the room there is), then wraps up to four lines, growing
   upward; your avatar leads it; it fades and slides in on the shell's
   curve and stays mounted while closed (invisible, ignoring the pointer)
-  so focus is immediate. What you sent shows where the box was for
-  `echoTime` (2.6 s, `QuickChatEcho`, with an accent hairline), or, with
-  danmaku notifications, flies at once as your own line; your own chat
-  toast coming back from the server is not shown again
-  (`QuickChat.echoed`). While the box or its echo is up the controls are
+  so focus is immediate. What you send comes back like everyone's chat:
+  your own chat toast while the chat panel is closed (no sound), or your
+  own danmaku line. While the box is up the controls are
   held hidden (`ControlsFrame.suppress`: drawn hidden, `shown` false, the
   cursor still follows the mouse) and the action area rides above the
   box. Typing is not mouse activity: the frame wakes the controls only
@@ -2364,8 +2362,7 @@ panel) and chat messages (Copy message, and a link in it).
   the field's I-beam stays hidden until the mouse moves over it, so
   Enter, typing and sending never show the cursor or the controls.
 - **Subtitle lift** (`video_view.dart`): bottom subtitles move above what
-  covers the bottom of the full player: the quick chat box or its echo
-  (always), and the control bar while it is up when
+  covers the bottom of the full player: the quick chat box (always), and the control bar while it is up when
   `AppSettings.liftSubtitles` is on (off by default; Settings → Player
   and the player panel, "Subtitles above the controls"); 8 px above it.
   `SubtitleLift` steps the covered height toward each new target in

@@ -14,7 +14,7 @@ import '../controls/model/controls_model.dart';
 import '../controls/player_panel.dart';
 import '../controls/session_controls.dart';
 import '../controls/volume.dart';
-import '../danmaku/danmaku.dart' show DanmakuController, DanmakuItem, DanmakuKind;
+import '../danmaku/danmaku.dart' show DanmakuController;
 import '../danmaku/danmaku_notices.dart';
 import '../danmaku/danmaku_preview.dart';
 import '../platform/desktop/media_kit_host.dart' show videoControllerOf;
@@ -210,8 +210,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
       untracked(_retargetLift);
     });
     _quick.open.addListener(_boxChanged);
-    _quick.echo.addListener(_boxChanged);
-    _quick.sends.addListener(_sent);
     _controlsShown.addListener(_retargetLift);
   }
 
@@ -229,11 +227,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
     if (oldWidget.quickChat != widget.quickChat) {
       final old = oldWidget.quickChat ?? _ownChat;
       old?.open.removeListener(_boxChanged);
-      old?.echo.removeListener(_boxChanged);
-      old?.sends.removeListener(_sent);
       _quick.open.addListener(_boxChanged);
-      _quick.echo.addListener(_boxChanged);
-      _quick.sends.addListener(_sent);
     }
     if (oldWidget.controlsShown != widget.controlsShown) {
       (oldWidget.controlsShown ?? _ownShown).removeListener(_retargetLift);
@@ -253,8 +247,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
     _stopLiftWatch();
     widget.danmakuActive?.value = false;
     _quick.open.removeListener(_boxChanged);
-    _quick.echo.removeListener(_boxChanged);
-    _quick.sends.removeListener(_sent);
     _controlsShown.removeListener(_retargetLift);
     _quick.close();
     _ownChat?.dispose();
@@ -273,7 +265,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
   // ------------------------------------------------------- quick chat box
 
   void _boxChanged() {
-    _boxUp.value = _quick.open.value || _quick.echo.value != null;
+    _boxUp.value = _quick.open.value;
     _retargetLift();
   }
 
@@ -294,17 +286,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
     setState(() {});
   }
 
-  /// Enter in the box with text: to the chat; your own line flies right
-  /// away when danmaku is the style (the echo is for toasts).
+  /// Enter in the box with text: to the chat; it comes back as your own
+  /// chat toast or danmaku line, like everyone's.
   void _send(String text) => _coord.sendChat(text);
-
-  void _sent() {
-    if (!_danmakuOn.peek()) return;
-    _quick.echo.value = null;
-    final me = selfAvatarInfo();
-    _lines.add(DanmakuItem(
-        kind: DanmakuKind.chat, sender: me.name, senderColor: me.color, text: _quick.lastSent, own: true, avatar: me));
-  }
 
   /// Swallows the Enter that opened the box before the focused widget
   /// (a button keeps focus after a click) acts on it too.
@@ -503,7 +487,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
         child: Stack(
           alignment: Alignment.bottomCenter,
           children: [
-            QuickChatEcho(chat: _quick),
             QuickChatBox(chat: _quick, onSend: _send, onHeight: _boxHeightChanged),
           ],
         ),
@@ -578,7 +561,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
                   style: _settings.danmakuStyle,
                   controller: _lines,
                   avatar: (name, id) => avatarForName(name, _coord, id),
-                  skip: _quick.echoed,
                 )
               : const SizedBox.shrink(),
         ),

@@ -864,7 +864,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       onOpenChat: () {
         if (!_chatOpen) _toggleChat();
       },
-      skip: (t) => (_danmakuActive.value && fliesAsDanmaku(t)) || _quickChat.echoed(t),
+      skip: (t) => _danmakuActive.value && fliesAsDanmaku(t),
     );
     return ValueListenableBuilder<bool>(
       valueListenable: _controlsShown,
