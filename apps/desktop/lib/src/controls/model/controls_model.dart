@@ -8,7 +8,7 @@ import '../../queue/queue_controller.dart';
 import '../../session/session_coordinator.dart';
 import '../../shaders/shader_presets.dart';
 import '../../state/settings.dart';
-import '../player_settings.dart' show applyShaderChoice;
+import '../player_settings.dart' show applyShaderChoice, setVideoVolume;
 import '../volume.dart' as vol;
 import 'controls_layout.dart';
 
@@ -169,11 +169,7 @@ class PlayerControlsModel {
   void playNextEpisode() => coord.playNextEpisode();
 
   /// The video's volume, now and from the next start on.
-  void setVolume(double v) {
-    final clamped = v.clamp(0.0, vol.maxVolume);
-    playback.setVolume(clamped);
-    settings.setPlayerVolume(clamped);
-  }
+  void setVolume(double v) => setVideoVolume(coord, v);
 
   /// One volume step up (+1) or down (-1) from the wheel or ↑ / ↓;
   /// flashes the volume readout.

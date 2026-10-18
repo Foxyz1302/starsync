@@ -233,10 +233,8 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
 
 What is where, what you see first, what is folded. Each setting has one
 home in Settings; the player panel is the watching subset, drawn with the
-same widgets; common rows first, the rest under "More". In two steps:
-1. **One widget per setting**: shared widgets (dense in the panel) replace
-   the panel's own rows; the same label everywhere.
-2. **Sections**: Player · Party (absorbs Profile: picture, name and colour
+same widgets; common rows first, the rest under "More". Left to do:
+**Sections**: Player · Party (absorbs Profile: picture, name and colour
    edited in place; Away; Your server; Recent servers) · Notifications &
    sounds (Over the video: toasts or danmaku, chat pop-ups, joins and
    leaves; Sounds) · Library & accounts (Jellyfin, AnimeFlow, Web links:

@@ -533,8 +533,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
                     child: PlayerPanel(
                       onClose: () => _model.panelOpen.value = false,
                       renderMode: _model.renderMode,
-                      volume: _model.volume,
-                      onVolume: _model.setVolume,
                       onAllSettings: switch (widget.onOpenSettings) {
                         final open? => (section) => open(settingsPageFor(section)),
                         null => null,
@@ -966,9 +964,8 @@ class _SessionPlayerState extends State<SessionPlayer> {
 
 /// The Settings page that holds a player panel section's settings.
 SettingsSection settingsPageFor(PanelSection s) => switch (s) {
-  PanelSection.sound || PanelSection.notifications => SettingsSection.notifications,
-  PanelSection.tracks || PanelSection.subtitles || PanelSection.picture || PanelSection.controls =>
-    SettingsSection.player,
+  PanelSection.sound || PanelSection.overVideo => SettingsSection.notifications,
+  PanelSection.subtitles || PanelSection.picture || PanelSection.controls => SettingsSection.player,
 };
 
 /// The mini player's empty controls slot (see [SessionPlayer]'s video).

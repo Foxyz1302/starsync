@@ -2268,26 +2268,26 @@ panel) and chat messages (Copy message, and a link in it).
   sliding and fading in from the right; it stays open while the controls
   hide and show, until its × or Esc (the player's Esc closes it first),
   and leaving the full player closes it. The mouse on it holds the
-  controls up (`ControlsHoldRegion`). Its sections (`PanelSection`)
-  fold (their titles toggle; folded ones are kept for the app's run,
-  Notifications and Controls start folded): sound first (the video's
-  volume on the bar's `VolumeBar`, and App sounds, `soundVolume`, with
-  a line saying it is the app's cues, not the video), tracks (subtitle,
-  audio; remembered as from the track menus), subtitles (size, mpv
-  `sub-scale` from `AppSettings.subScale`, set on every player; above
-  the controls, see "Subtitle lift"), picture (upscaling shader and
-  quality, sharp video and subtitles, see "Media", hardware decoding,
-  set live on mpv's `hwdec`, with the custom value's field under it),
-  notifications (Toasts / Danmaku and, with Danmaku, the look's knobs,
-  see "Danmaku notifications") and controls (design, progress line).
-  At its foot All settings and Mark a problem: All settings opens the
-  Settings page of the section last opened or clicked in
-  (`settingsPageFor`, through the shell's `_openSettings`, which takes
-  the player to the mini as any tab does). Compact rows of its own over the same settings and
-  actions; Settings → Player shows the full rows (`playerSettingRows`:
-  design, progress line, shader, sharp video, hardware decoding, subtitle
-  size, subtitles above the controls) and the controls' own choices
-  (`controlsSettingRows`, see "Player controls"); all apply live. The progress line (`AppSettings.progressLine`) is
+  controls up (`ControlsHoldRegion`). It draws Settings' own widgets
+  (see "Setting rows"), dense, in sections (`PanelSection`) that fold
+  (their titles toggle; folded ones are kept for the app's run, Over
+  the video and Controls start folded): Sound first (Volume, the
+  video's, on the bar's `VolumeBar`; App sounds, `soundVolume`, with a
+  line saying it is the app's cues, not the video), Subtitles & audio
+  (the subtitle and audio tracks, remembered as from the track menus;
+  Subtitle size, mpv `sub-scale` from `AppSettings.subScale`, set on
+  every player; Subtitles above the controls, see "Subtitle lift"),
+  Picture (Upscaling shader, HQ / Fast under an Anime4K mode; folded
+  under Troubleshooting: Sharp video and subtitles, see "Media", and
+  Hardware decoding, set live on mpv's `hwdec`, with the custom value's
+  field), Over the video (Notifications: Toasts / Danmaku, Chat
+  pop-ups, and with Danmaku the look's knobs folded, see "Danmaku
+  notifications") and Controls (Player design, Controls size, Progress
+  line when hidden). At its foot All settings and Mark a problem: All
+  settings opens the Settings page of the section last opened or
+  clicked in (`settingsPageFor`, through the shell's `_openSettings`,
+  which takes the player to the mini as any tab does); all apply live.
+  The progress line (`AppSettings.progressLine`) is
   what the bottom controls leave while hidden: Standard a 2 px line,
   Minimal its collapsed timeline. Fullscreen adds the
   `WindowButtons` to the top bar while the controls are up (restore
@@ -2404,7 +2404,7 @@ panel) and chat messages (Copy message, and a link in it).
   `video-margin-ratio-bottom` shrinks and moves the picture itself (with
   `sub-ass-force-margins` the dialogue goes into the new black band).
 - **Danmaku notifications** (`danmaku/`): Settings → Notifications &
-  sounds → Over the player → Notifications: Toasts (default) or Danmaku
+  sounds → Over the video → Notifications: Toasts (default) or Danmaku
   (`AppSettings.notifyStyle`, live; also in the player panel). With
   Danmaku and the full player up (not sitting out), what
   `fliesAsDanmaku` picks (chat, joins, leaves, lost connection and back,
@@ -2428,12 +2428,26 @@ panel) and chat messages (Copy message, and a link in it).
   ticking only while lines fly or wait. Each line is a widget moved by a
   `Flow`: per frame only paint runs. The look (`AppSettings.danmakuStyle`,
   one map, `DanmakuStyle.toJson` / `fromJson`, which clamps every value
-  to `DanmakuStyle.limits`) has every knob in the settings card
-  (`danmaku_settings.dart`: crossing time, at most on screen, lane band,
-  opacity, size, boldness, outline, avatars, frame my own lines, reset)
-  over a preview strip (a moving stand-in picture, a top sign, bottom
+  to `DanmakuStyle.limits`) has every knob in `DanmakuKnobs`
+  (`danmaku_settings.dart`: crossing time, at once, lanes, opacity,
+  size, boldness, outline, avatars before the lines, frame my own lines,
+  reset; the same words in the player panel), in Settings under a
+  preview strip (a moving stand-in picture, a top sign, bottom
   dialogue and sample lines in the current look; it plays for 16 s after
   it opens or a knob moves, then rests until clicked).
+
+**Setting rows** (`widgets/setting_rows.dart`): every setting is one
+widget, drawn the same way in Settings and in the player panel with the
+same label: `SettingRow` (label, help under it, the control at the
+right, `below` for an extra line), `SettingSwitch`, `SettingTrack` (a
+slider or the volume bar with its readout) and `SettingFold` (rows
+folded under "More", or a named fold such as the panel's
+Troubleshooting). Under a `SettingDensity` (the panel) they are dense:
+smaller type, the help becomes the label's tooltip and only an optional
+`brief` line shows, a track's label sits at its left. The player
+settings are in `controls/player_settings.dart` (with `setVideoVolume`,
+`applyShaderChoice`, `applyHwdecLive`), the notification ones in
+`shell/notice_settings.dart`.
 
 Settings persist in two Hive boxes: `connect_form` (last form, recent
 servers and links, the profile picture and colour; saved even when a join

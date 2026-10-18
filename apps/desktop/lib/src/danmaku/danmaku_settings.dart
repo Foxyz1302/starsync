@@ -6,14 +6,13 @@ import 'package:signals/signals_flutter.dart';
 
 import '../shell/avatar.dart' show AvatarInfo, colorForName, selfAvatarInfo;
 import '../state/settings.dart';
-import '../widgets/app_menu.dart' show AppSelect;
+import '../widgets/setting_rows.dart' show SettingDensity;
 import 'danmaku.dart';
 import 'danmaku_preview.dart' show DanmakuPreview, DanmakuStandIn, MockSubtitles;
 
-// Settings → Notifications & sounds: how notifications show over the full
-// player (Toasts or Danmaku) and every knob of the danmaku look, with a
-// live preview strip. The player's side panel shows the style and the
-// knobs too ([DanmakuKnobs]).
+// The danmaku look: every knob of how the lines fly, with a live preview
+// strip in Settings → Notifications & sounds; the player panel shows the
+// same knobs ([DanmakuKnobs], dense under a `SettingDensity`).
 
 /// Names of the weights the boldness slider steps through.
 const danmakuWeightNames = {
@@ -25,53 +24,17 @@ const danmakuWeightNames = {
   900: 'Black',
 };
 
-/// "Notifications: Toasts / Danmaku" ([AppSettings.notifyStyle]).
-class NotifyStyleSelect extends StatelessWidget {
+/// The danmaku look in Settings: the preview strip over the knobs.
+class DanmakuLookSettings extends StatelessWidget {
   final AppSettings settings;
-  const NotifyStyleSelect({super.key, required this.settings});
-
-  @override
-  Widget build(BuildContext context) => SignalBuilder(
-        builder: (context) => AppSelect<NotifyStyle>(
-          key: const ValueKey('notify-style'),
-          value: settings.notifyStyle.value,
-          onChanged: settings.setNotifyStyle,
-          items: [for (final m in NotifyStyle.values) (m, m.label)],
-        ),
-      );
-}
-
-/// The card: the style picker, the preview strip and the knobs.
-class DanmakuSettingsPanel extends StatelessWidget {
-  final AppSettings settings;
-  const DanmakuSettingsPanel({super.key, required this.settings});
+  const DanmakuLookSettings({super.key, required this.settings});
 
   @override
   Widget build(BuildContext context) {
-    final muted = TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Notifications'),
-                  Text(
-                      'Danmaku: over the full player, chat, joins, leaves, Up next and "starting now" fly across '
-                      'the top of the picture instead of popping up. Problems and errors stay pop-ups, and so does '
-                      'everything with the player small',
-                      style: muted),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            NotifyStyleSelect(settings: settings),
-          ],
-        ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 6),
         DanmakuPreviewStrip(settings: settings),
         const SizedBox(height: 6),
         DanmakuKnobs(settings: settings),
@@ -208,19 +171,18 @@ class _DanmakuPreviewStripState extends State<DanmakuPreviewStrip> {
 /// avatars, your own lines framed; and a reset.
 class DanmakuKnobs extends StatelessWidget {
   final AppSettings settings;
-
-  /// Narrow (the player's side panel): shorter labels column.
-  final bool dense;
-  const DanmakuKnobs({super.key, required this.settings, this.dense = false});
+  const DanmakuKnobs({super.key, required this.settings});
 
   void _set(DanmakuStyle Function(DanmakuStyle s) f) => settings.setDanmakuStyle(f(settings.danmakuStyle.peek()));
 
   @override
   Widget build(BuildContext context) {
     const l = DanmakuStyle.limits;
+    // Narrow (the player panel): a narrower label column, same words.
+    final dense = SettingDensity.of(context);
     return SignalBuilder(builder: (context) {
       final s = settings.danmakuStyle.value;
-      final labelW = dense ? 84.0 : 150.0;
+      final labelW = dense ? 96.0 : 150.0;
       Widget slider(String key, String label, double v, (num, num) r, String readout, ValueChanged<double> f,
               {int? divisions}) =>
           _Knob(
@@ -244,13 +206,13 @@ class DanmakuKnobs extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          slider('cross', dense ? 'Crossing' : 'Crossing time', s.crossSecs, l.crossSecs,
+          slider('cross', 'Crossing time', s.crossSecs, l.crossSecs,
               '${s.crossSecs.toStringAsFixed(1)} s', (v) => _set((s) => s.copyWith(crossSecs: v))),
-          slider('cap', dense ? 'At most' : 'At most on screen', s.maxOnScreen.toDouble(), l.maxOnScreen,
+          slider('cap', 'At once', s.maxOnScreen.toDouble(), l.maxOnScreen,
               '${s.maxOnScreen} lines', (v) => _set((s) => s.copyWith(maxOnScreen: v.round())),
               divisions: l.maxOnScreen.$2 - l.maxOnScreen.$1),
           _Knob(
-            label: dense ? 'Lanes' : 'Lanes (from the top)',
+            label: 'Lanes',
             labelWidth: labelW,
             readout: '${(s.bandTop * 100).round()}–${(s.bandBottom * 100).round()} %',
             child: RangeSlider(

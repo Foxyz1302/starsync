@@ -8,7 +8,7 @@ import 'package:sync_relay_core/core.dart'
     show CookieBrowser, CookieFile, NetscapeCookie, YtDlp, YtDlpCookies, cookieBrowsers, parseCookies;
 
 import '../controls/player_settings.dart';
-import '../danmaku/danmaku_settings.dart' show DanmakuSettingsPanel;
+import '../danmaku/danmaku_settings.dart' show DanmakuLookSettings;
 import '../jellyfin/accounts.dart';
 import '../jellyfin/accounts_panel.dart';
 import '../schedule/animeflow.dart';
@@ -24,6 +24,7 @@ import '../update/update_controller.dart';
 import '../widgets/app_menu.dart';
 import 'avatar.dart';
 import 'motion.dart';
+import 'notice_settings.dart';
 
 /// The Settings tab's pages, in nav order.
 enum SettingsSection {
@@ -375,7 +376,7 @@ class RecentServersPanel extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Join offers these in one click; remove the ones you no longer use',
+            Text('Join offers these in one click; forget the ones you no longer use',
                 style: TextStyle(color: muted, fontSize: 12)),
             if (list.isEmpty)
               Padding(
@@ -390,7 +391,7 @@ class RecentServersPanel extends StatelessWidget {
                 title: Text('${r.host}:${r.port}'),
                 subtitle: r.secret.isEmpty ? null : const Text('password saved'),
                 trailing: IconButton(
-                  tooltip: 'Remove',
+                  tooltip: 'Forget',
                   icon: const Icon(Icons.close, size: 18),
                   onPressed: () => forms.forget(r),
                 ),
@@ -755,14 +756,14 @@ class _AnimeFlowCardState extends State<AnimeFlowCard> {
   }
 }
 
-/// What pops up (chat pop-ups: [AppSettings.chatPopups]), what reaches
-/// you while you sit out or the window is in the background
-/// ([AppSettings.notifyPeople]), and what makes a sound.
+/// Settings → Notifications & sounds: what shows over the video and
+/// what makes a sound; the common rows first, the rest under More.
 class NotificationsInfo extends StatelessWidget {
   const NotificationsInfo({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final settings = AppScope.of(context).coordinator.settings;
     final muted = TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12);
     Widget line(String title, String help) => Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
@@ -775,69 +776,33 @@ class NotificationsInfo extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SettingsPanel(
-          title: 'Pop-ups',
+          key: const ValueKey('over-the-video'),
+          title: 'Over the video',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              line('Joins, leaves, lost connections and video changes',
-                  "Pop up bottom left for 5 s with the person's picture, above the player's controls "
-                  '(or fly across the picture: Danmaku, below)'),
-              line('Added to Up next', 'With the title, its picture and who added it'),
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Chat messages'),
-                          Text('Pop up the same way; always in Chat & activity (Tab)', style: muted),
-                        ],
-                      ),
-                    ),
-                    SignalBuilder(
-                      builder: (context) => AppSelect<ChatPopups>(
-                        key: const ValueKey('chat-popups'),
-                        value: AppSettings.instance.chatPopups.value,
-                        onChanged: AppSettings.instance.setChatPopups,
-                        items: [for (final m in ChatPopups.values) (m, m.label)],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              line('Sat out or nudged by someone', 'Only on your end, with their picture'),
-              line('Ready, seeks and pauses', 'Only in Chat & activity (Tab), never as a pop-up'),
-              line('Watching alone', 'No pop-ups or sounds about the party: there is nobody else'),
-              line('App notices', 'Shader changes, copies, errors, auto sit-out setting you away'),
-            ],
-          ),
-        ),
-        SettingsPanel(
-          key: const ValueKey('danmaku-settings'),
-          title: 'Over the player',
-          child: DanmakuSettingsPanel(settings: AppScope.of(context).coordinator.settings),
-        ),
-        SettingsPanel(
-          title: 'Sitting out and in the background',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              line('What still reaches you',
-                  'While you sit out, only chat, nudges, "starting now" and Up next pop up. With the window '
-                  'in the background or minimised they also go out as system notifications; a click brings '
-                  'the window up (a chat one opens the chat)'),
-              SignalBuilder(
-                builder: (context) => SwitchListTile(
-                  key: const ValueKey('notify-people'),
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Joins and leaves too'),
-                  subtitle: Text('Who joins, leaves, loses connection or comes back', style: muted),
-                  value: AppSettings.instance.notifyPeople.value,
-                  onChanged: AppSettings.instance.setNotifyPeople,
-                ),
-              ),
+              const NotifyStyleSetting(),
+              const ChatPopupsSetting(),
+              const NotifyPeopleSetting(),
+              SettingFold(children: [
+                Text('Danmaku look', style: Theme.of(context).textTheme.titleSmall),
+                DanmakuLookSettings(settings: settings),
+                const SizedBox(height: 8),
+                Text('What pops up when', style: Theme.of(context).textTheme.titleSmall),
+                line('Joins, leaves, lost connections and video changes',
+                    "Bottom left for 5 s with the person's picture, above the player's controls (or flying "
+                    'across the picture with Danmaku)'),
+                line('Added to Up next', 'With the title, its picture and who added it'),
+                line('Chat messages', 'As Chat pop-ups says; always in Chat & activity (Tab)'),
+                line('Sat out or nudged by someone', 'Only on your end, with their picture'),
+                line('Ready, seeks and pauses', 'Only in Chat & activity (Tab), never as a pop-up'),
+                line('Watching alone', 'No pop-ups or sounds about the party: there is nobody else'),
+                line('App notices', 'Shader changes, copies, errors, auto sit-out setting you away'),
+                line('Sitting out or in the background',
+                    'Only chat, nudges, "starting now" and Up next (and joins and leaves when switched on); with '
+                    'the window in the background or minimised they go out as system notifications, and a click '
+                    'brings the window up (a chat one opens the chat)'),
+              ]),
             ],
           ),
         ),
@@ -847,8 +812,8 @@ class NotificationsInfo extends StatelessWidget {
   }
 }
 
-/// Volume and the sound set, then every sound with a preview button, its
-/// own set (or the overall one) and its own switch.
+/// App sounds and the sound set; under More every sound with a preview
+/// button, its own set (or the overall one) and its own switch.
 class SoundSettings extends StatelessWidget {
   const SoundSettings({super.key});
 
@@ -857,7 +822,7 @@ class SoundSettings extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = AppSettings.instance;
+    final s = AppScope.of(context).coordinator.settings;
     final scheme = Theme.of(context).colorScheme;
     final muted = TextStyle(color: scheme.onSurfaceVariant, fontSize: 12);
     return SignalBuilder(builder: (context) {
@@ -868,87 +833,72 @@ class SoundSettings extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              const Text('App sounds'),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Slider(
-                  key: const ValueKey('sound-volume'),
-                  value: volume,
-                  onChanged: s.setSoundVolume,
-                  onChangeEnd: (_) => _preview(context, SfxKind.ready),
-                ),
-              ),
-              SizedBox(width: 44, child: Text('${(volume * 100).round()}%', textAlign: TextAlign.end)),
-            ],
+          const AppSoundsSetting(),
+          SettingRow(
+            label: 'Sound set',
+            help: presetInfo.entries.where((e) => e.key.name == overall).firstOrNull?.value.$2,
+            control: AppSelect<String>(
+              key: const ValueKey('sound-preset'),
+              value: overall,
+              onChanged: (v) {
+                s.setSoundPreset(v);
+                _preview(context, SfxKind.ready);
+              },
+              items: [
+                for (final MapEntry(key: p, value: (name, _)) in presetInfo.entries) (p.name, name),
+              ],
+            ),
           ),
-          Text('Soft cues for people and readiness, not the video (its volume is in the player); the video '
-              'itself covers play, pause and the end. Letting go of the slider plays the ready sound.',
-              style: muted),
-          const SizedBox(height: 12),
-          Row(
+          SettingFold(
+            title: 'Each sound',
             children: [
-              const Expanded(child: Text('Sound set')),
-              AppSelect<String>(
-                key: const ValueKey('sound-preset'),
-                value: overall,
-                onChanged: (v) {
-                  s.setSoundPreset(v);
-                  _preview(context, SfxKind.ready);
-                },
-                items: [
-                  for (final MapEntry(key: p, value: (name, _)) in presetInfo.entries) (p.name, name),
-                ],
-              ),
-            ],
-          ),
-          Text(presetInfo.entries.where((e) => e.key.name == overall).firstOrNull?.value.$2 ?? '', style: muted),
-          const SizedBox(height: 8),
-          for (final MapEntry(key: kind, value: (name, help)) in soundInfo.entries)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(
-                children: [
-                  IconButton(
-                    key: ValueKey('sound-play-${kind.name}'),
-                    tooltip: 'Play',
-                    onPressed: volume == 0 ? null : () => _preview(context, kind),
-                    icon: const Icon(Icons.play_arrow_rounded),
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [Text(name), Text(help, style: muted)],
-                    ),
-                  ),
-                  AppSelect<String?>(
-                    key: ValueKey('sound-preset-${kind.name}'),
-                    value: per[kind.name],
-                    style: muted,
-                    onChanged: (v) {
-                      s.setSoundPresetFor(kind.name, v);
-                      if (volume > 0) _preview(context, kind);
-                    },
-                    items: [
-                      (null, 'Same as set'),
-                      for (final MapEntry(key: p, value: (name, _)) in presetInfo.entries) (p.name, name),
+              for (final MapEntry(key: kind, value: (name, help)) in soundInfo.entries)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        key: ValueKey('sound-play-${kind.name}'),
+                        tooltip: 'Play',
+                        onPressed: volume == 0 ? null : () => _preview(context, kind),
+                        icon: const Icon(Icons.play_arrow_rounded),
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [Text(name), Text(help, style: muted)],
+                        ),
+                      ),
+                      AppSelect<String?>(
+                        key: ValueKey('sound-preset-${kind.name}'),
+                        value: per[kind.name],
+                        style: muted,
+                        onChanged: (v) {
+                          s.setSoundPresetFor(kind.name, v);
+                          if (volume > 0) _preview(context, kind);
+                        },
+                        items: [
+                          (null, 'Same as set'),
+                          for (final MapEntry(key: p, value: (name, _)) in presetInfo.entries) (p.name, name),
+                        ],
+                      ),
+                      // A nudge always plays (an explicit poke): no switch,
+                      // its place kept so the rows line up.
+                      Visibility.maintain(
+                        visible: kind != SfxKind.nudge,
+                        child: Switch(
+                          key: ValueKey('sound-on-${kind.name}'),
+                          value: !off.contains(kind.name),
+                          onChanged:
+                              volume == 0 || kind == SfxKind.nudge ? null : (on) => s.setSoundOn(kind.name, on),
+                        ),
+                      ),
                     ],
                   ),
-                  // A nudge always plays (an explicit poke): no switch,
-                  // its place kept so the rows line up.
-                  Visibility.maintain(
-                    visible: kind != SfxKind.nudge,
-                    child: Switch(
-                      key: ValueKey('sound-on-${kind.name}'),
-                      value: !off.contains(kind.name),
-                      onChanged: volume == 0 || kind == SfxKind.nudge ? null : (on) => s.setSoundOn(kind.name, on),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+                ),
+            ],
+          ),
         ],
       );
     });

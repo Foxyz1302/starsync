@@ -118,7 +118,7 @@ losing connection and coming back, video changes, additions to Up next
 (the title, its picture and who added it), chat and problems also pop up
 bottom left with the person's avatar, above the player's controls (never
 on them); ready, seeks and pauses stay in the activity. Click a message
-to open the chat (Settings → Notifications & sounds → Chat messages: All
+to open the chat (Settings → Notifications & sounds → Chat pop-ups: All
 by default, or Only when paused, or Off; messages always reach the chat,
 with their sound). Watching alone, nothing pops up or sounds about the
 party (there is nobody); the app's own notices still show.
@@ -134,13 +134,14 @@ bottom subtitles move up out of its way and back, top signs stay. The
 mouse pointer and the controls stay hidden: typing is not moving the
 mouse.
 
-**Danmaku.** Settings → Notifications & sounds → Over the player →
-Notifications: Toasts (default) or Danmaku. With Danmaku, over the big
-player chat, joins, leaves, Up next and "starting now" fly right to left
-across the top of the picture instead of popping up (problems and errors
-still pop up, and everything does while the player is small). The look
-is yours to tune there, with a live preview: crossing time, how many at
-once, which band of the picture they use, opacity, size, boldness,
+**Danmaku.** Settings → Notifications & sounds → Over the video →
+Notifications: Toasts (default) or Danmaku (also in the player panel).
+With Danmaku, over the big player chat, joins, leaves, Up next and
+"starting now" fly right to left across the top of the picture instead
+of popping up (problems and errors still pop up, and everything does
+while the player is small). The look is yours to tune under More there,
+with a live preview (and in the player panel): crossing time, how many
+at once, which lanes of the picture they use, opacity, size, boldness,
 outline, avatars, and a frame round your own lines.
 
 **While sitting out or in the background.** Sitting out, only chat,
@@ -415,14 +416,16 @@ Settings tab's tooltip; and the credits, e.g. that the Minimal player design is 
 Player settings live in the player too: ⚙ in the player's bar opens a
 narrow panel at the right edge of the player that stays open while you
 watch (the controls hide and show as usual) until its × or Esc. Its
-sections fold: sound first (the video's volume, and App sounds: how loud
-the app's own cues are), tracks (subtitles, audio), subtitles (size,
-above the controls), picture (upscaling shader, sharp video, hardware
-decoding with its custom value), notifications (toasts or danmaku and
-the danmaku look) and controls (design, progress line). Its All
-settings button opens the Settings page of the section you last used
-there (the player goes to the mini). Settings → Player has the same
-ones (plus the controls' layout and the custom shader files). Player
+sections fold: Sound first (the video's Volume, and App sounds: how loud
+the app's own cues are), Subtitles & audio (the tracks, subtitle size,
+subtitles above the controls), Picture (upscaling shader with HQ or
+Fast; under Troubleshooting sharp video and hardware decoding with its
+custom value), Over the video (toasts or danmaku, chat pop-ups, the
+danmaku look) and Controls (player design, controls size, progress
+line). They are Settings' own rows with the same names, only smaller.
+Its All settings button opens the Settings page of the section you last
+used there (the player goes to the mini). Settings → Player has the
+same ones (plus the controls' layout and the custom shader files). Player
 design: Standard or Minimal (below); progress line when hidden (on by
 default: a thin line at the bottom of the video while the controls are
 hidden); upscaling shader (see below); hardware decoding (auto, off or
@@ -632,7 +635,7 @@ affected. The app ships [Anime4K](https://github.com/bloc97/Anime4K) v4.0.1
 C (480p), A+A, B+B, C+A, each as HQ (strong GPUs, GTX 1080 and up) or Fast
 (the guide's low-end set). "Custom shaders" runs your own `.glsl` files.
 
-Pick one in the player with ⚙ → Upscaling (also in fullscreen) or
+Pick one in the player with ⚙ → Upscaling shader (also in fullscreen) or
 Ctrl+0..6; the change applies live and is saved, so the next session
 starts with it. Settings → Player sets it too, with HQ or Fast (used by
 Ctrl+1..6), and holds the custom files. Shaders cost GPU time
