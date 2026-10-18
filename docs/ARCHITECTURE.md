@@ -61,8 +61,8 @@ attach and detach the network listener (below).
   its reason; nothing else changes.
 - **Invite** (`session/invite.dart`): `YourServer.invite()` shares the
   server if it is not yet and returns an `Invite`: the host, the port, the
-  name ("<your name>'s server"), whether a password is needed (never the
-  password), the version and an `fp` field reserved for a pinned
+  name ("<your name>'s server"), whether a password is needed (not the
+  password itself), the version and an `fp` field reserved for a pinned
   certificate (`wss://` with a self-signed one, later; always null). This
   machine's addresses are `inviteAddresses` over `NetworkInterface.list`:
   IPv4 only, no loopback, link-local (169.254/16) or proxy fake-IP
@@ -82,10 +82,10 @@ attach and detach the network listener (below).
   elsewhere get in only with the port forwarded). No UPnP. The invite
   carries the internet address when the lookup answers within 4 s
   (`publicWait`), else the best local one, switched to the internet one
-  when it lands. `Invite.text` is what Invite copies ("Join me on
-  Starsync: starsync://203.0.113.7:8080/?name=Bob%27s+server (ask me for the
-  password) · Starsync 1.3.0"); `textWith(secret:)` puts the password in
-  the link instead, only when the user ticks it. The link format:
+  when it lands. `YourServer.inviteLink(invite)` is what Invite copies:
+  the bare link with the password the server was shared with
+  (`starsync://203.0.113.7:8080/?name=Bob%27s+server&pw=…`; the link is
+  the key, nothing around it). The link format:
   [PROTOCOL.md "Invite link"](PROTOCOL.md#invite-link) (`InviteLink`:
   `parse`, `uri`, a `toString` without the password). `inviteIn` finds an
   invite in a text (a link anywhere, or a 1.3.x plain invite's address;
@@ -1993,8 +1993,8 @@ panel) and chat messages (Copy message, and a link in it).
   "reconnecting…"; hidden under 1100 px), chat with an unread badge, then
   Invite on yours or Leave on a friend's (asks first, then you are home).
   Invite (`inviteFriends`, `shell/your_invite.dart`) shares your server if
-  it is not yet and copies the invite link, never the password ("Invite
-  link copied · 203.0.113.7:8080"); a port it cannot open
+  it is not yet and copies the invite link ("Invite link copied"); a port
+  it cannot open
   is a notice pointing at Settings. The stack
   opens the members card (the server's version under its title: yours is
   this app's, a joined one's from `/health.version`; the source
@@ -2004,15 +2004,14 @@ panel) and chat messages (Copy message, and a link in it).
   "reconnecting… (2 min)" with how long; per member force ready, Nudge and Sit
   out (anyone, the host too), your own row Sit out / Join back; at the
   bottom, on yours: not shared, "Only you can reach it" and Invite;
-  shared (`YourInvite`), "Friends join at" with each address of
-  `YourServer.reach` to pick (Internet, Home network, VPN; "Looking up
-  your internet address…" meanwhile), a note for the one picked (the
-  router's address: the port must be forwarded to this computer's home
-  address; this computer's own: a firewall can still block it; home
-  network, VPN: who it works for; no internet address found: forwarding
-  or a server all can reach), "Include the password in the link" (only
-  with a password; off each time the card opens), Copy invite link and
-  Stop sharing; on a friend's, "Copy invite link" (the dialled address
+  shared (`YourInvite`), Copy invite link (filled; the address the app
+  picks, `InviteReach.best`, in its tooltip) and Stop sharing; one line
+  only when something needs the user ("Looking up your internet
+  address…"; the router's address: the port needs forwarding to this
+  computer; no internet address found: the link works on the home network
+  only); "Other addresses" (folded, only with more than one) lists each
+  address of `YourServer.reach` (Internet, Home network, VPN) to pick
+  what Copy copies; on a friend's, "Copy invite link" (the dialled address
   and its name, never a password)).
   Empty strip space is the window
   drag area; the window buttons sit at its end.
@@ -2035,8 +2034,8 @@ panel) and chat messages (Copy message, and a link in it).
   owned by the shell so an attempt and its error outlive the card; the
   version gate's refusal says who has to update and, when it is you,
   offers "Check for the update". The card closes itself once in the
-  friend's server. It says that a friend gives the invite and the
-  password, that no account or Jellyfin is needed and that your own
+  friend's server. It says to paste a friend's invite link (it carries
+  the password) or their address and password, that no account or Jellyfin is needed and that your own
   server stays as it is.
 - **Profile** (`profile_card.dart`, `session/identity.dart`): a card
   tinted with your colour: picture (hover "Change" opens `CropPicker`:

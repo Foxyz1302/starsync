@@ -190,22 +190,21 @@ Your server starts with the app and stops when it closes. Only this app
 can reach it until you press **Invite** (in the strip, or in the member
 list): that opens it on your network at the port from Settings → Party &
 network (default 8080, with the password set there; blank = anyone can
-join) and copies an invite link ("Join me on Starsync:
-starsync://203.0.113.7:8080/?name=… · Starsync 1.3.0") to send to
-friends. Nothing restarts: what plays and Up next carry on, and you are
+join) and copies an invite link (`starsync://203.0.113.7:8080/?name=…`,
+just the link) to send to friends. Nothing restarts: what plays and Up next carry on, and you are
 the host (the crown).
 
 The link carries your internet address when the app can find it (it asks
 a "what is my IP" service such as ipify over HTTPS when you share), else
 this computer's home-network address (not a proxy one, nor a Docker or VM
-bridge). The member list shows every address to pick from: **Internet**
-for friends elsewhere, **Home network** for friends on the same Wi-Fi or
-router, **VPN** (Tailscale and the like). Behind a router, friends
-elsewhere get in only when the TCP port is forwarded on your router to
-this computer (the card says so and names this computer's address); the
-app does not open ports itself. The password is never in the link unless
-you tick **Include the password in the link**; otherwise friends ask you
-for it. Friends open nothing. **Stop sharing** (in the member list)
+bridge). In the member list, **Copy invite link** copies it again;
+**Other addresses** there lets you pick another: **Internet** for friends
+elsewhere, **Home network** for friends on the same Wi-Fi or router,
+**VPN** (Tailscale and the like). Behind a router, friends elsewhere get
+in only when the TCP port is forwarded on your router to this computer
+(the card says so); the app does not open ports itself. The link
+includes the password when one is set, so friends just click it: share
+it only with them. Friends open nothing. **Stop sharing** (in the member list)
 closes it again:
 everyone else leaves (their app goes back to their own server and says
 why), you and Up next stay.

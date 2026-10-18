@@ -36,19 +36,10 @@ class Invite {
   Invite at(String host) =>
       Invite(host: host, port: port, name: name, password: password, version: version, fp: fp);
 
-  /// Its `starsync://` link; the password only when given ([secret]).
+  /// Its `starsync://` link with the server's password ([secret], the
+  /// host's; empty when none is set): what Invite copies, nothing around
+  /// it, so a friend just clicks it.
   InviteLink link({String secret = ''}) => InviteLink(host: host, port: port, name: name, secret: secret);
-
-  /// The text Invite copies: the link, whether to ask for the password
-  /// (not when [secret] puts it in the link), the version to match.
-  String textWith({String secret = ''}) => [
-        'Join me on Starsync: ${link(secret: secret).uri}',
-        if (password && secret.isEmpty) '(ask me for the password)',
-        if (version.isNotEmpty) '· Starsync $version',
-      ].join(' ');
-
-  /// [textWith] without the password.
-  String get text => textWith();
 
   @override
   bool operator ==(Object other) =>
@@ -69,7 +60,7 @@ class Invite {
 
 /// A `starsync://host:port/?name=…&pw=…` invite link (PROTOCOL.md "Invite
 /// link"): where to join, the server's name for the prompt, and the
-/// password when the host chose to put it in. [toString] never shows the
+/// password when the server has one. [toString] never shows the
 /// password; [uri] does.
 class InviteLink {
   final String host;

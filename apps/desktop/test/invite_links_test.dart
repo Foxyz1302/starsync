@@ -56,16 +56,15 @@ void main() {
       expect(InviteLink.parse('starsync://a b:1'), isNull);
     });
 
-    test('the invite copies its link, the password only when asked; old apps still read the address', () {
+    test('the invite is just its link, with the password when one is set', () {
       const invite = Invite(host: '192.168.1.20', port: 8080, name: "Bob's server", password: true, version: '1.3.2');
-      expect(invite.text, contains('(ask me for the password)'));
-      expect(invite.text, isNot(contains('pw=')));
-      final withPw = invite.textWith(secret: 'hunter2');
-      expect(withPw, isNot(contains('ask me')));
-      expect(inviteIn(withPw)?.secret, 'hunter2');
-      expect(inviteIn(withPw)?.name, "Bob's server");
+      final link = invite.link(secret: 'hunter2');
+      expect(link.uri, 'starsync://192.168.1.20:8080/?name=Bob%27s+server&pw=hunter2');
+      expect(inviteIn(link.uri), link);
+      expect(link.toString(), isNot(contains('hunter2')));
+      expect(const Invite(host: '192.168.1.20', port: 8080).link().uri, 'starsync://192.168.1.20:8080');
       // A 1.3.x app pasting it into the Join card's address.
-      expect(addressIn(withPw), (host: '192.168.1.20', port: '8080'));
+      expect(addressIn(link.uri), (host: '192.168.1.20', port: '8080'));
       expect(invite.at('203.0.113.7').address, '203.0.113.7:8080');
     });
 
@@ -172,7 +171,7 @@ void main() {
       offers.fromClipboard('starsync://127.0.0.1:40000');
       expect(offers.offer.peek(), isNull);
       // What this app just copied is not offered back to it.
-      const copied = 'Join me on Starsync: starsync://198.51.100.4:8080';
+      const copied = 'starsync://198.51.100.4:8080';
       offers.copied(copied);
       offers.fromClipboard(copied);
       expect(offers.offer.peek(), isNull);

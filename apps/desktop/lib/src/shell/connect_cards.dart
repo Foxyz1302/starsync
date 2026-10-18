@@ -231,7 +231,7 @@ class JoinCard extends StatelessWidget {
             const Padding(
               padding: EdgeInsets.only(top: 8),
               child: Text(
-                'Your friend gives you their invite (the address) and the password, if any. '
+                'Paste your friend\'s invite link (it carries the password), or their address and password. '
                 'No account or Jellyfin needed. Your own server stays as it is.',
                 style: TextStyle(color: Colors.grey, fontSize: 12),
               ),

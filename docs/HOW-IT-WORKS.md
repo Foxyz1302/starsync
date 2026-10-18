@@ -46,8 +46,9 @@ A five-minute tour. Details: [ARCHITECTURE.md](ARCHITECTURE.md), wire format:
   next episode). Invite opens it to friends on your network (a second
   listener on the same server: nothing restarts, the video and Up next
   carry on) and copies an invite link (`starsync://`, with your internet
-  address when the app finds it); Stop sharing closes it again. A friend
-  clicks the link, or just copies it, and their app asks to join.
+  address when the app finds it and the password when one is set); Stop
+  sharing closes it again. A friend clicks the link, or just copies it,
+  and their app asks to join.
 - **Dedicated server**: `starsync-server`, a separate program in the
   release tarball, for an always-on box. See the README.
 

@@ -14,6 +14,7 @@ import 'package:starsync/src/session/session_coordinator.dart';
 import 'package:starsync/src/state/server_isolate.dart';
 import 'package:sync_relay_server/server.dart' show SyncServer;
 
+import 'package:starsync/src/session/invite.dart' show InviteLink;
 import 'package:starsync/src/session/navigation.dart' show Place;
 
 import 'test_graph.dart';
@@ -166,6 +167,11 @@ void main() {
       final invite = await yours.invite();
       expect(invite.port, port);
       expect(invite.password, isTrue);
+      // The link is the key: the password it was shared with, even when
+      // the setting changes later.
+      graph.forms.form.hostSecret = 'changed';
+      expect(InviteLink.parse(yours.inviteLink(invite))?.secret, 'pw');
+      graph.forms.form.hostSecret = 'pw';
       expect(yours.shared.peek(), invite);
       expect(identical(await yours.invite(), invite), isTrue, reason: 'already shared: the same invite');
 

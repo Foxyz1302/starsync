@@ -629,15 +629,14 @@ starsync://[fe80::1]:8080
 - `name` (optional): the server's name for the prompt before its
   `/health` answers (at most 64 characters are shown, control characters
   dropped).
-- `pw` (optional): the server password, only when the host chose to put
-  it in. Logs never show it (`redactLog` cuts a `starsync://` query to its
+- `pw` (optional): the server password, always there when the server has
+  one: the link is the key, a friend just clicks it. Logs never show it (`redactLog` cuts a `starsync://` query to its
   names).
 - Unknown query keys are ignored; anything else (no host, a port outside
   1–65535) is no link.
-- The text Invite copies is "Join me on Starsync: <link> [(ask me for the
-  password)] · Starsync <version>"; an app also takes a 1.3.x plain
-  invite ("Join me on Starsync: 192.168.1.20:8080 …"), and a 1.3.x app
-  reads the `host:port` out of a link.
+- Invite copies the bare link, nothing around it. An app also takes a
+  1.3.x plain invite ("Join me on Starsync: 192.168.1.20:8080 …"), and a
+  1.3.x app reads the `host:port` out of a link.
 
 ## Queue (proto 12)
 

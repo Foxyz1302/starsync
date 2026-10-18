@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemChannels;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:signals/signals_flutter.dart' show signal;
 import 'package:sync_relay_core/core.dart';
@@ -301,13 +302,12 @@ void main() {
       expect(isFakeIp(InternetAddress('198.20.1.1').rawAddress), isFalse);
     });
 
-    test('an invite: the address, whether to ask for a password, the version; pasted back', () {
+    test('an invite: the address, its link; pasted back', () {
       const invite = Invite(host: '192.168.1.20', port: 8080, password: true, version: '1.3.0');
       expect(invite.address, '192.168.1.20:8080');
-      expect(invite.text,
-          'Join me on Starsync: starsync://192.168.1.20:8080 (ask me for the password) · Starsync 1.3.0');
+      expect(invite.link().uri, 'starsync://192.168.1.20:8080');
       expect(invite.fp, isNull, reason: 'reserved for pinned certificates');
-      expect(addressIn(invite.text), (host: '192.168.1.20', port: '8080'));
+      expect(addressIn(invite.link().uri), (host: '192.168.1.20', port: '8080'));
       expect(addressIn('vps.example.com:9000'), (host: 'vps.example.com', port: '9000'));
       expect(addressIn('[fe80::1]:8080'), (host: 'fe80::1', port: '8080'));
       expect(addressIn('just a host'), isNull);
@@ -367,31 +367,51 @@ void main() {
       yours.reach.value = const InviteReach(local: ['192.168.1.20'], looking: true);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
-      expect(find.text('192.168.1.20:8080'), findsOneWidget);
       expect(find.text('Looking up your internet address…'), findsOneWidget);
       expect(find.text('Copy invite link'), findsOneWidget);
       expect(find.byKey(const ValueKey('stop-sharing')), findsOneWidget);
-      expect(find.textContaining('friends on your network'), findsOneWidget);
-      // No password set: nothing to tick.
-      expect(find.byKey(const ValueKey('invite-with-password')), findsNothing);
+      // One address so far: nothing else to pick, nothing to say.
+      expect(find.byKey(const ValueKey('invite-other-addresses')), findsNothing);
+      expect(find.byKey(const ValueKey('invite-note')), findsNothing);
 
-      // Behind a router: the internet address first, with the forwarding
-      // it needs; the home address stays a choice.
+      // Behind a router: the internet address, one line on forwarding;
+      // the home address waits behind Other addresses.
       yours.shared.value = const Invite(host: '203.0.113.7', port: 8080, version: '1.3.0');
       yours.reach.value = const InviteReach(public: '203.0.113.7', local: ['192.168.1.20']);
       await tester.pumpAndSettle();
-      expect(find.text('203.0.113.7:8080'), findsOneWidget);
-      expect(find.text('192.168.1.20:8080'), findsOneWidget);
-      expect(find.textContaining('port 8080 is forwarded on your router to this computer (192.168.1.20)'),
+      expect(find.text('Looking up your internet address…'), findsNothing);
+      expect(find.text('Friends outside your home network need port 8080 forwarded to this computer.'),
           findsOneWidget);
+      expect(find.text('192.168.1.20:8080'), findsNothing);
+      Future<String?> copy() async {
+        String? copied;
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.setData') copied = (call.arguments as Map)['text'] as String;
+          return null;
+        });
+        addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+        await tester.tap(find.byKey(const ValueKey('copy-invite')));
+        await tester.pumpAndSettle();
+        return copied;
+      }
+
+      // Just the link, nothing around it.
+      expect(await copy(), matches(RegExp(r'^starsync://203\.0\.113\.7:8080(/\?name=\S+)?$')));
+
+      await tester.tap(find.byKey(const ValueKey('invite-other-addresses')));
+      await tester.pumpAndSettle();
+      expect(find.text('203.0.113.7:8080'), findsOneWidget);
       await tester.tap(find.text('192.168.1.20:8080'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('friends on your network'), findsOneWidget);
+      expect(find.byKey(const ValueKey('invite-note')), findsNothing, reason: 'home network picked');
+      expect(await copy(), startsWith('starsync://192.168.1.20:8080'));
 
-      // No internet address found: say what friends elsewhere need.
+      // No internet address found: one line saying so.
       yours.reach.value = const InviteReach(local: ['192.168.1.20']);
       await tester.pumpAndSettle();
-      expect(find.textContaining('VPS'), findsOneWidget);
+      expect(find.textContaining("Couldn't find your internet address"), findsOneWidget);
+      expect(_graph.notifier.toasts.peek().map((t) => t.text), contains('Invite link copied'));
+      await tester.pump(const Duration(seconds: 6)); // the toasts go
     });
   });
 }

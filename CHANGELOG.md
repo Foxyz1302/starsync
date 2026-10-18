@@ -14,9 +14,8 @@ Links you put up are downloaded once for everyone, quick chat and danmaku in the
 - What's new: the update band shows what changed, and after an update the app shows the full list once (also in Settings → About)
 - Update channel in Settings → Updates: Stable, or Dev for test builds; Dev stays on test builds after a release and still gets the newer release when there is one
 - Sharper subtitles and picture: the video and its subtitles are drawn at your screen's resolution instead of the video's (Settings → Player → Sharp video and subtitles, on by default)
-- Invite links: Invite copies a starsync:// link; a friend clicks it (or just copies it and switches to Starsync) and the app asks "Join Bob's server?"
-- Invite finds your internet address, lets you pick it or your home-network address, and says when your router needs the port forwarded
-- The password goes into an invite link only when you tick "Include the password in the link"
+- Invite links: Invite copies just a starsync:// link, password included, so a friend just clicks it (or copies it and switches to Starsync) and the app asks "Join Bob's server?"
+- Invite finds your internet address on its own and says when your router needs the port forwarded; Other addresses picks your home-network or VPN address instead
 - Starsync runs once: a link clicked while it is open goes to the open window
 - Quick chat: press Enter in the big player to type a message in a small box at the bottom, without opening the chat panel and without the mouse pointer or the controls popping up; it shares its draft with the chat panel, closes by itself when you stop typing, and subtitles move up out of its way
 - Danmaku notifications: chat, joins, leaves and Up next can fly across the top of the picture instead of popping up (Settings → Notifications & sounds → Notifications: Danmaku, off by default), with speed, how many at once, where, opacity, size, boldness, outline and avatars all adjustable and a live preview

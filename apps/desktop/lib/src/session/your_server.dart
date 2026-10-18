@@ -98,6 +98,13 @@ class YourServer {
   /// An [invite] or [stopSharing] is under way.
   final busy = signal(false);
 
+  /// The password the server was shared with (empty: none).
+  String _secret = '';
+
+  /// What Invite copies: [invite]'s bare `starsync://` link with the
+  /// password the server was shared with, so a friend just clicks it.
+  String inviteLink(Invite invite) => invite.link(secret: _secret).uri;
+
   /// Set when the server died without being stopped; the shell says so
   /// and clears it. The next [start] makes a new one.
   final crash = signal<String?>(null);
@@ -171,13 +178,15 @@ class YourServer {
       final form = forms.form;
       final want = int.tryParse(form.hostPort.trim()) ?? 8080;
       await _accounts.ensureLoaded(validate: false);
+      final secret = form.hostSecret;
       final bound = await server.share(
         port: want,
-        secret: form.hostSecret,
+        secret: secret,
         // Guests without an account watch Jellyfin items through the
         // server, with this app's own sign-in on the item's server.
         jellyfin: relayCredentialsFor(_accounts),
       );
+      _secret = secret;
       final local = inviteAddresses(await _interfaces());
       final gen = ++_shareGen;
       reach.value = InviteReach(local: local, looking: true);
@@ -185,7 +194,7 @@ class YourServer {
       // The internet address when it comes quickly; else a local one now
       // and the internet one when it lands.
       final public = await lookup.timeout(publicWait, onTimeout: () => null);
-      final invite = inviteFor(bound, password: form.hostSecret.isNotEmpty, host: reach.peek()?.best);
+      final invite = inviteFor(bound, password: secret.isNotEmpty, host: reach.peek()?.best);
       shared.value = invite;
       if (public == null) {
         unawaited(lookup.then((ip) {
