@@ -196,7 +196,7 @@ class UpdateSettings extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        UpdateChannelSetting(controller: c),
+        UpdateChannelSetting(controller: c, settings: s),
         SignalBuilder(
           builder: (context) => SwitchListTile(
             key: const ValueKey('auto-check-updates'),
@@ -216,11 +216,11 @@ class UpdateSettings extends StatelessWidget {
 /// to go back to the latest release now when that one is older.
 class UpdateChannelSetting extends StatelessWidget {
   final UpdateController controller;
-  final AppSettings? settings;
-  const UpdateChannelSetting({super.key, required this.controller, this.settings});
+  final AppSettings settings;
+  const UpdateChannelSetting({super.key, required this.controller, required this.settings});
 
   Future<void> _choose(BuildContext context, UpdateChannel ch) async {
-    final s = settings ?? AppSettings.instance;
+    final s = settings;
     if (ch == s.updateChannel.peek()) return;
     s.setUpdateChannel(ch);
     if (ch == UpdateChannel.stable && isDevBuild(controller.currentVersion)) {
@@ -258,7 +258,7 @@ class UpdateChannelSetting extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = settings ?? AppSettings.instance;
+    final s = settings;
     return SignalBuilder(builder: (context) {
       final ch = s.updateChannel.value;
       return ListTile(
