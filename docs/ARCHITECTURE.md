@@ -1284,10 +1284,21 @@ all three link modes. Nothing is bundled or installed by hand.
   `swapLink` refuses it the same way for any other caller.
 - **Everyone fetches it**: the swap sends the page URL. Every app
   resolves it with its own yt-dlp (the media pipeline's resolve step,
-  `LinkResolver.probe`, waiting for the download on first use) and opens
-  what yt-dlp picked (`YtDlpPlay.mpvUrl`) with its headers as mpv's
+  `LinkResolver.probe`, waiting for the download on first use). A page
+  whose relay tracks are plain files (`SharedLinks.fits`) plays through
+  a reader of this app's own, as alone with no relay
+  (`SharedLinks.local`: a `SharedSource` without the upload, "Read once"
+  under "Relay"): its tracks with yt-dlp's headers and cookies, resumed
+  after a cut, backed off on 412/429/5xx, the page resolved again on
+  403/410/412, so a CDN cutting a long read (Bilibili: "Stream ends
+  prematurely", then a refused reconnect that ffmpeg treats as fatal)
+  never reaches the player. The reader is opened with its sizes (15 s);
+  one that cannot (a refusal, a pieces track, a live stream) leaves the
+  player on what yt-dlp picked (`YtDlpPlay.mpvUrl`) with its headers as mpv's
   `http-header-fields` (media_kit's `Media.httpHeaders`), for every
-  track of the EDL: Bilibili's CDN answers 403 without the Referer. Its
+  track of the EDL: Bilibili's CDN answers 403 without the Referer. The
+  session player's and the preload's readers stay, any other closes
+  (`trimLocal`); Reload video makes a new one. Its
   subtitles are added once the media is in (`sub-add <url> auto`). mpv's
   own Lua yt-dlp hook is off (`ytdl=no`): one resolve path for every mode,
   cookies and headers always the app's, and a libmpv without Lua plays

@@ -20,6 +20,8 @@ class SharedLink {
 /// Each one's player opens [SharedSource.playerUrl] and its relay serves
 /// [SharedSource.upload]. A page with a pieces track (HLS/DASH) is not
 /// shared ([fits]): its player and relay keep their own fetches.
+/// Page links played here only ([local]) get a reader of their own too,
+/// for its resume after cuts.
 class SharedLinks {
   SharedLink? _current;
   ({String queueId, SharedLink link})? _warm;
@@ -146,6 +148,57 @@ class SharedLinks {
   /// [url] is shared here (the current media's or the warm one).
   bool has(String url) => _current?.url == url || _warm?.link.url == url;
 
+  // Page links this app plays without passing them on (alone, or
+  // everyone fetches it), by page URL: the session player's and the
+  // preload's.
+  final _local = <String, Future<SharedLink?>>{};
+
+  /// A page link played here only: read through its own [SharedSource]
+  /// over [media] too, so the player gets the reader's resume after a cut,
+  /// back-off and fresh address (403/410/412) instead of ffmpeg's
+  /// reconnect, which a CDN like Bilibili cuts off for good. The one [url]
+  /// has is kept unless [fresh]. Null when the page does not fit ([fits]:
+  /// a pieces track) or the reader cannot open it: the player reads the
+  /// site itself. [trimLocal] closes the ones no longer needed.
+  Future<SharedLink?> local(String url, LinkProbe probe, RelayMedia Function() media,
+      {bool fresh = false, Duration timeout = const Duration(seconds: 15)}) {
+    final had = _local[url];
+    if (had != null && !fresh) return had;
+    if (had != null) _local.remove(url)!.then((l) => l?.source.close());
+    if (!fits(probe)) return Future.value();
+    Future<SharedLink?> make() async {
+      final s = SharedSource(media());
+      try {
+        // The sizes too: a format URL the site refuses (403) fails here,
+        // and the player then gets the site's own answer.
+        await s.start().timeout(timeout);
+        return SharedLink(url, s, subtitles: _subs(probe));
+      } catch (e) {
+        _log.info('link ${logUrl(url)} read by the player itself: $e');
+        unawaited(s.close());
+        return null;
+      }
+    }
+
+    final f = _local[url] = make();
+    unawaited(f.then((l) {
+      if (l == null && identical(_local[url], f)) _local.remove(url);
+    }));
+    return f;
+  }
+
+  /// [url] is read here through a [local] reader.
+  bool hasLocal(String url) => _local.containsKey(url);
+
+  /// Closes the [local] readers of every URL but [keep] (the player's and
+  /// the preload's).
+  void trimLocal(Set<String?> keep) {
+    for (final url in [..._local.keys]) {
+      if (keep.contains(url)) continue;
+      unawaited(_local.remove(url)!.then((l) => l?.source.close()));
+    }
+  }
+
   Future<void> closeCurrent() async {
     final c = _current;
     _current = null;
@@ -156,6 +209,7 @@ class SharedLinks {
   Future<void> closeAll() async {
     _dropPending();
     dropWarm();
+    trimLocal(const {});
     await closeCurrent();
   }
 }

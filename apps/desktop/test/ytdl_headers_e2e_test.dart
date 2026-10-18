@@ -34,6 +34,14 @@ class _Cdn {
   final Map<String, String> _files;
   int ok = 0, forbidden = 0;
   final cookies = <String?>[];
+  final agents = <String?>[];
+
+  /// Like Bilibili cutting a long read: a response stops after this many
+  /// bytes (the connection dropped), and the next request after a cut is
+  /// refused with 412 (where ffmpeg's reconnect gives up). Null: whole.
+  int? cutAfter;
+  bool _cut = false;
+  int cuts = 0, refused = 0;
 
   String url(String name) => 'http://127.0.0.1:${_server.port}/$name';
 
@@ -61,12 +69,21 @@ class _Cdn {
       await res.close();
       return;
     }
+    if (_cut) {
+      _cut = false;
+      refused++;
+      res.statusCode = HttpStatus.preconditionFailed;
+      await res.close();
+      return;
+    }
     ok++;
     cookies.add(req.headers.value('cookie'));
+    agents.add(req.headers.value('user-agent'));
     final bytes = await File(file).readAsBytes();
     var start = 0, end = bytes.length - 1;
     final range = RegExp(r'bytes=(\d*)-(\d*)').firstMatch(req.headers.value('range') ?? '');
     res.headers.set('accept-ranges', 'bytes');
+    res.headers.contentType = ContentType('video', 'mp4');
     if (range != null) {
       start = int.tryParse(range[1]!) ?? 0;
       end = int.tryParse(range[2]!) ?? end;
@@ -74,6 +91,23 @@ class _Cdn {
       res.headers.set('content-range', 'bytes $start-$end/${bytes.length}');
     }
     res.contentLength = end - start + 1;
+    final cut = cutAfter;
+    if (cut != null && end - start + 1 > cut) {
+      // Headers by hand on the raw socket, part of the body, then dropped.
+      final socket = await res.detachSocket(writeHeaders: false);
+      final status = range == null ? '200 OK' : '206 Partial Content';
+      socket.add(utf8.encode('HTTP/1.1 $status\r\naccept-ranges: bytes\r\ncontent-type: video/mp4\r\n'
+          '${range == null ? '' : 'content-range: bytes $start-$end/${bytes.length}\r\n'}'
+          'content-length: ${end - start + 1}\r\nconnection: close\r\n\r\n'));
+      socket.add(bytes.sublist(start, start + cut));
+      _cut = true;
+      cuts++;
+      try {
+        await socket.flush();
+      } catch (_) {}
+      socket.destroy();
+      return;
+    }
     res.add(bytes.sublist(start, end + 1));
     await res.close();
   }
@@ -88,16 +122,19 @@ Future<AppYtDlp> _fakeYtDlp(_Cdn cdn, {required bool headers, bool fail = false}
   if (dir.existsSync()) dir.deleteSync(recursive: true);
   dir.createSync(recursive: true);
   final h = headers ? {'Referer': _referer, 'User-Agent': 'fake-agent'} : <String, String>{};
+  final formats = [
+    {'format_id': 'v', 'url': cdn.url('v.m4s'), 'protocol': 'https', 'ext': 'mp4',
+      'vcodec': 'avc1.64001F', 'acodec': 'none', 'width': 320, 'height': 180, 'http_headers': h,
+      'cookies': 'SESSDATA=abc; Domain=.127.0.0.1; Path=/'},
+    {'format_id': 'a', 'url': cdn.url('a.m4s'), 'protocol': 'https', 'ext': 'm4a',
+      'vcodec': 'none', 'acodec': 'mp4a.40.2', 'http_headers': h,
+      'cookies': 'SESSDATA=abc; Domain=.127.0.0.1; Path=/'},
+  ];
   final json = jsonEncode({
     'id': 'BV1', 'title': 'Fake page', 'duration': 30, 'extractor': 'fake',
     'format_id': 'v+a', 'ext': 'mp4',
-    'requested_formats': [
-      {'format_id': 'v', 'url': cdn.url('v.m4s'), 'protocol': 'https', 'ext': 'mp4',
-        'vcodec': 'avc1.64001F', 'acodec': 'none', 'width': 320, 'height': 180, 'http_headers': h,
-        'cookies': 'SESSDATA=abc; Domain=.127.0.0.1; Path=/'},
-      {'format_id': 'a', 'url': cdn.url('a.m4s'), 'protocol': 'https', 'ext': 'm4a',
-        'vcodec': 'none', 'acodec': 'mp4a.40.2', 'http_headers': h},
-    ],
+    'formats': formats,
+    'requested_formats': formats,
     'requested_subtitles': {
       'en': {'url': cdn.url('en.vtt'), 'ext': 'vtt', 'name': 'English'},
       'danmaku': {'url': cdn.url('danmaku.xml'), 'ext': 'xml'},
@@ -124,8 +161,9 @@ void main() {
   tearDownAll(() => server.close(force: true));
 
   // A page "everyone fetches" opens through the app's own resolve: its
-  // stream URLs (an EDL of video + audio) with the CDN's headers; mpv's
-  // yt-dlp hook is off.
+  // stream URLs (video + audio) read by the app's own reader
+  // (SharedLinks.local) with the CDN's headers and cookies, mpv on its
+  // loopback EDL; mpv's yt-dlp hook is off.
   test(
     "a page plays from yt-dlp's stream URLs with each CDN's Referer and the cookies; subtitles but danmaku",
     timeout: const Timeout(Duration(minutes: 1)),
@@ -146,6 +184,8 @@ void main() {
         expect(cdn.forbidden, 0, reason: 'every request had the Referer');
         expect(cdn.ok, greaterThanOrEqualTo(2));
         expect(cdn.cookies, everyElement('SESSDATA=abc'));
+        expect(m.shared.hasLocal(cdn.page('BV1fake')), isTrue);
+        expect(cdn.agents, everyElement(startsWith('fake-agent')), reason: 'the reader sends the format\'s headers');
         expect(cdn.subtitles, 1, reason: 'the page\'s subtitles are added, danmaku is not');
         await _until(() => p.tracks.peek().any((t) => t.isExternal), 'the subtitle track listed');
       } finally {
@@ -185,6 +225,43 @@ void main() {
     skip: Platform.isLinux ? false : 'fake yt-dlp is a shell script',
   );
 
+  // Bilibili cuts a long read and refuses the reconnect right after it
+  // (412): ffmpeg's own reconnect ends playback there ("Stream ends
+  // prematurely", "Operation not permitted"); the reader resumes after a
+  // back-off and the player never sees the cut.
+  test(
+    'a CDN that cuts reads and refuses the reconnect (412): played to the end without an error',
+    timeout: const Timeout(Duration(minutes: 1)),
+    () async {
+      final m = MediaPipeline(host: MediaKitHost()..init(), links: await _fakeYtDlp(cdn, headers: true));
+      final p = m.playback;
+      final errors = <String>[];
+      p.onLoadError = errors.add;
+      m.onError = (raw, {cookies}) => errors.add(raw);
+      cdn.cutAfter = 48 * 1024;
+      final cutsBefore = cdn.cuts;
+      try {
+        await m.start();
+        final page = cdn.page('BV4fake');
+        expect(await m.open(page), isTrue);
+        await _until(() => p.duration.peek() > Duration.zero, 'opened', secs: 20);
+        await p.player.setProperty('speed', '8');
+        await p.player.play();
+        await _until(() => p.positionSecs > 25 || p.player.state.completed, 'played to the end', secs: 30);
+        // ignore: avoid_print
+        print('cuts: ${cdn.cuts - cutsBefore}, refused: ${cdn.refused}, errors: $errors');
+        expect(cdn.cuts - cutsBefore, greaterThan(2), reason: 'the CDN did cut');
+        expect(cdn.refused, greaterThan(0));
+        expect(errors, isEmpty);
+        expect(m.shared.hasLocal(page), isTrue);
+      } finally {
+        cdn.cutAfter = null;
+        await m.dispose();
+      }
+    },
+    skip: Platform.isLinux ? false : 'fake yt-dlp is a shell script',
+  );
+
   // D11: yt-dlp finds no video; the error names the cookies it used.
   test('a page yt-dlp finds no video on: the error says which cookies were used', () async {
     final m = MediaPipeline(host: MediaKitHost()..init(), links: await _fakeYtDlp(cdn, headers: true, fail: true));
@@ -203,8 +280,8 @@ void main() {
   }, skip: Platform.isLinux ? false : 'fake yt-dlp is a shell script');
 }
 
-Future<void> _until(bool Function() cond, String what) async {
-  final end = DateTime.now().add(const Duration(seconds: 10));
+Future<void> _until(bool Function() cond, String what, {int secs = 10}) async {
+  final end = DateTime.now().add(Duration(seconds: secs));
   while (!cond()) {
     if (DateTime.now().isAfter(end)) fail('timed out waiting for $what');
     await Future.delayed(const Duration(milliseconds: 100));

@@ -35,6 +35,7 @@ Links you put up are downloaded once for everyone, quick chat and danmaku in the
 - Relay: gentler retries, so Bilibili stops blocking the server
 - Relay: a source that refuses the old link (412) gets a fresh address and keeps playing
 - Chat pop-ups stay away while the chat panel is open (the sound still plays)
+- Bilibili and other sites no longer stop a video halfway when you watch alone or with "Everyone fetches it": a cut connection picks up where it left off
 
 ## 1.3.2
 

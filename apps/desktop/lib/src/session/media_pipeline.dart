@@ -233,8 +233,23 @@ class MediaPipeline {
       throw ResolveFailure(probe.ytDlpError ?? (probe.info == null ? 'Not a video page yt-dlp knows' : 'no format a player opens'),
           cookies: probe.cookies);
     }
+    if (headers == null || headers.isEmpty) {
+      // Played here only: through a reader of its own too, which resumes
+      // after a cut and gets a fresh address (a CDN cuts mpv's reconnects
+      // off). Pieces tracks, or a reader that cannot open: the site as is.
+      final y = await l.ytDlp;
+      final local =
+          await shared.local(url, probe, () => LinkRelayMedia(Uri.parse(url), ytDlp: y, probe: probe), fresh: fresh);
+      if (local != null) {
+        return _Target(local.source.playerUrl, const {}, subtitles: local.subtitles, shared: true, local: true);
+      }
+    }
     return _Target(play.mpvUrl, {...play.headers, ...?headers}, subtitles: play.subtitles);
   }
+
+  /// The [SharedLinks.local] readers the player and the preload use stay;
+  /// the rest close.
+  void _trimLocal() => shared.trimLocal({_openUrl, _pre?.url});
 
   /// The page's subtitles on [p] once its media is in (not selected: the
   /// usual choice applies).
@@ -303,6 +318,7 @@ class MediaPipeline {
     _openHeaders = headers;
     _openResolve = resolve;
     _opening = true;
+    _trimLocal();
     try {
       trace.mark(mediaId, SwitchTrace.open);
       final promoted = await _openInPlayer(url, headers,
@@ -360,6 +376,7 @@ class MediaPipeline {
     }
     if (headers != null && headers.isNotEmpty) return 'Jellyfin, own sign-in';
     if (shared.has(url)) return 'link passed on, read once here';
+    if (shared.hasLocal(url)) return 'link, read here with resume';
     return 'link, fetched here';
   }
 
@@ -465,6 +482,7 @@ class MediaPipeline {
     _openUrl = null;
     _openHeaders = null;
     await playback.stop();
+    _trimLocal();
   }
 
   /// The same media came back as [r.mediaId] (a restarted server put back
@@ -546,6 +564,7 @@ class MediaPipeline {
     _openHeaders = null;
     _recovery = null;
     if (ready) await playback.stop();
+    _trimLocal();
   }
 
   /// The next state's media is new to this player: it opens again from
@@ -794,9 +813,10 @@ class MediaPipeline {
     _pre = null;
     if (had != null) unawaited(_disposePrepared(had));
     final pre = _pre = _Prepared(url, headers ?? const {});
+    _trimLocal();
     try {
       final target = await _resolve(url, headers, fresh: fresh);
-      pre.shared = target.shared;
+      pre.shared = target.shared && !target.local;
       if (!identical(_pre, pre)) {
         pre.fail();
         return false;
@@ -857,6 +877,7 @@ class MediaPipeline {
     await pre.logSub?.cancel();
     final p = pre.player;
     if (p != null) await host.dispose(p);
+    if (!identical(_pre, pre)) _trimLocal();
   }
 
   /// [pre] becomes the session player; its buffer comes along.
@@ -935,7 +956,10 @@ class _Target {
 
   /// A link this member passes on, read through its shared reader.
   final bool shared;
-  const _Target(this.url, this.headers, {this.subtitles = const [], this.shared = false});
+
+  /// Read through a [SharedLinks.local] reader (played here only).
+  final bool local;
+  const _Target(this.url, this.headers, {this.subtitles = const [], this.shared = false, this.local = false});
 }
 
 /// A page could not be resolved: why ([message], yt-dlp's words) and which
