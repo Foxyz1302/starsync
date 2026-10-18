@@ -161,6 +161,14 @@ class MinimalControls extends StatelessWidget {
         ),
         UpNextButton(queue: m.queue, look: UpNextLook.minimal, hold: hold),
         const SizedBox(width: 4),
+        Builder(
+          builder: (context) => MinimalButton(
+            key: const ValueKey('controls-more'),
+            icon: moreIcon,
+            tooltip: moreTooltip,
+            onPressed: () => openMoreMenu(context, m),
+          ),
+        ),
         SignalBuilder(
           builder: (context) {
             final full = m.fullscreen.value;
@@ -236,14 +244,12 @@ class MinimalControls extends StatelessWidget {
           ),
         );
       case BarControl.settings:
-        return Builder(
+        return MinimalButton(
           key: key,
-          builder: (context) => MinimalButton(
-            icon: controlIcon(c, s),
-            tooltip: controlTooltip(c, s),
-            scale: scale,
-            onPressed: () => openControlsMenu(context, m),
-          ),
+          icon: controlIcon(c, s),
+          tooltip: controlTooltip(c, s),
+          scale: scale,
+          onPressed: m.togglePanel,
         );
       case BarControl.chat:
         return SignalBuilder(

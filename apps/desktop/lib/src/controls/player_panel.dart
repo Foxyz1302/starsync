@@ -17,7 +17,7 @@ import 'model/controls_prefs.dart';
 import 'player_settings.dart' show applyHwdecLive, applyShaderChoice;
 import 'volume.dart' as vol;
 
-// The player panel (⚙ → Player settings, both skins): a narrow glass
+// The player panel (⚙ in the bar, both skins): a narrow glass
 // column docked at the right edge of the full player that stays open
 // while the controls hide and show, until its × or Esc. What is useful
 // while watching, in collapsible sections: sound first (the video's
@@ -88,10 +88,10 @@ class PlayerPanel extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 8, 6, 2),
               child: Row(
                 children: [
-                  const Icon(Icons.tune_rounded, size: 18, color: Colors.white70),
+                  const Icon(Icons.settings_outlined, size: 18, color: Colors.white70),
                   const SizedBox(width: 10),
                   const Expanded(
-                    child: Text('Player', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    child: Text('Player settings', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                   ),
                   IconButton(
                     key: const ValueKey('player-panel-close'),
@@ -221,7 +221,8 @@ class PlayerPanel extends StatelessWidget {
                               padding: const EdgeInsets.symmetric(horizontal: 8),
                             ),
                             onPressed: () => open(_lastUsed),
-                            icon: const Icon(Icons.settings_outlined, size: 16),
+                            iconAlignment: IconAlignment.end,
+                            icon: const Icon(Icons.chevron_right_rounded, size: 18),
                             label: const Text('All settings'),
                           ),
                         const MarkProblemButton(),

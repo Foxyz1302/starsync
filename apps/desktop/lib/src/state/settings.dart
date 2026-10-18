@@ -123,7 +123,7 @@ class AppSettings {
   final controlsSize = signal(ControlsSize.normal);
   /// Seconds without mouse movement before the controls hide.
   final controlsHideSecs = signal(defaultControlsHideSecs);
-  /// Optional bar buttons switched off (they stay in ⚙).
+  /// Optional bar buttons switched off (they stay in the top bar's ⋯).
   final hiddenControls = signal<Set<OptionalControl>>(const {});
   /// Library: leave out of "Latest in X" what was added long after it
   /// first aired (re-uploads, old seasons added late).

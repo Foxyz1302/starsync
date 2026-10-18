@@ -7,7 +7,7 @@ import '../app/app_graph.dart';
 import '../widgets/app_menu.dart' show AppGlass;
 import 'motion.dart';
 
-// "Mark a problem" (Ctrl+Shift+B, the player's ⚙, Settings → About): a
+// "Mark a problem" (Ctrl+Shift+B, the player's ⋯, Settings → About): a
 // marker line in the server's session log at this moment, with an
 // optional short note, so whoever reads the log finds the spot.
 
@@ -94,7 +94,7 @@ class _MarkProblemCardState extends State<MarkProblemCard> {
   }
 }
 
-/// "Mark a problem" as a quiet row button (the ⚙ card, Settings → About).
+/// "Mark a problem" as a quiet row button (the player panel, Settings → About).
 class MarkProblemButton extends StatelessWidget {
   final bool outlined;
   const MarkProblemButton({super.key, this.outlined = false});

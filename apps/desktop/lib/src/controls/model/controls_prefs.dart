@@ -45,7 +45,7 @@ enum ControlsSize {
   const ControlsSize(this.label, this.scale);
 }
 
-/// Bar buttons the user may hide; hidden ones are still in ⚙.
+/// Bar buttons the user may hide; hidden ones are in the top bar's ⋯ menu.
 enum OptionalControl {
   chapters('Chapter buttons', 'Previous / next chapter (PgUp / PgDn)'),
   subtitles('Subtitles', 'The subtitle track list'),

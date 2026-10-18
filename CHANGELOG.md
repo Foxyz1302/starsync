@@ -16,6 +16,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 - The volume slider now stays next to the speaker in the player (in a narrow window it still slides out when you point at the speaker)
 - The player panel opens with Sound: the video's volume and App sounds (how loud the app's own cues are, so the two are no longer confused); its All settings button opens the matching Settings page
+- ⚙ in the player now opens and closes the player settings panel directly. Change video, Copy link, Reload video, Skip 1:30, Chapters, Mark everyone ready, Mark a problem and Leave server moved to a new ⋯ button in the player's top bar ("Video and session"), next to Up next. The shader is picked in the panel (or with Ctrl+0…6)
 - Joining without a name no longer stops with an error: the app asks "Wait, what do we call you?" right there (your computer's user name to start with, plus picture and colour), and OK carries on with the join
 - In fullscreen the party's avatars come up with the controls, also while the video plays, and work like the ones in the strip: hover for names, click for who is in the server
 - A message sent from the quick chat box now shows as your own chat bubble with everyone else's, instead of a separate echo where the box was

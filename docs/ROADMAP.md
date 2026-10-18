@@ -233,14 +233,10 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
 
 What is where, what you see first, what is folded. Each setting has one
 home in Settings; the player panel is the watching subset, drawn with the
-same widgets; common rows first, the rest under "More". In three steps:
-1. **⚙ is settings**: ⚙ opens and closes the panel ("Player settings").
-   The actions (Change video, Copy link, Reload, Skip 1:30, Chapters, Mark
-   everyone ready, Mark a problem, Leave) move to a ⋯ in the top bar
-   ("Video and session"), next to the title and Up next.
-2. **One widget per setting**: shared widgets (dense in the panel) replace
+same widgets; common rows first, the rest under "More". In two steps:
+1. **One widget per setting**: shared widgets (dense in the panel) replace
    the panel's own rows; the same label everywhere.
-3. **Sections**: Player · Party (absorbs Profile: picture, name and colour
+2. **Sections**: Player · Party (absorbs Profile: picture, name and colour
    edited in place; Away; Your server; Recent servers) · Notifications &
    sounds (Over the video: toasts or danmaku, chat pop-ups, joins and
    leaves; Sounds) · Library & accounts (Jellyfin, AnimeFlow, Web links:

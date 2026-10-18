@@ -220,7 +220,7 @@ void main() {
 
     testWidgets('Player: the card\'s rows, a pointer to it, and the controls\' choices', (tester) async {
       await pumpSettings(tester, SettingsSection.player, size: const Size(1280, 2400));
-      expect(find.textContaining('also in the player: ⚙ → Player settings'), findsOneWidget);
+      expect(find.textContaining('also in the player: ⚙ in the bar'), findsOneWidget);
       for (final key in [
         'player-design',
         'progress-line',

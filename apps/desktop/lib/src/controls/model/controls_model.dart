@@ -98,6 +98,7 @@ class PlayerControlsModel {
       hasLink: coord.serverState.value != null && coord.currentLink() != null,
       fullscreen: fullscreen.value,
       chatOpen: chatOpen.value,
+      panelOpen: panelOpen.value,
     );
   });
 
@@ -106,7 +107,7 @@ class PlayerControlsModel {
     () => barControls(snapshot.value, settings.hiddenControls.value),
   );
 
-  /// What the ⚙ menu lists now.
+  /// What the top bar's ⋯ menu lists now.
   List<ControlAction> menu() => menuActions(snapshot.peek(), settings.hiddenControls.peek());
 
   /// Ticks on each wheel / key volume step: the skins flash the volume.
@@ -115,8 +116,8 @@ class PlayerControlsModel {
   /// A menu of the controls is open (the player's Esc closes it).
   int menusOpen = 0;
 
-  /// The player panel docked at the right (⚙ → Player settings; Esc or
-  /// its × closes it). Stays open while the controls hide and show.
+  /// The player panel docked at the right (⚙ opens and closes it; so do
+  /// Esc and its ×). Stays open while the controls hide and show.
   final panelOpen = signal(false);
 
   void togglePanel() => panelOpen.value = !panelOpen.peek();

@@ -152,7 +152,7 @@ class HideDelaySetting extends StatelessWidget {
   }
 }
 
-/// One optional bar button on or off (off: it is still in ⚙). Live.
+/// One optional bar button on or off (off: it is still in ⋯). Live.
 class BarButtonSetting extends StatelessWidget {
   final OptionalControl control;
   const BarButtonSetting({super.key, required this.control});
@@ -365,7 +365,7 @@ List<Widget> controlsSettingRows() => [
   const HideDelaySetting(),
   const Padding(
     padding: EdgeInsets.only(top: 10, bottom: 2),
-    child: Text('Buttons in the bar (hidden ones stay in ⚙)', style: TextStyle(fontWeight: FontWeight.w600)),
+    child: Text('Buttons in the bar (hidden ones stay in ⋯)', style: TextStyle(fontWeight: FontWeight.w600)),
   ),
   for (final c in OptionalControl.values) BarButtonSetting(control: c),
 ];

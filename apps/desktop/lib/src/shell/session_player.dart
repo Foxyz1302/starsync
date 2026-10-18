@@ -504,7 +504,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
         ),
       );
 
-  /// The player panel docked at the right (⚙ → Player settings), between
+  /// The player panel docked at the right (⚙ in the bar), between
   /// the top bar and the control bar; it stays while they hide.
   Widget _playerPanel() => Positioned(
         right: _edge,

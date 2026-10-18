@@ -179,6 +179,16 @@ class StandardControls extends StatelessWidget {
       children: [
         const Expanded(child: NowPlayingTitle()),
         UpNextButton(queue: m.queue, look: UpNextLook.standard, hold: hold),
+        ExcludeFocus(
+          child: Builder(
+            builder: (context) => _IconButton(
+              key: const ValueKey('controls-more'),
+              icon: moreIcon,
+              tooltip: moreTooltip,
+              onPressed: () => openMoreMenu(context, m),
+            ),
+          ),
+        ),
         SignalBuilder(
           builder: (context) {
             final full = m.fullscreen.value;
@@ -260,14 +270,12 @@ class StandardControls extends StatelessWidget {
           ),
         );
       case BarControl.settings:
-        return Builder(
+        return _IconButton(
           key: key,
-          builder: (context) => _IconButton(
-            icon: controlIcon(c, s),
-            tooltip: controlTooltip(c, s),
-            size: 22 * scale,
-            onPressed: () => openControlsMenu(context, m),
-          ),
+          icon: controlIcon(c, s),
+          tooltip: controlTooltip(c, s),
+          size: 22 * scale,
+          onPressed: m.togglePanel,
         );
       case BarControl.chat:
         return SignalBuilder(

@@ -4,10 +4,11 @@ import '../../playback/media_marks.dart' show formatClock;
 import 'controls_prefs.dart';
 
 // The controls layout, defined once for both skins: which controls the
-// bottom bar has, in which order, which actions sit in the ⚙ menu instead,
-// and their icons, tooltips and labels. Pure: everything here is a
-// function of a [ControlsSnapshot] and the user's choices, so tests cover
-// it without a player.
+// bottom bar has, in which order, which actions sit in the top bar's ⋯
+// menu ("Video and session") instead, and their icons, tooltips and
+// labels. ⚙ is the player panel. Pure: everything here is a function of a
+// [ControlsSnapshot] and the user's choices, so tests cover it without a
+// player.
 
 /// What playback does as this viewer sees it. In a server "play" is being
 /// ready: the video plays once everyone is.
@@ -41,26 +42,25 @@ enum BarControl {
   subtitles,
   audio,
 
-  /// ⚙: everything that is not a bar button.
+  /// ⚙: opens and closes the player panel.
   settings,
   chat,
   fullscreen,
 }
 
-/// An action in the ⚙ menu.
+/// An action in the top bar's ⋯ menu: what plays and the server, then
+/// the bar buttons the user hid.
 enum ControlAction {
-  chapters('Chapters…', null),
-  subtitles('Subtitles…', null),
-  audio('Audio…', null),
-  skipForward('Skip 1:30', 'Shift+Right'),
-  shaders('Upscaling shader…', 'Ctrl+0…6'),
-  chat('Chat & activity', 'Tab'),
   changeVideo('Change video', null),
   copyLink('Copy link', null),
   reload('Reload video', 'Ctrl+R'),
+  skipForward('Skip 1:30', 'Shift+Right'),
+  chapters('Chapters…', 'PgUp / PgDn'),
+  subtitles('Subtitles…', null),
+  audio('Audio…', null),
+  chat('Chat & activity', 'Tab'),
   markAllReady('Mark everyone ready', null),
   markProblem('Mark a problem', 'Ctrl+Shift+B'),
-  playerSettings('Player settings…', null),
   leave('Leave server', null);
 
   final String label;
@@ -90,7 +90,7 @@ abstract final class ControlsLayout {
     BarControl.fullscreen,
   ];
 
-  /// The ⚙ menu's order.
+  /// The ⋯ menu's order.
   static const menu = ControlAction.values;
 }
 
@@ -119,6 +119,9 @@ class ControlsSnapshot {
   final bool hasLink;
   final bool fullscreen;
   final bool chatOpen;
+
+  /// The player panel is open (⚙ shows it).
+  final bool panelOpen;
   const ControlsSnapshot({
     this.play = PlayState.paused,
     this.previousLabel,
@@ -130,6 +133,7 @@ class ControlsSnapshot {
     this.hasLink = false,
     this.fullscreen = false,
     this.chatOpen = false,
+    this.panelOpen = false,
   });
 }
 
@@ -156,8 +160,8 @@ class ControlsSnapshot {
   );
 }
 
-/// The ⚙ menu for [s]: every action that applies, minus those the bar
-/// already shows.
+/// The ⋯ menu for [s]: every action that applies, minus the buttons the
+/// bar already shows.
 List<ControlAction> menuActions(ControlsSnapshot s, Set<OptionalControl> hidden) => [
   for (final a in ControlsLayout.menu)
     if (switch (a) {
@@ -198,7 +202,7 @@ IconData controlIcon(BarControl c, ControlsSnapshot s) => switch (c) {
   BarControl.time => Icons.schedule_rounded,
   BarControl.subtitles => Icons.subtitles_outlined,
   BarControl.audio => Icons.graphic_eq_rounded,
-  BarControl.settings => Icons.settings_outlined,
+  BarControl.settings => s.panelOpen ? Icons.settings_rounded : Icons.settings_outlined,
   BarControl.chat => s.chatOpen ? Icons.chat_bubble_rounded : Icons.chat_bubble_outline_rounded,
   BarControl.fullscreen => s.fullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
 };
@@ -219,10 +223,14 @@ String controlTooltip(BarControl c, ControlsSnapshot s) => switch (c) {
   BarControl.time => 'Elapsed / remaining (click to switch)',
   BarControl.subtitles => 'Subtitles',
   BarControl.audio => 'Audio',
-  BarControl.settings => 'Settings and more',
+  BarControl.settings => 'Player settings',
   BarControl.chat => 'Chat & activity (Tab)',
   BarControl.fullscreen => s.fullscreen ? 'Exit fullscreen (F, Esc)' : 'Fullscreen (F)',
 };
+
+/// The top bar's ⋯: the [ControlAction] menu.
+const moreIcon = Icons.more_horiz_rounded;
+const moreTooltip = 'Video and session';
 
 /// The bar's clock: "6:00 / 24:00", or the time left ("-18:00"); "0:00"
 /// parts while the length is unknown.

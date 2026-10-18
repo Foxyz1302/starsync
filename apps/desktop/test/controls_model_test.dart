@@ -44,7 +44,7 @@ void main() {
           [BarControl.playPause, BarControl.next, BarControl.volume, BarControl.time]);
     });
 
-    test('hidden optional buttons leave the bar and show in ⚙', () {
+    test('hidden optional buttons leave the bar and show in ⋯', () {
       const s = ControlsSnapshot(hasChapters: true, hasDuration: true);
       final hidden = OptionalControl.values.toSet();
       final bar = barControls(s, hidden);
@@ -56,21 +56,28 @@ void main() {
       expect(shown, isNot(contains(ControlAction.chat)));
     });
 
-    test('⚙ menu: what applies, in a fixed order', () {
+    test('⋯ menu: what plays and the server, in a fixed order; ⚙ is the panel', () {
       expect(menuActions(const ControlsSnapshot(), none), [
-        ControlAction.shaders,
         ControlAction.changeVideo,
         ControlAction.reload,
         ControlAction.markAllReady,
         ControlAction.markProblem,
-        ControlAction.playerSettings,
         ControlAction.leave,
       ]);
-      final all = menuActions(const ControlsSnapshot(hasChapters: true, hasDuration: true, hasLink: true), none);
-      expect(all.first, ControlAction.chapters);
-      expect(all, containsAllInOrder([ControlAction.skipForward, ControlAction.copyLink]));
+      expect(menuActions(const ControlsSnapshot(hasChapters: true, hasDuration: true, hasLink: true), none), [
+        ControlAction.changeVideo,
+        ControlAction.copyLink,
+        ControlAction.reload,
+        ControlAction.skipForward,
+        ControlAction.chapters,
+        ControlAction.markAllReady,
+        ControlAction.markProblem,
+        ControlAction.leave,
+      ]);
       expect(menuActions(const ControlsSnapshot(alone: true), none), isNot(contains(ControlAction.markAllReady)),
           reason: 'nobody to mark ready');
+      expect(controlTooltip(BarControl.settings, const ControlsSnapshot()), 'Player settings');
+      expect(controlIcon(BarControl.settings, const ControlsSnapshot(panelOpen: true)), Icons.settings_rounded);
     });
 
     test('play / pause follows the session: playing, ready and waiting, not ready', () {
@@ -223,17 +230,26 @@ void main() {
       expect(s.playerVolume.value, 150, reason: 'clamped to mpv\'s volume-max');
     });
 
-    testWidgets('⚙ lists the rest', (tester) async {
-      await pump(tester, ControlsSkin.minimal);
-      await tester.tap(find.byKey(const ValueKey('control-settings')));
-      await tester.pumpAndSettle();
-      for (final a in [ControlAction.reload, ControlAction.markProblem, ControlAction.playerSettings]) {
-        expect(find.byKey(ValueKey('controls-menu-${a.name}')), findsOneWidget, reason: a.name);
-      }
-      expect(find.byKey(const ValueKey('controls-menu-chapters')), findsNothing, reason: 'no chapters');
-      await tester.tapAt(const Offset(5, 5));
-      await tester.pumpAndSettle();
-    });
+    for (final skin in ControlsSkin.values) {
+      testWidgets('${skin.label}: ⚙ opens and closes the panel, the top bar\'s ⋯ lists the rest', (tester) async {
+        final model = await pump(tester, skin);
+        await tester.tap(find.byKey(const ValueKey('control-settings')));
+        await tester.pump();
+        expect(model.panelOpen.value, isTrue);
+        await tester.tap(find.byKey(const ValueKey('control-settings')));
+        await tester.pump();
+        expect(model.panelOpen.value, isFalse);
+        expect(find.byKey(const ValueKey('controls-menu-reload')), findsNothing, reason: '⚙ opens no menu');
+        await tester.tap(find.byKey(const ValueKey('controls-more')));
+        await tester.pumpAndSettle();
+        for (final a in [ControlAction.changeVideo, ControlAction.reload, ControlAction.markProblem, ControlAction.leave]) {
+          expect(find.byKey(ValueKey('controls-menu-${a.name}')), findsOneWidget, reason: a.name);
+        }
+        expect(find.byKey(const ValueKey('controls-menu-chapters')), findsNothing, reason: 'no chapters');
+        await tester.tapAt(const Offset(5, 300));
+        await tester.pumpAndSettle();
+      });
+    }
 
     testWidgets('Minimal hidden: the timeline stays as a line unless switched off', (tester) async {
       s.controlsHideSecs.value = 2;

@@ -125,7 +125,7 @@ class SettingsTab extends StatelessWidget {
         return [
           const SettingsHintCard(
             icon: Icons.tune,
-            text: "Player settings are also in the player: ⚙ → Player settings opens a panel at its right edge "
+            text: "Player settings are also in the player: ⚙ in the bar opens a panel at its right edge "
                 "that stays while you watch.",
           ),
           SettingsPanel(

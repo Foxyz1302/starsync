@@ -573,7 +573,7 @@ through the same dynamic `setProperty` and read back
 libmpv among them) prints it `,` joined. One saved choice in `AppSettings`
 (`shaderPreset`, `shaderQuality`, `customShaders`): applied on every player
 creation (join, new media, Reload video) and live when changed from the session (the
-controls' ⚙ → Upscaling shader menu, Ctrl+0..6, both also save it). The Anime4K
+player panel's Picture, Ctrl+0..6, both also save it). The Anime4K
 v4.0.1 files live in `apps/desktop/assets/shaders/anime4k/` (only the 14
 the presets use, plus its MIT LICENSE); mpv needs real paths, so
 `extractAnime4k` copies them once per version to
@@ -813,7 +813,7 @@ Skip rules (pure, `media_marks.dart`):
   decides). Without any opening, without chapters (a chaptered file
   without an OP chapter has none on purpose) and with media over 20 min,
   "Skip 1:30" during the first 6 min.
-- +1:30 (`skipForward`: the pill, ⚙ → Skip 1:30,
+- +1:30 (`skipForward`: the pill, ⋯ → Skip 1:30,
   Shift+Right) is a `nudge`, so repeated presses add up.
 - Chapter steps (PgUp / PgDn, `chapterStepTarget`): forward to the next
   start; back to the current start, or the previous one within 5 s of it
@@ -1418,7 +1418,7 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   clicker's account (through Up next when it is the continuation there).
   At the end, the next episode continues the item by itself (see "What's
   next"). Guests (relay, blocked) see none of it.
-- **Tracks**: the controls' Audio and Subtitles buttons (or ⚙ when
+- **Tracks**: the controls' Audio and Subtitles buttons (or ⋯ when
   hidden from the bar) list `PlaybackController.tracks`. A pick is applied, reported, and saved as a `TrackChoice`
   (language, title, codec, channels, forced/HI: from the Jellyfin streams
   with `OwnPlay`, else from mpv's track list) per series and as the global
@@ -1426,7 +1426,7 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   matched with `matchTrack` against the source's streams (mapped to mpv ids
   with `mpvTrackId`) or mpv's track list, and selected locally. Nothing goes
   on the wire.
-- **Change video**: the player's ⚙ → Change video opens the Library tab;
+- **Change video**: the player's ⋯ → Change video opens the Library tab;
   Link goes through `mediaForLink`, a Jellyfin pick as a ref, a file
   through `ServerIsolate.setFile` (host) or the relay (`swapFile`).
 
@@ -1961,9 +1961,9 @@ Enter picks, Esc or a click outside closes, and being a route it keeps
 the player's keys off (fullscreen too). `AppSelect` is the value picker
 on it (the current label and a chevron on a soft rounded surface; every
 setting that picks one of a few values), `AppMenuButton` the ⋮ action
-menu; the player controls' track, chapter and ⚙ menus are on it too.
-Material's own menus (the shader menu, the Jellyfin sort and server
-switch) get the same surface from `AppMenuStyle.theme`.
+menu; the player controls' track, chapter and ⋯ menus are on it too.
+Material's own menus (the Jellyfin sort and server switch) get the same
+surface from `AppMenuStyle.theme`.
 Reusing what the app shows (`widgets/copy_open.dart`): one wording
 (`ReuseText`: Copy link, Copy title, Copy message, Open in browser, Open
 in Jellyfin) in every right-click menu that offers it, and a toast
@@ -2260,8 +2260,8 @@ panel) and chat messages (Copy message, and a link in it).
   once (the pill is hidden while playing); avatars carry a red error mark
   and the members card says "can't play this: ...". 34 px avatars, a main line
   and a muted detail line. The pill glass, colour only for problems; it fades through
-  between kinds. The mini shows its short line in its hover bar. ⚙ →
-  Player settings (both skins) toggles the player panel
+  between kinds. The mini shows its short line in its hover bar. ⚙ in
+  the bar (both skins, "Player settings") toggles the player panel
   (`controls/player_panel.dart`, `PlayerControlsModel.panelOpen`): a
   312 px `AppGlass` column docked at the right of the full player,
   between the top bar and the control bar (it never covers the bar),
@@ -2296,7 +2296,8 @@ panel) and chat messages (Copy message, and a link in it).
   everything over the picture has a fixed place on one grid (16 px from
   the sides, the bars' inset), so nothing floats on its own. The top
   bar (part of the controls): now-playing title left; right the Up next
-  button (`UpNextButton`), back-to-library or exit fullscreen,
+  button (`UpNextButton`), ⋯ ("Video and session", see "Player
+  controls"), back-to-library or exit fullscreen,
   then the window buttons in fullscreen, all in that skin's button
   look. Under it at the right, in fullscreen (the strip is hidden), the
   party's `AvatarStack`: it comes and goes with the controls (fades with
@@ -2543,15 +2544,17 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
 - **Layout spec** (`model/controls_layout.dart`, pure): `ControlsLayout`
   is the bar's order, left cluster play / pause, previous / next episode,
   previous / next chapter, volume, time; right cluster subtitles, audio,
-  ⚙, chat, fullscreen. `barControls` drops what does not apply (no
+  ⚙ (the player panel, "Player settings"; filled while it is open),
+  chat, fullscreen. `barControls` drops what does not apply (no
   episode, no chapters) or what the user hid (`OptionalControl`:
   chapter buttons, subtitles, audio, chat); the rest keep their order, so
-  play is always first and fullscreen last. `menuActions` is the ⚙ menu
-  (`ControlAction`, fixed order): chapters, the hidden track lists,
-  Skip 1:30, upscaling shader, the hidden chat, change video, copy link
-  (when `currentLink` has one), reload, mark everyone ready (not alone),
-  mark a problem, player settings, leave. Icons, tooltips (with keys) and
-  the clock text (`clockText`) are defined there too, once.
+  play is always first and fullscreen last. `menuActions` is the top
+  bar's ⋯ menu ("Video and session"; `ControlAction`, fixed order):
+  change video, copy link (when `currentLink` has one), reload, Skip
+  1:30 (with a duration), chapters (with chapters), the hidden track
+  lists and chat, mark everyone ready (not alone), mark a problem,
+  leave. Icons, tooltips (with keys) and the clock text (`clockText`)
+  are defined there too, once.
 - **Shared pieces**: `ControlsFrame` (`frame.dart`): when the controls
   are up (real mouse movement shows them, see "Quick chat"; `suppress`
   holds them hidden; `controlsHideSecs` without movement or the
@@ -2560,7 +2563,7 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   the session's `ControlsHold`), and the double-click on the picture
   (`DoubleClickListener`, not on the bars) that toggles fullscreen; it
   reports `shown` for the overlay. `control_menus.dart`: the track and
-  chapter lists and the ⚙ menu on `showAppMenu` (anchored on the button,
+  chapter lists and the ⋯ menu on `showAppMenu` (anchored on the button,
   holding the controls), and `runControlAction`. `volume.dart`:
   `VolumeControl` (the skin's speaker button, click mutes; a `VolumeBar`
   beside it whenever the bar has room for it next to every button and

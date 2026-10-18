@@ -25,7 +25,7 @@ const sessionShortcuts = [
   ('< or Shift+P', 'Put up the previous Jellyfin episode'),
   ('Ctrl+1…6', 'Shaders: Anime4K mode A, B, C, A+A, B+B, C+A'),
   ('Ctrl+0', 'Shaders off'),
-  ('Esc', 'Close the panel or fullscreen, shrink the player, then ask to leave'),
+  ('Esc', 'Close a menu, the player settings panel, the chat or fullscreen, shrink the player, then ask to leave'),
   ('Ctrl+Shift+B', 'Mark a problem in the session log (anywhere)'),
 ];
 

@@ -3,9 +3,7 @@ import 'package:sync_relay_core/core.dart' show JellyfinStreamType;
 
 import '../jellyfin/track_prefs.dart' show MpvTrack;
 import '../playback/media_marks.dart';
-import '../shaders/shader_menu.dart';
 import '../shell/mark_problem.dart';
-import '../state/settings.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/copy_open.dart';
 import 'frame.dart';
@@ -13,8 +11,9 @@ import 'model/controls_layout.dart';
 import 'model/controls_model.dart';
 
 // The controls' menus, shared by both skins: the track and chapter lists
-// and the ⚙ menu, all on the app's menu (`showAppMenu`), anchored on the
-// button that opens them. Each keeps the controls up while open.
+// and the top bar's ⋯ menu, all on the app's menu (`showAppMenu`),
+// anchored on the button that opens them. Each keeps the controls up
+// while open.
 
 /// How many tracks of [type] there are.
 int trackCount(List<MpvTrack> tracks, JellyfinStreamType type) => tracks.where((t) => t.type == type).length;
@@ -77,23 +76,17 @@ Future<void> openChapterMenu(BuildContext context, PlayerControlsModel model) as
   if (pick != null) model.pickChapter(pick);
 }
 
-/// The ⚙ menu: every action that is not a bar button.
-Future<void> openControlsMenu(BuildContext context, PlayerControlsModel model) async {
-  final s = AppSettings.instance;
-  final shader = shaderShortLabel(s.shaderPreset.peek(), s.shaderQuality.peek()) ?? 'Off';
+/// The top bar's ⋯ menu ("Video and session"): what plays and the
+/// server, and the bar buttons the user hid.
+Future<void> openMoreMenu(BuildContext context, PlayerControlsModel model) async {
   final pick = await _menu(context, model, [
     for (final a in model.menu())
-      AppMenuItem(
-        key: ValueKey('controls-menu-${a.name}'),
-        value: a,
-        label: a.label,
-        hint: a == ControlAction.shaders ? shader : a.hint,
-      ),
+      AppMenuItem(key: ValueKey('controls-menu-${a.name}'), value: a, label: a.label, hint: a.hint),
   ]);
   if (pick != null && context.mounted) await runControlAction(context, model, pick);
 }
 
-/// Runs a ⚙ menu action; [context] anchors what it opens next.
+/// Runs a ⋯ menu action; [context] anchors what it opens next.
 Future<void> runControlAction(BuildContext context, PlayerControlsModel model, ControlAction action) async {
   switch (action) {
     case ControlAction.chapters:
@@ -104,16 +97,6 @@ Future<void> runControlAction(BuildContext context, PlayerControlsModel model, C
       await openTrackMenu(context, model, JellyfinStreamType.audio);
     case ControlAction.skipForward:
       model.skipForward();
-    case ControlAction.shaders:
-      model.menusOpen++;
-      try {
-        await ControlsFrame.holdWhile(
-          context,
-          () => showShaderMenu(context, renderMode: model.renderMode, onPick: model.pickShader),
-        );
-      } finally {
-        model.menusOpen--;
-      }
     case ControlAction.chat:
       model.toggleChat();
     case ControlAction.changeVideo:
@@ -127,8 +110,6 @@ Future<void> runControlAction(BuildContext context, PlayerControlsModel model, C
       model.markAllReady();
     case ControlAction.markProblem:
       await ControlsFrame.holdWhile(context, () => showMarkProblem(context));
-    case ControlAction.playerSettings:
-      model.togglePanel();
     case ControlAction.leave:
       model.leave();
   }

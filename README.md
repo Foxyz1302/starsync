@@ -369,7 +369,7 @@ merges everyone's lines and its own into one session log
 keeps it in the app's logs folder), so a problem can be read afterwards from every
 side. Chat is never logged anywhere, nor passwords, tokens and cookies.
 When something goes wrong, press **Mark a problem** (Ctrl+Shift+B, also in
-the player's ⚙ and Settings → About) and add a few words if you like: a
+the player's ⋯ and Settings → About) and add a few words if you like: a
 marker with your name goes in the session log at that moment. In a server,
 Copy diagnostics can add the session log of the last 6 hours (any member
 may read it). Don't want to share? Settings → About → **Share diagnostics
@@ -412,7 +412,7 @@ volume and sound set, and every sound with a preview, its own set and a switch);
 (the version, also at the bottom of every Settings page and in the
 Settings tab's tooltip; and the credits, e.g. that the Minimal player design is inspired by uosc).
 
-Player settings live in the player too: ⚙ → Player settings opens a
+Player settings live in the player too: ⚙ in the player's bar opens a
 narrow panel at the right edge of the player that stays open while you
 watch (the controls hide and show as usual) until its × or Esc. Its
 sections fold: sound first (the video's volume, and App sounds: how loud
@@ -432,7 +432,7 @@ controls (off by default: bottom lines move up while the control bar
 shows; the quick chat box always moves them). Settings → Player → Controls: time display (elapsed / total
 or remaining), controls size (normal or large), hide the controls after
 2, 3 or 5 s, and which optional buttons sit in the bar (chapter buttons,
-subtitles, audio, chat; hidden ones are still in ⚙). Every change
+subtitles, audio, chat; hidden ones are still in ⋯). Every change
 applies right away.
 
 Anywhere in a server (unless you are typing): Space = ready / unready,
@@ -454,12 +454,13 @@ episode (when there is one; next plays Up next first), previous / next
 chapter (when the video has chapters), volume and the time (click it to
 switch between elapsed / total and the time left). Bottom right:
 Subtitles and Audio (with the track count; tracks listed as "Japanese ·
-E-AC3 2.0 · title", subtitles with Off), ⚙, chat and fullscreen last.
-Everything else is in ⚙: chapters (current one checked; click to jump),
-Skip 1:30, upscaling shader, change video, copy link, reload video,
-mark everyone ready, mark a problem, player settings and leave. The top
-bar has the title, Up next and back to the library (in fullscreen: exit
-fullscreen and the window buttons). Volume: its slider sits next to
+E-AC3 2.0 · title", subtitles with Off), ⚙ (player settings: opens and
+closes the panel), chat and fullscreen last. The top bar has the title,
+Up next, ⋯ (video and session) and back to the library (in fullscreen:
+exit fullscreen and the window buttons). ⋯ holds change video, copy
+link, reload video, Skip 1:30, chapters (current one checked; click to
+jump), mark everyone ready, mark a problem and leave server, plus any
+bar button you hid. Volume: its slider sits next to
 the speaker (in a narrow window it slides out while you hover the
 speaker); a click on the speaker or M mutes, scrolling anywhere on the
 video or Up/Down steps it. It goes to 150 % like mpv: past the tick at
@@ -469,7 +470,7 @@ at. Lists and menus under the mouse scroll as usual.
 
 Standard (the default): a seek bar that marks chapter starts with a
 diamond (hovering it shows the time and the chapter title) over a row
-of round buttons. Minimal (⚙ → Player settings → Player design, switches
+of round buttons. Minimal (⚙ → Player design, switches
 right away): a translucent timeline across the bottom tints what has
 played, stripes the part not downloaded yet, marks chapter starts with
 dots (click one to jump), shows the elapsed time left and the total or
@@ -569,7 +570,7 @@ Your choice is remembered per series (and as a default) and the closest
 match (language, then title, then codec and channels) is selected on the
 next episode. This is per person; nobody else is affected.
 
-⚙ → Change video in the player opens the Library tab (the player
+⋯ → Change video in the player opens the Library tab (the player
 goes mini): the library starts on the series you are watching with the
 current season, else where you left it.
 
@@ -631,11 +632,10 @@ affected. The app ships [Anime4K](https://github.com/bloc97/Anime4K) v4.0.1
 C (480p), A+A, B+B, C+A, each as HQ (strong GPUs, GTX 1080 and up) or Fast
 (the guide's low-end set). "Custom shaders" runs your own `.glsl` files.
 
-Pick one with ⚙ → Upscaling shader in the player (also in
-fullscreen) or Ctrl+0..6; the change applies live and is saved, so the next
-session starts with it. ⚙ → Player settings and Settings → Player set it too,
-with HQ or Fast (used by Ctrl+1..6); Settings → Player holds the custom
-files. Shaders cost GPU time
+Pick one in the player with ⚙ → Upscaling (also in fullscreen) or
+Ctrl+0..6; the change applies live and is saved, so the next session
+starts with it. Settings → Player sets it too, with HQ or Fast (used by
+Ctrl+1..6), and holds the custom files. Shaders cost GPU time
 every frame and need hardware video rendering: on media_kit's software
 fallback they do nothing, and the app says so. A shader that is missing or
 fails to load shows a toast and switches shaders off.
