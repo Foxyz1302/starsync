@@ -11,6 +11,7 @@ import 'package:starsync/src/session/invite.dart';
 import 'package:starsync/src/session/join_offers.dart';
 import 'package:starsync/src/session/navigation.dart' show Place;
 import 'package:starsync/src/session/public_address.dart';
+import 'package:starsync/src/shell/party_strip.dart' show friendInviteLink;
 import 'package:starsync/src/shell/join_offer_card.dart';
 import 'package:starsync/src/state/connect_prefs.dart' show RecentServer;
 
@@ -33,6 +34,13 @@ String health({String name = "Bob's server", String version = '1.3.2', int viewe
 final _graph = testGraph(healthGet: (uri) async => health());
 
 void main() {
+  test('a friend\'s server: the copied link carries the password you joined with', () {
+    final link = friendInviteLink('example.org:6969', "Bob's server", secret: 'hunter2');
+    final back = InviteLink.parse(link)!;
+    expect([back.host, back.port, back.secret], ['example.org', 6969, 'hunter2']);
+    expect(friendInviteLink('example.org:6969', 'Bob'), isNot(contains('pw=')));
+  });
+
   group('invite link', () {
     test('round trip: address, name and password, which never shows in toString', () {
       const link = InviteLink(host: '203.0.113.7', port: 9000, name: "Bob's server & co", secret: 'p@ss w&rd=1');

@@ -508,7 +508,10 @@ class MembersCard extends StatelessWidget {
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
                         key: const ValueKey('copy-invite'),
-                        onPressed: () => copyToClipboard(context, friendInviteLink(address, nav.serverLabel.peek()),
+                        onPressed: () => copyToClipboard(
+                            context,
+                            friendInviteLink(address, nav.serverLabel.peek(),
+                                secret: AppScope.of(context).connection.params?.secret ?? ''),
                             done: 'Invite link copied'),
                         icon: const Icon(Icons.copy, size: 16),
                         label: const Text('Copy invite link'),
@@ -627,10 +630,11 @@ bool versionDiffers(String version, {String own = appVersion}) =>
     version.isNotEmpty && own != '0.0.0-dev' && version != '0.0.0-dev' && version != own;
 
 /// The invite link to a friend's server you are in ([address] as dialled,
-/// "host:port"; never its password).
-String friendInviteLink(String address, String name) {
+/// "host:port"), with the password you joined with: the link is the key,
+/// as for your own server.
+String friendInviteLink(String address, String name, {String secret = ''}) {
   final a = addressIn(address);
   final port = a == null ? null : int.tryParse(a.port);
   if (a == null || port == null) return address;
-  return InviteLink(host: a.host, port: port, name: name).uri;
+  return InviteLink(host: a.host, port: port, name: name, secret: secret).uri;
 }

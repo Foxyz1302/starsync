@@ -2011,8 +2011,9 @@ panel) and chat messages (Copy message, and a link in it).
   computer; no internet address found: the link works on the home network
   only); "Other addresses" (folded, only with more than one) lists each
   address of `YourServer.reach` (Internet, Home network, VPN) to pick
-  what Copy copies; on a friend's, "Copy invite link" (the dialled address
-  and its name, never a password)).
+  what Copy copies; on a friend's, "Copy invite link" (the dialled address,
+  its name and the password you joined with: the link is the key there
+  too))).
   Empty strip space is the window
   drag area; the window buttons sit at its end.
 - **Avatars** (`avatar.dart`): `StatusAvatar` draws a ring outside the
