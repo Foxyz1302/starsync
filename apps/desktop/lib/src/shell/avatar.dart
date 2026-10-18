@@ -49,6 +49,24 @@ class AvatarInfo {
     this.app = '',
   });
 
+  /// The same with [image] as the picture.
+  AvatarInfo withImage(ImageProvider image) => AvatarInfo(
+        id: id,
+        name: name,
+        color: color,
+        image: image,
+        ready: ready,
+        buffering: buffering,
+        relaying: relaying,
+        presence: presence,
+        goneSince: goneSince,
+        host: host,
+        self: self,
+        error: error,
+        delivery: delivery,
+        app: app,
+      );
+
   /// Sitting out.
   bool get away => presence == Presence.away;
 
@@ -386,5 +404,30 @@ AvatarInfo avatarForName(String name, SessionCoordinator c, [String id = '']) {
   for (final m in members) {
     if (id.isNotEmpty ? m.id == id : m.name == name) return memberAvatarInfo(m, r, c);
   }
-  return AvatarInfo(name: name, color: colorForName(name));
+  return AvatarInfo(id: id, name: name, color: colorForName(name));
+}
+
+/// Someone's avatar in a line that stays up a while (a toast, a danmaku
+/// line): [info] as it was when the line came, with their picture looked
+/// up again while it is missing. A picture often lands after the line
+/// that needs it (the server's copy is fetched once the member is seen,
+/// a first fetch can fail and is retried), so a line made a moment too
+/// early would otherwise keep the initial for good.
+class LineAvatar extends StatelessWidget {
+  final AvatarInfo info;
+  final double size;
+  final bool badges;
+  final bool ring;
+  const LineAvatar({super.key, required this.info, required this.size, this.badges = false, this.ring = true});
+
+  @override
+  Widget build(BuildContext context) {
+    Widget avatar(AvatarInfo i) => StatusAvatar(info: i, size: size, badges: badges, ring: ring);
+    final graph = AppScope.maybeOf(context);
+    if (info.image != null || graph == null) return avatar(info);
+    return PartyWatch(builder: (context) {
+      final image = avatarForName(info.name, graph.coordinator, info.id).image;
+      return avatar(image == null ? info : info.withImage(image));
+    });
+  }
 }

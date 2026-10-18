@@ -130,7 +130,10 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   bool _handoffOpen = false;
 
   late final AppGraph _graph = AppScope.of(context);
-  late final _flow = ConnectFlow(navigation: _graph.navigation, forms: _graph.forms);
+  /// Every join (Join card, the join prompt) goes through it; without a
+  /// name it asks for one first ([askYourName]).
+  late final _flow =
+      ConnectFlow(navigation: _graph.navigation, forms: _graph.forms, askName: (profile) => askYourName(context, profile));
   late final _join = JoinFields(_graph.forms.form);
   late final JellyfinAccounts _jellyfin = widget.jellyfin ?? JellyfinAccounts.instance;
   late MediaPickerController _picker = _newPicker();

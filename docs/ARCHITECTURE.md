@@ -103,8 +103,9 @@ attach and detach the network listener (below).
   you are in, and the text this app just copied (`copied`). Join
   (`accept`) fills the Join card's fields (a link without a password
   takes the one saved for that recent server) and joins through
-  `ConnectFlow` and `Navigation.join` (version gate, recents); a failure
-  opens the Join card with its error. A clipboard invite joined or
+  `ConnectFlow` and `Navigation.join` (version gate, recents; no name
+  yet: asked first, see "Join card"); a failure opens the Join card with
+  its error. A clipboard invite joined or
   dismissed (Not now) is not offered again: the connect form box keeps the
   last 30 as fingerprints (a hash of the link), never the links; the
   clipboard's text is only parsed, never logged or stored.
@@ -2026,7 +2027,10 @@ panel) and chat messages (Copy message, and a link in it).
   passing the video on. `memberAvatarImage` is the one picture lookup: yours from the
   profile, anyone else's from `coordinator.avatars` by `avatarHash`.
   Colours are local: yours is picked in the profile, others' come from
-  their name.
+  their name. A toast's or danmaku line's avatar (`LineAvatar`) is
+  looked up again while its picture is missing, so a picture that lands
+  after the line (fetched from `/a/` once the member is seen; a failed
+  fetch retries) still shows on it.
 - **Join card** (`connect_cards.dart`): recent servers as one-click rows
   that poll `GET /health` every 10 s while the card is open
   (`health_probe.dart`: online, name, viewer count, "needs update" with
@@ -2038,7 +2042,13 @@ panel) and chat messages (Copy message, and a link in it).
   offers "Check for the update". The card closes itself once in the
   friend's server. It says to paste a friend's invite link (it carries
   the password) or their address and password, that no account or Jellyfin is needed and that your own
-  server stays as it is.
+  server stays as it is. A join with no profile name (any way in: the
+  Join card, a link or the clipboard's invite) first asks for one
+  (`ConnectFlow.askName`, the shell's `askYourName`): `NameCard`, "Wait,
+  what do we call you?", with the profile card's picture and colours
+  (`ProfilePicture`, `ProfileColors`) and a name field prefilled with
+  `suggestedName` (the OS user name), focused; OK saves the name and the
+  same join goes on, Cancel (Esc, a click outside) drops it.
 - **Profile** (`profile_card.dart`, `session/identity.dart`): a card
   tinted with your colour: picture (hover "Change" opens `CropPicker`:
   drag, wheel or slider zoom, previews at 88/42/24 px, exports a 256 px
@@ -2283,9 +2293,13 @@ panel) and chat messages (Copy message, and a link in it).
   bar (part of the controls): now-playing title left; right the Up next
   button (`UpNextButton`), back-to-library or exit fullscreen,
   then the window buttons in fullscreen, all in that skin's button
-  look. Under it at the right, in fullscreen while paused, the party's
-  avatars; with the controls down and unread chat, the unread chip top
-  right. The action area: one band just above the bottom controls
+  look. Under it at the right, in fullscreen (the strip is hidden), the
+  party's `AvatarStack`: it comes and goes with the controls (fades with
+  `controlsShown`, takes no clicks while hidden), moves left of the
+  player panel while that is open, and works as the strip's (names on
+  hover, a click opens the members card; the mouse on it and the open
+  card hold the controls up); with the controls down and unread chat,
+  the unread chip top right. The action area: one band just above the bottom controls
   (`_actionArea`; their height per skin and size, `controlsBottomHeight`,
   16 px gap), sliding down to
   16 px from the bottom while they are hidden (`AnimatedPositioned`,

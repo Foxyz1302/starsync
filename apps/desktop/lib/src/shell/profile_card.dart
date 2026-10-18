@@ -42,7 +42,6 @@ class ProfileCard extends StatefulWidget {
 class _ProfileCardState extends State<ProfileCard> {
   final _p = Profile.instance;
   late final _name = TextEditingController(text: _p.name.peek());
-  bool _hoverPic = false;
 
   @override
   void dispose() {
@@ -54,13 +53,6 @@ class _ProfileCardState extends State<ProfileCard> {
     Navigator.of(context).maybePop();
     widget.onOpenSettings(s);
   }
-
-  Future<void> _changePicture() => showPopover<void>(
-        context,
-        at: Alignment.center,
-        dim: true,
-        child: CropPicker(onUse: _p.setPicture),
-      );
 
   @override
   Widget build(BuildContext context) {
@@ -102,42 +94,7 @@ class _ProfileCardState extends State<ProfileCard> {
                 ),
                 child: Row(
                   children: [
-                    MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      onEnter: (_) => setState(() => _hoverPic = true),
-                      onExit: (_) => setState(() => _hoverPic = false),
-                      child: GestureDetector(
-                        key: const ValueKey('profile-picture'),
-                        onTap: _changePicture,
-                        child: SizedBox(
-                          width: 88,
-                          height: 88,
-                          child: Stack(
-                            children: [
-                              StatusAvatar(info: me, size: 88, badges: false, ring: online),
-                              Positioned.fill(
-                                child: AnimatedOpacity(
-                                  duration: easeTime,
-                                  curve: ease,
-                                  opacity: _hoverPic ? 1 : 0,
-                                  child: Container(
-                                    margin: const EdgeInsets.all(4),
-                                    decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.black54),
-                                    child: const Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Icon(Icons.photo_camera_outlined, color: Colors.white, size: 22),
-                                        Text('Change', style: TextStyle(color: Colors.white, fontSize: 11)),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
+                    ProfilePicture(profile: _p, info: me, ring: online),
                     const SizedBox(width: 16),
                     Expanded(
                       child: Column(
@@ -178,37 +135,7 @@ class _ProfileCardState extends State<ProfileCard> {
                   ],
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
-                child: Row(
-                  children: [
-                    Text('Colour', style: small),
-                    const Spacer(),
-                    for (final c in profileColors)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8),
-                        child: InkWell(
-                          customBorder: const CircleBorder(),
-                          onTap: () => _p.setColor(c),
-                          child: AnimatedContainer(
-                            duration: easeTime,
-                            curve: ease,
-                            width: 24,
-                            height: 24,
-                            decoration: BoxDecoration(
-                              color: c,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: color.toARGB32() == c.toARGB32() ? scheme.onSurface : Colors.transparent,
-                                width: 2,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
+              Padding(padding: const EdgeInsets.fromLTRB(20, 14, 20, 4), child: ProfileColors(profile: _p)),
               if (png != null)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 4, 8, 0),
@@ -294,6 +221,246 @@ class _ProfileCardState extends State<ProfileCard> {
         trailing: trailing,
         onTap: onTap,
       );
+}
+
+/// Your picture, 88 px: a hover says "Change", a click opens the
+/// [CropPicker]. The profile card and the name card show it.
+class ProfilePicture extends StatefulWidget {
+  final Profile profile;
+  final AvatarInfo info;
+  final bool ring;
+  const ProfilePicture({super.key, required this.profile, required this.info, this.ring = false});
+
+  @override
+  State<ProfilePicture> createState() => _ProfilePictureState();
+}
+
+class _ProfilePictureState extends State<ProfilePicture> {
+  bool _hover = false;
+
+  Future<void> _change() => showPopover<void>(
+        context,
+        at: Alignment.center,
+        dim: true,
+        child: CropPicker(onUse: widget.profile.setPicture),
+      );
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          key: const ValueKey('profile-picture'),
+          onTap: _change,
+          child: SizedBox(
+            width: 88,
+            height: 88,
+            child: Stack(
+              children: [
+                StatusAvatar(info: widget.info, size: 88, badges: false, ring: widget.ring),
+                Positioned.fill(
+                  child: AnimatedOpacity(
+                    duration: easeTime,
+                    curve: ease,
+                    opacity: _hover ? 1 : 0,
+                    child: Container(
+                      margin: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.black54),
+                      child: const Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.photo_camera_outlined, color: Colors.white, size: 22),
+                          Text('Change', style: TextStyle(color: Colors.white, fontSize: 11)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+}
+
+/// "Colour" and the swatches ([profileColors]); a click picks one.
+class ProfileColors extends StatelessWidget {
+  final Profile profile;
+  const ProfileColors({super.key, required this.profile});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final p = profile;
+    return SignalBuilder(builder: (context) {
+      final color = p.color.value;
+      return Row(
+        children: [
+          Text('Colour', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+          const Spacer(),
+          for (final c in profileColors)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: () => p.setColor(c),
+                child: AnimatedContainer(
+                  duration: easeTime,
+                  curve: ease,
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: c,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: color.toARGB32() == c.toARGB32() ? scheme.onSurface : Colors.transparent,
+                      width: 2,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
+    });
+  }
+}
+
+/// A join with no name yet stops here first: "Wait, what do we call
+/// you?" with the profile card's picture and colours and a name field
+/// (the computer's user name to start with). OK saves the name and the
+/// join goes on (true); Cancel, Esc or a click outside drop it.
+Future<bool> askYourName(BuildContext context, Profile profile) async =>
+    await showPopover<bool>(context, at: Alignment.center, dim: true, child: NameCard(profile: profile)) ?? false;
+
+class NameCard extends StatefulWidget {
+  final Profile profile;
+  /// The name to start with (default: [suggestedName]).
+  final String? suggestion;
+  const NameCard({super.key, required this.profile, this.suggestion});
+
+  @override
+  State<NameCard> createState() => _NameCardState();
+}
+
+class _NameCardState extends State<NameCard> {
+  late final _p = widget.profile;
+  late final _name = TextEditingController(text: widget.suggestion ?? suggestedName());
+
+  @override
+  void initState() {
+    super.initState();
+    _name.selection = TextSelection(baseOffset: 0, extentOffset: _name.text.length);
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  void _ok() {
+    final name = _name.text.trim();
+    if (name.isEmpty) return;
+    _p.setName(name);
+    Navigator.of(context).pop(true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      key: const ValueKey('name-card'),
+      elevation: 12,
+      color: scheme.surfaceContainer,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: 360,
+        child: ListenableBuilder(
+          listenable: _name,
+          builder: (context, _) => SignalBuilder(builder: (context) {
+            final color = _p.color.value;
+            final typed = _name.text.trim();
+            // Your picture, else the initial of the name being typed.
+            final me = AvatarInfo(name: typed.isEmpty ? '?' : typed, color: color, image: selfAvatarInfo().image);
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                AnimatedContainer(
+                  duration: easeTime,
+                  curve: ease,
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [color.withValues(alpha: 0.55), color.withValues(alpha: 0.08)],
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      ProfilePicture(profile: _p, info: me),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Wait, what do we call you?', style: Theme.of(context).textTheme.titleSmall),
+                            const SizedBox(height: 6),
+                            TextField(
+                              key: const ValueKey('name-card-name'),
+                              controller: _name,
+                              autofocus: true,
+                              maxLength: 32,
+                              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                              decoration: const InputDecoration(
+                                isDense: true,
+                                counterText: '',
+                                hintText: 'Your name',
+                              ),
+                              onSubmitted: (_) => _ok(),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(padding: const EdgeInsets.fromLTRB(20, 14, 20, 0), child: ProfileColors(profile: _p)),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+                  child: Text('Others see your name and picture. You can change them later from your avatar.',
+                      style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 16, 14),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        key: const ValueKey('name-card-cancel'),
+                        onPressed: () => Navigator.of(context).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        key: const ValueKey('name-card-ok'),
+                        onPressed: typed.isEmpty ? null : _ok,
+                        child: const Text('OK'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          }),
+        ),
+      ),
+    );
+  }
 }
 
 /// Avatar crop: pick a file, drag to move, scroll or slide to zoom; live

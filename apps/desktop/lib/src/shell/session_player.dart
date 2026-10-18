@@ -33,6 +33,7 @@ import '../widgets/window_buttons.dart';
 import 'avatar.dart';
 import 'motion.dart';
 import 'now_playing_title.dart';
+import 'party_strip.dart' show showMembersCard;
 import 'player_status.dart';
 import 'quick_chat.dart';
 import 'sit_out_card.dart';
@@ -449,7 +450,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                 if (_isFull) ...[
                   _blockedCard(),
                   _actionArea(),
-                  if (widget.fullscreen) ...[if (!_coord.alone.value) _pausedParty(), _unreadChip()],
+                  if (widget.fullscreen) ...[if (!_coord.alone.value) _fullscreenParty(), _unreadChip()],
                   _volumeReadout(),
                   _quickChatBox(),
                   _playerPanel(),
@@ -728,21 +729,50 @@ class _SessionPlayerState extends State<SessionPlayer> {
         }),
       );
 
-  /// Fullscreen hides the strip: while paused the party stays in a corner.
-  Widget _pausedParty() => Positioned(
-        right: _edge,
-        top: _topBarHeight + 8,
-        child: PartyWatch(builder: (context) {
-          final r = _coord.serverState.value;
-          final paused = r != null && r.transport != 'playing';
-          return AnimatedOpacity(
+  /// Fullscreen hides the strip: the party's avatars come and go with the
+  /// controls, top right under the top bar (left of the player panel
+  /// while it is open), and work as the strip's do: names on hover, a
+  /// click opens the members card (the controls stay up while it is open).
+  Widget _fullscreenParty() => ListenableBuilder(
+        listenable: _controlsShown,
+        builder: (context, _) => SignalBuilder(builder: (context) {
+          final shown = _controlsShown.value;
+          final panel = _model.panelOpen.value;
+          return AnimatedPositioned(
             duration: easeTime,
             curve: ease,
-            opacity: paused ? 1 : 0,
-            child: IgnorePointer(child: AvatarStack(members: partyAvatars(_coord))),
+            right: panel ? _edge * 2 + PlayerPanel.width : _edge,
+            top: _topBarHeight + 8,
+            child: IgnorePointer(
+              ignoring: !shown,
+              child: AnimatedOpacity(
+                duration: easeTime,
+                curve: ease,
+                opacity: shown ? 1 : 0,
+                child: ControlsHoldRegion(
+                  hold: _hold,
+                  child: PartyWatch(
+                    builder: (context) => AvatarStack(
+                      key: const ValueKey('fullscreen-party'),
+                      members: partyAvatars(_coord),
+                      onTap: _openMembers,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           );
         }),
       );
+
+  Future<void> _openMembers() async {
+    _hold.set(#membersCard, true);
+    try {
+      await showMembersCard(context);
+    } finally {
+      if (mounted) _hold.set(#membersCard, false);
+    }
+  }
 
   /// Fullscreen hides the strip and its chat badge: while there is unread
   /// chat, the controls are down and the video is not playing, a small

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -87,6 +88,17 @@ const profileColors = <Color>[
   Colors.orange,
   Colors.blueGrey,
 ];
+
+/// A name to offer someone who has none yet: the computer's user name
+/// (`USER`, `USERNAME` on Windows), first letter capitalised; '' when
+/// there is none. [env] stands in for the environment in tests.
+String suggestedName([Map<String, String>? env]) {
+  final e = env ?? Platform.environment;
+  final raw = (e['USER'] ?? e['USERNAME'] ?? '').trim();
+  if (raw.isEmpty || raw == 'root') return '';
+  final name = raw.length > 32 ? raw.substring(0, 32) : raw;
+  return name[0].toUpperCase() + name.substring(1);
+}
 
 const _keyPicture = 'avatarPng';
 const _keyColor = 'profileColor';

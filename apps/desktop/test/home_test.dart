@@ -250,26 +250,27 @@ void main() {
   });
 
   testWidgets('Enter in the join card submits; errors show under it', (tester) async {
-    _graph.forms.form.name = '';
+    _graph.forms.form.name = 'Me';
     await pumpShell(tester, const Size(1280, 720));
     await openCard(tester, 'strip-join');
+    await tester.enterText(find.byKey(const ValueKey('join-port')), '0');
     await tester.enterText(find.byKey(const ValueKey('join-address')), 'friend.example');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
-    expect(find.textContaining('display name', findRichText: true), findsOneWidget);
+    expect(find.textContaining('port must be', findRichText: true), findsOneWidget);
     // The button submits too, and typing in the address clears the error.
     await tester.enterText(find.byKey(const ValueKey('join-address')), 'friend.example2');
     await tester.pump();
-    expect(find.textContaining('display name', findRichText: true), findsNothing);
+    expect(find.textContaining('port must be', findRichText: true), findsNothing);
     await tester.tap(find.widgetWithText(FilledButton, 'Join').last);
     await tester.pumpAndSettle();
-    expect(find.textContaining('display name', findRichText: true), findsOneWidget);
+    expect(find.textContaining('port must be', findRichText: true), findsOneWidget);
     // A click outside closes the card; the error is still there on reopen.
     await tester.tapAt(const Offset(20, 700));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('join-address')), findsNothing);
     await openCard(tester, 'strip-join');
-    expect(find.textContaining('display name', findRichText: true), findsOneWidget);
+    expect(find.textContaining('port must be', findRichText: true), findsOneWidget);
   });
 
   testWidgets('recent rows show live status from /health', (tester) async {

@@ -4,7 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
-import '../shell/avatar.dart' show AvatarInfo, StatusAvatar;
+import '../shell/avatar.dart' show AvatarInfo, LineAvatar;
 
 // Danmaku (Bilibili / niconico style): short lines that fly right to left
 // across the upper part of the picture. Each line takes a free lane (no
@@ -478,7 +478,7 @@ class _DanmakuLayerState extends State<DanmakuLayer> with SingleTickerProviderSt
       mainAxisSize: MainAxisSize.min,
       children: [
         if (avatar != null) ...[
-          StatusAvatar(info: avatar, size: avatarSize, badges: false, ring: false),
+          LineAvatar(info: avatar, size: avatarSize, ring: false),
           SizedBox(width: avatarGap),
         ],
         text,

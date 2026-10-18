@@ -11,10 +11,13 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ### Changed
 
+- Joining without a name no longer stops with an error: the app asks "Wait, what do we call you?" right there (your computer's user name to start with, plus picture and colour), and OK carries on with the join
+- In fullscreen the party's avatars come up with the controls, also while the video plays, and work like the ones in the strip: hover for names, click for who is in the server
 - A message sent from the quick chat box now shows as your own chat bubble with everyone else's, instead of a separate echo where the box was
 
 ### Fixed
 
+- A chat message that arrived before the sender's picture showed only their initial; the picture now appears as soon as it is there
 - After a server is updated, the members card shows its new version (it kept the old one until you rejoined)
 
 ## 1.4.0

@@ -99,9 +99,10 @@ The player fills the window under the strip. Pick a tab and it shrinks to
 a mini player in a corner: drag it anywhere and it snaps to the nearest
 corner; double-click or ⤢ makes it big again, × sits you out (below) and
 × again closes it; the strip's screen button brings it back. F or
-double-click on the picture goes fullscreen (the strip hides, the party
-shows in a corner while paused, the window buttons sit in the player's top
-bar while its controls are up), Esc leaves it. The controls show the
+double-click on the picture goes fullscreen (the strip hides; the
+party's avatars and the window buttons come up with the player's controls,
+top right, and work as in the strip: names on hover, a click opens who is
+in the server), Esc leaves it. The controls show the
 show's cover, title and episode top left (a web video: its thumbnail and
 name; guests get the art too; right-click to copy the title, or the link
 when you have it, or open it in the browser or Jellyfin); before
@@ -393,8 +394,10 @@ a link clicked while it runs goes to the open window. Before connecting
 the app checks the server's version: when they do not match it says who
 has to update ("Bob's server runs Starsync 1.2.1 — they need to
 update"), and offers the update when it is you. Your name and picture
-come from your profile (your avatar at the top left). Leave goes back to
-your own server.
+come from your profile (your avatar at the top left); with no name yet,
+the first join asks "Wait, what do we call you?" (your computer's user
+name to start with, plus picture and colour), and OK goes on with that
+join. Leave goes back to your own server.
 
 ## Settings
 

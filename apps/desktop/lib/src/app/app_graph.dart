@@ -215,6 +215,9 @@ class AppScope extends InheritedWidget {
     return scope!.graph;
   }
 
+  /// The graph, or null where there is none (a widget shown on its own).
+  static AppGraph? maybeOf(BuildContext context) => context.getInheritedWidgetOfExactType<AppScope>()?.graph;
+
   @override
   bool updateShouldNotify(AppScope oldWidget) => !identical(graph, oldWidget.graph);
 }

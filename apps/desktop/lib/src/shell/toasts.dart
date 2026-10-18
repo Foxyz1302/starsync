@@ -223,7 +223,7 @@ class ToastCard extends StatelessWidget {
             crossAxisAlignment: who == null ? CrossAxisAlignment.center : CrossAxisAlignment.start,
             children: [
               if (who != null)
-                StatusAvatar(info: who, size: 38, badges: false)
+                LineAvatar(info: who, size: 38)
               else if (toast.thumb.isNotEmpty)
                 _Thumb(hash: toast.thumb)
               else

@@ -18,15 +18,25 @@ class CardError {
   const CardError(this.title, this.message, {this.offerUpdate = false});
 }
 
-/// The Join card's submit state, owned by the shell so an attempt and its
+/// Asks for a name before a join (the shell's "what do we call you?"
+/// card, which saves it to [profile]): true to go on, false to drop the
+/// join.
+typedef AskName = Future<bool> Function(Profile profile);
+
+/// The submit state of every join (the Join card, the join prompt for a
+/// link or the clipboard), owned by the shell so an attempt and its
 /// error outlive the card. One attempt at a time; [cancel] abandons it
-/// ([Navigation.cancelPending]).
+/// ([Navigation.cancelPending]). Without a profile name a join first
+/// asks for one ([askName]) and then goes on with it.
 class ConnectFlow extends ChangeNotifier {
-  ConnectFlow({required this.navigation, required this.forms, this.profile});
+  ConnectFlow({required this.navigation, required this.forms, this.profile, this.askName});
   final Navigation navigation;
   final ConnectStore forms;
   /// Name and picture for the hello (default: the app's).
   final Profile? profile;
+  /// Without one, a join with no name takes [suggestedName].
+  final AskName? askName;
+  bool _asking = false;
 
   bool busy = false;
   CardError? error;
@@ -58,14 +68,12 @@ class ConnectFlow extends ChangeNotifier {
   }
 
   /// Validates and builds the params; throws [FormatException] with a
-  /// user-facing message. [avatar] is the base64 picture (the profile's).
+  /// user-facing message. [avatar] is the base64 picture (the profile's);
+  /// the name is the form's (the profile's: [submit] has one by then).
   static ConnectParams buildParams(ConnectForm f, {String avatar = ''}) {
     final port = int.tryParse(f.port.trim());
     if (port == null || port <= 0 || port > 65535) {
       throw const FormatException('port must be 1–65535');
-    }
-    if (f.name.trim().isEmpty) {
-      throw const FormatException('set your display name first (click your avatar at the top left)');
     }
     if (f.host.trim().isEmpty) {
       throw const FormatException('enter the server address');
@@ -76,11 +84,14 @@ class ConnectFlow extends ChangeNotifier {
   /// [edit] fills the card's fields into a copy of the form; the form is
   /// saved whatever happens (a failed join is when the user wants it back).
   Future<void> submit(void Function(ConnectForm f) edit) async {
+    if (busy || _asking) return;
+    final profile = this.profile ?? Profile.instance;
+    if (!await _haveName(profile)) return;
     if (busy) return;
     final myAttempt = ++_attempt;
     final form = forms.form.copy();
     edit(form);
-    form.name = form.name.trim();
+    form.name = profile.name.peek().trim();
     form.host = form.host.trim();
     busy = true;
     error = null;
@@ -89,8 +100,6 @@ class ConnectFlow extends ChangeNotifier {
 
     ConnectParams params;
     try {
-      final profile = this.profile ?? Profile.instance;
-      await profile.ensureLoaded();
       params = buildParams(form, avatar: profile.avatarBase64());
     } catch (e) {
       if (myAttempt != _attempt) return;
@@ -129,6 +138,23 @@ class ConnectFlow extends ChangeNotifier {
     }
     busy = false;
     _notify();
+  }
+
+  /// The profile has a name, or gets one now: asked ([askName]; false
+  /// when that was cancelled), else the suggestion.
+  Future<bool> _haveName(Profile profile) async {
+    _asking = true;
+    try {
+      await profile.ensureLoaded();
+      if (profile.name.peek().trim().isNotEmpty) return true;
+      final ask = askName;
+      if (ask != null) return await ask(profile) && profile.name.peek().trim().isNotEmpty;
+      final name = suggestedName();
+      profile.setName(name.isEmpty ? 'Guest' : name);
+      return true;
+    } finally {
+      _asking = false;
+    }
   }
 
   Future<void> cancel() async {

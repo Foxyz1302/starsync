@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,7 +8,8 @@ import 'package:media_kit_video/media_kit_video.dart' show VideoState;
 import 'package:sync_relay_core/core.dart';
 import 'package:starsync/src/controls/frame.dart' show ControlsFrame, ControlsFrameState;
 import 'package:starsync/src/controls/model/controls_prefs.dart';
-import 'package:starsync/src/controls/session_controls.dart' show controlsBottomHeight;
+import 'package:starsync/src/controls/session_controls.dart' show SessionControls, controlsBottomHeight;
+import 'package:starsync/src/session/app_events.dart' show ChatPosted;
 import 'package:starsync/src/session/notifier.dart' show Copied;
 import 'package:starsync/src/session/identity.dart';
 import 'package:starsync/src/shell/app_shell.dart';
@@ -25,6 +29,9 @@ import 'package:starsync/src/session/invite.dart' show Invite;
 import 'package:starsync/src/session/navigation.dart' show Place;
 
 import 'test_graph.dart';
+
+/// A 1x1 PNG.
+final _png = base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
 
 /// This file's composition root (see test_graph.dart).
 final _graph = testGraph();
@@ -50,10 +57,12 @@ class _FakeVideoState extends State<FakeVideo> {
   Widget build(BuildContext context) => const ColoredBox(color: Colors.black);
 }
 
-MemberView member(String id, String name, {bool ready = false, bool gone = false, String app = ''}) =>
+MemberView member(String id, String name,
+        {bool ready = false, bool gone = false, String app = '', String avatarHash = ''}) =>
     MemberView(
         id: id,
         name: name,
+        avatarHash: avatarHash,
         ready: ready,
         inSet: ready,
         buffered: 30,
@@ -64,10 +73,10 @@ void main() {
   final session = _graph;
   final coord = session.coordinator;
 
-  void online(List<MemberView> members, {bool media = true}) {
+  void online(List<MemberView> members, {bool media = true, String transport = 'held'}) {
     coord.serverState.value = StateBroadcast(
       eventId: 1,
-      transport: 'held',
+      transport: transport,
       position: 0,
       serverTime: DateTime.now().toUtc(),
       mediaId: media ? 1 : 0,
@@ -551,4 +560,156 @@ void main() {
       await tester.pumpAndSettle();
     });
   }
+
+  group('fullscreen party', () {
+    Future<void> fullscreen(WidgetTester tester) async {
+      final s = AppSettings.instance;
+      final hide = s.controlsHideSecs.peek();
+      s.controlsHideSecs.value = 2;
+      addTearDown(() => s.controlsHideSecs.value = hide);
+      coord.playback.alive.value = true;
+      await pumpShell(tester, const Size(1280, 800),
+          video: (context, controls) => Stack(fit: StackFit.expand, children: [
+                const ColoredBox(color: Colors.black),
+                if (controls != null) controls(VideoState()),
+              ]));
+      online(party);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(tester.state<AppShellState>(find.byType(AppShell)).fullscreen, isTrue);
+      expect(find.byType(PartyStrip), findsNothing);
+    }
+
+    Future<void> done(WidgetTester tester) async {
+      session.navigation.place.value = Place.none;
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+    }
+
+    double opacity(WidgetTester tester) => tester
+        .widget<AnimatedOpacity>(
+            find.ancestor(of: find.byKey(const ValueKey('fullscreen-party')), matching: find.byType(AnimatedOpacity)).first)
+        .opacity;
+
+    testWidgets('the avatars come and go with the controls, while it plays too', (tester) async {
+      await fullscreen(tester);
+      online(party, transport: 'playing');
+      await tester.pump(const Duration(milliseconds: 400));
+      final frame = tester.state<ControlsFrameState>(find.byType(ControlsFrame));
+      expect(frame.visible, isTrue);
+      expect(opacity(tester), 1, reason: 'up with the controls, playing');
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(frame.visible, isFalse);
+      expect(opacity(tester), 0, reason: 'hidden with them');
+      // A hidden stack takes no clicks.
+      await tester.tap(find.byKey(const ValueKey('fullscreen-party')), warnIfMissed: false);
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.byKey(const ValueKey('members-card')), findsNothing);
+      await done(tester);
+    });
+
+    testWidgets('a click opens the members card; the player panel moves them aside', (tester) async {
+      await fullscreen(tester);
+      final stack = find.byKey(const ValueKey('fullscreen-party'));
+      final right = tester.getRect(stack).right;
+      expect(right, closeTo(1280 - 16, 1));
+      // The player panel docks at the right: the avatars sit left of it.
+      final model = tester.widget<SessionControls>(find.byType(SessionControls)).model;
+      model.panelOpen.value = true;
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      final panel = tester.getRect(find.byKey(const ValueKey('player-panel-hold')));
+      expect(tester.getRect(stack).right, lessThan(panel.left));
+      model.panelOpen.value = false;
+      await tester.pump(const Duration(milliseconds: 400));
+      // Hover names, as in the strip.
+      expect(
+          find.descendant(
+              of: stack, matching: find.byWidgetPredicate((w) => w is Tooltip && w.message!.startsWith('Bob'))),
+          findsOneWidget);
+      await tester.tap(stack);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      final card = find.byKey(const ValueKey('members-card'));
+      expect(card, findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('Cleo')), findsOneWidget);
+      await tester.tapAt(const Offset(40, 700));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(card, findsNothing);
+      await done(tester);
+    });
+  });
+
+  group('avatars in chat toasts', () {
+    tearDown(() {
+      coord.connection.client
+        ..memberId = ''
+        ..wsUri = null
+        ..token = '';
+      Profile.instance.picture.value = null;
+    });
+
+    ImageProvider? toastPicture(WidgetTester tester) => tester
+        .widget<CircleAvatar>(find.descendant(of: find.byType(ToastCard), matching: find.byType(CircleAvatar)))
+        .backgroundImage;
+
+    void chat(String id, String name, String text) => coord.notify(ChatPosted(
+        FeedMessage(actor: name, actorId: id, action: 'chat', reason: text, at: DateTime.now().toUtc()),
+        own: id == coord.connection.memberId));
+
+    testWidgets('your first message after joining has your picture', (tester) async {
+      Profile.instance.picture.value = _png;
+      coord.connection.client.memberId = 'a';
+      await tester.pumpWidget(scoped(_graph, const MaterialApp(home: Scaffold(body: PartyToasts()))));
+      online([member('a', 'Alex', avatarHash: 'ha'), member('b', 'Bob')], media: false);
+      chat('a', 'Alex', 'hi');
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('hi'), findsOneWidget);
+      expect(toastPicture(tester), isNotNull);
+      await tester.pump(session.notifier.toastLife);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets("someone's first message: their picture shows once it lands", (tester) async {
+      // A real HTTP client (the test binding answers 400 to everything).
+      final http = HttpOverrides.current;
+      HttpOverrides.global = null;
+      addTearDown(() => HttpOverrides.global = http);
+      // Serves the picture route like a server does.
+      final server = (await tester.runAsync(() => HttpServer.bind(InternetAddress.loopbackIPv4, 0)))!;
+      addTearDown(() => server.close(force: true));
+      server.listen((req) {
+        req.response.add(_png);
+        req.response.close();
+      });
+      coord.connection.client
+        ..memberId = 'a'
+        ..wsUri = Uri.parse('ws://127.0.0.1:${server.port}/sync')
+        ..token = 't';
+      await tester.pumpWidget(scoped(_graph, const MaterialApp(home: Scaffold(body: PartyToasts()))));
+      online([member('a', 'Alex'), member('b', 'Bob', avatarHash: 'hb')], media: false);
+      // Bob's line comes before his picture.
+      expect(coord.avatars.bytesFor('hb'), isNull);
+      chat('b', 'Bob', 'first!');
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('first!'), findsOneWidget);
+      // The fetch runs on the real clock (and its callbacks on the test's).
+      for (var i = 0; i < 100 && coord.avatars.bytesFor('hb') == null; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump();
+      }
+      expect(coord.avatars.bytesFor('hb'), isNotNull);
+      await tester.pump();
+      expect(toastPicture(tester), isNotNull, reason: 'the toast shows it once it is here');
+      await tester.pump(session.notifier.toastLife);
+      await tester.pumpAndSettle();
+    });
+  });
 }
