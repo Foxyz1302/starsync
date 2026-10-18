@@ -70,14 +70,19 @@ void main() {
   });
 
   group('player panel', () {
-    testWidgets('tracks, subtitles, picture, sound, notifications and controls; all live', (tester) async {
+    testWidgets('sound first, then tracks, subtitles, picture, notifications and controls; all live', (tester) async {
       bigWindow(tester);
+      addTearDown(() {
+        s.soundVolume.value = 1;
+        s.hwdecCustom.value = '';
+      });
       coord.playback.tracks.value = const [
         MpvTrack(id: 1, type: JellyfinStreamType.audio, language: 'jpn', codec: 'eac3', channels: 2, selected: true),
         MpvTrack(id: 1, type: JellyfinStreamType.subtitle, language: 'eng', codec: 'ass', title: 'Full'),
       ];
       var volume = 80.0;
       var closed = 0;
+      final opened = <PanelSection>[];
       final vol = signal(volume);
       await tester.pumpWidget(scoped(
           _graph,
@@ -89,15 +94,29 @@ void main() {
                 onClose: () => closed++,
                 volume: vol,
                 onVolume: (v) => vol.value = volume = v,
+                onAllSettings: opened.add,
               ),
             ),
           ))));
       await tester.pumpAndSettle();
       final panel = find.byKey(const ValueKey('player-panel'));
       expect(panel, findsOneWidget);
-      for (final label in ['Subtitles', 'Audio', 'Size', 'Upscaling', 'Hardware decoding', 'Volume']) {
+      for (final label in ['Subtitles', 'Audio', 'Size', 'Upscaling', 'Hardware decoding', 'Volume', 'App sounds']) {
         expect(find.descendant(of: panel, matching: find.text(label)), findsWidgets, reason: label);
       }
+      // Sound is the first section: the video's volume, then the app's.
+      double top(String key) => tester.getTopLeft(find.byKey(ValueKey(key))).dy;
+      expect(top('panel-section-Sound'), lessThan(top('panel-section-Tracks')));
+      expect(top('panel-volume'), lessThan(top('panel-app-sounds')));
+      final bar = tester.getRect(find.byKey(const ValueKey('panel-volume')));
+      await tester.tapAt(Offset(bar.left + 10, bar.center.dy));
+      expect(volume, lessThan(20), reason: 'the bar runs 0..150 across the row');
+      await tester.drag(find.descendant(of: find.byKey(const ValueKey('panel-app-sounds')), matching: find.byType(Slider)),
+          const Offset(-60, 0));
+      expect(s.soundVolume.value, lessThan(1));
+      // "All settings" goes where the section last used lives.
+      await tester.tap(find.byKey(const ValueKey('panel-all-settings')));
+      expect(opened, [PanelSection.sound]);
       // Subtitles off (none selected), audio on the selected track.
       expect(find.descendant(of: find.byKey(const ValueKey('panel-subtitles')), matching: find.text('Off')),
           findsOneWidget);
@@ -107,12 +126,16 @@ void main() {
       expect(s.shaderPreset.value, ShaderPreset.b);
       await pick(tester, 'panel-hwdec', 'Off');
       expect(s.hwdec.value, 'no');
+      // Custom has its field, as in Settings.
+      expect(find.byKey(const ValueKey('panel-hwdec-custom')), findsNothing);
+      await pick(tester, 'panel-hwdec', 'Custom');
+      await tester.enterText(find.byKey(const ValueKey('panel-hwdec-custom')), 'vaapi');
+      expect(s.hwdec.value, 'vaapi');
+      await tester.tap(find.byKey(const ValueKey('panel-all-settings')));
+      expect(opened.last, PanelSection.picture);
       await tester.tap(find.descendant(of: find.byKey(const ValueKey('panel-lift')), matching: find.byType(Switch)));
       await tester.pump();
       expect(s.liftSubtitles.value, isTrue);
-      await tester.drag(find.descendant(of: find.byKey(const ValueKey('panel-volume')), matching: find.byType(Slider)),
-          const Offset(-60, 0));
-      expect(volume, lessThan(80));
       // Folded sections open with a click: notifications, then danmaku's knobs.
       expect(find.byKey(const ValueKey('notify-style')), findsNothing);
       await tester.tap(find.byKey(const ValueKey('panel-section-Notifications')));

@@ -36,6 +36,7 @@ import 'now_playing_title.dart';
 import 'party_strip.dart' show showMembersCard;
 import 'player_status.dart';
 import 'quick_chat.dart';
+import 'settings_tab.dart' show SettingsSection;
 import 'sit_out_card.dart';
 import 'start_banner.dart';
 import 'video_view.dart';
@@ -68,6 +69,9 @@ class SessionPlayer extends StatefulWidget {
   final VoidCallback onToggleChat;
   final VoidCallback onChangeVideo;
   final VoidCallback onOpenIntegrations;
+  /// Opens a Settings page (the player panel's "All settings"; the shell
+  /// takes the player to the mini).
+  final ValueChanged<SettingsSection>? onOpenSettings;
   /// Asks before leaving the server.
   final VoidCallback onLeave;
   final VideoViewBuilder? videoBuilder;
@@ -98,6 +102,7 @@ class SessionPlayer extends StatefulWidget {
     required this.onChangeVideo,
     required this.onOpenIntegrations,
     required this.onLeave,
+    this.onOpenSettings,
     this.chatOpen = false,
     this.unread = 0,
     this.videoBuilder,
@@ -380,6 +385,12 @@ class _SessionPlayerState extends State<SessionPlayer> {
       model.stepVolume(key == LogicalKeyboardKey.arrowUp ? 1 : -1);
       return true;
     }
+    if (key == LogicalKeyboardKey.keyM && !HardwareKeyboard.instance.isControlPressed) {
+      _lastKeyAt = now;
+      model.toggleMute();
+      model.volumeFlash.value++;
+      return true;
+    }
     if (key == LogicalKeyboardKey.arrowRight) {
       _lastKeyAt = now;
       model.nudge(10);
@@ -524,6 +535,10 @@ class _SessionPlayerState extends State<SessionPlayer> {
                       renderMode: _model.renderMode,
                       volume: _model.volume,
                       onVolume: _model.setVolume,
+                      onAllSettings: switch (widget.onOpenSettings) {
+                        final open? => (section) => open(settingsPageFor(section)),
+                        null => null,
+                      },
                     ),
                   ),
           );
@@ -948,6 +963,13 @@ class _SessionPlayerState extends State<SessionPlayer> {
     );
   }
 }
+
+/// The Settings page that holds a player panel section's settings.
+SettingsSection settingsPageFor(PanelSection s) => switch (s) {
+  PanelSection.sound || PanelSection.notifications => SettingsSection.notifications,
+  PanelSection.tracks || PanelSection.subtitles || PanelSection.picture || PanelSection.controls =>
+    SettingsSection.player,
+};
 
 /// The mini player's empty controls slot (see [SessionPlayer]'s video).
 Widget _noControls(VideoState state) => const SizedBox.shrink();

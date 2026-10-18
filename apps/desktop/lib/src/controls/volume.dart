@@ -254,9 +254,30 @@ typedef VolumeButtonBuilder = Widget Function(
   VoidCallback onPressed,
 );
 
+/// The bar's volume slider at full width, and with its gaps.
+const volumeSliderWidth = 72.0;
+const _sliderGaps = 4.0 + 8;
+
+/// Where a bar [width] wide puts the volume slider, given its [buttons]
+/// buttons of [button] each and [fixed] other room (the clock, paddings,
+/// a gap between the clusters): beside the speaker when it fits
+/// ([always]), else sliding out on hover as wide as the room left
+/// ([width] 0: none, the wheel, keys and the panel still set it).
+({bool always, double width}) volumeSliderRoom(
+    {required double width, required int buttons, required double button, double fixed = 0}) {
+  final spare = width - buttons * button - fixed - _sliderGaps;
+  if (spare >= volumeSliderWidth) return (always: true, width: volumeSliderWidth);
+  return (always: false, width: spare < 32 ? 0 : spare);
+}
+
+/// The speaker's tooltip at [volume].
+String volumeTooltip(double volume) => 'Volume ${volume.round()} %  (M mutes, scroll, ↑ / ↓)';
+
 /// The bar's volume, in both skins: the skin's speaker button (click
-/// mutes / unmutes), a [VolumeBar] sliding out on hover, the wheel on it
-/// stepping [volumeStep] (claimed, so the player's wheel skips it).
+/// mutes / unmutes) and a [VolumeBar] beside it, always when the bar has
+/// room, else sliding out while the mouse is on it (see
+/// [volumeSliderRoom]); the wheel on it steps [volumeStep] (claimed, so
+/// the player's wheel skips it).
 class VolumeControl extends StatefulWidget {
   /// 0..[maxVolume].
   final double volume;
@@ -265,7 +286,10 @@ class VolumeControl extends StatefulWidget {
   final VolumeButtonBuilder button;
   final Color sliderColor;
   final Color trackColor;
-  final double sliderWidth;
+
+  /// Where the slider goes ([volumeSliderRoom]); full width beside the
+  /// speaker by default.
+  final ({bool always, double width}) slider;
   const VolumeControl({
     super.key,
     required this.volume,
@@ -274,7 +298,7 @@ class VolumeControl extends StatefulWidget {
     required this.button,
     this.sliderColor = Colors.white,
     this.trackColor = Colors.white30,
-    this.sliderWidth = 72,
+    this.slider = (always: true, width: volumeSliderWidth),
   });
 
   @override
@@ -301,19 +325,23 @@ class _VolumeControlState extends State<VolumeControl> {
               context,
               volumeIcon(v),
               v > 100 ? boostColor : null,
-              'Volume ${v.round()} %  (scroll, ↑ / ↓)',
+              volumeTooltip(v),
               widget.onToggleMute,
             ),
+            // Only the hover slides; the bar growing past or below the
+            // room for the slider switches it without a slide (no
+            // overflow while it would shrink).
             AnimatedSize(
+              key: ValueKey(widget.slider.always),
               duration: const Duration(milliseconds: 150),
-              child: _hover
+              child: widget.slider.width > 0 && (widget.slider.always || _hover)
                   ? Padding(
                       padding: const EdgeInsets.only(left: 4, right: 8),
                       child: VolumeBar(
                         key: const ValueKey('volume-bar'),
                         volume: v,
                         onChanged: widget.onChanged,
-                        width: widget.sliderWidth,
+                        width: widget.slider.width,
                         color: widget.sliderColor,
                         trackColor: widget.trackColor,
                       ),

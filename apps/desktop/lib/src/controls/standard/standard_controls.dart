@@ -111,19 +111,32 @@ class StandardControls extends StatelessWidget {
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                           child: ExcludeFocus(
-                            child: SignalBuilder(
-                              builder: (context) {
-                                final s = model.snapshot.value;
-                                final layout = model.bar.value;
-                                return Row(
-                                  key: const ValueKey('standard-buttons'),
-                                  children: [
-                                    for (final c in layout.left) _control(context, c, s),
-                                    const Spacer(),
-                                    for (final c in layout.right) _control(context, c, s),
-                                  ],
-                                );
-                              },
+                            child: LayoutBuilder(
+                              builder: (context, box) => SignalBuilder(
+                                builder: (context) {
+                                  final s = model.snapshot.value;
+                                  final layout = model.bar.value;
+                                  // The volume slider stays out where the
+                                  // row has room for it beside the buttons
+                                  // and the clock (at its widest).
+                                  final d = model.duration.value;
+                                  final clock = _Clock.widthOf(clockText(d, d, model.settings.timeDisplay.value), scale);
+                                  final slider = volumeSliderRoom(
+                                    width: box.maxWidth,
+                                    buttons: layout.left.length + layout.right.length - 1,
+                                    button: 48 * scale,
+                                    fixed: clock + 24,
+                                  );
+                                  return Row(
+                                    key: const ValueKey('standard-buttons'),
+                                    children: [
+                                      for (final c in layout.left) _control(context, c, s, slider: slider),
+                                      const Spacer(),
+                                      for (final c in layout.right) _control(context, c, s, slider: slider),
+                                    ],
+                                  );
+                                },
+                              ),
                             ),
                           ),
                         ),
@@ -184,7 +197,8 @@ class StandardControls extends StatelessWidget {
     );
   }
 
-  Widget _control(BuildContext context, BarControl c, ControlsSnapshot s) {
+  Widget _control(BuildContext context, BarControl c, ControlsSnapshot s,
+      {({bool always, double width}) slider = (always: true, width: volumeSliderWidth)}) {
     final m = model;
     final key = ValueKey('control-${c.name}');
     final enabled = controlEnabled(c, s);
@@ -216,6 +230,7 @@ class StandardControls extends StatelessWidget {
             volume: m.volume.value,
             onChanged: m.setVolume,
             onToggleMute: m.toggleMute,
+            slider: slider,
             button: (context, i, color, tip, onPressed) =>
                 _IconButton(icon: i, tooltip: tip, color: color, size: 24 * scale, onPressed: onPressed),
           ),
@@ -318,6 +333,17 @@ class _Clock extends StatelessWidget {
   final VoidCallback onPressed;
   const _Clock({required this.text, required this.tooltip, required this.scale, required this.onPressed});
 
+  static TextStyle _style(double scale) =>
+      TextStyle(fontSize: 14 * scale, fontFeatures: const [FontFeature.tabularFigures()]);
+
+  /// The clock's width showing [text] (its padding included).
+  static double widthOf(String text, double scale) {
+    final p = TextPainter(text: TextSpan(text: text, style: _style(scale)), textDirection: TextDirection.ltr)..layout();
+    final w = p.width;
+    p.dispose();
+    return w + 20 * scale;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Tooltip(
@@ -330,10 +356,7 @@ class _Clock extends StatelessWidget {
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
         onPressed: onPressed,
-        child: Text(
-          text,
-          style: TextStyle(fontSize: 14 * scale, fontFeatures: const [FontFeature.tabularFigures()]),
-        ),
+        child: Text(text, style: _style(scale)),
       ),
     );
   }

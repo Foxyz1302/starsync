@@ -92,23 +92,34 @@ class MinimalControls extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(12, 0, 12, _rowGap),
                   child: SizedBox(
                     height: rowHeight(scale),
-                    child: SignalBuilder(
-                      builder: (context) {
-                        final s = model.snapshot.value;
-                        final layout = model.bar.value;
-                        // The clock lives on the timeline.
-                        List<Widget> cluster(List<BarControl> cs) => [
-                          for (final c in cs)
-                            if (c != BarControl.time) _control(context, c, s),
-                        ];
-                        return Row(
-                          children: [
-                            MinimalCapsule(scale: scale, children: cluster(layout.left)),
-                            const Spacer(),
-                            MinimalCapsule(scale: scale, children: cluster(layout.right)),
-                          ],
-                        );
-                      },
+                    child: LayoutBuilder(
+                      builder: (context, box) => SignalBuilder(
+                        builder: (context) {
+                          final s = model.snapshot.value;
+                          final layout = model.bar.value;
+                          // The clock lives on the timeline.
+                          final buttons = [...layout.left, ...layout.right].where((c) => c != BarControl.time).length;
+                          // The volume slider stays out where the row has
+                          // room for it (two capsules, a gap between).
+                          final slider = volumeSliderRoom(
+                            width: box.maxWidth,
+                            buttons: buttons,
+                            button: MinimalStyle.button * scale,
+                            fixed: 4 * MinimalStyle.capsulePad + 4 * scale + 24,
+                          );
+                          List<Widget> cluster(List<BarControl> cs) => [
+                            for (final c in cs)
+                              if (c != BarControl.time) _control(context, c, s, slider: slider),
+                          ];
+                          return Row(
+                            children: [
+                              MinimalCapsule(scale: scale, children: cluster(layout.left)),
+                              const Spacer(),
+                              MinimalCapsule(scale: scale, children: cluster(layout.right)),
+                            ],
+                          );
+                        },
+                      ),
                     ),
                   ),
                 ),
@@ -166,7 +177,8 @@ class MinimalControls extends StatelessWidget {
     );
   }
 
-  Widget _control(BuildContext context, BarControl c, ControlsSnapshot s) {
+  Widget _control(BuildContext context, BarControl c, ControlsSnapshot s,
+      {({bool always, double width}) slider = (always: true, width: volumeSliderWidth)}) {
     final m = model;
     final key = ValueKey('control-${c.name}');
     final enabled = controlEnabled(c, s);
@@ -200,6 +212,7 @@ class MinimalControls extends StatelessWidget {
             volume: m.volume.value,
             onChanged: m.setVolume,
             onToggleMute: m.toggleMute,
+            slider: slider,
             sliderColor: Theme.of(context).colorScheme.primary,
             trackColor: MinimalStyle.dim.withValues(alpha: 0.4),
             button: (context, i, color, tip, onPressed) =>

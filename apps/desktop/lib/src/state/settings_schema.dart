@@ -6,8 +6,8 @@ import 'package:hive_ce/hive.dart';
 
 /// The layout this build reads. 1: the layout of 1.2.x, where versioning
 /// starts (a box without a version is at 1). 2: auto sit-out replaces the
-/// idle switch.
-const settingsSchemaVersion = 2;
+/// idle switch. 3: the video volume is kept (`playerVolume`).
+const settingsSchemaVersion = 3;
 
 /// The box key holding the stored version.
 const settingsSchemaKey = 'schemaVersion';
@@ -24,7 +24,16 @@ class SettingsMigration {
 /// Every step in order of [SettingsMigration.to] (2, 3, ...).
 const settingsMigrations = <SettingsMigration>[
   SettingsMigration(2, 'auto sit-out replaces "when idle, sit out instead of just unready"', _autoSitOut),
+  SettingsMigration(3, 'the video volume is kept across starts', _playerVolume),
 ];
+
+/// 3: `playerVolume` is new. Nothing to carry over (every start was at
+/// 100 %, which a missing key still means); a value that is not a number
+/// goes.
+Future<void> _playerVolume(Box box) async {
+  final v = box.get('playerVolume');
+  if (v != null && v is! num) await box.delete('playerVolume');
+}
 
 /// 2: `idleSitsOut` only chose between two automatic steps after 10 idle
 /// minutes (unready, or sit out); both are auto sit-out now, on unless

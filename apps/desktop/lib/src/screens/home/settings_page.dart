@@ -14,6 +14,7 @@ const sessionShortcuts = [
   ('Space', 'Toggle ready'),
   ('← / →', 'Seek back / forward 10 s'),
   ('↑ / ↓, wheel', 'Volume up / down (up to 150 %)'),
+  ('M', 'Mute / unmute'),
   ('Shift+→', 'Skip 1:30 (for everyone)'),
   ('PgUp / PgDn', 'Previous / next chapter'),
   ('F', 'Toggle fullscreen'),

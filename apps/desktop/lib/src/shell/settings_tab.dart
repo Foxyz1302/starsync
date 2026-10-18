@@ -870,8 +870,8 @@ class SoundSettings extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(volume == 0 ? Icons.volume_off_outlined : Icons.volume_down_outlined,
-                  color: scheme.onSurfaceVariant),
+              const Text('App sounds'),
+              const SizedBox(width: 8),
               Expanded(
                 child: Slider(
                   key: const ValueKey('sound-volume'),
@@ -883,8 +883,9 @@ class SoundSettings extends StatelessWidget {
               SizedBox(width: 44, child: Text('${(volume * 100).round()}%', textAlign: TextAlign.end)),
             ],
           ),
-          Text('Soft cues for people and readiness; the video itself covers play, pause and the end. '
-              'Letting go of the slider plays the ready sound.', style: muted),
+          Text('Soft cues for people and readiness, not the video (its volume is in the player); the video '
+              'itself covers play, pause and the end. Letting go of the slider plays the ready sound.',
+              style: muted),
           const SizedBox(height: 12),
           Row(
             children: [

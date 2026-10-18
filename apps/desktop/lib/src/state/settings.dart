@@ -1,3 +1,4 @@
+import 'dart:async' show Timer;
 import 'dart:io' show File, Platform;
 
 import 'package:flutter/foundation.dart';
@@ -54,6 +55,7 @@ const _keyNotifyStyle = 'notifyStyle';
 const _keySubScale = 'subScale';
 const _keyDanmakuStyle = 'danmakuStyle';
 const _keyUpdateChannel = 'updateChannel';
+const _keyPlayerVolume = 'playerVolume';
 
 /// A file next to the binary naming a channel (`dev` / `stable`): the
 /// app takes it as the update channel on its next start and deletes it.
@@ -160,6 +162,10 @@ class AppSettings {
   NotifyPrefs get notifyPrefs => NotifyPrefs(chat: chatPopups.peek(), people: notifyPeople.peek());
   /// App sounds (`sfx/`): 0..1, 0 = silent.
   final soundVolume = signal(1.0);
+  /// The video's volume as last set (0..150, mpv's `volume-max`): every
+  /// start begins there. Written a moment after the last change (a wheel
+  /// makes many steps).
+  final playerVolume = signal(100.0);
   /// `SfxKind` names switched off one by one.
   final soundsOff = signal<Set<String>>(const {});
   /// The sound set (`SoundPreset` name) every sound uses unless
@@ -255,6 +261,8 @@ class AppSettings {
       if (people is bool) notifyPeople.value = people;
       final vol = box.get(_keySoundVolume);
       if (vol is num) soundVolume.value = vol.toDouble().clamp(0, 1);
+      final video = box.get(_keyPlayerVolume);
+      if (video is num && video.isFinite) playerVolume.value = video.toDouble().clamp(0, 150);
       final off = box.get(_keySoundsOff);
       if (off is List) soundsOff.value = Set.unmodifiable(off.whereType<String>());
       final welcomeOff = box.get(_keyWelcomeDismissed);
@@ -419,6 +427,14 @@ class AppSettings {
   void setSoundVolume(double v) {
     soundVolume.value = v.clamp(0, 1);
     _put(_keySoundVolume, soundVolume.value);
+  }
+
+  Timer? _playerVolumeWrite;
+
+  void setPlayerVolume(double v) {
+    playerVolume.value = v.clamp(0, 150);
+    _playerVolumeWrite?.cancel();
+    _playerVolumeWrite = Timer(const Duration(milliseconds: 400), () => _put(_keyPlayerVolume, playerVolume.peek()));
   }
 
   void setSoundOn(String kind, bool on) {

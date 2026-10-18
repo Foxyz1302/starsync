@@ -415,10 +415,13 @@ Settings tab's tooltip; and the credits, e.g. that the Minimal player design is 
 Player settings live in the player too: ⚙ → Player settings opens a
 narrow panel at the right edge of the player that stays open while you
 watch (the controls hide and show as usual) until its × or Esc. Its
-sections fold: tracks (subtitles, audio), subtitles (size, above the
-controls), picture (upscaling shader, sharp video, hardware decoding),
-sound (volume), notifications (toasts or danmaku and the danmaku look)
-and controls (design, progress line). Settings → Player has the same
+sections fold: sound first (the video's volume, and App sounds: how loud
+the app's own cues are), tracks (subtitles, audio), subtitles (size,
+above the controls), picture (upscaling shader, sharp video, hardware
+decoding with its custom value), notifications (toasts or danmaku and
+the danmaku look) and controls (design, progress line). Its All
+settings button opens the Settings page of the section you last used
+there (the player goes to the mini). Settings → Player has the same
 ones (plus the controls' layout and the custom shader files). Player
 design: Standard or Minimal (below); progress line when hidden (on by
 default: a thin line at the bottom of the video while the controls are
@@ -435,7 +438,7 @@ applies right away.
 Anywhere in a server (unless you are typing): Space = ready / unready,
 Tab = chat & activity (Tab never moves between buttons). Anywhere:
 Ctrl+Shift+B = mark a problem in the session log. Keys while the
-player fills the window: Left/Right = seek 10 s, Up/Down = volume, Shift+Right = skip 1:30,
+player fills the window: Left/Right = seek 10 s, Up/Down = volume, M = mute, Shift+Right = skip 1:30,
 PgUp/PgDn = previous / next chapter (as in mpv), F = fullscreen, Enter =
 quick chat, Esc = close the player panel, then
 the chat, then fullscreen, then shrink the player to mini; from the
@@ -456,11 +459,13 @@ Everything else is in ⚙: chapters (current one checked; click to jump),
 Skip 1:30, upscaling shader, change video, copy link, reload video,
 mark everyone ready, mark a problem, player settings and leave. The top
 bar has the title, Up next and back to the library (in fullscreen: exit
-fullscreen and the window buttons). Volume (scroll anywhere on the
-video, hover the speaker, or Up/Down) goes to 150 % like mpv: past the
-tick at 100 % the bar turns amber and mpv amplifies; a scroll or key
-shows the volume for a moment. Lists and menus under the mouse scroll
-as usual.
+fullscreen and the window buttons). Volume: its slider sits next to
+the speaker (in a narrow window it slides out while you hover the
+speaker); a click on the speaker or M mutes, scrolling anywhere on the
+video or Up/Down steps it. It goes to 150 % like mpv: past the tick at
+100 % the bar turns amber and mpv amplifies; a scroll or key shows the
+volume for a moment. The next start begins at the volume you left it
+at. Lists and menus under the mouse scroll as usual.
 
 Standard (the default): a seek bar that marks chapter starts with a
 diamond (hovering it shows the time and the chapter title) over a row

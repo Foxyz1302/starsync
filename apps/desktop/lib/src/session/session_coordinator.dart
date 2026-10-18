@@ -379,6 +379,8 @@ class SessionCoordinator {
       ..notify = notify
       ..onError = _setPlayerError
       ..onOpened = _onOpened;
+    // The video starts at the volume last set (the controls keep it).
+    playback.volume.value = settings.playerVolume.peek();
     // The Notifier's view of the session (Status → Notifier, never back).
     notifier.session = () {
       final r = serverState.peek();

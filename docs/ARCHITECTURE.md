@@ -2226,7 +2226,7 @@ panel) and chat messages (Copy message, and a link in it).
   is `windowManager.setFullScreen` with the strip hidden (party avatars in
   a corner while paused); F, Esc and double-click on the picture toggle it.
   The player keys (Settings → Keyboard shortcuts) work while the player is
-  full and nothing is in front of it; ↑ / ↓ step the volume. Space (ready)
+  full and nothing is in front of it; ↑ / ↓ step the volume, M mutes. Space (ready)
   and Tab (chat) are app-wide: `AppKeys` (`widgets/app_keys.dart`, around
   the shell) takes them first while in a server, unless a text field (or
   a `KeyboardClaim`, see "Up next") has focus or a dialog or menu is in
@@ -2268,17 +2268,22 @@ panel) and chat messages (Copy message, and a link in it).
   sliding and fading in from the right; it stays open while the controls
   hide and show, until its × or Esc (the player's Esc closes it first),
   and leaving the full player closes it. The mouse on it holds the
-  controls up (`ControlsHoldRegion`). Its sections fold (their titles
-  toggle; folded ones are kept for the app's run, Notifications and
-  Controls start folded): tracks (subtitle, audio; remembered as from
-  the track menus), subtitles (size, mpv `sub-scale` from
-  `AppSettings.subScale`, set on every player; above the controls, see
-  "Subtitle lift"), picture (upscaling shader and quality, sharp video
-  and subtitles, see "Media", hardware decoding, set live on mpv's
-  `hwdec`), sound (volume), notifications (Toasts / Danmaku and, with
-  Danmaku, the look's knobs, see "Danmaku notifications") and controls
-  (design, progress line); a pointer to Settings → Player and Mark a
-  problem at its foot. Compact rows of its own over the same settings and
+  controls up (`ControlsHoldRegion`). Its sections (`PanelSection`)
+  fold (their titles toggle; folded ones are kept for the app's run,
+  Notifications and Controls start folded): sound first (the video's
+  volume on the bar's `VolumeBar`, and App sounds, `soundVolume`, with
+  a line saying it is the app's cues, not the video), tracks (subtitle,
+  audio; remembered as from the track menus), subtitles (size, mpv
+  `sub-scale` from `AppSettings.subScale`, set on every player; above
+  the controls, see "Subtitle lift"), picture (upscaling shader and
+  quality, sharp video and subtitles, see "Media", hardware decoding,
+  set live on mpv's `hwdec`, with the custom value's field under it),
+  notifications (Toasts / Danmaku and, with Danmaku, the look's knobs,
+  see "Danmaku notifications") and controls (design, progress line).
+  At its foot All settings and Mark a problem: All settings opens the
+  Settings page of the section last opened or clicked in
+  (`settingsPageFor`, through the shell's `_openSettings`, which takes
+  the player to the mini as any tab does). Compact rows of its own over the same settings and
   actions; Settings → Player shows the full rows (`playerSettingRows`:
   design, progress line, shader, sharp video, hardware decoding, subtitle
   size, subtitles above the controls) and the controls' own choices
@@ -2463,8 +2468,9 @@ refills.
 stores `schemaVersion`; `migrateSettings` (run when `AppSettings` loads)
 applies the ordered `settingsMigrations` steps past the stored version up
 to `settingsSchemaVersion`, stamping the version after each. 1 is the
-layout of 1.2.x (a box without a version is at 1, no steps yet); a box
-from a newer build is left alone. Link media names are a web page's title (see "yt-dlp"), else
+layout of 1.2.x (a box without a version is at 1); 2: auto sit-out
+replaces the idle switch; 3: the video volume is kept (`playerVolume`,
+100 % when missing). A box from a newer build is left alone. Link media names are a web page's title (see "yt-dlp"), else
 derived from the URL path, never containing a query string.
 
 Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
@@ -2556,8 +2562,11 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   reports `shown` for the overlay. `control_menus.dart`: the track and
   chapter lists and the ⚙ menu on `showAppMenu` (anchored on the button,
   holding the controls), and `runControlAction`. `volume.dart`:
-  `VolumeControl` (the skin's speaker button, a `VolumeBar` sliding out
-  on hover, the wheel on it stepping), `VolumeReadout`. `SessionControls`
+  `VolumeControl` (the skin's speaker button, click mutes; a `VolumeBar`
+  beside it whenever the bar has room for it next to every button and
+  the Standard clock at its widest, `volumeSliderRoom`; narrower it
+  slides out on hover in the room left, or not at all; the wheel on it
+  steps), `VolumeReadout`. `SessionControls`
   (`session_controls.dart`) puts the skin the settings pick into one
   frame, live, and gives the overlay the bars' heights.
 - **Standard skin** (`standard/`): Material-style. A top gradient with the
@@ -2604,7 +2613,9 @@ part not downloaded still reads; chapter cuts are a light dark line.
   (Skip ED and Next episode never without the controls).
 - Volume: mpv's `volume-max` is pinned to 150 per player by the host
   (`PlaybackController.maxVolume`); the volume is the controller's and
-  goes to every next player; `VolumeBar` runs 0..150 with a tick at 100 and the
+  goes to every next player; it starts at `AppSettings.playerVolume`
+  and the controls' `setVolume` (bar, panel, wheel, keys, mute, M)
+  stores it there (written 400 ms after the last change); `VolumeBar` runs 0..150 with a tick at 100 and the
   part above in amber; the wheel and ↑ / ↓ step 5 % (`volumeStep`),
   clamped. The wheel works anywhere on the full player (`VolumeWheel`
   around the player's stack): `WheelSteps` makes a mouse notch one step

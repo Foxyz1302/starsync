@@ -49,7 +49,7 @@ class PlayerControlsModel {
 
   PlaybackController get playback => coord.playback;
   QueueController get queue => coord.queue;
-  AppSettings get settings => AppSettings.instance;
+  AppSettings get settings => coord.settings;
 
   // ---------------------------------------------------------------- state
 
@@ -167,7 +167,12 @@ class PlayerControlsModel {
 
   void playNextEpisode() => coord.playNextEpisode();
 
-  void setVolume(double v) => playback.setVolume(v.clamp(0.0, vol.maxVolume));
+  /// The video's volume, now and from the next start on.
+  void setVolume(double v) {
+    final clamped = v.clamp(0.0, vol.maxVolume);
+    playback.setVolume(clamped);
+    settings.setPlayerVolume(clamped);
+  }
 
   /// One volume step up (+1) or down (-1) from the wheel or ↑ / ↓;
   /// flashes the volume readout.

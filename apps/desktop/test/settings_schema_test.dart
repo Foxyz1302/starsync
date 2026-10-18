@@ -38,6 +38,16 @@ void main() {
       expect(kept.get('autoSitOut'), isFalse, reason: 'a choice already made stays');
     });
 
+    test('3: the video volume is kept; a stored value that is not a number goes', () async {
+      final box = await Hive.openBox('settings');
+      await box.putAll({settingsSchemaKey: 2, 'playerVolume': 'loud'});
+      await migrateSettings(box);
+      expect(box.containsKey('playerVolume'), isFalse);
+      await box.putAll({settingsSchemaKey: 2, 'playerVolume': 40.0});
+      await migrateSettings(box);
+      expect(box.get('playerVolume'), 40.0);
+    });
+
     test('steps run in order, only past the stored version', () async {
       final box = await Hive.openBox('settings');
       await box.put(settingsSchemaKey, 1);

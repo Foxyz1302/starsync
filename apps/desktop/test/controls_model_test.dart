@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:signals/signals_flutter.dart';
@@ -112,8 +113,8 @@ void main() {
       coord.playback.duration.value = Duration.zero;
     });
 
-    Future<PlayerControlsModel> pump(WidgetTester tester, ControlsSkin skin) async {
-      tester.view.physicalSize = const Size(1280, 720);
+    Future<PlayerControlsModel> pump(WidgetTester tester, ControlsSkin skin, {double width = 1280}) async {
+      tester.view.physicalSize = Size(width, 720);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       s.controlsSkin.value = skin;
@@ -182,6 +183,45 @@ void main() {
         expect(drawn(tester), isNot(contains(BarControl.chat)));
       });
     }
+
+    for (final skin in ControlsSkin.values) {
+      testWidgets('${skin.label}: the volume slider stays out in a wide bar, on hover in a narrow one', (tester) async {
+        await pump(tester, skin);
+        expect(find.byKey(const ValueKey('volume-bar')), findsOneWidget, reason: 'wide');
+        // Room for every button, not for the slider too.
+        await pump(tester, skin, width: skin == ControlsSkin.standard ? 612 : 400);
+        expect(tester.takeException(), isNull);
+        expect(find.byKey(const ValueKey('volume-bar')), findsNothing, reason: 'narrow');
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: Offset.zero);
+        await mouse.moveTo(tester.getCenter(find.byKey(const ValueKey('volume-control'))));
+        addTearDown(mouse.removePointer);
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('volume-bar')), findsOneWidget, reason: 'narrow, hovered');
+      });
+    }
+
+    test('the video volume is kept for the next start', () {
+      addTearDown(() => s.playerVolume.value = 100);
+      final model = PlayerControlsModel(
+        coord: coord,
+        fullscreen: signal(false),
+        chatOpen: signal(false),
+        unread: signal(0),
+        onToggleFullscreen: () {},
+        onToggleChat: () {},
+        onChangeVideo: () {},
+        onCollapse: () {},
+        onLeave: () {},
+      );
+      addTearDown(model.dispose);
+      model.setVolume(40);
+      expect(s.playerVolume.value, 40);
+      model.toggleMute();
+      expect(s.playerVolume.value, 0);
+      model.setVolume(400);
+      expect(s.playerVolume.value, 150, reason: 'clamped to mpv\'s volume-max');
+    });
 
     testWidgets('⚙ lists the rest', (tester) async {
       await pump(tester, ControlsSkin.minimal);

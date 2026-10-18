@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart' show JellyfinStreamType;
@@ -5,6 +7,7 @@ import 'package:sync_relay_core/core.dart' show JellyfinStreamType;
 import '../app/app_graph.dart';
 import '../danmaku/danmaku_settings.dart' show DanmakuKnobs, NotifyStyleSelect;
 import '../playback/playback_controller.dart' show RenderMode;
+import '../sfx/sfx.dart' show SfxKind;
 import '../shaders/shader_presets.dart';
 import '../shell/mark_problem.dart' show MarkProblemButton;
 import '../shell/motion.dart';
@@ -17,13 +20,31 @@ import 'volume.dart' as vol;
 // The player panel (⚙ → Player settings, both skins): a narrow glass
 // column docked at the right edge of the full player that stays open
 // while the controls hide and show, until its × or Esc. What is useful
-// while watching, in collapsible sections: tracks, subtitles, picture,
-// sound, notifications (toasts or danmaku, the danmaku look) and the
-// controls. Everything applies live and is saved; the rest of Settings →
-// Player stays there.
+// while watching, in collapsible sections: sound first (the video's
+// volume, the app's sounds), tracks, subtitles, picture, notifications
+// (toasts or danmaku, the danmaku look) and the controls. Everything
+// applies live and is saved; "All settings" opens Settings where the
+// section last used lives.
+
+/// The panel's sections, in order.
+enum PanelSection {
+  sound('Sound'),
+  tracks('Tracks'),
+  subtitles('Subtitles'),
+  picture('Picture'),
+  notifications('Notifications'),
+  controls('Controls');
+
+  final String title;
+  const PanelSection(this.title);
+}
 
 /// Sections folded by the user, kept for the app's run.
-final _folded = <String>{'Notifications', 'Controls'};
+final _folded = <PanelSection>{PanelSection.notifications, PanelSection.controls};
+
+/// The section last opened or used (a click in it), kept for the app's
+/// run: "All settings" opens its page.
+var _lastUsed = PanelSection.sound;
 
 class PlayerPanel extends StatelessWidget {
   static const width = 312.0;
@@ -33,10 +54,23 @@ class PlayerPanel extends StatelessWidget {
   final ReadonlySignal<RenderMode>? renderMode;
 
   /// The player's volume (0..[vol.maxVolume]) and how to set it; the
-  /// Sound section only with both.
+  /// video's volume row only with both.
   final ReadonlySignal<double>? volume;
   final ValueChanged<double>? onVolume;
-  const PlayerPanel({super.key, required this.onClose, this.renderMode, this.volume, this.onVolume});
+
+  /// "All settings": opens Settings at the page of the section last used.
+  final ValueChanged<PanelSection>? onAllSettings;
+  const PlayerPanel({
+    super.key,
+    required this.onClose,
+    this.renderMode,
+    this.volume,
+    this.onVolume,
+    this.onAllSettings,
+  });
+
+  /// The section "All settings" goes to now.
+  static PanelSection get lastUsed => _lastUsed;
 
   @override
   Widget build(BuildContext context) {
@@ -76,11 +110,33 @@ class PlayerPanel extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const _Section(title: 'Tracks', children: [
+                    _Section(section: PanelSection.sound, children: [
+                      if ((volume, onVolume) case (final v?, final set?))
+                        SignalBuilder(
+                          builder: (context) => _Row(
+                            label: 'Volume',
+                            control: _VolumeSlider(key: const ValueKey('panel-volume'), volume: v.value, onChanged: set),
+                          ),
+                        ),
+                      SignalBuilder(
+                        builder: (context) => _SliderRow(
+                          key: const ValueKey('panel-app-sounds'),
+                          label: 'App sounds',
+                          help: 'Ready, joins and chat cues, not the video',
+                          value: s.soundVolume.value,
+                          min: 0,
+                          max: 1,
+                          readout: '${(s.soundVolume.value * 100).round()} %',
+                          onChanged: s.setSoundVolume,
+                          onChangeEnd: (_) => unawaited(graph.sfx.preview(SfxKind.ready, readyIndex: 2)),
+                        ),
+                      ),
+                    ]),
+                    const _Section(section: PanelSection.tracks, children: [
                       _TrackRow(type: JellyfinStreamType.subtitle),
                       _TrackRow(type: JellyfinStreamType.audio),
                     ]),
-                    _Section(title: 'Subtitles', children: [
+                    _Section(section: PanelSection.subtitles, children: [
                       SignalBuilder(
                         builder: (context) => _SliderRow(
                           key: const ValueKey('panel-sub-scale'),
@@ -103,7 +159,7 @@ class PlayerPanel extends StatelessWidget {
                         ),
                       ),
                     ]),
-                    _Section(title: 'Picture', children: [
+                    _Section(section: PanelSection.picture, children: [
                       _ShaderRow(renderMode: renderMode),
                       SignalBuilder(builder: (context) {
                         final m = renderMode?.value;
@@ -116,36 +172,9 @@ class PlayerPanel extends StatelessWidget {
                           onChanged: s.setScreenResVideo,
                         );
                       }),
-                      SignalBuilder(
-                        builder: (context) => _Row(
-                          label: 'Hardware decoding',
-                          control: AppSelect<HwdecMode>(
-                            key: const ValueKey('panel-hwdec'),
-                            value: s.hwdecMode.value,
-                            items: const [(HwdecMode.auto, 'Auto'), (HwdecMode.off, 'Off'), (HwdecMode.custom, 'Custom')],
-                            onChanged: (m) {
-                              s.setHwdecMode(m);
-                              applyHwdecLive(graph.coordinator.playback);
-                            },
-                          ),
-                        ),
-                      ),
+                      const _HwdecRow(),
                     ]),
-                    if (volume case final v?)
-                      _Section(title: 'Sound', children: [
-                        SignalBuilder(
-                          builder: (context) => _SliderRow(
-                            key: const ValueKey('panel-volume'),
-                            label: 'Volume',
-                            value: v.value,
-                            min: 0,
-                            max: vol.maxVolume,
-                            readout: '${v.value.round()} %',
-                            onChanged: onVolume,
-                          ),
-                        ),
-                      ]),
-                    _Section(title: 'Notifications', children: [
+                    _Section(section: PanelSection.notifications, children: [
                       _Row(label: 'Show as', control: NotifyStyleSelect(settings: s)),
                       SignalBuilder(
                         builder: (context) => AnimatedSize(
@@ -158,7 +187,7 @@ class PlayerPanel extends StatelessWidget {
                         ),
                       ),
                     ]),
-                    _Section(title: 'Controls', children: [
+                    _Section(section: PanelSection.controls, children: [
                       SignalBuilder(
                         builder: (context) => _Row(
                           label: 'Design',
@@ -180,14 +209,21 @@ class PlayerPanel extends StatelessWidget {
                       ),
                     ]),
                     const SizedBox(height: 6),
-                    Row(
+                    Wrap(
+                      alignment: WrapAlignment.spaceBetween,
                       children: [
-                        Expanded(
-                          child: Text(
-                            'More in Settings → Player',
-                            style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12),
+                        if (onAllSettings case final open?)
+                          TextButton.icon(
+                            key: const ValueKey('panel-all-settings'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                            ),
+                            onPressed: () => open(_lastUsed),
+                            icon: const Icon(Icons.settings_outlined, size: 16),
+                            label: const Text('All settings'),
                           ),
-                        ),
                         const MarkProblemButton(),
                       ],
                     ),
@@ -202,32 +238,41 @@ class PlayerPanel extends StatelessWidget {
   }
 }
 
-/// A titled group that folds (its title is the toggle).
+/// A titled group that folds (its title is the toggle). A click anywhere
+/// in it makes it the section last used.
 class _Section extends StatefulWidget {
-  final String title;
+  final PanelSection section;
   final List<Widget> children;
-  const _Section({required this.title, required this.children});
+  const _Section({required this.section, required this.children});
 
   @override
   State<_Section> createState() => _SectionState();
 }
 
 class _SectionState extends State<_Section> {
-  late bool _open = !_folded.contains(widget.title);
+  late bool _open = !_folded.contains(widget.section);
 
   void _toggle() {
     setState(() => _open = !_open);
-    _open ? _folded.remove(widget.title) : _folded.add(widget.title);
+    _open ? _folded.remove(widget.section) : _folded.add(widget.section);
   }
 
   @override
   Widget build(BuildContext context) {
     final muted = Colors.white.withValues(alpha: 0.55);
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => _lastUsed = widget.section,
+      child: _column(muted),
+    );
+  }
+
+  Widget _column(Color muted) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         InkWell(
-          key: ValueKey('panel-section-${widget.title}'),
+          key: ValueKey('panel-section-${widget.section.title}'),
           borderRadius: BorderRadius.circular(AppMenuStyle.rowRadius),
           onTap: _toggle,
           child: Padding(
@@ -235,7 +280,7 @@ class _SectionState extends State<_Section> {
             child: Row(
               children: [
                 Expanded(
-                  child: Text(widget.title.toUpperCase(),
+                  child: Text(widget.section.title.toUpperCase(),
                       style: TextStyle(fontSize: 11, letterSpacing: 0.8, fontWeight: FontWeight.w600, color: muted)),
                 ),
                 AnimatedRotation(
@@ -312,23 +357,39 @@ class _SwitchRow extends StatelessWidget {
 
 class _SliderRow extends StatelessWidget {
   final String label;
+  final String? help;
   final double value, min, max;
   final int? divisions;
   final String readout;
   final ValueChanged<double>? onChanged;
+  final ValueChanged<double>? onChangeEnd;
   const _SliderRow({
     super.key,
     required this.label,
+    this.help,
     required this.value,
     required this.min,
     required this.max,
     this.divisions,
     required this.readout,
     required this.onChanged,
+    this.onChangeEnd,
   });
 
   @override
-  Widget build(BuildContext context) => SizedBox(
+  Widget build(BuildContext context) {
+    final row = _row(context);
+    if (help == null) return row;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        row,
+        Text(help!, style: TextStyle(fontSize: 11.5, color: Colors.white.withValues(alpha: 0.5))),
+      ],
+    );
+  }
+
+  Widget _row(BuildContext context) => SizedBox(
         height: 38,
         child: Row(
           children: [
@@ -341,7 +402,14 @@ class _SliderRow extends StatelessWidget {
                   thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
                   tickMarkShape: SliderTickMarkShape.noTickMark,
                 ),
-                child: Slider(value: value.clamp(min, max), min: min, max: max, divisions: divisions, onChanged: onChanged),
+                child: Slider(
+                  value: value.clamp(min, max),
+                  min: min,
+                  max: max,
+                  divisions: divisions,
+                  onChanged: onChanged,
+                  onChangeEnd: onChangeEnd,
+                ),
               ),
             ),
             SizedBox(
@@ -357,6 +425,97 @@ class _SliderRow extends StatelessWidget {
           ],
         ),
       );
+}
+
+/// The video's volume: the bar's [vol.VolumeBar] (a tick at 100 %, amber
+/// above) across the row, and the percentage.
+class _VolumeSlider extends StatelessWidget {
+  final double volume;
+  final ValueChanged<double> onChanged;
+  const _VolumeSlider({super.key, required this.volume, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) => Row(
+        children: [
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, box) => vol.VolumeBar(volume: volume, onChanged: onChanged, width: box.maxWidth),
+            ),
+          ),
+          SizedBox(
+            width: 52,
+            child: Text('${volume.round()} %',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: volume > 100 ? vol.boostColor : Colors.white.withValues(alpha: 0.7),
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                )),
+          ),
+        ],
+      );
+}
+
+/// Hardware decoding: auto, off, or custom with mpv's value typed below
+/// (Enter puts it on the running player).
+class _HwdecRow extends StatefulWidget {
+  const _HwdecRow();
+
+  @override
+  State<_HwdecRow> createState() => _HwdecRowState();
+}
+
+class _HwdecRowState extends State<_HwdecRow> {
+  late final _s = AppScope.of(context).coordinator.settings;
+  late final _custom = TextEditingController(text: _s.hwdecCustom.peek());
+
+  @override
+  void dispose() {
+    _custom.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final playback = AppScope.of(context).coordinator.playback;
+    return SignalBuilder(builder: (context) {
+      final mode = _s.hwdecMode.value;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _Row(
+            label: 'Hardware decoding',
+            control: AppSelect<HwdecMode>(
+              key: const ValueKey('panel-hwdec'),
+              value: mode,
+              items: const [(HwdecMode.auto, 'Auto'), (HwdecMode.off, 'Off'), (HwdecMode.custom, 'Custom')],
+              onChanged: (m) {
+                _s.setHwdecMode(m);
+                applyHwdecLive(playback);
+              },
+            ),
+          ),
+          if (mode == HwdecMode.custom)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: TextField(
+                key: const ValueKey('panel-hwdec-custom'),
+                controller: _custom,
+                style: const TextStyle(fontSize: 13),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  labelText: 'mpv hwdec value (Enter applies)',
+                  hintText: 'e.g. vaapi, nvdec, d3d11va',
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: _s.setHwdecCustom,
+                onSubmitted: (_) => applyHwdecLive(playback),
+              ),
+            ),
+        ],
+      );
+    });
+  }
 }
 
 /// Subtitle or audio track of the running player; remembered for the

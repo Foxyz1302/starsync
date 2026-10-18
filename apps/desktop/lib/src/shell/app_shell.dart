@@ -959,6 +959,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
                   onToggleChat: _toggleChat,
                   onChangeVideo: _changeVideo,
                   onOpenIntegrations: () => _openSettings(SettingsSection.integrations),
+                  onOpenSettings: _openSettings,
                   onLeave: _confirmLeave,
                   videoBuilder: widget.videoBuilder,
                   windowControls: widget.windowControls,
