@@ -7,6 +7,14 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ## Unreleased
 
+### Added
+
+### Changed
+
+### Fixed
+
+## 1.4.0
+
 Links you put up are downloaded once for everyone, quick chat and danmaku in the player, plus What's new and fixes for Windows, the relay and chat.
 
 ### Added
