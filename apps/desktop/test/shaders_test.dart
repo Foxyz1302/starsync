@@ -103,10 +103,11 @@ void main() {
     test('copies the bundle once per version, redoes a broken copy', () async {
       final support = _fresh('shaders_support');
       final dir = await extractAnime4k(support);
-      expect(dir.path, endsWith('shaders/anime4k-$anime4kVersion'));
+      expect(dir.path, endsWith('shaders/anime4k-$anime4kVersion-$anime4kCopyRevision'));
       for (final f in [...anime4kAllFiles, 'LICENSE']) {
-        expect(File('${dir.path}/$f').readAsBytesSync(),
-            File('$anime4kAssetDir/$f').readAsBytesSync(),
+        final shipped = File('$anime4kAssetDir/$f');
+        expect(File('${dir.path}/$f').readAsStringSync(),
+            f.endsWith('.glsl') ? highpAnime4k(shipped.readAsStringSync()) : shipped.readAsStringSync(),
             reason: f);
       }
       // Second run is a no-op: a marker-tagged copy stays untouched.
@@ -130,6 +131,36 @@ void main() {
       expect(await shaderPathsFor(ShaderPreset.custom, ShaderQuality.hq, ['/x']),
           ['/x']);
     });
+  });
+
+  test('Anime4K reads go through a highp helper, once per pass', () {
+    const src = '''// header
+//!DESC pass 1
+//!HOOK MAIN
+//!BIND MAIN
+#define go_0(x_off, y_off) (MAIN_texOff(vec2(x_off, y_off)))
+vec4 hook() { return mat4(1.0) * go_0(0.0, 0.0); }
+//!DESC pass 2
+//!HOOK MAIN
+//!BIND conv2d_tf
+#define go_0(x_off, y_off) (max((conv2d_tf_texOff(vec2(x_off, y_off))), 0.0))
+#define go_1(x_off, y_off) (max(-(conv2d_tf_texOff(vec2(x_off, y_off))), 0.0))
+#define g_0 (max((conv2d_tf_tex(conv2d_tf_pos)), 0.0))
+vec4 hook() { return go_0(0.0, 0.0) + go_1(0.0, 0.0) + g_0 + MAIN_tex(MAIN_pos); }
+''';
+    final out = highpAnime4k(src);
+    expect('highp vec4 starsync_hp('.allMatches(out), hasLength(2), reason: 'one helper per pass');
+    expect(out, contains('#define go_0(x_off, y_off) (starsync_hp(MAIN_texOff(vec2(x_off, y_off))))'));
+    expect(out, contains('(max(-(starsync_hp(conv2d_tf_texOff(vec2(x_off, y_off)))), 0.0))'));
+    expect(out, contains('#define g_0 (max((starsync_hp(conv2d_tf_tex(conv2d_tf_pos))), 0.0))'));
+    expect(out, contains('+ g_0 + MAIN_tex(MAIN_pos); }'), reason: 'other code stays as it is');
+    // Every shipped file: every network read wrapped, the helper before its first use.
+    for (final f in anime4kAllFiles) {
+      final o = highpAnime4k(File('$anime4kAssetDir/$f').readAsStringSync());
+      for (final line in o.split('\n').where((l) => RegExp(r'^#define g(o)?_\d').hasMatch(l))) {
+        expect(line, contains('starsync_hp('), reason: '$f: $line');
+      }
+    }
   });
 
   test('shader settings persist across a reload', () async {

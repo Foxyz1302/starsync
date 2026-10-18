@@ -148,10 +148,11 @@ abstract interface class PlayerHost {
   /// start).
   HostedVideo video(HostedPlayer player, {bool probe = false});
 
-  /// The pixel size every video output renders at: the view's, so mpv
-  /// scales the picture and draws subtitles at screen resolution
-  /// (Settings → Player, "Sharp video"). Null: each output at its video's
-  /// own size. Applies to live outputs and to new ones once they are up.
+  /// The view's pixel size: every video output renders the picture fitted
+  /// in it ([fitOutputSize]), so mpv scales the picture and draws
+  /// subtitles at screen resolution (Settings → Player, "Sharp video").
+  /// Null: each output at its video's own size. Applies to live outputs
+  /// and to new ones once they are up.
   void setOutputSize(int? width, int? height);
 
   /// How video renders, as last learned (kept after leaving).
@@ -202,4 +203,27 @@ bool mpvStreamLost(PlayerLogLine log) =>
 bool mpvLoadFailed(PlayerLogLine log, Duration duration) {
   return duration == Duration.zero &&
       ((log.prefix == 'cplayer' && log.level == 'fatal') || (log.prefix == 'demux' && log.level == 'error'));
+}
+
+/// The size a video output renders at for a [view] of that many pixels:
+/// the [video]'s picture (its display size, aspect included) fitted
+/// inside, no letterbox. The texture then has the picture's aspect, so
+/// while a resize settles Flutter scales the last one to the new view
+/// with no jump (a texture of the whole view would shrink inside its own
+/// black bars until the new one came). Drawn 1:1: the fitted side is the
+/// view's, the other is rounded down to the view's parity, so the
+/// picture sits on whole pixels when centred (a half-pixel offset would
+/// blur every line). Unknown video: the view.
+(int, int) fitOutputSize((int, int) view, (int, int)? video) {
+  final (vw, vh) = view;
+  if (video == null || video.$1 <= 0 || video.$2 <= 0) return view;
+  final aspect = video.$1 / video.$2;
+  int under(double x, int full) {
+    var n = x.floor().clamp(1, full);
+    if ((full - n).isOdd) n = n > 1 ? n - 1 : n;
+    return n;
+  }
+
+  if (vw / vh > aspect) return (under(vh * aspect, vw), vh); // pillarbox
+  return (vw, under(vw / aspect, vh)); // letterbox (or exact)
 }

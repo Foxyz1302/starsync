@@ -12,7 +12,8 @@ import '../playback/playback_controller.dart';
 // bottom subtitles move up while something covers the bottom of the
 // picture (the quick chat box; the control bar when chosen).
 
-/// The video output's size for a view of [logical] size at [dpr]: its
+/// The view size the host fits each video output into ([fitOutputSize])
+/// for a view of [logical] size at [dpr]: its
 /// physical pixels when [on] and video renders on the GPU, else null (the
 /// video's own size). Software rendering keeps the video's size: every
 /// pixel there is CPU work.
@@ -26,7 +27,7 @@ import '../playback/playback_controller.dart';
 /// How long a view size must hold before the output follows it (a
 /// window drag resizes many times a second; each resize reallocates the
 /// output's texture).
-const outputResizeDelay = Duration(milliseconds: 180);
+const outputResizeDelay = Duration(milliseconds: 120);
 
 /// Sends the size of the view around [child] to the player host (see
 /// [videoOutputSize]): at once the first time, then once a resize has

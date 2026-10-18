@@ -29,6 +29,8 @@ Links you put up are downloaded once for everyone, quick chat and danmaku in the
 
 ### Fixed
 
+- Upscaling shaders (Anime4K, the HQ modes) no longer shift the colours or draw a grid over the picture, which showed most in a large window or fullscreen
+- Sharp video: resizing the window or opening the chat panel no longer shrinks the picture for a moment before it jumps back
 - Joining while something plays on Windows: the video opens again by itself when it was too early
 - Relay: players no longer get stuck after a slow or stalled source
 - Relay: X (Twitter) clips play through the relay

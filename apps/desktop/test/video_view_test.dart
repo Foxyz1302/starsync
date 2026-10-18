@@ -1,6 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:starsync/src/platform/ports/player_host.dart' show RenderMode;
+import 'package:starsync/src/platform/ports/player_host.dart' show RenderMode, fitOutputSize;
 import 'package:starsync/src/screens/home/ui.dart' show devToolsFor;
 import 'package:starsync/src/shell/video_view.dart';
 
@@ -20,6 +20,27 @@ void main() {
         expect(videoOutputSize(const Size(1280, 720), 1, on: true, mode: m), isNull, reason: m.name);
       }
       expect(videoOutputSize(const Size(4, 4), 1, on: true, mode: RenderMode.gpu), isNull);
+    });
+  });
+
+  group('fitOutputSize', () {
+    test('the picture fitted in the view, no bars', () {
+      expect(fitOutputSize((1920, 1080), (1280, 720)), (1920, 1080));
+      // 16:9 on a 2560x1080 screen: pillarboxed, full height.
+      expect(fitOutputSize((2560, 1080), (1280, 720)), (1920, 1080));
+      // The chat panel narrows the view: letterboxed, full width.
+      expect(fitOutputSize((880, 720), (1280, 720)), (880, 494));
+      expect(fitOutputSize((1280, 720), null), (1280, 720));
+      expect(fitOutputSize((1280, 720), (0, 0)), (1280, 720));
+    });
+
+    test('the bars split evenly: the picture sits on whole pixels', () {
+      for (final (view, video) in [((881, 720), (1280, 720)), ((1000, 999), (1920, 800)), ((1366, 768), (720, 576))]) {
+        final (w, h) = fitOutputSize(view, video);
+        expect(w <= view.$1 && h <= view.$2, isTrue);
+        expect((view.$1 - w).isEven && (view.$2 - h).isEven, isTrue, reason: '$view $video -> ($w, $h)');
+        expect(w == view.$1 || h == view.$2, isTrue, reason: 'one side fills the view');
+      }
     });
   });
 

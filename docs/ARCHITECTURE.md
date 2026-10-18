@@ -575,8 +575,20 @@ controls' ⚙ → Upscaling shader menu, Ctrl+0..6, both also save it). The Anim
 v4.0.1 files live in `apps/desktop/assets/shaders/anime4k/` (only the 14
 the presets use, plus its MIT LICENSE); mpv needs real paths, so
 `extractAnime4k` copies them once per version to
-`<app support>/shaders/anime4k-<version>/` (a `.complete` marker is written
-last). `anime4kFiles` maps each mode to the file list of Anime4K's mpv
+`<app support>/shaders/anime4k-<version>-<revision>/` (a `.complete`
+marker is written last; other `anime4k-*` copies are deleted), each
+rewritten by `highpAnime4k`. media_kit renders through OpenGL ES (EGL
+on Linux, ANGLE on Windows), where mpv declares `precision mediump
+sampler2D`: a texture read is mediump and Anime4K's weights are bare
+literals, so a network's `mat4(...) * go_0(...)` sums ran at half
+precision (fp16 on NVIDIA). The VL networks of HQ overflow and round
+there: shifted, posterised colours and a regular grid, strongest once
+the upscalers run (output over 1.2x the video, so mostly with "Sharp
+video" at a large size). The rewrite adds a highp identity function to
+each pass and routes every `go_N` / `g_N` read through it; the result on
+OpenGL ES then equals desktop OpenGL's (an mpv CLI frame grab,
+`--opengl-es=yes` vs `no`, identical). Desktop GLSL ignores the
+qualifiers. Custom shaders are passed as they are. `anime4kFiles` maps each mode to the file list of Anime4K's mpv
 templates: HQ = the high-end GPU set (VL + M networks), Fast = the low-end
 set (M + S). A missing file, a path containing the list separator, a
 read-back mismatch, or an mpv `libmpv_render` error while shaders are on
@@ -608,12 +620,20 @@ a 720p image for a 720p file. With the setting on and the GPU renderer
 work, nor before the probe knows), the session view
 (`shell/video_view.dart`, `VideoOutputSizer` around the `Video`) sends its
 size in physical pixels to the host (`PlayerHost.setOutputSize`): at
-once the first time, then once a resize has held 180 ms
-(`outputResizeDelay`: a window drag, fullscreen, full ↔ mini). The host
-applies it to every live output and to each new one once it is up
-(`NativeVideoController.setSize`); mpv then letterboxes inside it and
-draws subtitles at that size (text subtitles may sit in the black bars,
-as in mpv). media_kit's controller sets an output back to the video's
+once the first time, then once a resize has held 120 ms
+(`outputResizeDelay`: a window drag, the chat panel, fullscreen, full ↔
+mini). The host renders each output at the picture fitted in that view
+(`fitOutputSize` over the video's display size, re-fitted when it
+changes), not the whole view: the texture has the picture's aspect, so
+while a resize settles Flutter scales the last texture to the new view
+without a jump (a texture of the whole view, bars included, shrank
+inside its own bars until the new one came, about 0.2 s later), and the
+shaders work on no bar pixels. The side that fills the view is exact and
+the other is rounded down to the view's parity, so the centred picture
+sits on whole pixels and is drawn 1:1. It applies to every live output
+and to each new one once it is up (`NativeVideoController.setSize`,
+which only changes the size the next frame is drawn at); subtitles are
+drawn at that size, inside the picture. media_kit's controller sets an output back to the video's
 size whenever the video's parameters change (each new file), so the host
 sends the size again after it, under the controller's own lock; a fresh
 player's first frame or two show at the video's size. A paused player

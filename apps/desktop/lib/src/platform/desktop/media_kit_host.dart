@@ -569,7 +569,10 @@ class _MkVideo implements HostedVideo {
           // NativeVideoController (Linux, Windows): not exported, reached
           // through its public fields.
           final dynamic native = await controller.platform.future;
-          final want = player.host._outputSize;
+          final view = player.host._outputSize;
+          final params = player.mk.state.videoParams;
+          final dw = params.dw ?? 0, dh = params.dh ?? 0;
+          final want = view == null ? null : fitOutputSize(view, dw > 0 && dh > 0 ? (dw, dh) : null);
           if (_sized && want == _sent && !again) return;
           if (want == null) {
             if (!_sized) return; // never resized: already the video's size
