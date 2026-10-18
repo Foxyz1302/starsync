@@ -121,7 +121,8 @@ attach and detach the network listener (below).
   server"), goes home. Your server stays up all the while: what plays
   there and Up next wait for you, and whoever you invited stays in it.
   A joined server's name and version (`serverLabel`, `serverVersion`)
-  come from its `/health`; yours is this app's. The Join card's recents
+  come from its `/health`, read at the join and again whenever it comes
+  back restarted (an update); yours is this app's. The Join card's recents
   are the friends' servers that got in.
 - **Version gate**: `/health` gives `protoMin`, `protoMax` and `version`
   (a proto 15 server only `proto`, used for both). `versionFit` against

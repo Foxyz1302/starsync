@@ -15,6 +15,8 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ### Fixed
 
+- After a server is updated, the members card shows its new version (it kept the old one until you rejoined)
+
 ## 1.4.0
 
 Links you put up are downloaded once for everyone, quick chat and danmaku in the player, plus What's new and fixes for Windows, the relay and chat.

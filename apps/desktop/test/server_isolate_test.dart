@@ -260,6 +260,30 @@ void main() {
     }
   });
 
+  test('a friend\'s server restarts: its name and version are read again', timeout: const Timeout(Duration(minutes: 2)),
+      () async {
+    _hive('hive_friend_restart_test');
+    final graph = testGraph();
+    final first = SyncServer(const AppConfig(port: 0, secret: '', name: 'Old name'));
+    await first.start();
+    final port = first.boundPort;
+    SyncServer? second;
+    try {
+      expect(await graph.navigation.goHome(), isTrue);
+      await graph.navigation.join(ConnectParams(host: '127.0.0.1', port: port, secret: '', name: 'me'));
+      expect(graph.navigation.serverLabel.peek(), 'Old name');
+      await first.stop();
+      second = SyncServer(AppConfig(port: port, secret: '', name: 'New name'));
+      await second.start();
+      await _poll(() => graph.navigation.serverLabel.peek() == 'New name', 'the new name after the restart',
+          timeout: const Duration(seconds: 30));
+    } finally {
+      await graph.navigation.leave();
+      await graph.yourServer.stop();
+      await second?.stop();
+    }
+  });
+
   test('a friend stops sharing: told, and you are back home on yours', timeout: const Timeout(Duration(minutes: 2)),
       () async {
     _hive('hive_your_server_closed_test');

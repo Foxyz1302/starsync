@@ -57,6 +57,31 @@ class Navigation {
             (_) => coordinator.notify(const ServerRefused('The host stopped sharing their server')))));
       }
     }));
+    // A friend's server came back restarted (an update, a crash): read its
+    // name and version again, they may have changed.
+    var restarts = coordinator.restarts.peek();
+    _stops.add(effect(() {
+      final n = coordinator.restarts.value;
+      if (n <= restarts) {
+        restarts = n;
+        return;
+      }
+      restarts = n;
+      if (untracked(() => place.value) != Place.friend) return;
+      final at = untracked(() => address.value);
+      scheduleMicrotask(() => unawaited(_refreshHealth(at)));
+    }));
+  }
+
+  /// Reads `/health` of the friend's server at [at] ("host:port") again
+  /// and updates [serverLabel] and [serverVersion] if still there.
+  Future<void> _refreshHealth(String at) async {
+    final i = at.lastIndexOf(':');
+    if (i <= 0) return;
+    final health = await probeHealth(at.substring(0, i), at.substring(i + 1), healthGet);
+    if (!health.online || place.peek() != Place.friend || address.peek() != at) return;
+    serverLabel.value = health.label;
+    serverVersion.value = health.version;
   }
 
   final SessionCoordinator coordinator;
