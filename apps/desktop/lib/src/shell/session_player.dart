@@ -11,13 +11,15 @@ import '../controls/controls_probe.dart';
 import '../controls/minimal/style.dart';
 import '../controls/model/controls_layout.dart';
 import '../controls/model/controls_model.dart';
+import '../controls/player_panel.dart';
 import '../controls/session_controls.dart';
 import '../controls/volume.dart';
+import '../danmaku/danmaku.dart' show DanmakuController, DanmakuItem, DanmakuKind;
+import '../danmaku/danmaku_notices.dart';
 import '../danmaku/danmaku_preview.dart';
 import '../platform/desktop/media_kit_host.dart' show videoControllerOf;
 import '../queue/queue_ui.dart';
 import '../playback/media_marks.dart' show SkipKind, SkipOffer, formatClock;
-import '../screens/home/ui.dart' show devTools;
 import '../screens/session/jellyfin_widgets.dart';
 import '../screens/session/player_controls.dart';
 import '../session/app_events.dart' show ShaderMessage;
@@ -26,13 +28,13 @@ import '../shaders/shader_presets.dart';
 import '../app/app_graph.dart';
 import '../state/settings.dart';
 import '../widgets/app_keys.dart';
-import '../widgets/app_menu.dart' show AppGlass;
 import '../widgets/text_focus.dart';
 import '../widgets/window_buttons.dart';
 import 'avatar.dart';
 import 'motion.dart';
 import 'now_playing_title.dart';
 import 'player_status.dart';
+import 'quick_chat.dart';
 import 'sit_out_card.dart';
 import 'start_banner.dart';
 import 'video_view.dart';
@@ -48,9 +50,10 @@ typedef VideoViewBuilder = Widget Function(BuildContext context, VideoControlsBu
 
 /// The session's player: the one `Video` of the current player and
 /// everything over it. Full: the controls (one model, the skin picked in
-/// Settings), the start card, the status pill, Jellyfin overlays and
-/// the player keys. Mini: hover controls and a progress line. The shell keeps this
-/// widget mounted at one place in the tree while the mode changes, so the
+/// Settings), the start card, the status pill, Jellyfin overlays, the
+/// quick chat box, the danmaku, the player panel and the player keys.
+/// Mini: hover controls and a progress line. The shell keeps this widget
+/// mounted at one place in the tree while the mode changes, so the
 /// `Video` is never mounted twice nor rebuilt for a move.
 class SessionPlayer extends StatefulWidget {
   final PlayerMode mode;
@@ -73,6 +76,12 @@ class SessionPlayer extends StatefulWidget {
   /// Follows whether the full player's controls are up (the shell lifts
   /// its toasts above them); the player keeps its own when null.
   final ValueNotifier<bool>? controlsShown;
+  /// The quick chat box's state (the shell's: its draft is the chat
+  /// panel's); the player keeps its own when null.
+  final QuickChat? quickChat;
+  /// Set while the session's notifications fly as danmaku here (the
+  /// shell then leaves those out of its toasts).
+  final ValueNotifier<bool>? danmakuActive;
   /// Dev builds: the danmaku preview, shown over the full player while
   /// it is active.
   final DanmakuPreview? danmaku;
@@ -93,6 +102,8 @@ class SessionPlayer extends StatefulWidget {
     this.videoBuilder,
     this.windowControls = true,
     this.controlsShown,
+    this.quickChat,
+    this.danmakuActive,
     this.danmaku,
   });
 
@@ -108,16 +119,29 @@ class _SessionPlayerState extends State<SessionPlayer> {
   final _noFocus = FocusNode(skipTraversal: true, canRequestFocus: false);
   DateTime? _lastKeyAt;
   late final void Function() _stopShaderWatch;
+  late final void Function() _stopSubScale;
+  late final void Function() _stopDanmakuWatch;
+  late final void Function() _stopLiftWatch;
   int _shaderNoticeSeen = 0;
   bool _miniHover = false;
   // Whether the controls are up (their frame reports it).
   final _ownShown = ValueNotifier(true);
-  // Dev builds with "Lift subtitles": Enter opens a stand-in for the
-  // planned chat line at the bottom, in place of the control bar.
-  final _chatLine = ValueNotifier(false);
-  final _chatLineText = TextEditingController();
-  final _chatLineFocus = FocusNode();
   ValueNotifier<bool> get _controlsShown => widget.controlsShown ?? _ownShown;
+  // The quick chat box (Enter): the shell's, else one of our own.
+  QuickChat? _ownChat;
+  QuickChat get _quick => widget.quickChat ?? (_ownChat ??= QuickChat());
+  // The box or its echo sits in the control bar's place: the controls
+  // stay hidden meanwhile.
+  final _boxUp = ValueNotifier(false);
+  double _boxHeight = QuickChatBox.height;
+  // What covers the bottom, as bottom subtitles move above it.
+  final _lift = SubtitleLift();
+  // The Enter that opened the box: kept from the focused widget.
+  KeyEvent? _swallow;
+  // The session's danmaku lines (and your own sent ones).
+  final _lines = DanmakuController();
+  final _danmakuOn = signal(false);
+  late final _full = signal(widget.mode == PlayerMode.full);
   // The mouse on a floating element, or the Up next popover open, keeps
   // the controls up.
   final _hold = ControlsHold();
@@ -139,7 +163,8 @@ class _SessionPlayerState extends State<SessionPlayer> {
   );
 
   late final SessionCoordinator _coord = AppScope.of(context).coordinator;
-  bool get _full => widget.mode == PlayerMode.full;
+  AppSettings get _settings => _coord.settings;
+  bool get _isFull => widget.mode == PlayerMode.full;
 
   @override
   void initState() {
@@ -148,6 +173,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
     _model;
     _coord.jellyfin.ensureLoaded();
     HardwareKeyboard.instance.addHandler(_globalKey);
+    FocusManager.instance.addEarlyKeyEventHandler(_earlyKey);
     // Tab (AppKeys) reaches the chat through here in fullscreen.
     AppKeys.addChatToggle(_toggleChat);
     // Shader messages (preset changes, load failures) become toasts.
@@ -161,6 +187,32 @@ class _SessionPlayerState extends State<SessionPlayer> {
     _stopPopoverWatch = effect(() {
       _hold.set(#upNextPopover, _coord.queue.popoverOpen.value);
     });
+    // Subtitle size on every player, live.
+    _stopSubScale = effect(() {
+      final scale = _settings.subScale.value;
+      _coord.playback.generation.value;
+      final p = untracked(() => _coord.playback.current);
+      if (p == null || p.disposed) return;
+      unawaited(p.setProperty('sub-scale', scale.toStringAsFixed(2)).catchError((Object _) {}));
+    });
+    // Danmaku is the style and the full player is up (not sitting out).
+    _stopDanmakuWatch = effect(() {
+      final on = _full.value && _settings.notifyStyle.value == NotifyStyle.danmaku && !_coord.selfAway.value;
+      untracked(() {
+        _danmakuOn.value = on;
+        widget.danmakuActive?.value = on;
+      });
+    });
+    _stopLiftWatch = effect(() {
+      _settings.liftSubtitles.value;
+      _settings.controlsSkin.value;
+      _settings.controlsSize.value;
+      untracked(_retargetLift);
+    });
+    _quick.open.addListener(_boxChanged);
+    _quick.echo.addListener(_boxChanged);
+    _quick.sends.addListener(_sent);
+    _controlsShown.addListener(_retargetLift);
   }
 
   @override
@@ -169,25 +221,103 @@ class _SessionPlayerState extends State<SessionPlayer> {
     _fullscreen.value = widget.fullscreen;
     _chatOpen.value = widget.chatOpen;
     _unread.value = widget.unread;
+    _full.value = _isFull;
+    if (!_isFull) {
+      _quick.close();
+      _model.panelOpen.value = false;
+    }
+    if (oldWidget.quickChat != widget.quickChat) {
+      final old = oldWidget.quickChat ?? _ownChat;
+      old?.open.removeListener(_boxChanged);
+      old?.echo.removeListener(_boxChanged);
+      old?.sends.removeListener(_sent);
+      _quick.open.addListener(_boxChanged);
+      _quick.echo.addListener(_boxChanged);
+      _quick.sends.addListener(_sent);
+    }
+    if (oldWidget.controlsShown != widget.controlsShown) {
+      (oldWidget.controlsShown ?? _ownShown).removeListener(_retargetLift);
+      _controlsShown.addListener(_retargetLift);
+    }
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_globalKey);
+    FocusManager.instance.removeEarlyKeyEventHandler(_earlyKey);
     AppKeys.removeChatToggle(_toggleChat);
     _stopShaderWatch();
     _stopPopoverWatch();
+    _stopSubScale();
+    _stopDanmakuWatch();
+    _stopLiftWatch();
+    widget.danmakuActive?.value = false;
+    _quick.open.removeListener(_boxChanged);
+    _quick.echo.removeListener(_boxChanged);
+    _quick.sends.removeListener(_sent);
+    _controlsShown.removeListener(_retargetLift);
+    _quick.close();
+    _ownChat?.dispose();
     _noFocus.dispose();
     _ownShown.dispose();
-    _chatLine.dispose();
-    _chatLineText.dispose();
-    _chatLineFocus.dispose();
+    _boxUp.dispose();
+    _lift.dispose();
+    _lines.dispose();
     _hold.dispose();
     _model.dispose();
     super.dispose();
   }
 
   void _toggleChat() => _model.toggleChat();
+
+  // ------------------------------------------------------- quick chat box
+
+  void _boxChanged() {
+    _boxUp.value = _quick.open.value || _quick.echo.value != null;
+    _retargetLift();
+  }
+
+  /// What covers the bottom of the full player, for the subtitle lift:
+  /// the box (or its echo) from 16 px up, else the control bar while it is
+  /// up when "Subtitles above the controls" is on; 8 px above it.
+  void _retargetLift() {
+    if (!mounted) return;
+    final box = _boxUp.value ? _edge + _boxHeight + 8 : 0.0;
+    final bar = _settings.liftSubtitles.peek() && _controlsShown.value ? _bottomControlsHeight() + 8 : 0.0;
+    _lift.animateTo(math.max(box, bar));
+  }
+
+  void _boxHeightChanged(double h) {
+    if (h == _boxHeight) return;
+    _boxHeight = h;
+    _retargetLift();
+    setState(() {});
+  }
+
+  /// Enter in the box with text: to the chat; your own line flies right
+  /// away when danmaku is the style (the echo is for toasts).
+  void _send(String text) => _coord.sendChat(text);
+
+  void _sent() {
+    if (!_danmakuOn.peek()) return;
+    _quick.echo.value = null;
+    final me = selfAvatarInfo();
+    _lines.add(DanmakuItem(
+        kind: DanmakuKind.chat, sender: me.name, senderColor: me.color, text: _quick.lastSent, own: true, avatar: me));
+  }
+
+  /// Swallows the Enter that opened the box before the focused widget
+  /// (a button keeps focus after a click) acts on it too.
+  KeyEventResult _earlyKey(KeyEvent event) {
+    final s = _swallow;
+    if (s == null || event.logicalKey != s.logicalKey) return KeyEventResult.ignored;
+    if (event is KeyDownEvent && !identical(event, s)) {
+      _swallow = null;
+      return KeyEventResult.ignored;
+    }
+    if (event is KeyUpEvent) _swallow = null;
+    return KeyEventResult.handled;
+  }
 
   /// The player keys, while the player fills the body and nothing (a
   /// dialog, a card, a text field) is in front of it. Space and Tab are
@@ -197,7 +327,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
     if (!AppScope.of(context).navigation.online.peek()) return false;
     // Mini: Esc is the last step out (a friend's server: asking to leave
     // it; yours: the player closes).
-    if (!_full) {
+    if (!_isFull) {
       if (event.logicalKey != LogicalKeyboardKey.escape) return false;
       if (ModalRoute.of(context)?.isCurrent == false || textInputFocused()) return false;
       widget.onLeave();
@@ -213,10 +343,12 @@ class _SessionPlayerState extends State<SessionPlayer> {
       return false;
     }
     if (textInputFocused()) return false;
-    if (devTools &&
-        _coord.settings.liftSubtitles.peek() &&
-        (event.logicalKey == LogicalKeyboardKey.enter || event.logicalKey == LogicalKeyboardKey.numpadEnter)) {
-      _openChatLine();
+    final key = event.logicalKey;
+    // Enter: the quick chat box (the chat panel's draft), whatever plays.
+    if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
+      if (_coord.selfAway.peek()) return false;
+      _swallow = event;
+      _quick.show();
       return true;
     }
     final now = DateTime.now().toUtc();
@@ -224,7 +356,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
       return false;
     }
     final model = _model;
-    final key = event.logicalKey;
     // Ctrl+0..6: Anime4K's own mpv keys (off, modes A..C+A).
     final digit = _shaderKeys.indexOf(key);
     if (digit >= 0 && HardwareKeyboard.instance.isControlPressed) {
@@ -276,7 +407,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
     }
     if (key == LogicalKeyboardKey.escape) {
       _lastKeyAt = now;
-      if (widget.chatOpen) {
+      if (_model.panelOpen.peek()) {
+        _model.panelOpen.value = false;
+      } else if (widget.chatOpen) {
         widget.onToggleChat();
       } else if (widget.fullscreen) {
         widget.onToggleFullscreen();
@@ -308,7 +441,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
           if (!playback.alive.value) {
             return Center(
               child: Text('player starting…',
-                  style: TextStyle(color: Colors.white70, fontSize: _full ? 14 : 12)),
+                  style: TextStyle(color: Colors.white70, fontSize: _isFull ? 14 : 12)),
             );
           }
           if (gen != _videoGen) {
@@ -317,25 +450,25 @@ class _SessionPlayerState extends State<SessionPlayer> {
           }
           // Never null for the mini: media_kit keeps the last controls
           // when given null, so the full player's would stay under it.
-          final VideoControlsBuilder controls = _full ? _sessionControls : _noControls;
+          final VideoControlsBuilder controls = _isFull ? _sessionControls : _noControls;
           final video = widget.videoBuilder?.call(context, controls) ?? _video(controls);
           // The wheel anywhere on the full player steps the volume
           // (lists, menus and popovers under the mouse scroll instead).
           return VolumeWheel(
-            enabled: _full,
+            enabled: _isFull,
             onStep: _model.stepVolume,
             child: Stack(
               fit: StackFit.expand,
               children: [
                 video,
-                // Dev experiment: bottom subtitles above the controls.
-                if (devTools) _subtitleLifter(),
-                if (_full) ...[
+                SubtitleLifter(playback: _coord.playback, lift: _lift, active: _isFull),
+                if (_isFull) ...[
                   _blockedCard(),
                   _actionArea(),
                   if (widget.fullscreen) ...[if (!_coord.alone.value) _pausedParty(), _unreadChip()],
                   _volumeReadout(),
-                  if (devTools) _chatLineOverlay(),
+                  _quickChatBox(),
+                  _playerPanel(),
                   if (widget.danmaku case final d?) _danmakuPanel(d),
                 ] else
                   _miniOverlay(),
@@ -352,7 +485,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
 
   Widget _video(VideoControlsBuilder? controls) => VideoOutputSizer(
         playback: _coord.playback,
-        sharp: _coord.settings.screenResVideo,
+        sharp: _settings.screenResVideo,
         child: Video(
           key: _videoKey,
           controller: videoControllerOf(_coord.playback.video),
@@ -361,100 +494,56 @@ class _SessionPlayerState extends State<SessionPlayer> {
         ),
       );
 
-  /// What covers the bottom of the full player, for the subtitle lift:
-  /// the chat line, else the control bar while it is up.
-  Widget _subtitleLifter() => SignalBuilder(builder: (context) {
-        final controls = _bottomControlsHeight();
-        return SubtitleLifter(
-          playback: _coord.playback,
-          changes: Listenable.merge([_controlsShown, _chatLine]),
-          lift: _coord.settings.liftSubtitles,
-          cover: () => _chatLine.value
-              ? _chatLineHeight + _edge
-              : _controlsShown.value
-                  ? controls
-                  : 0,
-          active: _full,
-        );
-      });
-
-  // ------------------------------------------------- chat line (stand-in)
-
-  static const _chatLineHeight = 44.0;
-
-  void _openChatLine() {
-    _chatLine.value = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _chatLineFocus.requestFocus());
-  }
-
-  void _closeChatLine() {
-    _chatLine.value = false;
-    _chatLineText.clear();
-    _chatLineFocus.unfocus();
-  }
-
-  void _sendChatLine(String text) {
-    final t = text.trim();
-    if (t.isNotEmpty) {
-      _coord.sendChat(t);
-      // The preview, when it is up, shows it as your own line.
-      final d = widget.danmaku;
-      if (d != null && d.active.peek()) d.controller.add(d.own(t));
-    }
-    _closeChatLine();
-  }
-
-  /// A one-line chat box at the bottom of the full player (Enter opens
-  /// it, Enter sends, Esc closes): the planned chat line, to try the
-  /// subtitle lift with.
-  Widget _chatLineOverlay() => Positioned(
+  /// The quick chat box in the control bar's place, centred (Enter opens
+  /// it), and the echo of what you sent.
+  Widget _quickChatBox() => Positioned(
         left: _edge,
         right: _edge,
         bottom: _edge,
-        height: _chatLineHeight,
-        child: ValueListenableBuilder<bool>(
-          valueListenable: _chatLine,
-          builder: (context, open, child) => IgnorePointer(
-            ignoring: !open,
-            child: AnimatedSlide(
-              offset: open ? Offset.zero : const Offset(0, 0.4),
-              duration: easeTime,
-              curve: ease,
-              child: AnimatedOpacity(opacity: open ? 1 : 0, duration: easeTime, curve: ease, child: child),
-            ),
-          ),
-          child: CallbackShortcuts(
-            bindings: {const SingleActivator(LogicalKeyboardKey.escape): _closeChatLine},
-            child: AppGlass.pill(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                child: Row(
-                  children: [
-                    Icon(Icons.chat_bubble_outline, size: 18, color: Colors.white.withValues(alpha: 0.7)),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextField(
-                        key: const ValueKey('chat-line'),
-                        controller: _chatLineText,
-                        focusNode: _chatLineFocus,
-                        onSubmitted: _sendChatLine,
-                        onTapOutside: (_) => _closeChatLine(),
-                        style: const TextStyle(color: Colors.white, fontSize: 15),
-                        cursorColor: Colors.white,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          border: InputBorder.none,
-                          hintText: 'Say something  ·  Enter sends, Esc closes',
-                          hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 15),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+        child: Stack(
+          alignment: Alignment.bottomCenter,
+          children: [
+            QuickChatEcho(chat: _quick),
+            QuickChatBox(chat: _quick, onSend: _send, onHeight: _boxHeightChanged),
+          ],
+        ),
+      );
+
+  /// The player panel docked at the right (⚙ → Player settings), between
+  /// the top bar and the control bar; it stays while they hide.
+  Widget _playerPanel() => Positioned(
+        right: _edge,
+        top: _topBarHeight + 8,
+        bottom: _bottomControlsHeightNow() + _edge,
+        child: SignalBuilder(builder: (context) {
+          final open = _model.panelOpen.value;
+          return AnimatedSwitcher(
+            duration: easeTime,
+            switchInCurve: ease,
+            switchOutCurve: Curves.easeIn,
+            layoutBuilder: (current, previous) =>
+                Stack(alignment: Alignment.topRight, children: [...previous, ?current]),
+            transitionBuilder: (child, a) => FadeTransition(
+              opacity: a,
+              child: SlideTransition(
+                position: Tween(begin: const Offset(0.12, 0), end: Offset.zero).animate(a),
+                child: child,
               ),
             ),
-          ),
-        ),
+            child: !open
+                ? const SizedBox.shrink(key: ValueKey('no-player-panel'))
+                : ControlsHoldRegion(
+                    key: const ValueKey('player-panel-hold'),
+                    hold: _hold,
+                    child: PlayerPanel(
+                      onClose: () => _model.panelOpen.value = false,
+                      renderMode: _model.renderMode,
+                      volume: _model.volume,
+                      onVolume: _model.setVolume,
+                    ),
+                  ),
+          );
+        }),
       );
 
   /// Fullscreen hides the strip and its window buttons: the top bar
@@ -482,24 +571,29 @@ class _SessionPlayerState extends State<SessionPlayer> {
       children: [
         const StartBanner(),
         // Under the controls, over the picture.
+        SignalBuilder(
+          builder: (context) => _danmakuOn.value
+              ? DanmakuNotices(
+                  toasts: _coord.toasts,
+                  style: _settings.danmakuStyle,
+                  controller: _lines,
+                  avatar: (name, id) => avatarForName(name, _coord, id),
+                  skip: _quick.echoed,
+                )
+              : const SizedBox.shrink(),
+        ),
         if (widget.danmaku case final d?)
           SignalBuilder(
-            builder: (context) => d.active.value ? DanmakuPreviewLayers(preview: d) : const SizedBox.shrink(),
+            builder: (context) =>
+                d.active.value ? DanmakuPreviewLayers(preview: d, lift: _lift) : const SizedBox.shrink(),
           ),
-        // The chat line takes the control bar's place while it is open.
-        ValueListenableBuilder<bool>(
-          valueListenable: _chatLine,
-          builder: (context, chatLine, child) => IgnorePointer(
-            ignoring: chatLine,
-            child: AnimatedOpacity(opacity: chatLine ? 0 : 1, duration: easeTime, curve: ease, child: child),
-          ),
-          child: SessionControls(
-            model: _model,
-            shown: _controlsShown,
-            hold: _hold,
-            onDoubleClick: widget.onToggleFullscreen,
-            windowButtons: _fullscreenWindowButtons(),
-          ),
+        SessionControls(
+          model: _model,
+          shown: _controlsShown,
+          hold: _hold,
+          onDoubleClick: widget.onToggleFullscreen,
+          windowButtons: _fullscreenWindowButtons(),
+          suppress: _boxUp,
         ),
       ],
     );
@@ -510,12 +604,13 @@ class _SessionPlayerState extends State<SessionPlayer> {
   static const _edge = 16.0;
 
   /// The bottom controls' height in the skin and size in use.
-  static double _bottomControlsHeight() {
-    final s = AppSettings.instance;
-    return controlsBottomHeight(s.controlsSkin.value, s.controlsSize.value);
-  }
+  double _bottomControlsHeight() =>
+      controlsBottomHeight(_settings.controlsSkin.value, _settings.controlsSize.value);
 
-  static double get _topBarHeight => controlsTopHeight(AppSettings.instance.controlsSkin.peek());
+  double _bottomControlsHeightNow() =>
+      controlsBottomHeight(_settings.controlsSkin.peek(), _settings.controlsSize.peek());
+
+  double get _topBarHeight => controlsTopHeight(_settings.controlsSkin.peek());
 
   /// The danmaku preview's panel, top right under the top bar; the mouse
   /// on it keeps the controls up.
@@ -560,15 +655,20 @@ class _SessionPlayerState extends State<SessionPlayer> {
   Widget _actionArea() {
     return SignalBuilder(builder: (context) {
       final controls = _bottomControlsHeight();
-      return ValueListenableBuilder<bool>(
-        valueListenable: _controlsShown,
-        builder: (context, shown, child) => AnimatedPositioned(
+      return ListenableBuilder(
+        listenable: Listenable.merge([_controlsShown, _boxUp]),
+        builder: (context, child) => AnimatedPositioned(
           duration: easeTime,
           curve: ease,
           left: _edge,
           right: _edge,
           top: 0,
-          bottom: shown ? controls + _edge : _edge,
+          // Above the quick chat box while it (or its echo) is up.
+          bottom: _boxUp.value
+              ? _boxHeight + _edge * 2
+              : _controlsShown.value
+                  ? controls + _edge
+                  : _edge,
           child: child!,
         ),
         child: CustomMultiChildLayout(
@@ -705,7 +805,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            SitOutCard(key: const ValueKey('sit-out-card'), compact: !_full),
+            SitOutCard(key: const ValueKey('sit-out-card'), compact: !_isFull),
             Positioned(
               top: 4,
               right: 4,
@@ -714,9 +814,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
                 children: [
                   IconButton(
                     focusNode: _noFocus,
-                    onPressed: _full ? widget.onCollapse : widget.onExpand,
-                    tooltip: _full ? 'Small player' : 'Expand',
-                    icon: Icon(_full ? Icons.close_fullscreen : Icons.open_in_full, color: Colors.white, size: 18),
+                    onPressed: _isFull ? widget.onCollapse : widget.onExpand,
+                    tooltip: _isFull ? 'Small player' : 'Expand',
+                    icon: Icon(_isFull ? Icons.close_fullscreen : Icons.open_in_full, color: Colors.white, size: 18),
                   ),
                   IconButton(
                     focusNode: _noFocus,

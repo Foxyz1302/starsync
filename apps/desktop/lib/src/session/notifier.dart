@@ -25,6 +25,11 @@ class ToastItem {
   final bool chat;
   /// A picture hash to show (an Up next item's), '' when none.
   final String thumb;
+  /// What it is about (the shell may show some of it another way:
+  /// "Notifications as danmaku").
+  final NoticeCategory category;
+  /// This member's own (their chat message coming back from the server).
+  final bool own;
   const ToastItem(
       {required this.id,
       required this.text,
@@ -32,7 +37,9 @@ class ToastItem {
       this.actor,
       this.actorId = '',
       this.chat = false,
-      this.thumb = ''});
+      this.thumb = '',
+      this.category = NoticeCategory.app,
+      this.own = false});
 }
 
 /// What a notice is about; the policy filters by it ([noticeFor]).
@@ -135,6 +142,8 @@ class Notice {
   final bool chat;
   /// A picture hash for the toast (an Up next item's).
   final String thumb;
+  /// This member is the actor (a feed line of its own).
+  final bool own;
   final SfxCue? sound;
   final bool attention;
   final SystemNote? system;
@@ -146,6 +155,7 @@ class Notice {
     this.actor,
     this.chat = false,
     this.thumb = '',
+    this.own = false,
     this.sound,
     this.attention = false,
     this.system,
@@ -154,12 +164,13 @@ class Notice {
 
   static const none = Notice();
 
-  Notice _with({bool toast = true, bool sound = true, SystemNote? system}) => Notice(
+  Notice _with({bool toast = true, bool sound = true, SystemNote? system, bool own = false}) => Notice(
         category: category,
         toast: toast ? this.toast : null,
         actor: toast ? actor : null,
         chat: toast && chat,
         thumb: toast ? thumb : '',
+        own: own,
         sound: sound ? this.sound : null,
         attention: attention,
         system: system,
@@ -334,7 +345,7 @@ Notice noticeFor(AppEvent e, [NoticeContext c = const NoticeContext()]) {
       payload: cat == NoticeCategory.chat ? SystemNote.payloadChat : '',
     );
   }
-  return n._with(toast: toast, sound: sound, system: system);
+  return n._with(toast: toast, sound: sound, system: system, own: own);
 }
 
 /// The one way news reaches the user: [notify] turns an [AppEvent] into
@@ -410,7 +421,9 @@ class Notifier {
             actor: n.actor,
             actorId: n.actor == null ? '' : n.log?.actorId ?? '',
             chat: n.chat,
-            thumb: n.thumb),
+            thumb: n.thumb,
+            category: n.category,
+            own: n.own),
       ];
       _timers[id] = Timer(toastLife, () => dismiss(id));
     }

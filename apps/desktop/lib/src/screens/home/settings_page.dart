@@ -16,6 +16,7 @@ const sessionShortcuts = [
   ('Shift+→', 'Skip 1:30 (for everyone)'),
   ('PgUp / PgDn', 'Previous / next chapter'),
   ('F', 'Toggle fullscreen'),
+  ('Enter', 'Quick chat box (Enter sends, Esc closes)'),
   ('Tab', 'Open / close chat & activity'),
   ('Ctrl+R', 'Reload the video'),
   ('> or Shift+N', 'Put up the next Jellyfin episode'),

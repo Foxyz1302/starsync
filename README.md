@@ -122,6 +122,26 @@ by default, or Only when paused, or Off; messages always reach the chat,
 with their sound). Watching alone, nothing pops up or sounds about the
 party (there is nobody); the app's own notices still show.
 
+**Quick chat.** Enter in the big player opens a small chat box at the
+bottom centre without opening the chat panel, also while the video
+plays: type (the player's keys wait meanwhile), Enter sends, Esc or an
+empty Enter closes it, and it closes by itself after a few seconds
+without typing. It is the same draft as the chat panel's field, so a
+message started in one is there in the other. What you sent shows for a
+moment where the box was (or flies as your own line with danmaku, below);
+bottom subtitles move up out of its way and back, top signs stay. The
+mouse pointer and the controls stay hidden: typing is not moving the
+mouse.
+
+**Danmaku.** Settings → Notifications & sounds → Over the player →
+Notifications: Toasts (default) or Danmaku. With Danmaku, over the big
+player chat, joins, leaves, Up next and "starting now" fly right to left
+across the top of the picture instead of popping up (problems and errors
+still pop up, and everything does while the player is small). The look
+is yours to tune there, with a live preview: crossing time, how many at
+once, which band of the picture they use, opacity, size, boldness,
+outline, avatars, and a frame round your own lines.
+
 **While sitting out or in the background.** Sitting out, only chat,
 nudges, "starting now" (the video starts for the others) and Up next
 reach you; joins and leaves too if you turn on Settings → Notifications &
@@ -390,15 +410,21 @@ volume and sound set, and every sound with a preview, its own set and a switch);
 (the version, also at the bottom of every Settings page and in the
 Settings tab's tooltip; and the credits, e.g. that the Minimal player design is inspired by uosc).
 
-Player settings live in the player too: ⚙ → Player settings, at the
-right of its controls, and Settings → Player has the same ones (plus the
-controls' layout and the custom shader files). Player design: Standard or
-Minimal (below); progress line when hidden (on by default: a thin line at
-the bottom of the video while the controls are hidden); upscaling shader
-(see below); hardware decoding (auto, off or custom; auto is mpv's
-`auto-copy` on Windows, `auto` elsewhere; the env var
-`SYNC_RELAY_HWDEC` overrides it); in the player also the subtitle and
-audio track. Settings → Player → Controls: time display (elapsed / total
+Player settings live in the player too: ⚙ → Player settings opens a
+narrow panel at the right edge of the player that stays open while you
+watch (the controls hide and show as usual) until its × or Esc. Its
+sections fold: tracks (subtitles, audio), subtitles (size, above the
+controls), picture (upscaling shader, sharp video, hardware decoding),
+sound (volume), notifications (toasts or danmaku and the danmaku look)
+and controls (design, progress line). Settings → Player has the same
+ones (plus the controls' layout and the custom shader files). Player
+design: Standard or Minimal (below); progress line when hidden (on by
+default: a thin line at the bottom of the video while the controls are
+hidden); upscaling shader (see below); hardware decoding (auto, off or
+custom; auto is mpv's `auto-copy` on Windows, `auto` elsewhere; the env
+var `SYNC_RELAY_HWDEC` overrides it); subtitle size; subtitles above the
+controls (off by default: bottom lines move up while the control bar
+shows; the quick chat box always moves them). Settings → Player → Controls: time display (elapsed / total
 or remaining), controls size (normal or large), hide the controls after
 2, 3 or 5 s, and which optional buttons sit in the bar (chapter buttons,
 subtitles, audio, chat; hidden ones are still in ⚙). Every change
@@ -408,8 +434,9 @@ Anywhere in a server (unless you are typing): Space = ready / unready,
 Tab = chat & activity (Tab never moves between buttons). Anywhere:
 Ctrl+Shift+B = mark a problem in the session log. Keys while the
 player fills the window: Left/Right = seek 10 s, Up/Down = volume, Shift+Right = skip 1:30,
-PgUp/PgDn = previous / next chapter (as in mpv), F = fullscreen, Esc =
-close the chat, then fullscreen, then shrink the player to mini; from the
+PgUp/PgDn = previous / next chapter (as in mpv), F = fullscreen, Enter =
+quick chat, Esc = close the player panel, then
+the chat, then fullscreen, then shrink the player to mini; from the
 mini it asks to leave, Ctrl+R = reload video,
 `<` / `>` or Shift+P / Shift+N = previous / next Jellyfin episode,
 Ctrl+1..6 = Anime4K mode A, B, C, A+A, B+B, C+A, Ctrl+0 = shaders off.

@@ -8,6 +8,7 @@ import 'package:sync_relay_core/core.dart'
     show CookieBrowser, CookieFile, NetscapeCookie, YtDlp, YtDlpCookies, cookieBrowsers, parseCookies;
 
 import '../controls/player_settings.dart';
+import '../danmaku/danmaku_settings.dart' show DanmakuSettingsPanel;
 import '../jellyfin/accounts.dart';
 import '../jellyfin/accounts_panel.dart';
 import '../schedule/animeflow.dart';
@@ -124,7 +125,8 @@ class SettingsTab extends StatelessWidget {
         return [
           const SettingsHintCard(
             icon: Icons.tune,
-            text: "Player settings are also in the player: ⚙ → Player settings, at the right of its controls.",
+            text: "Player settings are also in the player: ⚙ → Player settings opens a panel at its right edge "
+                "that stays while you watch.",
           ),
           SettingsPanel(
             title: 'Player',
@@ -778,7 +780,8 @@ class NotificationsInfo extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               line('Joins, leaves, lost connections and video changes',
-                  "Pop up bottom left for 5 s with the person's picture, above the player's controls"),
+                  "Pop up bottom left for 5 s with the person's picture, above the player's controls "
+                  '(or fly across the picture: Danmaku, below)'),
               line('Added to Up next', 'With the title, its picture and who added it'),
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 6),
@@ -810,6 +813,11 @@ class NotificationsInfo extends StatelessWidget {
               line('App notices', 'Shader changes, copies, errors, auto sit-out setting you away'),
             ],
           ),
+        ),
+        SettingsPanel(
+          key: const ValueKey('danmaku-settings'),
+          title: 'Over the player',
+          child: DanmakuSettingsPanel(settings: AppScope.of(context).coordinator.settings),
         ),
         SettingsPanel(
           title: 'Sitting out and in the background',

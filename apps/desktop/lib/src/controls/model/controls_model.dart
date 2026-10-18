@@ -115,6 +115,12 @@ class PlayerControlsModel {
   /// A menu of the controls is open (the player's Esc closes it).
   int menusOpen = 0;
 
+  /// The player panel docked at the right (⚙ → Player settings; Esc or
+  /// its × closes it). Stays open while the controls hide and show.
+  final panelOpen = signal(false);
+
+  void togglePanel() => panelOpen.value = !panelOpen.peek();
+
   void dispose() => volumeFlash.dispose();
 
   // -------------------------------------------------------------- actions

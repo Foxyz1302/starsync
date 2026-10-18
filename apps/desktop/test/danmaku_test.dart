@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starsync/src/danmaku/danmaku.dart';
+import 'package:starsync/src/danmaku/danmaku_notices.dart';
+import 'package:starsync/src/session/notifier.dart' show NoticeCategory, ToastItem;
 import 'package:starsync/src/shell/avatar.dart' show AvatarInfo;
 
 // Danmaku lanes: free lanes only, no two lines in a lane ever touch, the
@@ -171,6 +173,89 @@ void main() {
     await tester.pump(const Duration(milliseconds: 16));
     expect(c.onScreen.value, 0);
     expect(c.waiting.value, 0);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+
+  group('DanmakuStyle as a setting', () {
+    test('round-trips through its map', () {
+      const s = DanmakuStyle(
+          crossSecs: 6, maxOnScreen: 5, bandTop: 0.2, bandBottom: 0.5, opacity: 0.7, size: 1.3, weight: 800,
+          outline: 2, highlightOwn: false, avatars: false);
+      expect(DanmakuStyle.fromJson(s.toJson()), s);
+    });
+
+    test('junk and out-of-range values: defaults and the nearest ends', () {
+      expect(DanmakuStyle.fromJson(const {}), const DanmakuStyle());
+      final s = DanmakuStyle.fromJson(const {
+        'crossSecs': 99,
+        'maxOnScreen': 0,
+        'opacity': 'x',
+        'weight': 1234,
+        'bandTop': 0.6,
+        'bandBottom': 0.61,
+        'avatars': 1,
+      });
+      expect(s.crossSecs, 16);
+      expect(s.maxOnScreen, 1);
+      expect(s.opacity, const DanmakuStyle().opacity);
+      expect(s.weight, 900);
+      expect((s.bandTop, s.bandBottom), (0.10, 0.45), reason: 'a band too thin takes the default');
+      expect(s.avatars, isTrue);
+    });
+
+    test('boldness: the text at its weight, the name a step bolder', () {
+      expect(const DanmakuStyle(weight: 400).fontWeight, FontWeight.w400);
+      expect(const DanmakuStyle(weight: 400).nameWeight, FontWeight.w500);
+      expect(const DanmakuStyle(weight: 900).nameWeight, FontWeight.w900);
+    });
+  });
+
+  group('notifications as danmaku', () {
+    ToastItem toast(String text,
+            {String? actor, NoticeCategory category = NoticeCategory.app, bool chat = false, bool own = false}) =>
+        ToastItem(id: 1, text: text, at: DateTime(2026), actor: actor, chat: chat, own: own, category: category);
+
+    test('chat and short notices fly; problems, nudges and the app stay toasts', () {
+      expect(fliesAsDanmaku(toast('Bob: hi', actor: 'Bob', chat: true, category: NoticeCategory.chat)), isTrue);
+      expect(fliesAsDanmaku(toast('Bob joined', actor: 'Bob', category: NoticeCategory.people)), isTrue);
+      expect(fliesAsDanmaku(toast('Starting now', category: NoticeCategory.start)), isTrue);
+      expect(fliesAsDanmaku(toast('Bob added X to Up next', actor: 'Bob', category: NoticeCategory.upNext)), isTrue);
+      expect(fliesAsDanmaku(toast('Skipped X: gone', category: NoticeCategory.upNext)), isFalse);
+      expect(fliesAsDanmaku(toast("Bob can't play this", actor: 'Bob', category: NoticeCategory.problem)), isFalse);
+      expect(fliesAsDanmaku(toast('Bob nudged you', actor: 'Bob', category: NoticeCategory.nudge)), isFalse);
+      expect(fliesAsDanmaku(toast('Link copied')), isFalse);
+      expect(fliesAsDanmaku(toast('The server restarted', category: NoticeCategory.self)), isFalse);
+    });
+
+    test('lines: the sender before the message, own chat framed', () {
+      final chat = danmakuForToast(toast('Me: hello', actor: 'Me', chat: true, own: true, category: NoticeCategory.chat))!;
+      expect((chat.kind, chat.sender, chat.text, chat.own), (DanmakuKind.chat, 'Me', 'hello', true));
+      final left = danmakuForToast(toast('Bob lost connection', actor: 'Bob', category: NoticeCategory.people))!;
+      expect((left.kind, left.text), (DanmakuKind.leave, 'lost connection'));
+      final start = danmakuForToast(toast('Starting now: Frieren', category: NoticeCategory.start))!;
+      expect((start.kind, start.sender), (DanmakuKind.starting, null));
+      expect(danmakuForToast(toast('Copied')), isNull);
+    });
+  });
+
+  testWidgets('an idle layer asks for no frames', (tester) async {
+    final c = DanmakuController();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(Directionality(
+      textDirection: TextDirection.ltr,
+      child: SizedBox(width: 800, height: 450, child: DanmakuLayer(controller: c, accent: Colors.purple)),
+    ));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    c.add(const DanmakuItem(kind: DanmakuKind.chat, sender: 'Bob', text: 'hi'));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(c.onScreen.value, 1);
+    expect(tester.binding.hasScheduledFrame, isTrue);
+    await tester.pump(const Duration(seconds: 9));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(c.onScreen.value, 0);
+    expect(tester.binding.hasScheduledFrame, isFalse);
     await tester.pumpWidget(const SizedBox());
   });
 }

@@ -1,15 +1,16 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../playback/playback_controller.dart';
-import 'motion.dart';
 
 // What the session's video view tells mpv about where it is shown: the
-// size its output renders at ("Sharp video and subtitles") and, as a dev
-// experiment, how far bottom subtitles move up while the controls are up.
+// size its output renders at ("Sharp video and subtitles") and how far
+// bottom subtitles move up while something covers the bottom of the
+// picture (the quick chat box; the control bar when chosen).
 
 /// The video output's size for a view of [logical] size at [dpr]: its
 /// physical pixels when [on] and video renders on the GPU, else null (the
@@ -115,42 +116,94 @@ double subtitleLiftPos({required Size view, int? videoW, int? videoH, required d
   return (100 - shift / picH * 100).clamp(50.0, 100.0);
 }
 
-/// Dev experiment ([AppSettings.liftSubtitles]): while something covers
-/// the bottom of the full player ([cover]: its height, 0 for nothing; the
-/// chat line, else the control bar while it is up), bottom subtitles of the
-/// current player move above it, and back down when it goes, animated over
-/// the shell's [easeTime] in mpv `sub-pos` steps. Top-aligned signs stay
-/// put. Draws nothing.
+/// The subtitle lift moves in [liftStepCount] steps [liftStepGap] apart
+/// (about 130 ms): each `sub-pos` change makes mpv re-render the
+/// subtitles, and a playing video shows a change only with its next
+/// frame, so a change per screen frame (60 a second against a video's 24)
+/// landed unevenly and looked choppy. One step per frame of a 24 fps
+/// video, eased out (most of the way in the first step), reads as one
+/// quick, smooth move.
+const liftStepCount = 4;
+const liftStepGap = Duration(milliseconds: 42);
+
+/// The covered heights a lift from [from] to [to] passes through, one per
+/// step, eased out; the last is exactly [to]. Empty when there is nothing
+/// to move.
+List<double> liftSteps(double from, double to, {int count = liftStepCount}) {
+  if ((to - from).abs() < 0.5) return const [];
+  return [
+    for (var i = 1; i <= count; i++) i == count ? to : from + (to - from) * Curves.easeOutQuad.transform(i / count),
+  ];
+}
+
+/// How much of the bottom of the view is covered, as it moves: [value]
+/// the covered height in logical px (0: nothing), stepping toward the
+/// latest [animateTo] target ([liftSteps], [liftStepGap] apart; a new
+/// target starts from where it is). mpv's `sub-pos` follows it
+/// ([SubtitleLifter]), and so do the danmaku preview's mock subtitles.
+class SubtitleLift extends ChangeNotifier implements ValueListenable<double> {
+  double _value = 0;
+  double _target = 0;
+  List<double> _steps = const [];
+  int _next = 0;
+  Timer? _timer;
+
+  @override
+  double get value => _value;
+  double get target => _target;
+
+  /// Moves toward [target] (px); the first step at once.
+  void animateTo(double target) {
+    target = math.max(0, target);
+    if ((target - _target).abs() < 0.5) return;
+    _target = target;
+    _timer?.cancel();
+    _timer = null;
+    _steps = liftSteps(_value, target);
+    _next = 0;
+    if (_steps.isEmpty) return;
+    _step();
+    if (_next < _steps.length) _timer = Timer.periodic(liftStepGap, (_) => _step());
+  }
+
+  void _step() {
+    if (_next >= _steps.length) return;
+    _value = _steps[_next++];
+    if (_next >= _steps.length) {
+      _timer?.cancel();
+      _timer = null;
+    }
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+}
+
+/// Bottom subtitles of the current player sit above what covers the
+/// bottom of the full player ([lift]: the quick chat box, and the control
+/// bar while it is up when [AppSettings.liftSubtitles] is on): mpv
+/// `sub-pos` follows each step of [lift], only as far as the letterbox
+/// under the picture leaves no room ([subtitleLiftPos]). Top-aligned
+/// signs stay put. Draws nothing.
 class SubtitleLifter extends StatefulWidget {
   final PlaybackController playback;
-
-  /// Fires when [cover] may have changed.
-  final Listenable changes;
-  final double Function() cover;
-
-  /// The dev setting ([AppSettings.liftSubtitles]).
-  final ReadonlySignal<bool> lift;
+  final SubtitleLift lift;
 
   /// Only the full player lifts.
   final bool active;
-  const SubtitleLifter({
-    super.key,
-    required this.playback,
-    required this.changes,
-    required this.cover,
-    required this.lift,
-    required this.active,
-  });
+  const SubtitleLifter({super.key, required this.playback, required this.lift, required this.active});
 
   @override
   State<SubtitleLifter> createState() => _SubtitleLifterState();
 }
 
-class _SubtitleLifterState extends State<SubtitleLifter> with SingleTickerProviderStateMixin {
-  late final AnimationController _anim = AnimationController(vsync: this, duration: easeTime)
-    ..addListener(_tick);
-  double _from = 100, _to = 100;
-  double _sent = 100;
+class _SubtitleLifterState extends State<SubtitleLifter> {
+  static const _home = '100.0';
+  String _sent = _home;
   HostedPlayer? _player;
   Size _view = Size.zero;
   late final void Function() _stop;
@@ -158,77 +211,61 @@ class _SubtitleLifterState extends State<SubtitleLifter> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    widget.changes.addListener(_retarget);
+    widget.lift.addListener(_apply);
+    // A new player starts where the file wants its subtitles.
     _stop = effect(() {
-      widget.lift.value;
       widget.playback.generation.value;
-      untracked(_retarget);
+      untracked(_apply);
     });
   }
 
   @override
   void didUpdateWidget(SubtitleLifter old) {
     super.didUpdateWidget(old);
-    if (old.changes != widget.changes) {
-      old.changes.removeListener(_retarget);
-      widget.changes.addListener(_retarget);
+    if (old.lift != widget.lift) {
+      old.lift.removeListener(_apply);
+      widget.lift.addListener(_apply);
     }
-    _retarget();
+    if (old.active != widget.active) _apply();
   }
 
   @override
   void dispose() {
-    widget.changes.removeListener(_retarget);
+    widget.lift.removeListener(_apply);
     _stop();
-    _anim.dispose();
     // Leave the player as the file wants it.
-    if (_sent != 100) _send(100);
+    if (_sent != _home) _send(_home);
     super.dispose();
   }
 
-  double get _target {
-    final cover = widget.cover();
-    if (!widget.active || !widget.lift.peek() || cover <= 0) return 100;
-    final st = widget.playback.current?.state;
-    return subtitleLiftPos(view: _view, videoW: st?.width, videoH: st?.height, controls: cover);
-  }
-
-  void _retarget() {
+  void _apply() {
     if (!mounted) return;
     final p = widget.playback.current;
     if (!identical(p, _player)) {
-      // A new player starts where the file wants its subtitles.
       _player = p;
-      _sent = 100;
-      _from = _to = 100;
-      _anim.value = 1;
+      _sent = _home;
     }
-    final t = _target;
-    if ((t - _to).abs() < 0.1) return;
-    _from = _sent;
-    _to = t;
-    _anim.forward(from: 0);
+    final cover = widget.active ? widget.lift.value : 0.0;
+    final st = p?.state;
+    final pos = cover <= 0
+        ? 100.0
+        : subtitleLiftPos(view: _view, videoW: st?.width, videoH: st?.height, controls: cover, gap: 0);
+    final v = pos.toStringAsFixed(1);
+    if (v != _sent) _send(v);
   }
 
-  void _tick() {
-    final v = _from + (_to - _from) * ease.transform(_anim.value);
-    // mpv redraws on every change: whole tenths are enough.
-    final r = (v * 10).round() / 10;
-    if (r != _sent) _send(r);
-  }
-
-  void _send(double pos) {
+  void _send(String pos) {
     _sent = pos;
     final p = widget.playback.current;
     if (p == null || p.disposed) return;
-    unawaited(p.setProperty('sub-pos', pos.toStringAsFixed(1)).catchError((Object _) {}));
+    unawaited(p.setProperty('sub-pos', pos).catchError((Object _) {}));
   }
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(builder: (context, box) {
         if (box.biggest != _view) {
           _view = box.biggest;
-          WidgetsBinding.instance.addPostFrameCallback((_) => _retarget());
+          WidgetsBinding.instance.addPostFrameCallback((_) => _apply());
         }
         return const SizedBox.shrink();
       });

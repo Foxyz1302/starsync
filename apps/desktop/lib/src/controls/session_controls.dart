@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 
@@ -34,6 +35,9 @@ class SessionControls extends StatelessWidget {
   final ControlsHold hold;
   final VoidCallback onDoubleClick;
   final Widget? windowButtons;
+
+  /// Hides them while something takes their place ([ControlsFrame.suppress]).
+  final ValueListenable<bool>? suppress;
   const SessionControls({
     super.key,
     required this.model,
@@ -41,6 +45,7 @@ class SessionControls extends StatelessWidget {
     required this.hold,
     required this.onDoubleClick,
     this.windowButtons,
+    this.suppress,
   });
 
   @override
@@ -56,6 +61,7 @@ class SessionControls extends StatelessWidget {
           key: ValueKey(skin),
           shown: shown,
           holdBy: hold,
+          suppress: suppress,
           hideAfter: Duration(seconds: s.controlsHideSecs.value),
           onDoubleClick: onDoubleClick,
           barTop: controlsTopHeight(skin),

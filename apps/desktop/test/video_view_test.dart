@@ -45,6 +45,47 @@ void main() {
     });
   });
 
+  group('subtitle lift steps', () {
+    test('a few large eased-out steps, the last exactly on target', () {
+      final up = liftSteps(0, 100);
+      expect(up, hasLength(liftStepCount));
+      expect(up.last, 100);
+      // Eased out: the first step moves most, each one less.
+      for (var i = 1; i < up.length; i++) {
+        expect(up[i], greaterThan(up[i - 1]));
+        if (i > 1) expect(up[i] - up[i - 1], lessThan(up[i - 1] - (i > 1 ? up[i - 2] : 0)));
+      }
+      expect(up.first, greaterThan(30), reason: 'most of the way at once');
+      final down = liftSteps(100, 0);
+      expect(down.last, 0);
+      expect(down.first, lessThan(70));
+      expect(liftSteps(40, 40.2), isEmpty);
+    });
+
+    testWidgets('SubtitleLift steps toward the latest target, liftStepGap apart', (tester) async {
+      final lift = SubtitleLift();
+      addTearDown(lift.dispose);
+      final seen = <double>[];
+      lift.addListener(() => seen.add(lift.value));
+      lift.animateTo(80);
+      expect(seen, hasLength(1), reason: 'the first step at once');
+      await tester.pump(liftStepGap * (liftStepCount - 1));
+      expect(seen, liftSteps(0, 80));
+      expect(lift.value, 80);
+      await tester.pump(liftStepGap * 4);
+      expect(seen, hasLength(liftStepCount), reason: 'nothing after the target');
+      // A new target mid-way starts from where it is.
+      seen.clear();
+      lift.animateTo(0);
+      await tester.pump(liftStepGap);
+      final from = lift.value, n = seen.length;
+      expect(from, inExclusiveRange(0, 80));
+      lift.animateTo(80);
+      await tester.pump(liftStepGap * liftStepCount);
+      expect(seen.sublist(n), liftSteps(from, 80));
+    });
+  });
+
   test('dev tools: dev versions and debug runs only', () {
     expect(devToolsFor(version: '1.3.3-dev.2', debug: false), isTrue);
     expect(devToolsFor(version: '0.0.0-dev', debug: false), isTrue);

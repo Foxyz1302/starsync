@@ -27,7 +27,6 @@ class DeveloperPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final s = AppScope.of(context).coordinator.settings;
     return SettingsPanel(
       title: 'Developer',
       child: Column(
@@ -40,19 +39,6 @@ class DeveloperPanel extends StatelessWidget {
             onPressed: onDanmakuPreview,
             icon: const Icon(Icons.subtitles_outlined, size: 18),
             label: const Text('Danmaku preview'),
-          ),
-          const SizedBox(height: 8),
-          SignalBuilder(
-            builder: (context) => SwitchListTile(
-              key: const ValueKey('lift-subtitles'),
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Lift subtitles above the chat line and controls'),
-              subtitle: const Text('Enter in the player opens a stand-in chat line at the bottom. '
-                  'While it or the control bar is up, bottom subtitles move above it (mpv sub-pos); '
-                  'signs at the top stay where they are.'),
-              value: s.liftSubtitles.value,
-              onChanged: s.setLiftSubtitles,
-            ),
           ),
         ],
       ),

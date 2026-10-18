@@ -5,6 +5,7 @@ import 'package:hive_ce/hive.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../controls/model/controls_prefs.dart';
+import '../danmaku/danmaku.dart' show DanmakuStyle;
 import '../shaders/shader_presets.dart';
 import '../session/notice_prefs.dart';
 import 'settings_schema.dart';
@@ -48,8 +49,20 @@ const _keyWhatsNewSeen = 'whatsNewSeen';
 const _keyWhatsNewNotes = 'whatsNewNotes';
 const _keyScreenResVideo = 'screenResVideo';
 const _keyLiftSubtitles = 'liftSubtitles';
+const _keyNotifyStyle = 'notifyStyle';
+const _keySubScale = 'subScale';
+const _keyDanmakuStyle = 'danmakuStyle';
 
 enum HwdecMode { auto, off, custom }
+
+/// How notifications show over the full player ([AppSettings.notifyStyle]).
+enum NotifyStyle {
+  toasts('Toasts'),
+  danmaku('Danmaku');
+
+  final String label;
+  const NotifyStyle(this.label);
+}
 
 /// The mpv `hwdec` of [HwdecMode.auto]. Windows: 'auto-copy' (decoded on
 /// the GPU, frames copied back): media_kit renders through ANGLE, where
@@ -96,9 +109,19 @@ class AppSettings {
   /// resolution; off: at the video's own size, scaled by Flutter. Applies
   /// live (GPU rendering only).
   final screenResVideo = signal(true);
-  /// Dev builds only, an experiment: bottom subtitles move up while the
-  /// controls are up (mpv `sub-pos`). Applies live.
+  /// Bottom subtitles also move up above the control bar while it is up
+  /// (mpv `sub-pos`; the quick chat box always lifts them). Default off.
+  /// Applies live.
   final liftSubtitles = signal(false);
+  /// Subtitle size, mpv `sub-scale` (1: as the file has them), 0.5..2.
+  /// Applies live and to each new player.
+  final subScale = signal(1.0);
+  /// How notifications show over the full player: toasts (the default),
+  /// or chat and short notices flying across the picture as danmaku
+  /// (`danmaku/danmaku_notices.dart`; problems stay toasts). Applies live.
+  final notifyStyle = signal(NotifyStyle.toasts);
+  /// How those lines look and move (stored as one map, [DanmakuStyle.toJson]).
+  final danmakuStyle = signal(const DanmakuStyle());
   /// Chat message toasts (default: all). Applies live.
   final chatPopups = signal(ChatPopups.all);
   /// Joins and leaves also notify while sitting out or with the window in
@@ -189,6 +212,12 @@ class AppSettings {
       if (screenRes is bool) screenResVideo.value = screenRes;
       final lift = box.get(_keyLiftSubtitles);
       if (lift is bool) liftSubtitles.value = lift;
+      final scale = box.get(_keySubScale);
+      if (scale is num && scale.isFinite) subScale.value = scale.toDouble().clamp(0.5, 2.0);
+      final notifyAs = box.get(_keyNotifyStyle);
+      notifyStyle.value = NotifyStyle.values.where((m) => m.name == notifyAs).firstOrNull ?? NotifyStyle.toasts;
+      final style = box.get(_keyDanmakuStyle);
+      if (style is Map) danmakuStyle.value = DanmakuStyle.fromJson(style);
       final share = box.get(_keyShareDiagnostics);
       if (share is bool) shareDiagnostics.value = share;
       final popups = box.get(_keyChatPopups);
@@ -301,6 +330,22 @@ class AppSettings {
   void setLiftSubtitles(bool on) {
     liftSubtitles.value = on;
     _put(_keyLiftSubtitles, on);
+  }
+
+  void setSubScale(double v) {
+    subScale.value = v.clamp(0.5, 2.0);
+    _put(_keySubScale, subScale.value);
+  }
+
+  void setNotifyStyle(NotifyStyle style) {
+    notifyStyle.value = style;
+    _put(_keyNotifyStyle, style.name);
+  }
+
+  void setDanmakuStyle(DanmakuStyle style) {
+    if (style == danmakuStyle.peek()) return;
+    danmakuStyle.value = style;
+    _put(_keyDanmakuStyle, style.toJson());
   }
 
   void setShareDiagnostics(bool on) {

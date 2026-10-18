@@ -58,7 +58,11 @@ ShellToast shellToastFor(ToastItem t, AvatarInfo Function(String name) avatar) {
 /// all (chat pop-ups, sitting out, alone) is the Notifier's policy.
 class PartyToasts extends StatefulWidget {
   final VoidCallback? onOpenChat;
-  const PartyToasts({super.key, this.onOpenChat});
+
+  /// Toasts shown another way (flying as danmaku, your quick chat echo):
+  /// left out when they come.
+  final bool Function(ToastItem t)? skip;
+  const PartyToasts({super.key, this.onOpenChat, this.skip});
 
   @override
   State<PartyToasts> createState() => _PartyToastsState();
@@ -86,6 +90,7 @@ class _PartyToastsState extends State<PartyToasts> {
       // Only new toasts re-run this, not the party they mention.
       untracked(() {
         for (final t in fresh) {
+          if (widget.skip?.call(t) ?? false) continue;
           _add(shellToastFor(t, (n) => avatarForName(n, coord, t.actorId)));
         }
         if (gone.isNotEmpty) _leave(gone);

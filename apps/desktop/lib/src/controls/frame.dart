@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart' show kPrimaryMouseButton;
 import 'package:flutter/material.dart';
 
@@ -10,7 +11,10 @@ import 'controls_probe.dart' show ControlsHold;
 // without any (or the mouse leaving) hides them and the cursor. Holds keep
 // them up: a seek drag (no hover events arrive), an open menu (a route
 // takes the mouse), and the session's [ControlsHold] (the mouse on a
-// floating pill or card, the Up next popover).
+// floating pill or card, the Up next popover). Only real mouse movement
+// wakes them: a widget appearing or going under a still pointer (the
+// quick chat box) does not, nor does typing. [ControlsFrame.suppress]
+// hides them while something takes their place (the quick chat box).
 
 class ControlsFrame extends StatefulWidget {
   /// Draws the controls; [visible] false while they are hidden.
@@ -28,6 +32,11 @@ class ControlsFrame extends StatefulWidget {
 
   /// Keeps them up while held.
   final ControlsHold? holdBy;
+
+  /// While true the controls are drawn hidden and [shown] says so; the
+  /// cursor still follows the mouse. They come back as they would have
+  /// been once it is false again.
+  final ValueListenable<bool>? suppress;
   const ControlsFrame({
     super.key,
     required this.builder,
@@ -37,6 +46,7 @@ class ControlsFrame extends StatefulWidget {
     this.hideAfter = const Duration(seconds: 3),
     this.shown,
     this.holdBy,
+    this.suppress,
   });
 
   /// The frame around [context], for widgets that keep it up (a drag, a
@@ -62,16 +72,23 @@ class ControlsFrameState extends State<ControlsFrame> {
   int _holds = 0;
   bool _heldBy = false;
   Timer? _timer;
+  // Where the mouse was last seen, to tell real movement from a widget
+  // appearing or going under it.
+  Offset? _lastPos;
 
-  bool get visible => _visible;
+  bool get _suppressed => widget.suppress?.value ?? false;
+
+  /// The controls are drawn (up and not suppressed).
+  bool get visible => _visible && !_suppressed;
 
   @override
   void initState() {
     super.initState();
     widget.holdBy?.addListener(_holdByChanged);
+    widget.suppress?.addListener(_suppressChanged);
     // Not during this build: an overlay listening to [shown] may be built.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) widget.shown?.value = true;
+      if (mounted) widget.shown?.value = visible;
     });
     _hideLater();
   }
@@ -84,12 +101,17 @@ class ControlsFrameState extends State<ControlsFrame> {
       widget.holdBy?.addListener(_holdByChanged);
       _holdByChanged();
     }
+    if (oldWidget.suppress != widget.suppress) {
+      oldWidget.suppress?.removeListener(_suppressChanged);
+      widget.suppress?.addListener(_suppressChanged);
+    }
     if (oldWidget.hideAfter != widget.hideAfter && _visible) _hideLater();
   }
 
   @override
   void dispose() {
     widget.holdBy?.removeListener(_holdByChanged);
+    widget.suppress?.removeListener(_suppressChanged);
     _timer?.cancel();
     super.dispose();
   }
@@ -101,13 +123,27 @@ class ControlsFrameState extends State<ControlsFrame> {
     hold(on);
   }
 
+  void _suppressChanged() {
+    if (!mounted) return;
+    setState(() {});
+    widget.shown?.value = visible;
+  }
+
   /// Show the controls and restart the hide countdown.
   void wake() {
     if (!_visible && mounted) {
       setState(() => _visible = true);
-      widget.shown?.value = true;
+      widget.shown?.value = visible;
     }
     _hideLater();
+  }
+
+  /// A hover or enter at [pos]: wakes only when the mouse really moved.
+  void _moved(Offset pos) {
+    final last = _lastPos;
+    _lastPos = pos;
+    if (last != null && (pos - last).distance < 0.5) return;
+    wake();
   }
 
   /// Keep the controls up while [on] (paired calls).
@@ -141,9 +177,10 @@ class ControlsFrameState extends State<ControlsFrame> {
   Widget build(BuildContext context) {
     return MouseRegion(
       cursor: _visible ? SystemMouseCursors.basic : SystemMouseCursors.none,
-      onEnter: (_) => wake(),
-      onHover: (_) => wake(),
-      onExit: (_) {
+      onEnter: (e) => _moved(e.position),
+      onHover: (e) => _moved(e.position),
+      onExit: (e) {
+        _lastPos = e.position;
         _timer?.cancel();
         _hide();
       },
@@ -154,12 +191,12 @@ class ControlsFrameState extends State<ControlsFrame> {
             Positioned.fill(
               child: DoubleClickListener(
                 onDoubleClick: widget.onDoubleClick!,
-                skipTop: _visible ? widget.barTop : 0,
-                skipBottom: _visible ? widget.barBottom : 0,
+                skipTop: visible ? widget.barTop : 0,
+                skipBottom: visible ? widget.barBottom : 0,
                 child: const ColoredBox(color: Color(0x00000000), child: SizedBox.expand()),
               ),
             ),
-          widget.builder(context, _visible),
+          widget.builder(context, visible),
         ],
       ),
     );

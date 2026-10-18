@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../controls/minimal/style.dart';
@@ -10,9 +12,12 @@ import '../session/notifier.dart' show ToastItem;
 import '../session/session_coordinator.dart' show SessionCoordinator;
 import '../shell/avatar.dart' show AvatarInfo, avatarForName, colorForName, memberAvatarInfo, selfAvatarInfo;
 import '../shell/motion.dart';
+import '../shell/quick_chat.dart';
+import '../shell/video_view.dart' show SubtitleLift;
 import '../app/app_graph.dart' show AppScope;
 import '../widgets/app_menu.dart' show AppGlass, AppMenuStyle;
 import 'danmaku.dart';
+import 'danmaku_notices.dart' show danmakuForToast;
 
 // Dev builds only (Settings → About → Developer): try the danmaku look on
 // the real player (when something is loaded) or on a stand-in picture,
@@ -25,7 +30,7 @@ class DanmakuPreview {
 
   /// Shown over the full session player.
   final active = signal(false);
-  final style = signal(const DanmakuStyle());
+  final Signal<DanmakuStyle> style;
 
   /// A random stream: lines per minute, lengths from one word to a long
   /// sentence, CJK and emoji among them.
@@ -50,7 +55,9 @@ class DanmakuPreview {
   Timer? _autoTimer;
   late final void Function() _stopAuto;
 
-  DanmakuPreview() {
+  /// Starts from [style] (the user's look, Settings → Notifications &
+  /// sounds); the preview's knobs change only the preview.
+  DanmakuPreview({DanmakuStyle style = const DanmakuStyle()}) : style = signal(style) {
     _stopAuto = effect(() {
       final on = auto.value;
       autoRate.value;
@@ -127,41 +134,15 @@ class DanmakuPreview {
     return sample(DanmakuKind.upNext);
   }
 
-  /// A toast of this session as a line: chat (name, then the message),
-  /// joins, leaves, Up next adds; the rest (problems) stay toasts.
-  DanmakuItem? fromToast(ToastItem t, {String? selfName}) {
-    final who = t.actor;
-    if (who == null || who.isEmpty) {
-      return t.text.toLowerCase().startsWith('starting')
-          ? DanmakuItem(kind: DanmakuKind.starting, text: '▶  ${t.text}')
-          : null;
-    }
-    final color = colorForName(who);
+  /// A toast of this session as a line, as "Notifications: Danmaku" maps
+  /// it ([danmakuForToast]); the rest (problems) stay toasts.
+  DanmakuItem? fromToast(ToastItem t) {
     final c = coord;
-    final avatar = c == null ? AvatarInfo(name: who, color: color) : avatarForName(who, c, t.actorId);
-    if (t.chat && t.text.startsWith('$who: ')) {
-      return DanmakuItem(
-          kind: DanmakuKind.chat,
-          sender: who,
-          senderColor: color,
-          text: t.text.substring(who.length + 2),
-          own: who == selfName,
-          avatar: avatar);
-    }
-    final rest = t.text.startsWith('$who ') ? t.text.substring(who.length + 1) : t.text;
-    final kind = rest.startsWith('joined')
-        ? DanmakuKind.join
-        : rest.startsWith('left')
-            ? DanmakuKind.leave
-            : rest.startsWith('added')
-                ? DanmakuKind.upNext
-                : null;
-    if (kind == null) return null;
-    return DanmakuItem(kind: kind, sender: who, senderColor: color, text: rest, avatar: avatar);
+    return danmakuForToast(t, avatar: c == null ? null : (name, id) => avatarForName(name, c, id));
   }
 
   /// Follows [toasts] while [live] is on; returns the stop.
-  void Function() watchToasts(ReadonlySignal<List<ToastItem>> toasts, {String? selfName}) {
+  void Function() watchToasts(ReadonlySignal<List<ToastItem>> toasts) {
     var seen = {for (final t in toasts.peek()) t.id};
     return effect(() {
       final items = toasts.value;
@@ -169,7 +150,7 @@ class DanmakuPreview {
       untracked(() {
         for (final t in items) {
           if (!seen.add(t.id) || !on) continue;
-          final line = fromToast(t, selfName: selfName);
+          final line = fromToast(t);
           if (line != null) controller.add(line);
         }
         seen = {for (final t in items) t.id};
@@ -209,7 +190,11 @@ class DanmakuPreview {
 /// picture; lets clicks through.
 class DanmakuPreviewLayers extends StatelessWidget {
   final DanmakuPreview preview;
-  const DanmakuPreviewLayers({super.key, required this.preview});
+
+  /// The covered bottom the mock dialogue moves above, as the real
+  /// subtitles do ([SubtitleLift]).
+  final ValueListenable<double>? lift;
+  const DanmakuPreviewLayers({super.key, required this.preview, this.lift});
 
   @override
   Widget build(BuildContext context) {
@@ -218,7 +203,7 @@ class DanmakuPreviewLayers extends StatelessWidget {
       builder: (context) => Stack(
         fit: StackFit.expand,
         children: [
-          MockSubtitles(top: preview.mockTop.value, bottom: preview.mockBottom.value),
+          MockSubtitles(top: preview.mockTop.value, bottom: preview.mockBottom.value, lift: lift),
           DanmakuLayer(controller: preview.controller, style: preview.style.value, accent: accent),
         ],
       ),
@@ -227,11 +212,14 @@ class DanmakuPreviewLayers extends StatelessWidget {
 }
 
 /// Stand-ins for subtitles where real ones sit: an ASS sign at the top
-/// (`\an8`, yellow serif) and two lines of dialogue at the bottom.
+/// (`\an8`, yellow serif) and two lines of dialogue at the bottom. The
+/// dialogue moves up by [lift] (px covered at the bottom) in the same
+/// steps as mpv's `sub-pos` moves the real ones; the sign stays.
 class MockSubtitles extends StatelessWidget {
   final bool top;
   final bool bottom;
-  const MockSubtitles({super.key, required this.top, required this.bottom});
+  final ValueListenable<double>? lift;
+  const MockSubtitles({super.key, required this.top, required this.bottom, this.lift});
 
   static Widget _outlined(String text, TextStyle style, double outline) => Stack(
         children: [
@@ -276,10 +264,15 @@ class MockSubtitles extends StatelessWidget {
                 ),
               ),
             if (bottom)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: h * 0.05,
+              ValueListenableBuilder<double>(
+                valueListenable: lift ?? const AlwaysStoppedAnimation(0.0),
+                builder: (context, up, child) => Positioned(
+                  key: const ValueKey('mock-dialogue'),
+                  left: 0,
+                  right: 0,
+                  bottom: h * 0.05 + up,
+                  child: child!,
+                ),
                 child: Center(
                   child: _outlined(
                     'I told you the controls would cover this line.\nThey never do now — or do they?',
@@ -299,15 +292,29 @@ class MockSubtitles extends StatelessWidget {
 /// fields drifting over a dusk gradient, so motion and contrast behind
 /// the lines are realistic.
 class DanmakuStandIn extends StatefulWidget {
-  const DanmakuStandIn({super.key});
+  /// False: a still picture (the settings' strip while it rests).
+  final bool animate;
+  const DanmakuStandIn({super.key, this.animate = true});
 
   @override
   State<DanmakuStandIn> createState() => _DanmakuStandInState();
 }
 
 class _DanmakuStandInState extends State<DanmakuStandIn> with SingleTickerProviderStateMixin {
-  late final AnimationController _clock =
-      AnimationController(vsync: this, duration: const Duration(seconds: 60))..repeat();
+  late final AnimationController _clock = AnimationController(vsync: this, duration: const Duration(seconds: 60));
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.animate) _clock.repeat();
+  }
+
+  @override
+  void didUpdateWidget(DanmakuStandIn old) {
+    super.didUpdateWidget(old);
+    if (widget.animate && !_clock.isAnimating) _clock.repeat();
+    if (!widget.animate && _clock.isAnimating) _clock.stop();
+  }
 
   @override
   void dispose() {
@@ -521,6 +528,8 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
         _Slider('Opacity', s.opacity, 0.3, 1, '${(s.opacity * 100).round()} %',
             (v) => _style((s) => s.copyWith(opacity: v))),
         _Slider('Size', s.size, 0.6, 1.8, '×${s.size.toStringAsFixed(2)}', (v) => _style((s) => s.copyWith(size: v))),
+        _Slider('Bold', s.weight.toDouble(), 400, 900, '${s.weight}',
+            (v) => _style((s) => s.copyWith(weight: (v / 100).round() * 100))),
         _Slider('Outline', s.outline, 0, 4, '${s.outline.toStringAsFixed(1)} px',
             (v) => _style((s) => s.copyWith(outline: v))),
         _Toggle('Avatars', s.avatars, (v) => _style((s) => s.copyWith(avatars: v))),
@@ -679,54 +688,127 @@ Future<void> showDanmakuPreviewPage(BuildContext context, DanmakuPreview preview
       ),
     );
 
-class DanmakuPreviewPage extends StatelessWidget {
+class DanmakuPreviewPage extends StatefulWidget {
   final DanmakuPreview preview;
   const DanmakuPreviewPage({super.key, required this.preview});
 
   @override
+  State<DanmakuPreviewPage> createState() => _DanmakuPreviewPageState();
+}
+
+/// The page also has the quick chat box (Enter): what you send flies as
+/// your own line, and the mock dialogue moves above the box in the lift's
+/// steps, as the real subtitles do over the player.
+class _DanmakuPreviewPageState extends State<DanmakuPreviewPage> {
+  final _chat = QuickChat();
+  final _lift = SubtitleLift();
+  final _pageFocus = FocusNode(debugLabel: 'danmaku preview');
+  double _boxH = QuickChatBox.height;
+
+  DanmakuPreview get preview => widget.preview;
+
+  @override
+  void initState() {
+    super.initState();
+    _chat.open.addListener(_retarget);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _pageFocus.requestFocus());
+  }
+
+  @override
+  void dispose() {
+    _chat.open.removeListener(_retarget);
+    _chat.dispose();
+    _lift.dispose();
+    _pageFocus.dispose();
+    super.dispose();
+  }
+
+  void _retarget() {
+    final s = AppScope.of(context).coordinator.settings;
+    final bar = preview.controlsBand.peek() && s.liftSubtitles.peek()
+        ? controlsBottomHeight(s.controlsSkin.peek(), s.controlsSize.peek()) + 8
+        : 0.0;
+    final box = _chat.open.value ? 16 + _boxH + 8 : 0.0;
+    _lift.animateTo(box > bar ? box : bar);
+    if (!_chat.open.value) _pageFocus.requestFocus();
+  }
+
+  KeyEventResult _key(FocusNode node, KeyEvent e) {
+    if (e is! KeyDownEvent) return KeyEventResult.ignored;
+    if (e.logicalKey == LogicalKeyboardKey.enter || e.logicalKey == LogicalKeyboardKey.numpadEnter) {
+      _chat.show();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.black,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          const DanmakuStandIn(),
-          DanmakuPreviewLayers(preview: preview),
-          SignalBuilder(builder: (context) {
-            if (!preview.controlsBand.value) return const SizedBox.shrink();
-            final s = AppScope.of(context).coordinator.settings;
-            final h = controlsBottomHeight(s.controlsSkin.value, s.controlsSize.value);
-            return Align(
-              alignment: Alignment.bottomCenter,
-              child: IgnorePointer(
-                child: Container(
-                  height: h,
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0x00000000), MinimalStyle.band],
+    return Focus(
+      focusNode: _pageFocus,
+      onKeyEvent: _key,
+      child: Material(
+        color: Colors.black,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            const DanmakuStandIn(),
+            DanmakuPreviewLayers(preview: preview, lift: _lift),
+            SignalBuilder(builder: (context) {
+              if (!preview.controlsBand.value) return const SizedBox.shrink();
+              final s = AppScope.of(context).coordinator.settings;
+              final h = controlsBottomHeight(s.controlsSkin.value, s.controlsSize.value);
+              return Align(
+                alignment: Alignment.bottomCenter,
+                child: IgnorePointer(
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: _chat.open,
+                    builder: (context, open, child) =>
+                        AnimatedOpacity(opacity: open ? 0 : 1, duration: easeTime, curve: ease, child: child),
+                    child: Container(
+                      height: h,
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Color(0x00000000), MinimalStyle.band],
+                        ),
+                        border: Border(top: BorderSide(color: AppMenuStyle.border, width: 0.5)),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text('control bar',
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 12)),
                     ),
-                    border: Border(top: BorderSide(color: AppMenuStyle.border, width: 0.5)),
                   ),
-                  alignment: Alignment.center,
-                  child: Text('control bar', style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 12)),
                 ),
+              );
+            }),
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 16,
+              child: QuickChatBox(
+                chat: _chat,
+                onSend: (text) => preview.controller.add(preview.own(text)),
+                onHeight: (h) {
+                  _boxH = h;
+                  if (_chat.open.value) _retarget();
+                },
               ),
-            );
-          }),
-          Positioned(
-            left: 16,
-            top: 14,
-            child: Text('Stand-in picture: load something to preview on the real player',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 12)),
-          ),
-          Positioned(
-            right: 16,
-            top: 16,
-            child: DanmakuPanel(preview: preview, onClose: () => Navigator.of(context).pop()),
-          ),
-        ],
+            ),
+            Positioned(
+              left: 16,
+              top: 14,
+              child: Text('Stand-in picture: load something to preview on the real player · Enter: chat box',
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 12)),
+            ),
+            Positioned(
+              right: 16,
+              top: 16,
+              child: DanmakuPanel(preview: preview, onClose: () => Navigator.of(context).pop()),
+            ),
+          ],
+        ),
       ),
     );
   }

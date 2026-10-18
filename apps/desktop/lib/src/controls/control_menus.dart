@@ -11,7 +11,6 @@ import '../widgets/copy_open.dart';
 import 'frame.dart';
 import 'model/controls_layout.dart';
 import 'model/controls_model.dart';
-import 'player_settings.dart';
 
 // The controls' menus, shared by both skins: the track and chapter lists
 // and the ⚙ menu, all on the app's menu (`showAppMenu`), anchored on the
@@ -129,7 +128,7 @@ Future<void> runControlAction(BuildContext context, PlayerControlsModel model, C
     case ControlAction.markProblem:
       await ControlsFrame.holdWhile(context, () => showMarkProblem(context));
     case ControlAction.playerSettings:
-      await showPlayerSettings(context, renderMode: model.renderMode);
+      model.togglePanel();
     case ControlAction.leave:
       model.leave();
   }

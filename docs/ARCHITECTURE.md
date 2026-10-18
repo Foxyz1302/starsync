@@ -600,7 +600,7 @@ fails every seek until a fresh open, so the coordinator runs "Reload
 video" once per media for it (`mpvStreamLost`, `onStreamLost`).
 
 Output size ("Sharp video and subtitles", `AppSettings.screenResVideo`,
-on by default, live; Settings → Player and the player settings card):
+on by default, live; Settings → Player and the player panel):
 media_kit renders mpv into a texture the size of the video and Flutter
 scales it, so libass subtitles, mpv's scaler and the shaders all work on
 a 720p image for a 720p file. With the setting on and the GPU renderer
@@ -2121,7 +2121,8 @@ panel) and chat messages (Copy message, and a link in it).
   Jellyfin & integrations (linked servers, AnimeFlow's `/me` via
   `AnimeFlowClient.fromAccounts`, "Play the next episode automatically":
   whether this app adds the continuation, see "What's next"), notifications & sounds
-  (what pops up, chat pop-ups, joins and leaves while sitting out or in
+  (what pops up, chat pop-ups, toasts or danmaku over the player with the
+  danmaku look, joins and leaves while sitting out or in
   the background), updates, shortcuts, about.
 - **Drop and paste** (`handoff.dart`, `fox_utils`): the shell is one
   `DropTarget` (a "Drop to open" overlay while dragging) and a
@@ -2218,14 +2219,28 @@ panel) and chat messages (Copy message, and a link in it).
   and the members card says "can't play this: ...". 34 px avatars, a main line
   and a muted detail line. The pill glass, colour only for problems; it fades through
   between kinds. The mini shows its short line in its hover bar. ⚙ →
-  Player settings (both skins) opens the player settings card (`controls/
-  player_settings.dart`, `showPopover`, on `AppGlass`): player design, progress line
-  when hidden, upscaling shader, sharp video and subtitles (the output
-  at screen size, see "Media"), hardware decoding (set live on mpv's
-  `hwdec`), subtitle and audio track. The rows (`playerSettingRows`) are
-  the same widgets Settings → Player shows; all apply live. Settings →
-  Player also has the controls' own choices (`controlsSettingRows`, see
-  "Player controls"). The progress line (`AppSettings.progressLine`) is
+  Player settings (both skins) toggles the player panel
+  (`controls/player_panel.dart`, `PlayerControlsModel.panelOpen`): a
+  312 px `AppGlass` column docked at the right of the full player,
+  between the top bar and the control bar (it never covers the bar),
+  sliding and fading in from the right; it stays open while the controls
+  hide and show, until its × or Esc (the player's Esc closes it first),
+  and leaving the full player closes it. The mouse on it holds the
+  controls up (`ControlsHoldRegion`). Its sections fold (their titles
+  toggle; folded ones are kept for the app's run, Notifications and
+  Controls start folded): tracks (subtitle, audio; remembered as from
+  the track menus), subtitles (size, mpv `sub-scale` from
+  `AppSettings.subScale`, set on every player; above the controls, see
+  "Subtitle lift"), picture (upscaling shader and quality, sharp video
+  and subtitles, see "Media", hardware decoding, set live on mpv's
+  `hwdec`), sound (volume), notifications (Toasts / Danmaku and, with
+  Danmaku, the look's knobs, see "Danmaku notifications") and controls
+  (design, progress line); a pointer to Settings → Player and Mark a
+  problem at its foot. Compact rows of its own over the same settings and
+  actions; Settings → Player shows the full rows (`playerSettingRows`:
+  design, progress line, shader, sharp video, hardware decoding, subtitle
+  size, subtitles above the controls) and the controls' own choices
+  (`controlsSettingRows`, see "Player controls"); all apply live. The progress line (`AppSettings.progressLine`) is
   what the bottom controls leave while hidden: Standard a 2 px line,
   Minimal its collapsed timeline. Fullscreen adds the
   `WindowButtons` to the top bar while the controls are up (restore
@@ -2261,7 +2276,8 @@ panel) and chat messages (Copy message, and a link in it).
 - **Chat** (`chat_panel.dart`): a 340 px panel sliding in at the right
   (strip button or Tab): chat with avatars; the "Activity" chip (off by
   default, `showActivity`, kept for the app's run only) adds the other
-  feed lines between them. Opening focuses the field; Tab or Esc in it
+  feed lines between them. Its field shares the quick chat box's draft
+  (see "Quick chat"). Opening focuses the field; Tab or Esc in it
   close the panel and focus goes back where it was. Unread chat badges
   the strip's and the player controls' chat buttons; in fullscreen with
   the controls down and the video not playing a glass chip
@@ -2279,7 +2295,96 @@ panel) and chat messages (Copy message, and a link in it).
   are up and come down to 16 px from the edge while they are hidden
   (`AnimatedPositioned`, the shell's `ease`; the player reports its
   controls through the shell's `controlsShown`); elsewhere 16 px from the
-  bottom left. What pops up at all is the Notifier's policy.
+  bottom left. What pops up at all is the Notifier's policy. Each
+  `ToastItem` carries its `NoticeCategory` and whether it is your own
+  (`own`); the shell leaves out those flying as danmaku and your own chat
+  coming back for a line the quick chat box already showed
+  (`PartyToasts.skip`).
+- **Quick chat** (`shell/quick_chat.dart`): Enter in the full player
+  (not the mini: it is a corner thumbnail while you are elsewhere in the
+  app, where Enter belongs to that page; nor while sitting out) opens a
+  small box at the bottom centre, 16 px up, in the control bar's place,
+  without opening the chat panel. Enter is a `HardwareKeyboard` handler
+  of the player, so it works whatever plays and whatever button kept
+  focus; a `FocusManager` early handler swallows that Enter so the
+  focused button does not act on it too. `QuickChat` (the shell's, it
+  outlives the player's modes) holds the state: the draft is the chat
+  panel's `TextEditingController` (typing in either shows in both, a send
+  from either clears both), its `FocusNode` takes focus at once (keys
+  typed right after go to the box; `textInputFocused` keeps Space, Tab,
+  F and the arrows off the player meanwhile), and it closes by itself
+  after `idleClose` (8 s) without typing, Esc, or an empty Enter, keeping
+  the draft for the next Enter. Enter with text (an input method's
+  composing Enter excepted) sends it (`sendChat`) and closes. The box
+  (`QuickChatBox`) starts 300 px wide and widens with the text up to
+  640 px (or the room there is), then wraps up to four lines, growing
+  upward; your avatar leads it; it fades and slides in on the shell's
+  curve and stays mounted while closed (invisible, ignoring the pointer)
+  so focus is immediate. What you sent shows where the box was for
+  `echoTime` (2.6 s, `QuickChatEcho`, with an accent hairline), or, with
+  danmaku notifications, flies at once as your own line; your own chat
+  toast coming back from the server is not shown again
+  (`QuickChat.echoed`). While the box or its echo is up the controls are
+  held hidden (`ControlsFrame.suppress`: drawn hidden, `shown` false, the
+  cursor still follows the mouse) and the action area rides above the
+  box. Typing is not mouse activity: the frame wakes the controls only
+  on real pointer movement (an enter or hover at the last seen position,
+  as when the box comes or goes under a still pointer, does nothing), and
+  the field's I-beam stays hidden until the mouse moves over it, so
+  Enter, typing and sending never show the cursor or the controls.
+- **Subtitle lift** (`video_view.dart`): bottom subtitles move above what
+  covers the bottom of the full player: the quick chat box or its echo
+  (always), and the control bar while it is up when
+  `AppSettings.liftSubtitles` is on (off by default; Settings → Player
+  and the player panel, "Subtitles above the controls"); 8 px above it.
+  `SubtitleLift` steps the covered height toward each new target in
+  `liftStepCount` (4) eased-out steps `liftStepGap` (42 ms) apart, the
+  first at once: about one step per frame of a 24 fps video, so each
+  lands on its own video frame (a `sub-pos` change per screen frame
+  landed unevenly on the video's frames and looked choppy).
+  `SubtitleLifter` turns each step into mpv `sub-pos` (`subtitleLiftPos`:
+  only as far as the letterbox under the picture leaves no room, at most
+  half the picture), back to 100 when nothing covers and for a new
+  player. What each mpv property does, on `tool/make_sub_test.sh`'s file
+  (mpv 0.41, libmpv as the app uses it): `sub-pos` moves bottom ASS
+  dialogue and SRT lines up and leaves `\an8` signs in place (with
+  `sub-ass-override` at its default `scale` or `yes`; `no` ignores it
+  for ASS); `sub-margin-y` moves SRT only (ASS only with
+  `sub-ass-override=force`, which restyles every line, signs too);
+  `sub-ass-style-overrides=MarginV=...` moves top signs down as well;
+  `video-margin-ratio-bottom` shrinks and moves the picture itself (with
+  `sub-ass-force-margins` the dialogue goes into the new black band).
+- **Danmaku notifications** (`danmaku/`): Settings → Notifications &
+  sounds → Over the player → Notifications: Toasts (default) or Danmaku
+  (`AppSettings.notifyStyle`, live; also in the player panel). With
+  Danmaku and the full player up (not sitting out), what
+  `fliesAsDanmaku` picks (chat, joins, leaves, lost connection and back,
+  "starting now", Up next news someone caused) flies right to left
+  across the picture (`DanmakuNotices` under the controls feeds new
+  toasts to a `DanmakuLayer` through `danmakuForToast`); nudges,
+  problems, your own state and the app's notices stay toasts, and so does
+  everything with the player small. The player sets the shell's
+  `danmakuActive` so the toasts leave the flying ones out. The layer:
+  lanes in a band of the height (`DanmakuStyle.bandTop` / `bandBottom`,
+  default 10 to 45 %, under top signs, never down into the dialogue);
+  each line takes the topmost free lane (`DanmakuLanes`, pure: the last
+  line in a lane must have fully entered with a gap, and the new one, at
+  its own speed, cannot catch it before it leaves); at most
+  `maxOnScreen` fly, the rest wait in order (dropped after 15 s, 60 at
+  most); every line crosses in `crossSecs`, so long ones move faster;
+  white text at the chosen weight (`weight`, 400 to 900, the name a step
+  bolder) with a dark outline and no box, the sender's avatar and
+  coloured name first, the app's own notices without one, own lines in
+  an accent frame; the layer's own clock (lines fly on while paused),
+  ticking only while lines fly or wait. Each line is a widget moved by a
+  `Flow`: per frame only paint runs. The look (`AppSettings.danmakuStyle`,
+  one map, `DanmakuStyle.toJson` / `fromJson`, which clamps every value
+  to `DanmakuStyle.limits`) has every knob in the settings card
+  (`danmaku_settings.dart`: crossing time, at most on screen, lane band,
+  opacity, size, boldness, outline, avatars, frame my own lines, reset)
+  over a preview strip (a moving stand-in picture, a top sign, bottom
+  dialogue and sample lines in the current look; it plays for 16 s after
+  it opens or a knob moves, then rests until clicked).
 
 Settings persist in two Hive boxes: `connect_form` (last form, recent
 servers and links, the profile picture and colour; saved even when a join
@@ -2399,7 +2504,8 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   mark a problem, player settings, leave. Icons, tooltips (with keys) and
   the clock text (`clockText`) are defined there too, once.
 - **Shared pieces**: `ControlsFrame` (`frame.dart`): when the controls
-  are up (mouse movement shows them, `controlsHideSecs` without any or the
+  are up (real mouse movement shows them, see "Quick chat"; `suppress`
+  holds them hidden; `controlsHideSecs` without movement or the
   mouse leaving hides them and the cursor), holds (`hold` during a seek
   drag, `holdDuring` / `holdWhile` around menus and popovers, `holdBy`
   the session's `ControlsHold`), and the double-click on the picture
@@ -2445,7 +2551,7 @@ part not downloaded still reads; chapter cuts are a light dark line.
   `mpvControls: true` from before becomes minimal), `timeDisplay`,
   `controlsSize` (normal / large: the bottom bar ×1.25),
   `controlsHideSecs` (2 / 3 / 5), `hiddenControls`, `progressLine`.
-  The player settings card has the skin and the progress line; Settings →
+  The player panel has the skin and the progress line; Settings →
   Player → Controls has the rest.
 - Pills (Skip OP / ED / 1:30, Next episode) and cards live outside the
   controls, in the action area ("Player overlay"). The cards stay up; a
@@ -2597,7 +2703,7 @@ dedicated server (`package:logging` loggers named by area: `relay`,
 - **Opting out**: Settings → About → "Share diagnostics with the server"
   (default on). Off: no lines are kept or sent; one batch per connection
   says so (`share:false`). The local log is unchanged.
-- **Mark a problem**: Ctrl+Shift+B (`AppKeys`), the player's ⚙ card and
+- **Mark a problem**: Ctrl+Shift+B (`AppKeys`), the player panel and
   Settings → About open a small card with an optional note (200
   characters, one line); the mark goes at once with the lines waiting,
   opted out or not, and the server writes `[who] === PROBLEM marked by

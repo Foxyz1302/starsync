@@ -2,23 +2,19 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
-import 'package:sync_relay_core/core.dart' show JellyfinStreamType;
 
-import '../jellyfin/track_prefs.dart' show MpvTrack;
 import '../playback/playback_controller.dart' show PlaybackController, RenderMode;
 import '../session/session_coordinator.dart' show SessionCoordinator;
 import '../shaders/shader_presets.dart';
 import '../app/app_graph.dart';
-import '../shell/mark_problem.dart';
-import '../shell/motion.dart';
 import '../state/settings.dart';
 import '../widgets/app_menu.dart';
-import 'frame.dart';
 import 'model/controls_prefs.dart';
 
-// Everything about the player, defined once: the rows of the player
-// settings card (⚙ → Player settings, both skins) and of Settings → Player. Each row reads and
-// writes [AppSettings] and applies to a running player right away.
+// Everything about the player, defined once: the rows of Settings →
+// Player (the player panel, `player_panel.dart`, has compact rows for the
+// same settings). Each row reads and writes [AppSettings] and applies to
+// a running player right away.
 
 /// One setting: a label, one line of help under it, the control at the
 /// right ([below]: an extra line under the row, e.g. a text field).
@@ -362,58 +358,6 @@ class _HwdecSettingState extends State<HwdecSetting> {
   }
 }
 
-/// Audio or subtitle track of the running player (in the player only).
-/// The pick is remembered for the next Jellyfin item.
-class TrackSetting extends StatelessWidget {
-  final JellyfinStreamType type;
-  const TrackSetting({super.key, required this.type});
-
-  bool get _audio => type == JellyfinStreamType.audio;
-
-  @override
-  Widget build(BuildContext context) {
-    final coord = AppScope.of(context).coordinator;
-    return SignalBuilder(builder: (context) {
-      final list = [
-        for (final t in coord.playback.tracks.value)
-          if (t.type == type) t,
-      ];
-      // -1: subtitles off.
-      final selected = list.where((t) => t.selected).firstOrNull?.id ?? (_audio ? null : -1);
-      final items = <(int, String)>[
-        if (!_audio) (-1, 'Off'),
-        for (final MpvTrack t in list) (t.id, t.label),
-      ];
-      return SettingRow(
-        label: _audio ? 'Audio' : 'Subtitles',
-        help: 'Remembered for the next episode',
-        control: SizedBox(
-          width: 190,
-          child: items.isEmpty || selected == null
-              ? Text(items.isEmpty ? 'None' : 'Pick one…',
-                  key: ValueKey(_audio ? 'audio-track' : 'subtitle-track'), textAlign: TextAlign.end)
-              : _dropdown<int>(
-                  key: ValueKey(_audio ? 'audio-track' : 'subtitle-track'),
-                  value: selected,
-                  expanded: true,
-                  items: items,
-                  onChanged: (id) {
-                    coord.markInput();
-                    if (id == -1) {
-                      coord.selectTrack(subtitlesOff: true);
-                    } else if (_audio) {
-                      coord.selectTrack(aid: id);
-                    } else {
-                      coord.selectTrack(sid: id);
-                    }
-                  },
-                ),
-        ),
-      );
-    });
-  }
-}
-
 /// The controls' own choices (Settings → Player → Controls).
 List<Widget> controlsSettingRows() => [
   const TimeDisplaySetting(),
@@ -426,58 +370,38 @@ List<Widget> controlsSettingRows() => [
   for (final c in OptionalControl.values) BarButtonSetting(control: c),
 ];
 
-/// The player rows of Settings → Player and the player settings card, in
-/// order.
+/// The player rows of Settings → Player, in order (the player panel has
+/// its own compact rows for the same settings).
 List<Widget> playerSettingRows({ReadonlySignal<RenderMode>? renderMode}) => [
       const PlayerDesignSetting(),
       const ProgressLineSetting(),
       ShaderPresetSetting(renderMode: renderMode),
       ScreenResSetting(renderMode: renderMode),
       const HwdecSetting(),
+      const SubScaleSetting(),
+      const LiftSubtitlesSetting(),
     ];
 
-/// The player settings card: every player setting, plus the running
-/// player's tracks.
-class PlayerSettingsCard extends StatelessWidget {
-  final ReadonlySignal<RenderMode>? renderMode;
-  /// Show the audio / subtitle pickers (a player is running).
-  final bool tracks;
-  const PlayerSettingsCard({super.key, this.renderMode, this.tracks = true});
+/// Subtitle size (mpv `sub-scale`, [AppSettings.subScale]). Live.
+class SubScaleSetting extends StatelessWidget {
+  const SubScaleSetting({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // The app's glass, like the Up next popover and the menus.
-    return AppGlass(
-      key: const ValueKey('player-settings-card'),
-      child: SizedBox(
-        width: 420,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text('Player', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-              const SizedBox(height: 4),
-              ...playerSettingRows(renderMode: renderMode),
-              if (tracks) ...[
-                const Divider(),
-                const TrackSetting(type: JellyfinStreamType.subtitle),
-                const TrackSetting(type: JellyfinStreamType.audio),
-              ],
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Controls layout and custom shaders: Settings → Player',
-                      style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
-                    ),
-                  ),
-                  const MarkProblemButton(),
-                ],
-              ),
-            ],
+    final s = AppScope.of(context).coordinator.settings;
+    return SignalBuilder(
+      builder: (context) => SettingRow(
+        label: 'Subtitle size',
+        help: '${(s.subScale.value * 100).round()} % of what the file sets',
+        control: SizedBox(
+          width: 220,
+          child: Slider(
+            key: const ValueKey('sub-scale'),
+            value: s.subScale.value,
+            min: 0.5,
+            max: 2,
+            divisions: 30,
+            onChanged: s.setSubScale,
           ),
         ),
       ),
@@ -485,14 +409,25 @@ class PlayerSettingsCard extends StatelessWidget {
   }
 }
 
-/// Opens the player settings card over the player, near the controls'
-/// right end; the controls stay up while it is open.
-Future<void> showPlayerSettings(BuildContext context, {ReadonlySignal<RenderMode>? renderMode}) =>
-    ControlsFrame.holdWhile(
-      context,
-      () => showPopover<void>(
-        context,
-        at: const Alignment(0.96, 0.5),
-        child: PlayerSettingsCard(renderMode: renderMode),
+/// Bottom subtitles above the control bar while it is up
+/// ([AppSettings.liftSubtitles]). Live.
+class LiftSubtitlesSetting extends StatelessWidget {
+  const LiftSubtitlesSetting({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context).coordinator.settings;
+    return SignalBuilder(
+      builder: (context) => SettingRow(
+        label: 'Subtitles above the controls',
+        help: 'Bottom lines move up while the control bar shows; signs at the top stay. '
+            'The chat box always moves them',
+        control: Switch(
+          key: const ValueKey('lift-subtitles'),
+          value: s.liftSubtitles.value,
+          onChanged: s.setLiftSubtitles,
+        ),
       ),
     );
+  }
+}

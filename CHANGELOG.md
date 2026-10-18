@@ -7,7 +7,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ## Unreleased
 
-Links you put up are downloaded once for everyone, plus What's new and fixes for Windows, the relay and chat.
+Links you put up are downloaded once for everyone, quick chat and danmaku in the player, plus What's new and fixes for Windows, the relay and chat.
 
 ### Added
 
@@ -17,6 +17,10 @@ Links you put up are downloaded once for everyone, plus What's new and fixes for
 - Invite finds your internet address, lets you pick it or your home-network address, and says when your router needs the port forwarded
 - The password goes into an invite link only when you tick "Include the password in the link"
 - Starsync runs once: a link clicked while it is open goes to the open window
+- Quick chat: press Enter in the big player to type a message in a small box at the bottom, without opening the chat panel and without the mouse pointer or the controls popping up; it shares its draft with the chat panel, closes by itself when you stop typing, and subtitles move up out of its way
+- Danmaku notifications: chat, joins, leaves and Up next can fly across the top of the picture instead of popping up (Settings → Notifications & sounds → Notifications: Danmaku, off by default), with speed, how many at once, where, opacity, size, boldness, outline and avatars all adjustable and a live preview
+- Player panel: ⚙ → Player settings opens a panel at the right of the player that stays open while you watch, with tracks, subtitle size, picture, volume and notification settings
+- Subtitles can move up above the controls while they show (Settings → Player → Subtitles above the controls, off by default), and their size can be changed
 
 ### Changed
 

@@ -11,7 +11,9 @@ import '../shell/avatar.dart' show AvatarInfo, StatusAvatar;
 // two ever touch), at most [DanmakuStyle.maxOnScreen] fly at once and the
 // rest wait their turn; every line crosses in the same time, so a long
 // one moves faster. The clock is the layer's own: lines keep flying while
-// the video is paused. Dev preview for now (DEVELOPMENT.md "Dev tools").
+// the video is paused. The session's notifications use it when the user
+// picks "Notifications as danmaku" (`danmaku_notices.dart`); the dev
+// preview tries it out (DEVELOPMENT.md "Dev tools").
 
 /// What a line is: a chat message or a short notice.
 enum DanmakuKind { chat, join, leave, upNext, starting }
@@ -32,7 +34,9 @@ class DanmakuItem {
       {required this.kind, required this.text, this.sender, this.senderColor, this.own = false, this.avatar});
 }
 
-/// How lines look and move.
+/// How lines look and move. Persisted as [toJson] (Settings →
+/// Notifications & sounds); [DanmakuStyle.fromJson] clamps every value to
+/// its range ([limits]), so a hand-edited or older box never breaks it.
 @immutable
 class DanmakuStyle {
   /// Seconds a line takes from the right edge until it has left on the
@@ -51,6 +55,10 @@ class DanmakuStyle {
   /// Text size relative to the picture's height ([fontSizeFor]).
   final double size;
 
+  /// Font weight of the text, 400 (regular) to 900 (black); the sender's
+  /// name is a step bolder.
+  final int weight;
+
   /// Width of the dark outline round the white text, logical px.
   final double outline;
   final bool highlightOwn;
@@ -65,10 +73,23 @@ class DanmakuStyle {
     this.bandBottom = 0.45,
     this.opacity = 0.92,
     this.size = 1,
+    this.weight = 600,
     this.outline = 1.4,
     this.highlightOwn = true,
     this.avatars = true,
   });
+
+  /// The range of each knob (the settings' sliders use them too).
+  static const limits = (
+    crossSecs: (4.0, 16.0),
+    maxOnScreen: (1, 40),
+    band: (0.0, 0.9),
+    minBand: 0.05,
+    opacity: (0.3, 1.0),
+    size: (0.6, 1.8),
+    weight: (400, 900),
+    outline: (0.0, 4.0),
+  );
 
   DanmakuStyle copyWith({
     double? crossSecs,
@@ -77,6 +98,7 @@ class DanmakuStyle {
     double? bandBottom,
     double? opacity,
     double? size,
+    int? weight,
     double? outline,
     bool? highlightOwn,
     bool? avatars,
@@ -88,10 +110,68 @@ class DanmakuStyle {
         bandBottom: bandBottom ?? this.bandBottom,
         opacity: opacity ?? this.opacity,
         size: size ?? this.size,
+        weight: weight ?? this.weight,
         outline: outline ?? this.outline,
         highlightOwn: highlightOwn ?? this.highlightOwn,
         avatars: avatars ?? this.avatars,
       );
+
+  Map<String, Object> toJson() => {
+        'crossSecs': crossSecs,
+        'maxOnScreen': maxOnScreen,
+        'bandTop': bandTop,
+        'bandBottom': bandBottom,
+        'opacity': opacity,
+        'size': size,
+        'weight': weight,
+        'outline': outline,
+        'highlightOwn': highlightOwn,
+        'avatars': avatars,
+      };
+
+  /// [json] as stored ([toJson]); missing or wrong values take the
+  /// default, out-of-range ones the nearest end of their range.
+  factory DanmakuStyle.fromJson(Map<Object?, Object?> json) {
+    const d = DanmakuStyle();
+    const l = limits;
+    double num_(String k, double def, (double, double) r) {
+      final v = json[k];
+      return v is num && v.isFinite ? v.toDouble().clamp(r.$1, r.$2) : def;
+    }
+
+    int int_(String k, int def, (int, int) r) {
+      final v = json[k];
+      return v is num && v.isFinite ? v.round().clamp(r.$1, r.$2) : def;
+    }
+
+    bool bool_(String k, bool def) {
+      final v = json[k];
+      return v is bool ? v : def;
+    }
+
+    var top = num_('bandTop', d.bandTop, l.band);
+    var bottom = num_('bandBottom', d.bandBottom, l.band);
+    if (bottom - top < l.minBand) (top, bottom) = (d.bandTop, d.bandBottom);
+    return DanmakuStyle(
+      crossSecs: num_('crossSecs', d.crossSecs, l.crossSecs),
+      maxOnScreen: int_('maxOnScreen', d.maxOnScreen, l.maxOnScreen),
+      bandTop: top,
+      bandBottom: bottom,
+      opacity: num_('opacity', d.opacity, l.opacity),
+      size: num_('size', d.size, l.size),
+      weight: (int_('weight', d.weight, l.weight) / 100).round() * 100,
+      outline: num_('outline', d.outline, l.outline),
+      highlightOwn: bool_('highlightOwn', d.highlightOwn),
+      avatars: bool_('avatars', d.avatars),
+    );
+  }
+
+  /// [weight] as a [FontWeight] (400..900 in steps of 100).
+  FontWeight get fontWeight => FontWeight.values[((weight.clamp(100, 900) / 100).round() - 1)];
+
+  /// The sender's name: a step bolder than the text.
+  FontWeight get nameWeight =>
+      FontWeight.values[math.min(FontWeight.values.length - 1, (weight.clamp(100, 900) / 100).round())];
 
   /// The text size in a picture [height] px tall: 4.2 % of it (about 30 px
   /// on a 720 px player), 13 to 44 px, times [size].
@@ -105,6 +185,24 @@ class DanmakuStyle {
     final band = (bandBottom - bandTop).clamp(0.0, 1.0) * height;
     return math.max(1, (band / laneHeightFor(height)).floor());
   }
+
+  @override
+  bool operator ==(Object other) =>
+      other is DanmakuStyle &&
+      other.crossSecs == crossSecs &&
+      other.maxOnScreen == maxOnScreen &&
+      other.bandTop == bandTop &&
+      other.bandBottom == bandBottom &&
+      other.opacity == opacity &&
+      other.size == size &&
+      other.weight == weight &&
+      other.outline == outline &&
+      other.highlightOwn == highlightOwn &&
+      other.avatars == avatars;
+
+  @override
+  int get hashCode =>
+      Object.hash(crossSecs, maxOnScreen, bandTop, bandBottom, opacity, size, weight, outline, highlightOwn, avatars);
 }
 
 /// One line in flight in [lane], from [start] (seconds on the layer's
@@ -286,18 +384,21 @@ class _DanmakuLayerState extends State<DanmakuLayer> with SingleTickerProviderSt
   late final Ticker _ticker = createTicker(_onTick);
   final _lanes = DanmakuLanes<_Line>();
   final _repaint = ValueNotifier(0);
+  // The layer's clock: [_base] from earlier runs of the ticker, which
+  // only runs while lines fly or wait (an idle layer asks for no frames).
+  Duration _base = Duration.zero;
   Duration _elapsed = Duration.zero;
   Size _size = Size.zero;
   var _pending = <DanmakuItem>[];
   var _shown = <DanmakuFlight<_Line>>[];
 
-  double get _t => _elapsed.inMicroseconds / 1e6;
+  double get _t => (_base + _elapsed).inMicroseconds / 1e6;
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_onAdd);
-    _ticker.start();
+    _onAdd();
   }
 
   @override
@@ -325,6 +426,7 @@ class _DanmakuLayerState extends State<DanmakuLayer> with SingleTickerProviderSt
       _pending = [];
     }
     _pending.addAll(c._take());
+    if (!_ticker.isActive) _ticker.start();
   }
 
   _Line _build(DanmakuItem item) {
@@ -333,7 +435,7 @@ class _DanmakuLayerState extends State<DanmakuLayer> with SingleTickerProviderSt
     final base = TextStyle(
       fontSize: size,
       height: 1.2,
-      fontWeight: FontWeight.w600,
+      fontWeight: s.fontWeight,
       color: Colors.white,
       letterSpacing: 0.2,
       shadows: const [],
@@ -346,7 +448,7 @@ class _DanmakuLayerState extends State<DanmakuLayer> with SingleTickerProviderSt
           TextSpan(
             text: item.kind == DanmakuKind.chat ? '$name  ' : '$name ',
             style: TextStyle(
-              fontWeight: FontWeight.w700,
+              fontWeight: s.nameWeight,
               color: stroke == null ? (item.senderColor ?? Colors.white) : null,
             ),
           ),
@@ -420,6 +522,11 @@ class _DanmakuLayerState extends State<DanmakuLayer> with SingleTickerProviderSt
       setState(() => _shown = now);
     } else if (now.isNotEmpty) {
       _repaint.value++;
+    }
+    if (now.isEmpty && _lanes.waiting == 0 && _pending.isEmpty) {
+      _base += _elapsed;
+      _elapsed = Duration.zero;
+      _ticker.stop();
     }
   }
 

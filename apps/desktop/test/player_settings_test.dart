@@ -1,12 +1,12 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:signals/signals_flutter.dart' show signal;
 import 'package:sync_relay_core/core.dart';
-import 'package:starsync/src/controls/frame.dart';
 import 'package:starsync/src/controls/model/controls_prefs.dart';
-import 'package:starsync/src/controls/player_settings.dart';
+import 'package:starsync/src/controls/player_panel.dart';
+import 'package:starsync/src/danmaku/danmaku.dart' show DanmakuStyle;
 import 'package:starsync/src/jellyfin/track_prefs.dart';
 import 'package:starsync/src/schedule/animeflow.dart';
 import 'package:starsync/src/shaders/shader_presets.dart';
@@ -37,6 +37,8 @@ void bigWindow(WidgetTester tester, [Size size = const Size(1280, 1100)]) {
 }
 
 Future<void> pick(WidgetTester tester, String key, String item) async {
+  await tester.ensureVisible(find.byKey(ValueKey(key)));
+  await tester.pumpAndSettle();
   await tester.tap(find.byKey(ValueKey(key)));
   await tester.pumpAndSettle();
   await tester.tap(find.text(item).last);
@@ -57,6 +59,8 @@ void main() {
     s.shaderPreset.value = ShaderPreset.off;
     s.shaderQuality.value = ShaderQuality.hq;
     s.hwdecMode.value = HwdecMode.auto;
+    s.liftSubtitles.value = false;
+    s.notifyStyle.value = NotifyStyle.toasts;
     coord.playback.tracks.value = const [];
     coord.serverState.value = null;
     coord.hostFile = null;
@@ -64,76 +68,66 @@ void main() {
     _graph.forms.recents.value = const [];
   });
 
-  Widget opener() => Builder(
-        builder: (context) => TextButton(
-          key: const ValueKey('open-settings'),
-          onPressed: () => showPlayerSettings(context),
-          child: const Text('settings'),
-        ),
-      );
-
-  group('player settings card', () {
-    testWidgets('lists every player setting, changes apply live', (tester) async {
+  group('player panel', () {
+    testWidgets('tracks, subtitles, picture, sound, notifications and controls; all live', (tester) async {
       bigWindow(tester);
       coord.playback.tracks.value = const [
         MpvTrack(id: 1, type: JellyfinStreamType.audio, language: 'jpn', codec: 'eac3', channels: 2, selected: true),
         MpvTrack(id: 1, type: JellyfinStreamType.subtitle, language: 'eng', codec: 'ass', title: 'Full'),
       ];
-      await tester.pumpWidget(scoped(_graph, app(Align(alignment: Alignment.bottomRight, child: opener()))));
-      await tester.tap(find.byKey(const ValueKey('open-settings')));
+      var volume = 80.0;
+      var closed = 0;
+      final vol = signal(volume);
+      await tester.pumpWidget(scoped(
+          _graph,
+          app(Align(
+            alignment: Alignment.topRight,
+            child: SizedBox(
+              height: 1000,
+              child: PlayerPanel(
+                onClose: () => closed++,
+                volume: vol,
+                onVolume: (v) => vol.value = volume = v,
+              ),
+            ),
+          ))));
       await tester.pumpAndSettle();
-      final card = find.byKey(const ValueKey('player-settings-card'));
-      expect(card, findsOneWidget);
-      for (final label in [
-        'Player design',
-        'Progress line when hidden',
-        'Upscaling shader',
-        'Hardware decoding',
-        'Subtitles',
-        'Audio',
-      ]) {
-        expect(find.descendant(of: card, matching: find.text(label)), findsOneWidget, reason: label);
+      final panel = find.byKey(const ValueKey('player-panel'));
+      expect(panel, findsOneWidget);
+      for (final label in ['Subtitles', 'Audio', 'Size', 'Upscaling', 'Hardware decoding', 'Volume']) {
+        expect(find.descendant(of: panel, matching: find.text(label)), findsWidgets, reason: label);
       }
       // Subtitles off (none selected), audio on the selected track.
-      expect(find.descendant(of: find.byKey(const ValueKey('subtitle-track')), matching: find.text('Off')),
+      expect(find.descendant(of: find.byKey(const ValueKey('panel-subtitles')), matching: find.text('Off')),
           findsOneWidget);
-      expect(find.descendant(of: find.byKey(const ValueKey('audio-track')), matching: find.textContaining('Japanese')),
+      expect(find.descendant(of: find.byKey(const ValueKey('panel-audio')), matching: find.textContaining('Japanese')),
           findsOneWidget);
-
-      await pick(tester, 'player-design', 'Minimal');
-      expect(s.controlsSkin.value, ControlsSkin.minimal);
-      await tester.tap(find.byKey(const ValueKey('progress-line')));
-      await tester.pump();
-      expect(s.progressLine.value, isFalse);
-      await pick(tester, 'shader-preset', 'Mode B');
+      await pick(tester, 'panel-shader', 'Mode B');
       expect(s.shaderPreset.value, ShaderPreset.b);
-      await pick(tester, 'shader-quality', 'Fast');
-      expect(s.shaderQuality.value, ShaderQuality.fast);
-      await pick(tester, 'hwdec', 'Off');
+      await pick(tester, 'panel-hwdec', 'Off');
       expect(s.hwdec.value, 'no');
-      // Esc closes it.
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.tap(find.descendant(of: find.byKey(const ValueKey('panel-lift')), matching: find.byType(Switch)));
+      await tester.pump();
+      expect(s.liftSubtitles.value, isTrue);
+      await tester.drag(find.descendant(of: find.byKey(const ValueKey('panel-volume')), matching: find.byType(Slider)),
+          const Offset(-60, 0));
+      expect(volume, lessThan(80));
+      // Folded sections open with a click: notifications, then danmaku's knobs.
+      expect(find.byKey(const ValueKey('notify-style')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('panel-section-Notifications')));
       await tester.pumpAndSettle();
-      expect(card, findsNothing);
-    });
-
-    testWidgets('keeps the controls up while open', (tester) async {
-      bigWindow(tester);
-      await tester.pumpWidget(scoped(_graph, app(ControlsFrame(
-        hideAfter: const Duration(seconds: 1),
-        builder: (context, visible) => Align(alignment: Alignment.bottomRight, child: opener()),
-      ))));
-      final controls = tester.state<ControlsFrameState>(find.byType(ControlsFrame));
-      await tester.tap(find.byKey(const ValueKey('open-settings')));
+      await pick(tester, 'notify-style', 'Danmaku');
+      expect(s.notifyStyle.value, NotifyStyle.danmaku);
+      expect(find.byKey(const ValueKey('danmaku-weight')), findsOneWidget);
+      await tester.ensureVisible(find.byKey(const ValueKey('panel-section-Controls')));
+      await tester.tap(find.byKey(const ValueKey('panel-section-Controls')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('player-settings-card')), findsOneWidget);
-      expect(find.text('Standard'), findsOneWidget, reason: 'the current skin');
-      await tester.pump(const Duration(seconds: 3));
-      expect(controls.visible, isTrue, reason: 'held while the card is open');
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await pick(tester, 'panel-design', 'Minimal');
+      expect(s.controlsSkin.value, ControlsSkin.minimal);
+      await tester.ensureVisible(find.byKey(const ValueKey('player-panel-close')));
       await tester.pumpAndSettle();
-      await tester.pump(const Duration(seconds: 2));
-      expect(controls.visible, isFalse);
+      await tester.tap(find.byKey(const ValueKey('player-panel-close')));
+      expect(closed, 1);
     });
   });
 
@@ -169,6 +163,37 @@ void main() {
       expect(find.byIcon(Icons.hub_outlined), findsOneWidget);
     });
 
+    testWidgets('Notifications: Toasts / Danmaku, a preview strip and every knob of the look', (tester) async {
+      addTearDown(() => s.danmakuStyle.value = const DanmakuStyle());
+      await pumpSettings(tester, SettingsSection.notifications, size: const Size(1280, 2600));
+      final card = find.byKey(const ValueKey('danmaku-settings'));
+      expect(card, findsOneWidget);
+      expect(find.byKey(const ValueKey('danmaku-preview-strip')), findsOneWidget);
+      expect(s.notifyStyle.value, NotifyStyle.toasts, reason: 'toasts by default');
+      await pick(tester, 'notify-style', 'Danmaku');
+      expect(s.notifyStyle.value, NotifyStyle.danmaku);
+      for (final k in ['cross', 'cap', 'band', 'opacity', 'size', 'weight', 'outline', 'avatars', 'own']) {
+        expect(find.byKey(ValueKey('danmaku-$k')), findsOneWidget, reason: k);
+      }
+      // Boldness: one step right of Semibold is Bold.
+      final weight = find.byKey(const ValueKey('danmaku-weight'));
+      final box = tester.getRect(weight);
+      await tester.tapAt(Offset(box.left + box.width * 0.6, box.center.dy));
+      await tester.pump();
+      expect(s.danmakuStyle.value.weight, 700);
+      expect(find.text('Bold'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('danmaku-avatars')));
+      await tester.pump();
+      expect(s.danmakuStyle.value.avatars, isFalse);
+      await tester.tap(find.byKey(const ValueKey('danmaku-reset')));
+      await tester.pump();
+      expect(s.danmakuStyle.value, const DanmakuStyle());
+      // The strip rests after a while and plays again on a click.
+      await tester.pump(const Duration(seconds: 20));
+      expect(find.byKey(const ValueKey('danmaku-preview-play')), findsOneWidget);
+      await tester.pumpAndSettle();
+    });
+
     testWidgets('Player: the card\'s rows, a pointer to it, and the controls\' choices', (tester) async {
       await pumpSettings(tester, SettingsSection.player, size: const Size(1280, 2400));
       expect(find.textContaining('also in the player: ⚙ → Player settings'), findsOneWidget);
@@ -177,6 +202,8 @@ void main() {
         'progress-line',
         'shader-preset',
         'hwdec',
+        'sub-scale',
+        'lift-subtitles',
         'time-display',
         'controls-size',
         'controls-hide',

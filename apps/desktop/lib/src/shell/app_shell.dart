@@ -7,6 +7,7 @@ import 'package:signals/signals_flutter.dart';
 
 import '../controls/frame.dart' show DoubleClickListener;
 import '../controls/session_controls.dart' show controlsBottomHeight;
+import '../danmaku/danmaku_notices.dart' show fliesAsDanmaku;
 import '../danmaku/danmaku_preview.dart';
 import '../files/folder_store.dart';
 import '../files/ui/files_page.dart' show showFilesFolder;
@@ -38,6 +39,7 @@ import 'profile_card.dart';
 import '../schedule/ui/schedule_page.dart';
 import 'session_player.dart';
 import 'settings_tab.dart';
+import 'quick_chat.dart';
 import 'toasts.dart';
 import 'welcome.dart';
 
@@ -112,6 +114,11 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   /// Whether the full player's controls are up (the player's frame
   /// reports it): the toasts sit above them.
   final _controlsShown = ValueNotifier(true);
+  /// The player's quick chat box (Enter); its draft is the chat panel's.
+  late final _quickChat = QuickChat(draft: _chat);
+  /// The player flies notifications as danmaku: those stay out of the
+  /// toasts.
+  final _danmakuActive = ValueNotifier(false);
 
   Alignment _corner = Alignment.bottomRight;
   Offset? _drag; // mini top-left while dragging
@@ -262,6 +269,8 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     _flow.dispose();
     _join.dispose();
     _picker.dispose();
+    _quickChat.dispose();
+    _danmakuActive.dispose();
     _chat.dispose();
     _chatFocus.dispose();
     _controlsShown.dispose();
@@ -367,7 +376,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   /// Over the full player when a player is up, else on its own page with
   /// a stand-in picture.
   void _openDanmakuPreview() {
-    final d = _danmaku ??= DanmakuPreview();
+    final d = _danmaku ??= DanmakuPreview(style: _graph.coordinator.settings.danmakuStyle.peek());
     if (_online.peek() && _graph.coordinator.playback.alive.peek()) {
       setState(() => d.active.value = true);
       _show(PlayerMode.full);
@@ -855,6 +864,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       onOpenChat: () {
         if (!_chatOpen) _toggleChat();
       },
+      skip: (t) => (_danmakuActive.value && fliesAsDanmaku(t)) || _quickChat.echoed(t),
     );
     return ValueListenableBuilder<bool>(
       valueListenable: _controlsShown,
@@ -950,6 +960,8 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
                   videoBuilder: widget.videoBuilder,
                   windowControls: widget.windowControls,
                   controlsShown: _controlsShown,
+                  quickChat: _quickChat,
+                  danmakuActive: _danmakuActive,
                   danmaku: _danmaku,
                 ),
               ),
