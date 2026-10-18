@@ -31,6 +31,18 @@ Few commits, one per topic/session, never per fix. Rewriting unpushed
 history (amend, squash) is normal. Commit code + its docs together. No
 `flutter analyze` unless asked or diagnosing; scoped `dart analyze` on touched
 files is the pre-commit check. Run tests only when the code under test changed.
+A user-facing change adds a plain-words line to `CHANGELOG.md`'s
+"Unreleased" in the same commit.
+
+## Settings and new users
+
+Keep settings tidy: anything new goes straight to its one home in the
+settings layout (common rows first, the rest under "More"; the player panel
+only for what you adjust while watching, with the same widget). Prefer a
+good default over a new switch. Check every change against a first-time or
+one-time user: someone who clicks an invite link and watches must not need
+to touch anything new. Details: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+("Where a new setting goes").
 
 ## Releases
 
