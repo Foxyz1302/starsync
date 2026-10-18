@@ -320,9 +320,20 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
    shows none without an extension), so close-to-tray needs a fallback
    to quitting where no tray exists.
 
-8. **Jellyfin** (epic, below).
+8. **Hosting without a VPS** (friends host from their own connection,
+   on their own bandwidth; a tunnel through the VPS is out: everyone's
+   traffic would land on it). In order: IPv6 (try a public IPv6 address
+   first, no NAT); UPnP / NAT-PMP port opening later; hole punching
+   (the VPS only introduces the two sides) only as a research spike: it
+   needs UDP (WebRTC or QUIC) under the sync connection, a local HTTP
+   stand-in so mpv can read relayed video, and still fails behind CGNAT
+   and symmetric NAT. Also: an invite with a generated access code
+   instead of the password (`starsync://host:port/<code>`, a "New link"
+   button revokes old links; the server accepts code or password).
 
-9. **Smaller items**
+9. **Jellyfin** (epic, below).
+
+10. **Smaller items**
    - The video freeze after GPU idle: next suspect is media_kit's context
      switching on the raster thread with NVIDIA.
    - Timelines: draw mpv's real cached ranges (`demuxer-cache-state`
