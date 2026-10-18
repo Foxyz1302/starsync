@@ -1,8 +1,9 @@
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:sync_relay_core/core.dart' show UpdateChannel, appVersion, defaultUpdateChannel;
 
 import '../controls/model/controls_prefs.dart';
 import '../danmaku/danmaku.dart' show DanmakuStyle;
@@ -52,6 +53,12 @@ const _keyLiftSubtitles = 'liftSubtitles';
 const _keyNotifyStyle = 'notifyStyle';
 const _keySubScale = 'subScale';
 const _keyDanmakuStyle = 'danmakuStyle';
+const _keyUpdateChannel = 'updateChannel';
+
+/// A file next to the binary naming a channel (`dev` / `stable`): the
+/// app takes it as the update channel on its next start and deletes it.
+/// The one-time command `tool/dev_release.sh` prints writes it.
+const updateChannelFileName = 'update-channel';
 
 enum HwdecMode { auto, off, custom }
 
@@ -73,9 +80,30 @@ String get autoHwdec => Platform.isWindows ? 'auto-copy' : 'auto';
 class AppSettings {
   static final AppSettings instance = AppSettings();
 
+  /// The running build's version: picks the default [updateChannel].
+  final String runningVersion;
+  /// The [updateChannelFileName] file to adopt at load (null: none).
+  final File? channelFile;
+
+  AppSettings({this.runningVersion = appVersion, File? channelFile})
+      : channelFile = channelFile ?? _channelFileNextToBinary();
+
+  static File? _channelFileNextToBinary() {
+    try {
+      return File('${File(Platform.resolvedExecutable).parent.path}/$updateChannelFileName');
+    } catch (_) {
+      return null;
+    }
+  }
+
   final hwdecMode = signal(HwdecMode.auto);
   final hwdecCustom = signal('');
   final autoCheckUpdates = signal(true);
+  /// Where updates come from (Settings → Updates). Never chosen: dev for
+  /// a test build, else stable; a test build stores dev on its first
+  /// start, so the install stays on test builds after a release (also
+  /// when that release updated it).
+  late final updateChannel = signal(defaultUpdateChannel(runningVersion));
   /// An episode this app puts up (Jellyfin, a file of a local show) is
   /// continued by the next one (Up next's `auto` item, the server's
   /// countdown at its end).
@@ -186,6 +214,7 @@ class AppSettings {
       if (custom is String) hwdecCustom.value = custom;
       final auto = box.get(_keyAutoCheckUpdates);
       if (auto is bool) autoCheckUpdates.value = auto;
+      await _loadUpdateChannel(box);
       final advance = box.get(_keyAutoAdvance);
       if (advance is bool) autoAdvance.value = advance;
       final unready = box.get(_keyUnreadyOnSwap);
@@ -273,6 +302,30 @@ class AppSettings {
   void setAutoCheckUpdates(bool on) {
     autoCheckUpdates.value = on;
     _put(_keyAutoCheckUpdates, on);
+  }
+
+  Future<void> _loadUpdateChannel(Box box) async {
+    UpdateChannel? requested;
+    final file = channelFile;
+    try {
+      if (file != null && file.existsSync()) {
+        requested = UpdateChannel.fromName(file.readAsStringSync().trim());
+        file.deleteSync();
+      }
+    } catch (e) {
+      debugPrint('update channel file: $e');
+    }
+    final stored = requested ?? UpdateChannel.fromName(box.get(_keyUpdateChannel));
+    final channel = stored ?? defaultUpdateChannel(runningVersion);
+    updateChannel.value = channel;
+    if (channel.name != box.get(_keyUpdateChannel) && (requested != null || channel == UpdateChannel.dev)) {
+      await box.put(_keyUpdateChannel, channel.name);
+    }
+  }
+
+  void setUpdateChannel(UpdateChannel channel) {
+    updateChannel.value = channel;
+    _put(_keyUpdateChannel, channel.name);
   }
 
   void setAutoAdvance(bool on) {

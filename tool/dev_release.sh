@@ -12,7 +12,9 @@
 # (a Gitea access token with repository read/write; keep the file 0600).
 # The manifest's `changes` (What's new) and the dev release's page are
 # CHANGELOG.md's Unreleased.
-# Prints the one-time command that moves a stable install onto test builds.
+# Prints the one-time command that moves a stable install onto test builds
+# and sets its update channel to Dev (the `update-channel` file the app
+# takes at its next start).
 set -euo pipefail
 
 PUBLISH=1
@@ -97,6 +99,6 @@ done
 cat <<EOF
 
 Published $VERSION. Dev builds pick it up with their next update check.
-A stable install moves onto test builds once: with the app open, run (bash)
-  p=\$(pgrep -xo 'starsync|watch_together') && d=\$(dirname "\$(readlink /proc/\$p/exe)") && t=\$(mktemp -d) && curl -fsSL $BASE_URL/$(basename "$TARBALL") | tar -xz -C "\$t" --strip-components=1 && cp -rf --remove-destination "\$t"/. "\$d"/ && rm -rf "\$t" && echo "Done: restart the app." || echo "Failed: is the app open?"
+A stable install moves onto test builds (update channel Dev) once: with the app open, run (bash)
+  p=\$(pgrep -xo 'starsync|watch_together') && d=\$(dirname "\$(readlink /proc/\$p/exe)") && t=\$(mktemp -d) && curl -fsSL $BASE_URL/$(basename "$TARBALL") | tar -xz -C "\$t" --strip-components=1 && cp -rf --remove-destination "\$t"/. "\$d"/ && echo dev > "\$d"/update-channel && rm -rf "\$t" && echo "Done: restart the app." || echo "Failed: is the app open?"
 EOF

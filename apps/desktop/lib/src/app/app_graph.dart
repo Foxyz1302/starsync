@@ -167,6 +167,7 @@ class AppGraph {
     final updates = UpdateController.instance;
     final whatsNew = WhatsNew(store: SettingsWhatsNewStore(settings));
     updates.beforeRestart ??= whatsNew.installing;
+    updates.channelOf ??= () => settings.updateChannel.peek();
     return AppGraph._(
       ports: p,
       sfx: sfx,

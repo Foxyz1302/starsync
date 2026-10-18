@@ -54,6 +54,7 @@ class UpdateController {
 
   final String currentVersion;
   final String manifestUrl;
+  final String devUrl;
   final String? executablePath;
   final Directory? installRoot;
   final RestartFn restart;
@@ -61,15 +62,22 @@ class UpdateController {
   /// Awaited after the apply, before [restart]: keeps the new version's
   /// notes for its first start ([WhatsNew.installing], wired by `AppGraph`).
   Future<void> Function(UpdateManifest manifest)? beforeRestart;
+  /// The update channel each check reads (the setting, wired by
+  /// `AppGraph`); null: [defaultUpdateChannel] of [currentVersion].
+  UpdateChannel Function()? channelOf;
 
   UpdateController(
       {this.currentVersion = appVersion,
       this.manifestUrl = updateManifestUrl,
+      this.devUrl = devManifestUrl,
       this.executablePath,
       this.installRoot,
       this.restart = _closeAndRestart,
       this.skipDevBuilds = true,
-      this.beforeRestart});
+      this.beforeRestart,
+      this.channelOf});
+
+  UpdateChannel get channel => channelOf?.call() ?? defaultUpdateChannel(currentVersion);
 
   final status = ValueNotifier(const UpdateStatus(UpdatePhase.idle));
   /// The manifest of the last check that read one, newer or not (What's
@@ -78,6 +86,9 @@ class UpdateController {
   /// Outcome of the last finished check, for Settings/About wording
   /// ("Up to date", "Check failed: ..."); null until one finishes.
   final lastCheck = ValueNotifier<String?>(null);
+  /// On the stable channel in a test build: the latest release when it
+  /// is older than this build (offered only by [goBackTo], after asking).
+  final stableBehind = ValueNotifier<UpdateManifest?>(null);
   Future<void>? _check;
   late final String _exe = executablePath ?? currentExecutablePath();
   late final Directory? _root = installRoot ?? findInstallRoot(_exe);
@@ -113,9 +124,19 @@ class UpdateController {
     final root = _root;
     if (root != null) await cleanupUpdateLeftovers(root);
     try {
+      final ch = channel;
       final m = await fetchLatestManifest(
-          currentVersion: currentVersion, url: manifestUrl);
+          currentVersion: currentVersion, channel: ch, url: manifestUrl, devUrl: devUrl);
       latest.value = m;
+      stableBehind.value = ch == UpdateChannel.stable && isStableBehind(currentVersion, m) ? m : null;
+      if (stableBehind.value != null) {
+        _log.info('stable channel: latest release ${m.version} is older than $currentVersion');
+        lastCheck.value = 'Stable is at ${m.version}, older than this test build';
+        if (!_installing && status.value.manifest?.version != m.version) {
+          status.value = const UpdateStatus(UpdatePhase.idle);
+        }
+        return;
+      }
       if (!isNewerVersion(currentVersion, m.version)) {
         _log.info('up to date ($currentVersion, latest ${m.version})');
         lastCheck.value = 'Up to date';
@@ -131,6 +152,27 @@ class UpdateController {
       _log.warning('update check failed: $e');
       lastCheck.value = 'Update check failed: $e';
     }
+  }
+
+  /// The latest release when it is older than this test build (the
+  /// question before going back to stable); null when it is not, or the
+  /// check failed.
+  Future<UpdateManifest?> stableToGoBackTo() async {
+    try {
+      final m = await fetchManifest(url: manifestUrl);
+      return isStableBehind(currentVersion, m) ? m : null;
+    } catch (e) {
+      _log.warning('stable manifest: $e');
+      return null;
+    }
+  }
+
+  /// Installs [m] although it is older (going back to stable, asked
+  /// first): offered as an update, then [install].
+  Future<void> goBackTo(UpdateManifest m) async {
+    if (_installing) return;
+    status.value = UpdateStatus(UpdatePhase.available, manifest: m, canInstall: _root != null);
+    if (_root != null) await install();
   }
 
   bool get _installing => switch (status.value.phase) {

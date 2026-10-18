@@ -12,6 +12,7 @@ Links you put up are downloaded once for everyone, quick chat and danmaku in the
 ### Added
 
 - What's new: the update band shows what changed, and after an update the app shows the full list once (also in Settings → About)
+- Update channel in Settings → Updates: Stable, or Dev for test builds; Dev stays on test builds after a release and still gets the newer release when there is one
 - Sharper subtitles and picture: the video and its subtitles are drawn at your screen's resolution instead of the video's (Settings → Player → Sharp video and subtitles, on by default)
 - Invite links: Invite copies a starsync:// link; a friend clicks it (or just copies it and switches to Starsync) and the app asks "Join Bob's server?"
 - Invite finds your internet address, lets you pick it or your home-network address, and says when your router needs the port forwarded

@@ -278,19 +278,45 @@ void main() {
       await req.response.close();
     });
     final base = 'http://127.0.0.1:${http.port}';
-    Future<String> latest(String current) async => (await fetchLatestManifest(
-            currentVersion: current, url: '$base/stable', devUrl: '$base/dev'))
+    Future<String> latest(String current, [UpdateChannel? channel]) async => (await fetchLatestManifest(
+            currentVersion: current, channel: channel, url: '$base/stable', devUrl: '$base/dev'))
         .version;
     try {
       expect(await latest('1.1.2'), '1.1.2'); // stable builds never see dev
       expect(await latest('1.1.3-dev.1'), '1.1.3-dev.2');
       versions['/stable'] = '1.1.3'; // the release outranks its test builds
       expect(await latest('1.1.3-dev.2'), '1.1.3');
+      // A release installed on the dev channel still sees the next test line.
+      versions['/dev'] = '1.1.4-dev.1';
+      expect(await latest('1.1.3', UpdateChannel.dev), '1.1.4-dev.1');
+      expect(await latest('1.1.3', UpdateChannel.stable), '1.1.3');
+      expect(await latest('1.1.4-dev.1', UpdateChannel.stable), '1.1.3');
       versions.remove('/stable');
-      expect(await latest('1.1.3-dev.1'), '1.1.3-dev.2');
+      expect(await latest('1.1.3-dev.1'), '1.1.4-dev.1');
     } finally {
       await http.close(force: true);
     }
+  });
+
+  test('update channel: default, pick by semver, a stable behind a test build', () {
+    UpdateManifest m(String v) => UpdateManifest(version: v, protocol: 1, url: 'http://x/$v', notes: '');
+    expect(defaultUpdateChannel('1.4.0-dev.3'), UpdateChannel.dev);
+    expect(defaultUpdateChannel('1.4.0'), UpdateChannel.stable);
+    expect(defaultUpdateChannel('0.0.0-dev'), UpdateChannel.stable);
+    expect(UpdateChannel.fromName('dev'), UpdateChannel.dev);
+    expect(UpdateChannel.fromName('beta'), isNull);
+    String? pick(UpdateChannel ch, String? s, String? d) =>
+        pickManifest(ch, stable: s == null ? null : m(s), dev: d == null ? null : m(d))?.version;
+    expect(pick(UpdateChannel.dev, '1.4.0', '1.4.0-dev.3'), '1.4.0');
+    expect(pick(UpdateChannel.dev, '1.4.0', '1.4.1-dev.1'), '1.4.1-dev.1');
+    expect(pick(UpdateChannel.dev, '1.3.2', '1.4.0-dev.3'), '1.4.0-dev.3');
+    expect(pick(UpdateChannel.dev, null, '1.4.0-dev.3'), '1.4.0-dev.3');
+    expect(pick(UpdateChannel.dev, '1.3.2', null), '1.3.2');
+    expect(pick(UpdateChannel.stable, '1.3.2', '1.4.0-dev.3'), '1.3.2');
+    expect(isStableBehind('1.4.0-dev.3', m('1.3.2')), isTrue);
+    expect(isStableBehind('1.4.0-dev.3', m('1.4.0')), isFalse);
+    expect(isStableBehind('1.3.2', m('1.3.1')), isFalse); // not a test build
+    expect(isStableBehind('1.4.0-dev.3', m('1.4.0-dev.2')), isFalse);
   });
 
   group('upgrade flow', () {

@@ -3,7 +3,9 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hive_ce/hive.dart';
 import 'package:sync_relay_core/core.dart';
+import 'package:starsync/src/state/settings.dart';
 import 'package:starsync/src/update/update_controller.dart';
 
 // Work dir base: WT_TEST_TMP or the system temp. Staging lives inside
@@ -257,5 +259,85 @@ void main() {
       expect(await File('${root.path}/watch_together').readAsString(),
           'binary-v1');
     }, skip: _posixOnly);
+
+    test('channel: dev offers a newer release; stable in a test build asks before going back', () async {
+      var channel = UpdateChannel.dev;
+      final root = await _fakeRoot(work);
+      final restarts = <String>[];
+      // The dev manifest is missing (404): only the stable 0.2.0 is read.
+      final c = UpdateController(
+          currentVersion: '0.2.0-dev.3',
+          manifestUrl: server.manifestUrl,
+          devUrl: '${server.base}/dev.json',
+          executablePath: '${root.path}/watch_together',
+          restart: (exe, _) async => restarts.add(exe))
+        ..channelOf = () => channel;
+      await c.checkOnce();
+      expect(c.status.value.phase, UpdatePhase.available);
+      expect(c.status.value.manifest!.version, '0.2.0');
+      expect(c.stableBehind.value, isNull);
+
+      final behind = UpdateController(
+          currentVersion: '0.3.0-dev.1',
+          manifestUrl: server.manifestUrl,
+          devUrl: '${server.base}/dev.json',
+          executablePath: '${root.path}/watch_together',
+          restart: (exe, _) async => restarts.add(exe))
+        ..channelOf = () => channel;
+      await behind.checkOnce();
+      expect(behind.status.value.phase, UpdatePhase.idle); // dev: 0.2.0 is older
+      expect(behind.stableBehind.value, isNull);
+      channel = UpdateChannel.stable;
+      await behind.checkNow();
+      expect(behind.status.value.phase, UpdatePhase.idle); // never offered by itself
+      expect(behind.stableBehind.value?.version, '0.2.0');
+      expect(behind.lastCheck.value, contains('older than this test build'));
+      final m = await behind.stableToGoBackTo();
+      expect(m?.version, '0.2.0');
+      await behind.goBackTo(m!);
+      expect(behind.status.value.phase, UpdatePhase.restarting);
+      expect(await File('${root.path}/starsync').readAsString(), 'binary-v2');
+      expect(restarts, hasLength(1));
+    }, skip: _posixOnly);
+  });
+
+  group('update channel setting', () {
+    late Directory dir;
+    setUp(() async {
+      dir = await _work();
+      Hive.init('${dir.path}/hive');
+    });
+    tearDown(() async {
+      await Hive.close();
+      await dir.delete(recursive: true);
+    });
+
+    Future<AppSettings> load(String version) async {
+      await Hive.close();
+      final s = AppSettings(runningVersion: version, channelFile: File('${dir.path}/update-channel'));
+      await s.ensureLoaded();
+      return s;
+    }
+
+    test('a test build keeps Dev across an update to a release; a choice stays', () async {
+      expect((await load('1.3.2')).updateChannel.value, UpdateChannel.stable);
+      // Stable by default is not stored: a test build later still starts on Dev.
+      expect((await load('1.4.0-dev.1')).updateChannel.value, UpdateChannel.dev);
+      // Updated to the release: stays on Dev.
+      final s = await load('1.4.0');
+      expect(s.updateChannel.value, UpdateChannel.dev);
+      s.setUpdateChannel(UpdateChannel.stable);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect((await load('1.4.1-dev.1')).updateChannel.value, UpdateChannel.stable);
+    });
+
+    test('the update-channel file sets the channel once and is deleted', () async {
+      expect((await load('1.3.2')).updateChannel.value, UpdateChannel.stable);
+      final f = File('${dir.path}/update-channel');
+      await f.writeAsString('dev\n');
+      expect((await load('1.3.2')).updateChannel.value, UpdateChannel.dev);
+      expect(f.existsSync(), isFalse);
+      expect((await load('1.3.2')).updateChannel.value, UpdateChannel.dev);
+    });
   });
 }

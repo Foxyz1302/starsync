@@ -2813,11 +2813,28 @@ update has no Later. Nothing downloads before the click. The app checks at
 start and every 4 hours while running (`updateCheckEvery`), both with the
 auto-check setting on; a re-check never touches an install under way.
 Settings has Check now and the auto-check toggle. The manifest is `updates/manifest.json` in
-this repo, written by `tool/release.sh`. Test builds (`X.Y.Z-dev.N`,
-`isDevBuild`) also read `devManifestUrl`, the `manifest.json` of the `dev`
-prerelease (`tool/dev_release.sh`), and take the newer of the two
-(`fetchLatestManifest`); the release X.Y.Z outranks its test builds, so
-testers land back on stable. `0.0.0-dev` (a dev run) checks nothing.
+this repo, written by `tool/release.sh`.
+
+**Update channel.** `UpdateChannel` stable or dev, the setting
+`updateChannel` (Settings → Updates, "Update channel", which also says
+the channel and version running). Dev also reads `devManifestUrl`, the
+`manifest.json` of the `dev` prerelease (`tool/dev_release.sh`), and takes
+the newer of the two by semver (`pickManifest`, `fetchLatestManifest`): a
+release 1.4.0 is offered over 1.4.0-dev.3, and after it 1.4.1-dev.1 is,
+the install staying on Dev. Stable reads only the stable manifest. Never
+chosen, the channel is `defaultUpdateChannel`: dev for a test build
+(`X.Y.Z-dev.N`, `isDevBuild`), else stable; a test build stores dev on its
+first start, so the release that later updates it stays on Dev (stable by
+default is not stored). A file `update-channel` next to the binary (`dev`
+/ `stable`, written by the one-time command `tool/dev_release.sh` prints)
+is taken as the channel at the next start and deleted. Switching the
+setting re-checks at once. On stable in a test build, a release older than
+the build (`isStableBehind`) is never offered by itself
+(`UpdateController.stableBehind`, "Stable is at X, older than this test
+build"); switching to Stable there asks "Go back to stable X?": going
+back installs it (`goBackTo`), staying keeps the build until a newer
+release. `--upgrade` uses the default channel of the binary's version.
+`0.0.0-dev` (a dev run) checks nothing.
 
 **What's new.** The manifest's `notes` is one line (all 1.2.x and 1.3.x
 read; they ignore other keys) and `changes` (`{"added": [...], "changed":

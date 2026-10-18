@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:sync_relay_core/core.dart' show UpdateChannel, isDevBuild;
 
 import '../../app/app_graph.dart';
 import '../../state/settings.dart';
@@ -195,6 +196,7 @@ class UpdateSettings extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
+        UpdateChannelSetting(controller: c),
         SignalBuilder(
           builder: (context) => SwitchListTile(
             key: const ValueKey('auto-check-updates'),
@@ -207,6 +209,75 @@ class UpdateSettings extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+/// Stable or Dev (test builds). Leaving Dev in a test build asks whether
+/// to go back to the latest release now when that one is older.
+class UpdateChannelSetting extends StatelessWidget {
+  final UpdateController controller;
+  final AppSettings? settings;
+  const UpdateChannelSetting({super.key, required this.controller, this.settings});
+
+  Future<void> _choose(BuildContext context, UpdateChannel ch) async {
+    final s = settings ?? AppSettings.instance;
+    if (ch == s.updateChannel.peek()) return;
+    s.setUpdateChannel(ch);
+    if (ch == UpdateChannel.stable && isDevBuild(controller.currentVersion)) {
+      final m = await controller.stableToGoBackTo();
+      if (m != null && context.mounted) {
+        final back = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('Go back to stable ${m.version}?'),
+            content: Text('This is test build ${controller.currentVersion}, newer than the latest release. '
+                'Going back installs ${m.version} and restarts the app. Or stay on this build: '
+                'the next release newer than it is offered as usual.'),
+            actions: [
+              TextButton(
+                key: const ValueKey('stay-on-test-build'),
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Stay on this build'),
+              ),
+              TextButton(
+                key: const ValueKey('go-back-to-stable'),
+                onPressed: () => Navigator.pop(context, true),
+                child: Text('Go back to ${m.version}'),
+              ),
+            ],
+          ),
+        );
+        if (back == true) {
+          await controller.goBackTo(m);
+          return;
+        }
+      }
+    }
+    await runUpdateCheck(controller, true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = settings ?? AppSettings.instance;
+    return SignalBuilder(builder: (context) {
+      final ch = s.updateChannel.value;
+      return ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Update channel'),
+        subtitle: Text('On ${ch == UpdateChannel.dev ? 'Dev' : 'Stable'}, running ${controller.currentVersion}. '
+            '${ch == UpdateChannel.dev ? 'Test builds and releases, whichever is newer; stays on Dev after a release' : 'Releases only'}'),
+        trailing: SegmentedButton<UpdateChannel>(
+          key: const ValueKey('update-channel'),
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment(value: UpdateChannel.stable, label: Text('Stable')),
+            ButtonSegment(value: UpdateChannel.dev, label: Text('Dev')),
+          ],
+          selected: {ch},
+          onSelectionChanged: (sel) => _choose(context, sel.first),
+        ),
+      );
+    });
   }
 }
 

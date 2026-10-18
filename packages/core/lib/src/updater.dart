@@ -237,16 +237,58 @@ Future<UpdateManifest> fetchManifest(
 /// A test build (`1.1.3-dev.4`); `0.0.0-dev` (a dev run) is not one.
 bool isDevBuild(String version) => version.contains('-dev.');
 
-/// The manifest to update from: the stable one, and for a [isDevBuild]
-/// also the dev one, whichever is newer (either alone if the other fails).
-/// A release outranks its own test builds, so testers return to stable.
+/// Where an install takes its updates from. [stable]: releases only.
+/// [dev]: test builds as well (`devManifestUrl`), whichever of the two is
+/// newer, so a release newer than the running test build is installed and
+/// the next test line after it still is.
+enum UpdateChannel {
+  stable,
+  dev;
+
+  static UpdateChannel? fromName(Object? name) {
+    for (final c in values) {
+      if (c.name == name) return c;
+    }
+    return null;
+  }
+}
+
+/// The channel of an install that never chose one: [UpdateChannel.dev]
+/// for a test build, else [UpdateChannel.stable].
+UpdateChannel defaultUpdateChannel(String version) =>
+    isDevBuild(version) ? UpdateChannel.dev : UpdateChannel.stable;
+
+/// Of the stable and dev manifests read (null: that one failed), the one
+/// [channel] updates from: on stable the stable one, on dev the newer of
+/// the two by semver (a release outranks its own test builds).
+UpdateManifest? pickManifest(UpdateChannel channel,
+    {UpdateManifest? stable, UpdateManifest? dev}) {
+  if (channel == UpdateChannel.stable || dev == null) return stable;
+  if (stable == null) return dev;
+  return isNewerVersion(stable.version, dev.version) ? dev : stable;
+}
+
+/// A stable [latest] that is older than the running test build
+/// [currentVersion]: on [UpdateChannel.stable] it is offered only after
+/// asking ("go back to stable X?"), never as an update.
+bool isStableBehind(String currentVersion, UpdateManifest latest) =>
+    isDevBuild(currentVersion) &&
+    !isDevBuild(latest.version) &&
+    compareVersions(latest.version, currentVersion) < 0;
+
+/// The manifest to update from on [channel] (default by [currentVersion]:
+/// [defaultUpdateChannel]): the stable one, and on dev also the dev one,
+/// the newer of the two ([pickManifest]; either alone if the other fails).
 Future<UpdateManifest> fetchLatestManifest(
     {HttpClient? http,
     String currentVersion = appVersion,
+    UpdateChannel? channel,
     String url = updateManifestUrl,
     String devUrl = devManifestUrl}) async {
   final stable = fetchManifest(http: http, url: url);
-  if (!isDevBuild(currentVersion)) return stable;
+  if ((channel ?? defaultUpdateChannel(currentVersion)) == UpdateChannel.stable) {
+    return stable;
+  }
   stable.ignore(); // awaited below; don't let an early failure go uncaught
   final dev = await fetchManifest(http: http, url: devUrl)
       .then<UpdateManifest?>((m) => m, onError: (Object e) {
@@ -254,12 +296,8 @@ Future<UpdateManifest> fetchLatestManifest(
     return null;
   });
   if (dev == null) return stable;
-  try {
-    final s = await stable;
-    return isNewerVersion(s.version, dev.version) ? dev : s;
-  } catch (_) {
-    return dev;
-  }
+  final s = await stable.then<UpdateManifest?>((m) => m, onError: (Object _) => null);
+  return pickManifest(UpdateChannel.dev, stable: s, dev: dev)!;
 }
 
 typedef DownloadProgress = void Function(int received, int? total);

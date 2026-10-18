@@ -316,10 +316,13 @@ minor / major when asked, and once such a line is published later runs
 follow it until a release moves the pubspec) and replaces the assets of the
 `dev` prerelease with the tarball and its `manifest.json` (`changes`:
 the changelog's Unreleased, which also becomes the prerelease's text). Dev builds
-update from it ([Updater](ARCHITECTURE.md#updater)). A stable install
-moves onto it once with the command the script prints (run with the app
-open: it finds the install from the running process and copies the new
-files over it).
+update from it on the Dev update channel, which a test build starts on
+and keeps after a release ([Updater](ARCHITECTURE.md#updater)). Any
+install switches channel in Settings → Updates; the command the script
+prints is a shortcut that moves a stable install onto the test build at
+once (run with the app open: it finds the install from the running
+process, copies the new files over it and writes the `update-channel`
+file that sets Dev).
 
 Tokens come from the environment (`RELEASE_TOKEN`, or Actions-provided
 `GITHUB_TOKEN`/`GITEA_TOKEN`). The manifest has no `sha256` by default; the
