@@ -613,6 +613,32 @@ media URL unchanged, its ready flag and presence kept; after a
 non-resumed `welcome` (grace over, server restarted) the client sends
 its intent again (`ready`, `presence`).
 
+## Invite link
+
+Not a WebSocket message: what one app hands another (clipboard, chat,
+a clicked link), so every version reads the same format.
+
+```
+starsync://203.0.113.7:8080/?name=Bob%27s+server&pw=hunter2
+starsync://192.168.1.20:8080
+starsync://[fe80::1]:8080
+```
+
+- Scheme `starsync`, the server's host (IPv6 in brackets) and port; no
+  port means 8080. The path is `/` or empty.
+- `name` (optional): the server's name for the prompt before its
+  `/health` answers (at most 64 characters are shown, control characters
+  dropped).
+- `pw` (optional): the server password, only when the host chose to put
+  it in. Logs never show it (`redactLog` cuts a `starsync://` query to its
+  names).
+- Unknown query keys are ignored; anything else (no host, a port outside
+  1–65535) is no link.
+- The text Invite copies is "Join me on Starsync: <link> [(ask me for the
+  password)] · Starsync <version>"; an app also takes a 1.3.x plain
+  invite ("Join me on Starsync: 192.168.1.20:8080 …"), and a 1.3.x app
+  reads the `host:port` out of a link.
+
 ## Queue (proto 12)
 
 Up next: what plays after the current media, held by the server for

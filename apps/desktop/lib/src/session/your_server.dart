@@ -12,6 +12,7 @@ import '../jellyfin/session_media.dart' show relayCredentialsFor;
 import '../state/connect_prefs.dart';
 import '../state/server_isolate.dart';
 import 'invite.dart';
+import 'public_address.dart';
 
 /// A fresh key per app run: this app's own client sends it in hello to be
 /// recognised as the host (`members[].host`; it also stands in for the
@@ -44,8 +45,9 @@ Future<ServerIsolate> _startIsolate(
 /// port, so only this app reaches it; [invite] attaches a second
 /// listener on every interface at the configured port (Settings → Party
 /// & network: port and password) and [stopSharing] detaches it. Members,
-/// what plays and Up next never restart or reconnect for either. Made
-/// by the composition root.
+/// what plays and Up next never restart or reconnect for either. Sharing
+/// also looks up the internet address ([reach]). Made by the composition
+/// root.
 class YourServer {
   YourServer({
     required this.forms,
@@ -54,10 +56,13 @@ class YourServer {
     String? Function()? logDir,
     ServerStarter? starter,
     Future<List<({String name, InternetAddress address})>> Function()? interfaces,
+    Future<String?> Function()? publicAddress,
+    this.publicWait = const Duration(seconds: 4),
   })  : _ytDlpDir = ytDlpDir ?? (() async => ''),
         _logDir = logDir ?? (() => null),
         _starter = starter ?? _startIsolate,
-        _interfaces = interfaces ?? machineInterfaces;
+        _interfaces = interfaces ?? machineInterfaces,
+        _publicAddress = publicAddress ?? lookUpPublicAddress;
 
   final ConnectStore forms;
   /// Linked Jellyfin servers (default: the app's): the relay logins.
@@ -66,6 +71,18 @@ class YourServer {
   final String? Function() _logDir;
   final ServerStarter _starter;
   final Future<List<({String name, InternetAddress address})>> Function() _interfaces;
+  final Future<String?> Function() _publicAddress;
+
+  /// How long [invite] waits for the internet address before it hands
+  /// out a local one (the lookup goes on; [reach] and [shared] follow).
+  final Duration publicWait;
+
+  /// Where friends can reach it while shared: the internet address (once
+  /// looked up) and this machine's; null when not shared.
+  final reach = signal<InviteReach?>(null);
+
+  /// What `/health` calls it ("Bob's server"), the invite's name.
+  String _name = '';
 
   /// Sent by this app's own client (see [newHostKey]).
   final String hostKey = newHostKey();
@@ -106,12 +123,13 @@ class YourServer {
 
   Future<int> _start(String name) async {
     final who = name.trim();
+    _name = who.isEmpty ? '' : "$who's server";
     late final ServerIsolate server;
     server = await _starter(
       AppConfig(
         port: 0,
         secret: '',
-        name: who.isEmpty ? 'server' : "$who's server",
+        name: who.isEmpty ? 'server' : _name,
         hostKey: hostKey,
         ytDlpDir: await _ytDlpDir(),
       ),
@@ -133,6 +151,7 @@ class YourServer {
     _server = null;
     port.value = null;
     shared.value = null;
+    reach.value = null;
     final message = 'server crashed: $cause';
     debugPrint('[server] $message');
     crash.value = message;
@@ -159,24 +178,66 @@ class YourServer {
         // server, with this app's own sign-in on the item's server.
         jellyfin: relayCredentialsFor(_accounts),
       );
-      final invite = await inviteFor(bound, password: form.hostSecret.isNotEmpty);
+      final local = inviteAddresses(await _interfaces());
+      final gen = ++_shareGen;
+      reach.value = InviteReach(local: local, looking: true);
+      final lookup = _lookUp(local, gen);
+      // The internet address when it comes quickly; else a local one now
+      // and the internet one when it lands.
+      final public = await lookup.timeout(publicWait, onTimeout: () => null);
+      final invite = inviteFor(bound, password: form.hostSecret.isNotEmpty, host: reach.peek()?.best);
       shared.value = invite;
+      if (public == null) {
+        unawaited(lookup.then((ip) {
+          final now = shared.peek();
+          if (ip != null && gen == _shareGen && identical(now, invite)) shared.value = now!.at(ip);
+        }));
+      }
       return invite;
     } finally {
       busy.value = false;
     }
   }
 
-  /// The invite for [port] from this machine's best address (see
-  /// [inviteAddresses]); 127.0.0.1 when there is none.
-  Future<Invite> inviteFor(int port, {required bool password}) async {
-    final addresses = inviteAddresses(await _interfaces());
+  /// Bumped by every share and unshare: a lookup of an earlier one is
+  /// dropped.
+  int _shareGen = 0;
+
+  /// The internet address into [reach] (its own failure is no address).
+  Future<String?> _lookUp(List<String> local, int gen) async {
+    String? ip;
+    try {
+      ip = await _publicAddress();
+    } catch (e) {
+      debugPrint('public address lookup failed: $e');
+    }
+    if (gen != _shareGen || reach.peek() == null) return null;
+    reach.value = InviteReach(public: ip, local: local);
+    return ip;
+  }
+
+  /// The invite for [port] at [host] (else this machine's best address,
+  /// see [inviteAddresses]; 127.0.0.1 when there is none).
+  Invite inviteFor(int port, {required bool password, String? host}) {
+    final local = reach.peek()?.local ?? const [];
     return Invite(
-      host: addresses.isEmpty ? '127.0.0.1' : addresses.first,
+      host: host ?? (local.isEmpty ? '127.0.0.1' : local.first),
       port: port,
+      name: _name,
       password: password,
       version: appVersion,
     );
+  }
+
+  /// [link] points at this server (one of its invite addresses, or this
+  /// machine, at its shared or loopback port).
+  bool isOwn(InviteLink link) {
+    final host = link.host.toLowerCase();
+    final local = host == 'localhost' || host == '127.0.0.1' || host == '::1';
+    if (local && link.port == port.peek()) return true;
+    final s = shared.peek();
+    if (s == null || link.port != s.port) return false;
+    return local || host == s.host || (reach.peek()?.choices.any((c) => c.host == host) ?? false);
   }
 
   /// Closes it to friends again: everyone but you leaves (told, so their
@@ -187,7 +248,9 @@ class YourServer {
     busy.value = true;
     try {
       await server.unshare();
+      _shareGen++;
       shared.value = null;
+      reach.value = null;
     } finally {
       busy.value = false;
     }
@@ -202,6 +265,7 @@ class YourServer {
     _server = null;
     port.value = null;
     shared.value = null;
+    reach.value = null;
     await server?.stop();
   }
 }

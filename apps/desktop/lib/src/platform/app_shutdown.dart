@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../files/thumbnails.dart';
 import '../app/app_graph.dart';
+import 'single_instance.dart';
 
 // The one way out of the app (close button, Alt+F4, Update and restart).
 // Order matters: every mpv player goes before the engine does (a live one
@@ -21,10 +22,14 @@ bool get shuttingDown => _shuttingDown;
 /// The systems the close stops; `main` hands them over once.
 AppGraph? _graph;
 
-/// Makes [graph] the one [shutDownApp] stops and returns the close
-/// request handler for the window.
-Future<void> Function() closeAppWith(AppGraph graph) {
+/// This app's claim on its profile folder (one app at a time).
+InstanceLock? _instance;
+
+/// Makes [graph] the one [shutDownApp] stops (and [instance] the claim it
+/// gives up) and returns the close request handler for the window.
+Future<void> Function() closeAppWith(AppGraph graph, {InstanceLock? instance}) {
   _graph = graph;
+  _instance = instance;
   return shutDownApp;
 }
 
@@ -38,6 +43,9 @@ Future<void> shutDownApp({Future<void> Function()? beforeQuit, bool restart = fa
   final graph = _graph;
   if (_shuttingDown || graph == null) return;
   _shuttingDown = true;
+  // A start from now on waits for this app to end instead of handing its
+  // link to it.
+  _instance?.closing();
   final shell = graph.ports.shell;
   final total = Stopwatch()..start();
   await _step('window save', shell.saveWindow(), const Duration(milliseconds: 500));
@@ -57,6 +65,8 @@ Future<void> shutDownApp({Future<void> Function()? beforeQuit, bool restart = fa
   // server: 3 s in all.
   await _step('leave', graph.navigation.leave(bye: !restart), const Duration(milliseconds: 2500));
   await _step('server stop', graph.yourServer.stop(), const Duration(milliseconds: 500));
+  // Update and restart: the new binary claims the folder at once.
+  if (restart) await _step('instance', _instance?.release(), const Duration(milliseconds: 500));
   if (beforeQuit != null) await _step('before quit', beforeQuit(), const Duration(seconds: 3));
   debugPrint('close: ready to quit after ${total.elapsedMilliseconds} ms');
   await shell.quit();

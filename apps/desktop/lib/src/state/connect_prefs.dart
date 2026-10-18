@@ -184,4 +184,46 @@ class ConnectStore {
     ];
     await saveQuietly();
   }
+
+  /// The saved password of a recent server at [host]:[port], '' when none.
+  String secretFor(String host, int port) =>
+      recents.peek().where((r) => r.key == '${host.toLowerCase()}:$port').firstOrNull?.secret ?? '';
+
+  /// Invites the join prompt already asked about (joined or dismissed),
+  /// as fingerprints ([inviteFingerprint]), newest last; never the links.
+  final _seenInvites = <String>[];
+
+  bool seenInvite(String fingerprint) {
+    _loadSeen();
+    return _seenInvites.contains(fingerprint);
+  }
+
+  Future<void> rememberInvite(String fingerprint) async {
+    _loadSeen();
+    _seenInvites
+      ..remove(fingerprint)
+      ..add(fingerprint);
+    while (_seenInvites.length > maxSeenInvites) {
+      _seenInvites.removeAt(0);
+    }
+    try {
+      final box = connectFormBoxIfOpen() ?? await openConnectFormBox();
+      await box.put(connectKeySeenInvites, [..._seenInvites]);
+    } catch (e) {
+      debugPrint('save seen invites failed: $e');
+    }
+  }
+
+  bool _seenLoaded = false;
+  void _loadSeen() {
+    if (_seenLoaded) return;
+    final box = connectFormBoxIfOpen();
+    if (box == null) return;
+    _seenLoaded = true;
+    final raw = box.get(connectKeySeenInvites);
+    if (raw is List) _seenInvites.insertAll(0, [for (final v in raw) if (v is String && !_seenInvites.contains(v)) v]);
+  }
 }
+
+const connectKeySeenInvites = 'seenInvites';
+const maxSeenInvites = 30;

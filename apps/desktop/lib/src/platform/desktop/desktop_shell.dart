@@ -98,10 +98,13 @@ class DesktopShell implements ShellPort {
   }
 
   @override
-  Future<void> focus() async {
+  Future<void> focus({String activation = ''}) async {
     try {
       if (await windowManager.isMinimized()) await windowManager.restore();
       if (!await windowManager.isVisible()) await windowManager.show();
+      // Linux: present with the token when there is one (else a
+      // compositor only marks the window as wanting attention).
+      if (activation.isNotEmpty && await presentWindow(activation)) return;
       await windowManager.focus();
     } catch (e) {
       debugPrint('window focus failed: $e');
@@ -124,6 +127,15 @@ class DesktopShell implements ShellPort {
       } catch (_) {}
     }
     return (files: files, text: text);
+  }
+
+  @override
+  Future<String?> readClipboardText() async {
+    try {
+      return await ClipboardX.readText();
+    } catch (_) {
+      return null;
+    }
   }
 
   @override

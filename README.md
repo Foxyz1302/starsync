@@ -66,8 +66,9 @@ The app always runs its own server, quietly: your server. When it starts
 you are on it, alone, and it is a plain player. Three ways in, at the top
 of the Library the first time; none needs Jellyfin or an account.
 
-- **Join a friend** (most people): your friend sends you an invite (an
-  address) and, maybe, a password. See [Join](#join).
+- **Join a friend** (most people): your friend sends you an invite (a
+  `starsync://` link) and, maybe, a password. Click the link, or just
+  copy it: the app asks "Join <their server>?". See [Join](#join).
 - **Invite friends**: you have the video and friends watch it with you.
   See [Your server and Invite](#your-server-and-invite).
 - **Watch on your own**: just play something from the Library, with
@@ -88,8 +89,8 @@ out; a crown on whoever
 hosts, a tower on whoever passes the video on). Click the avatars for the
 member list (each member's app version, amber when it differs from yours,
 and the server's at the top; force ready, Nudge, Sit out; on your
-server the invite with Copy invite and Stop sharing, on a friend's "Copy
-invite address"). Beside them the server and "ready n/m" (who is sitting out or
+server where friends can reach it, Copy invite link and Stop sharing,
+on a friend's "Copy invite link"). Beside them the server and "ready n/m" (who is sitting out or
 reconnecting does not count), the chat button with unread
 count, and Invite on your server or Leave on a friend's. Empty strip
 space drags the window.
@@ -169,13 +170,23 @@ Your server starts with the app and stops when it closes. Only this app
 can reach it until you press **Invite** (in the strip, or in the member
 list): that opens it on your network at the port from Settings → Party &
 network (default 8080, with the password set there; blank = anyone can
-join) and copies an invite ("Join me on Starsync: 192.168.1.20:8080 ·
-Starsync 1.3.0") to send to friends. Nothing restarts: what plays and Up
-next carry on, and you are the host (the crown). The invite picks this
-computer's home-network address (not a VPN or proxy one, nor a Docker or
-VM bridge). Friends elsewhere need the TCP port forwarded on your router
-(or a VPN address, or a server they can all reach, like a VPS). Friends
-open nothing. **Stop sharing** (in the member list) closes it again:
+join) and copies an invite link ("Join me on Starsync:
+starsync://203.0.113.7:8080/?name=… · Starsync 1.3.0") to send to
+friends. Nothing restarts: what plays and Up next carry on, and you are
+the host (the crown).
+
+The link carries your internet address when the app can find it (it asks
+a "what is my IP" service such as ipify over HTTPS when you share), else
+this computer's home-network address (not a proxy one, nor a Docker or VM
+bridge). The member list shows every address to pick from: **Internet**
+for friends elsewhere, **Home network** for friends on the same Wi-Fi or
+router, **VPN** (Tailscale and the like). Behind a router, friends
+elsewhere get in only when the TCP port is forwarded on your router to
+this computer (the card says so and names this computer's address); the
+app does not open ports itself. The password is never in the link unless
+you tick **Include the password in the link**; otherwise friends ask you
+for it. Friends open nothing. **Stop sharing** (in the member list)
+closes it again:
 everyone else leaves (their app goes back to their own server and says
 why), you and Up next stay.
 
@@ -351,7 +362,15 @@ Join a friend in the strip. Servers you got into are listed first (up
 to 6), with live status (online and how many are watching, or offline,
 plus "needs update" when its version and yours do not match): click one
 to rejoin, x to forget it. Or paste the invite (or the address and port)
-and the password if there is one, then Enter or Join. Before connecting
+and the password if there is one, then Enter or Join.
+
+Faster: click a friend's `starsync://` link, or copy their invite and
+switch to Starsync. The app asks "Join Bob's server (203.0.113.7:8080)?"
+with the server's version and who is watching; Join joins (and adds it
+to your recent servers), Not now leaves it (a copied invite is then not
+offered again). The clipboard is only looked at for an invite when the
+window comes to the front, and never saved or logged. The app runs once:
+a link clicked while it runs goes to the open window. Before connecting
 the app checks the server's version: when they do not match it says who
 has to update ("Bob's server runs Starsync 1.2.1 — they need to
 update"), and offers the update when it is you. Your name and picture

@@ -277,7 +277,8 @@ void main() {
     test('an invite: the address, whether to ask for a password, the version; pasted back', () {
       const invite = Invite(host: '192.168.1.20', port: 8080, password: true, version: '1.3.0');
       expect(invite.address, '192.168.1.20:8080');
-      expect(invite.text, 'Join me on Starsync: 192.168.1.20:8080 (ask me for the password) · Starsync 1.3.0');
+      expect(invite.text,
+          'Join me on Starsync: starsync://192.168.1.20:8080 (ask me for the password) · Starsync 1.3.0');
       expect(invite.fp, isNull, reason: 'reserved for pinned certificates');
       expect(addressIn(invite.text), (host: '192.168.1.20', port: '8080'));
       expect(addressIn('vps.example.com:9000'), (host: 'vps.example.com', port: '9000'));
@@ -336,11 +337,33 @@ void main() {
       expect(find.byKey(const ValueKey('stop-sharing')), findsNothing);
 
       yours.shared.value = const Invite(host: '192.168.1.20', port: 8080, version: '1.3.0');
-      await tester.pumpAndSettle();
+      yours.reach.value = const InviteReach(local: ['192.168.1.20'], looking: true);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('192.168.1.20:8080'), findsOneWidget);
-      expect(find.text('Copy invite'), findsOneWidget);
+      expect(find.text('Looking up your internet address…'), findsOneWidget);
+      expect(find.text('Copy invite link'), findsOneWidget);
       expect(find.byKey(const ValueKey('stop-sharing')), findsOneWidget);
-      expect(find.textContaining('port 8080 forwarded'), findsOneWidget);
+      expect(find.textContaining('friends on your network'), findsOneWidget);
+      // No password set: nothing to tick.
+      expect(find.byKey(const ValueKey('invite-with-password')), findsNothing);
+
+      // Behind a router: the internet address first, with the forwarding
+      // it needs; the home address stays a choice.
+      yours.shared.value = const Invite(host: '203.0.113.7', port: 8080, version: '1.3.0');
+      yours.reach.value = const InviteReach(public: '203.0.113.7', local: ['192.168.1.20']);
+      await tester.pumpAndSettle();
+      expect(find.text('203.0.113.7:8080'), findsOneWidget);
+      expect(find.text('192.168.1.20:8080'), findsOneWidget);
+      expect(find.textContaining('port 8080 is forwarded on your router to this computer (192.168.1.20)'),
+          findsOneWidget);
+      await tester.tap(find.text('192.168.1.20:8080'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('friends on your network'), findsOneWidget);
+
+      // No internet address found: say what friends elsewhere need.
+      yours.reach.value = const InviteReach(local: ['192.168.1.20']);
+      await tester.pumpAndSettle();
       expect(find.textContaining('VPS'), findsOneWidget);
     });
   });

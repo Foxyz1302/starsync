@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:sync_relay_core/core.dart' show findInstallRoot;
 
+import 'url_scheme.dart';
+
 /// The app's id: GTK's application id, so the Wayland `app_id` the
 /// compositor matches to [desktopFileName] for the window's icon.
 const appId = 'dev.foxyz.starsync';
@@ -18,10 +20,17 @@ const _iconSizes = [16, 32, 48, 64, 128, 256, 512];
 /// Wayland shows a generic icon. On start: write the `.desktop` file into
 /// `~/.local/share/applications` (Exec = this binary) and the icon into
 /// the hicolor theme, only when something changed (a moved install, a new
-/// icon). The entry and icons of [legacyAppId] go. Never in debug runs
-/// (unless [force], for tests); failures only log.
-Future<void> installDesktopEntry(
-    {String? executable, String? dataHome, String? home, @visibleForTesting bool force = false}) async {
+/// icon). The entry and icons of [legacyAppId] go. The entry also takes
+/// `starsync://` links ([schemeMimeType], %u) and the app becomes their
+/// default handler ([registerScheme], default [registerLinuxScheme]).
+/// Never in debug runs (unless [force], for tests); failures only log.
+Future<void> installDesktopEntry({
+  String? executable,
+  String? dataHome,
+  String? home,
+  @visibleForTesting bool force = false,
+  Future<void> Function(String desktopFile, String applicationsDir)? registerScheme,
+}) async {
   if (!Platform.isLinux || (kDebugMode && !force)) return;
   try {
     final exe = executable ?? Platform.resolvedExecutable;
@@ -41,9 +50,11 @@ Future<void> installDesktopEntry(
     }
     final entry = desktopEntryText(exe);
     final file = File('$share/applications/$desktopFileName');
-    if (file.existsSync() && file.readAsStringSync() == entry) return;
-    await file.parent.create(recursive: true);
-    await file.writeAsString(entry);
+    if (!file.existsSync() || file.readAsStringSync() != entry) {
+      await file.parent.create(recursive: true);
+      await file.writeAsString(entry);
+    }
+    await (registerScheme ?? registerLinuxScheme)(desktopFileName, file.parent.path);
   } catch (e) {
     debugPrint('desktop entry: $e');
   }
@@ -69,9 +80,11 @@ String desktopEntryText(String exe) => '''[Desktop Entry]
 Type=Application
 Name=Starsync
 Comment=Watch videos in sync with friends
-Exec="$exe"
+Exec="$exe" %u
 Icon=$appId
 StartupWMClass=$appId
+StartupNotify=true
+MimeType=$schemeMimeType;
 Categories=AudioVideo;Video;Player;Network;
 Terminal=false
 ''';

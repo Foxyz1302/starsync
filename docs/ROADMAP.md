@@ -112,8 +112,11 @@ ever happen mid-session (D8 says never during playback).
 Left of step 3 (your server): a human check of Invite (Linux and, at
 1.3.0, Windows' firewall prompt, now on Invite rather than at start;
 that the invite skips the proxy's 198.18.x here) and of the update band
-from 1.2.1-dev.3 in real use. No public address lookup or UPnP: the
-members card only says friends elsewhere need the port forwarded. Your
+from 1.2.1-dev.3 in real use. No UPnP: the members card says when
+friends elsewhere need the port forwarded. Human checks of the
+`starsync://` links: clicked in a browser and in Discord on KDE Wayland,
+X11 and Windows (the window coming to the front, the registry key after
+first start and after an update from a `watch_together.exe` copy). Your
 server's `/health` name is the profile name at start (a rename shows
 after a restart). Joining a friend while others are on
 your server leaves them there without you, unwarned; a join refused

@@ -52,6 +52,13 @@ bool FlutterWindow::OnCreate() {
   window_channel_->SetMethodCallHandler(
       [this](const flutter::MethodCall<flutter::EncodableValue>& call,
              std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        // A second start that handed its link to the running app ends
+        // here, before its window ever shows (no CRT exit, no DLL detach).
+        if (call.method_name() == "exit") {
+          fflush(nullptr);
+          ::TerminateProcess(::GetCurrentProcess(), 0);
+          return;
+        }
         if (call.method_name() != "attention") {
           result->NotImplemented();
           return;

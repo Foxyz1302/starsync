@@ -117,7 +117,7 @@ void relogLine(String tag, String line) {
 // `"name":"value"` or `Name="value"` (Jellyfin's MediaBrowser header).
 const _secretNames = r'(?:x-emby-token|x-mediabrowser-token|x-emby-authorization|authorization|set-cookie|cookie|'
     r'api_?key|access_?token|refresh_?token|id_?token|auth_?token|token|password|passwd|secret|host_?key|'
-    r'sessdata|bili_jct|client_?secret|client_?id|client)';
+    r'sessdata|bili_jct|client_?secret|client_?id|client|pw)';
 final _jsonSecret = RegExp('"($_secretNames)"\\s*:\\s*"(?:[^"\\\\]|\\\\.)*"', caseSensitive: false);
 final _quotedSecret = RegExp('\\b($_secretNames)\\s*=\\s*"[^"]*"', caseSensitive: false);
 // Header-like `Name: value` runs to the end of the line (a cookie
@@ -127,7 +127,8 @@ final _headerSecret = RegExp(
     caseSensitive: false);
 final _pairSecret = RegExp('\\b($_secretNames)\\s*=\\s*[^&\\s"\',;)}\\]]+', caseSensitive: false);
 final _bearer = RegExp(r'\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}', caseSensitive: false);
-final _url = RegExp(r'''\b(?:https?|wss?)://[^\s"'<>]+''', caseSensitive: false);
+// starsync:// is an invite link (its `pw` is a server password).
+final _url = RegExp(r'''\b(?:https?|wss?|starsync)://[^\s"'<>]+''', caseSensitive: false);
 // A member token in a server path: /r/<sid>/<token>/..., /m, /j, /a, /i, /l.
 final _pathToken = RegExp(r'(/[rmjail]/[^/\s?#]+/)[0-9a-fA-F]{32}\b');
 final _userInfo = RegExp(r'^([a-z]+://)[^/@\s]+@', caseSensitive: false);

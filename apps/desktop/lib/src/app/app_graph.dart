@@ -12,6 +12,7 @@ import '../schedule/animeflow.dart';
 import '../screens/home/health_probe.dart';
 import '../session/connection.dart' show Connection;
 import '../session/identity.dart' show ClientIdentity, Profile;
+import '../session/join_offers.dart';
 import '../session/navigation.dart';
 import '../session/notifier.dart';
 import '../session/session_coordinator.dart';
@@ -65,6 +66,9 @@ class AppGraph {
   /// What's new once after an update; keeps the notes the updater saves.
   final WhatsNew whatsNew;
 
+  /// The join prompt for a clicked invite link or one on the clipboard.
+  final JoinOffers joinOffers;
+
   AppGraph._({
     required this.ports,
     required this.sfx,
@@ -78,10 +82,12 @@ class AppGraph {
     required this.watch,
     required this.updates,
     required this.whatsNew,
+    required this.joinOffers,
   });
 
   /// The desktop app's graph. Tests pass their own [ports], [identity]
-  /// (default: the install's stored one), [healthGet] and server starter.
+  /// (default: the install's stored one), [healthGet], server starter and
+  /// internet address lookup ([publicAddress]).
   factory AppGraph.build({
     Ports? ports,
     ClientIdentity? identity,
@@ -90,6 +96,7 @@ class AppGraph {
     JellyfinAccounts? jellyfin,
     ShowMatcher? library,
     WatchHistory? history,
+    Future<String?> Function()? publicAddress,
   }) {
     final p = ports ?? desktopPorts();
     final settings = AppSettings.instance;
@@ -142,6 +149,7 @@ class AppGraph {
       },
       logDir: () => appLogDir,
       starter: serverStarter,
+      publicAddress: publicAddress,
     );
     final navigation = Navigation(
       coordinator: coordinator,
@@ -172,6 +180,7 @@ class AppGraph {
       watch: watch,
       updates: updates,
       whatsNew: whatsNew,
+      joinOffers: JoinOffers(navigation: navigation, yourServer: yourServer, forms: forms),
     );
   }
 

@@ -61,21 +61,53 @@ attach and detach the network listener (below).
   its reason; nothing else changes.
 - **Invite** (`session/invite.dart`): `YourServer.invite()` shares the
   server if it is not yet and returns an `Invite`: the host, the port, the
-  name, whether a password is needed (never the password), the version
-  and an `fp` field reserved for a pinned certificate (`wss://` with a
-  self-signed one, later; always null). The host is the best of
-  `inviteAddresses` over `NetworkInterface.list`: IPv4 only, no loopback,
-  link-local (169.254/16) or proxy fake-IP (198.18.0.0/15, what TUN
-  proxies like Clash hand out) address and no container or VM bridge
-  (`docker*`, `br-*`, `veth*`, `virbr*`, `vmnet*`, `vboxnet*`, `cni*`,
-  `podman*`, `lxcbr*`, `lxdbr*`, `vEthernet`, VirtualBox, VMware); 192.168
-  first, then 10/8 and 172.16/12, then a mesh VPN's 100.64/10, then any
-  other (public) address. No public-address lookup: the members card says
-  that friends elsewhere need the port forwarded or a server they can all
-  reach. `Invite.text` is what Invite copies ("Join me on Starsync:
-  192.168.1.20:8080 (ask me for the password) · Starsync 1.3.0");
-  `addressIn` reads the address back out of a pasted invite (the Join
-  card's address field). `stopSharing` unshares.
+  name ("<your name>'s server"), whether a password is needed (never the
+  password), the version and an `fp` field reserved for a pinned
+  certificate (`wss://` with a self-signed one, later; always null). This
+  machine's addresses are `inviteAddresses` over `NetworkInterface.list`:
+  IPv4 only, no loopback, link-local (169.254/16) or proxy fake-IP
+  (198.18.0.0/15, what TUN proxies like Clash hand out) address and no
+  container or VM bridge (`docker*`, `br-*`, `veth*`, `virbr*`, `vmnet*`,
+  `vboxnet*`, `cni*`, `podman*`, `lxcbr*`, `lxdbr*`, `vEthernet`,
+  VirtualBox, VMware); 192.168 first, then 10/8 and 172.16/12, then a mesh
+  VPN's 100.64/10, then any other (public) address. Sharing also looks up
+  the internet address (`lookUpPublicAddress`, `session/public_address.dart`):
+  plain-text "what is my IP" services over HTTPS (ipify, icanhazip,
+  checkip.amazonaws, ifconfig.me), asked in order until one answers a
+  public IPv4 address, 3 s each; that tells those services this network's
+  address, nothing else. `YourServer.reach` (`InviteReach`) holds both: the
+  internet address first, then this machine's, each with its
+  `AddressKind` (internet, home network, VPN); `forwarding` when the
+  internet address is not on this machine (behind a router: friends
+  elsewhere get in only with the port forwarded). No UPnP. The invite
+  carries the internet address when the lookup answers within 4 s
+  (`publicWait`), else the best local one, switched to the internet one
+  when it lands. `Invite.text` is what Invite copies ("Join me on
+  Starsync: starsync://203.0.113.7:8080/?name=Bob%27s+server (ask me for the
+  password) · Starsync 1.3.0"); `textWith(secret:)` puts the password in
+  the link instead, only when the user ticks it. The link format:
+  [PROTOCOL.md "Invite link"](PROTOCOL.md#invite-link) (`InviteLink`:
+  `parse`, `uri`, a `toString` without the password). `inviteIn` finds an
+  invite in a text (a link anywhere, or a 1.3.x plain invite's address;
+  never a bare address); `addressIn` reads `host:port` out of anything
+  (the Join card's address field; a 1.3.x app pasting a link reads its
+  address this way). `stopSharing` unshares.
+- **Links and the join prompt** (`session/join_offers.dart`, `JoinOffers`,
+  in the composition root): a clicked `starsync://` link (the app's start
+  arguments, or a second start's, see "Single instance" under "App
+  events and platform ports") and an invite on the clipboard when the
+  window gains the focus (and at start) become `offer`: "Join Bob's server
+  (203.0.113.7:8080)?" with the server's `/health` (its name, version,
+  how many watch, the version gate's sentence, or unreachable). Not
+  offered: links to your own server (`YourServer.isOwn`), to the server
+  you are in, and the text this app just copied (`copied`). Join
+  (`accept`) fills the Join card's fields (a link without a password
+  takes the one saved for that recent server) and joins through
+  `ConnectFlow` and `Navigation.join` (version gate, recents); a failure
+  opens the Join card with its error. A clipboard invite joined or
+  dismissed (Not now) is not offered again: the connect form box keeps the
+  last 30 as fingerprints (a hash of the link), never the links; the
+  clipboard's text is only parsed, never logged or stored.
 - **Where you are** (`session/navigation.dart`, `Navigation`): `place` is
   `none` (starting, or between two servers), `yours` or `friend`. The app
   starts at home: your server, joined over 127.0.0.1 with the host key
@@ -136,7 +168,7 @@ only stopping sharing sends guests out.
 `Ports` (the player host among them, handed to the coordinator), the sounds (`SynthSfx`), the `Notifier`, the `Connection`, the
 `SessionCoordinator` (handed the settings and the watch tracker), the
 connect form and recents (`ConnectStore`, `state/connect_prefs.dart`),
-`YourServer`, `Navigation`, the library's matches (`ShowMatcher`,
+`YourServer`, `Navigation`, the join prompt (`JoinOffers`), the library's matches (`ShowMatcher`,
 "Library", whose `refForPath` it hands the coordinator as `fileRef`, and
 a `LocalNextFinder` over it as `nextFile`) and watch tracking
 (`WatchTracker` with the device's `WatchHistory`, "Watch tracking"); it
@@ -1798,8 +1830,10 @@ handed on from there (the coordinator gets its `Notifier`, `Connection` and
   (`watchActivity`: focused, unfocused, minimised, hidden; window_manager's
   focus, blur, minimise and restore, and the shell's own `hide`, wired to
   `SessionCoordinator.windowActivity` and `Notifier.window` in `main`),
-  bringing the window up and focusing it (`focus`), dragging (`WindowDragArea`), close, the way out
-  (save, hide, quit), attention, the clipboard paste (files, else text)
+  bringing the window up and focusing it (`focus`, with another start's
+  activation token, see "Single instance" below), dragging (`WindowDragArea`), close, the way out
+  (save, hide, quit), attention, the clipboard paste (files, else text), the clipboard's
+  text alone (`readClipboardText`, for the join prompt)
   and drop targets (fox_utils).
 - `UrlOpener` (`DesktopUrls`): `xdg-open`, `open`, Windows' `url.dll`.
 - `FolderAccess` (`DesktopFolders`): folder and file dialogs
@@ -1824,6 +1858,47 @@ handed on from there (the coordinator gets its `Notifier`, `Connection` and
   (`AppDirs`, "Desktop UI"), and the copy of the data from before the
   rename; resolved in `main` before the composition root exists, so not a
   `Ports` field.
+
+**Single instance** (`platform/single_instance.dart`, `InstanceLock`): one
+app per profile folder (`<app support>`, or `profiles/<name>/` with
+`STARSYNC_PROFILE`, so each profile is its own instance). `main` claims
+it right after resolving the folders, before the log or the window: an
+exclusive `RandomAccessFile.lock` on `instance.lock` (the OS drops it
+when the process ends, a crash too) and a loopback listener whose port,
+a random token and the pid go in `instance.json`. A start that finds the
+lock held sends its arguments and activation token there (one JSON line
+with the token) and ends at once through the runner (`exit` on the
+`starsync/window` channel: `_exit` / `TerminateProcess`, no exit
+handlers) before its window ever shows; the running app brings its
+window up (`ShellPort.focus(activation:)`) and hands the arguments to
+`JoinOffers`. Bringing a window up from another process needs the
+desktop's permission: on Linux the second start's `XDG_ACTIVATION_TOKEN`
+(Wayland) or `DESKTOP_STARTUP_ID` (X11), which the runner keeps before
+GTK takes it (`launchToken`) and the running app presents its window
+with (`present`: `gdk_wayland_display_set_startup_notification_id` /
+`gtk_window_set_startup_id`, then `gtk_window_present`; the launcher
+entry has `StartupNotify=true` so launchers hand one out); on Windows
+the second start calls `AllowSetForegroundWindow` for the holder's pid
+(`platform/desktop/windows_api.dart`). While the app closes it answers
+"closing" and a new start waits for the lock (up to 20 s; 5 s without
+any answer), then starts anyway; Update and restart gives the lock up
+before starting the new binary. Invite links among the arguments are
+not passed on to that restart (`launchArgs`).
+
+**Link handler** (`platform/url_scheme.dart`): on Linux the launcher
+entry ("App icon and launcher entry") lists
+`MimeType=x-scheme-handler/starsync;` with `Exec=... %u`, and
+`xdg-mime default dev.foxyz.starsync.desktop x-scheme-handler/starsync`
+runs when `xdg-mime query default` names another (then
+`update-desktop-database` on the applications folder). On Windows
+(release builds) `HKCU\Software\Classes\starsync`: default value
+`URL:Starsync invite`, `URL Protocol` empty, `DefaultIcon` and
+`shell\open\command` = `"<install>\starsync.exe" "%1"` (`starsync.exe`
+next to an old-named `watch_together.exe` copy when it is there),
+written per user (no admin) through `RegSetKeyValueW` at start only when
+the command differs (first start, a moved install, an update from an old
+name).
+
 Still direct: the updater's restart
 (`Process.start`), the session's own file reads for what it plays or
 relays (`QueueController`, thumbnails, cookies import), app-private
@@ -1886,8 +1961,9 @@ panel) and chat messages (Copy message, and a link in it).
   `PresencePolicy`, so not away, gone or errored; "connecting…",
   "reconnecting…"; hidden under 1100 px), chat with an unread badge, then
   Invite on yours or Leave on a friend's (asks first, then you are home).
-  Invite (`inviteFriends`) shares your server if it is not yet and copies
-  the invite ("Invite copied · 192.168.1.20:8080"); a port it cannot open
+  Invite (`inviteFriends`, `shell/your_invite.dart`) shares your server if
+  it is not yet and copies the invite link, never the password ("Invite
+  link copied · 203.0.113.7:8080"); a port it cannot open
   is a notice pointing at Settings. The stack
   opens the members card (the server's version under its title: yours is
   this app's, a joined one's from `/health.version`; the source
@@ -1897,9 +1973,16 @@ panel) and chat messages (Copy message, and a link in it).
   "reconnecting… (2 min)" with how long; per member force ready, Nudge and Sit
   out (anyone, the host too), your own row Sit out / Join back; at the
   bottom, on yours: not shared, "Only you can reach it" and Invite;
-  shared, the invite's address, Copy invite, Stop sharing and a note
-  that friends outside the LAN need a forwarded port or a reachable
-  server; on a friend's, "Copy invite address" (the dialled address)).
+  shared (`YourInvite`), "Friends join at" with each address of
+  `YourServer.reach` to pick (Internet, Home network, VPN; "Looking up
+  your internet address…" meanwhile), a note for the one picked (the
+  router's address: the port must be forwarded to this computer's home
+  address; this computer's own: a firewall can still block it; home
+  network, VPN: who it works for; no internet address found: forwarding
+  or a server all can reach), "Include the password in the link" (only
+  with a password; off each time the card opens), Copy invite link and
+  Stop sharing; on a friend's, "Copy invite link" (the dialled address
+  and its name, never a password)).
   Empty strip space is the window
   drag area; the window buttons sit at its end.
 - **Avatars** (`avatar.dart`): `StatusAvatar` draws a ring outside the
@@ -2456,7 +2539,8 @@ dedicated server (`package:logging` loggers named by area: `relay`,
   once Flutter is up) are kept and written first.
 - **Redaction** (`redactLog`): every line, in one place
   (`formatLogLine`), before console or file: URL query strings cut to
-  their parameter names (signed CDN links, Jellyfin `api_key`),
+  their parameter names (signed CDN links, Jellyfin `api_key`, an invite
+  link's `pw`: `starsync://` counts as a URL),
   `user:pass@` in URLs, member tokens in `/r /m /j /a /i /l` paths, and the
   values of passwords, secrets, tokens, API keys, cookies,
   `Authorization` / `X-Emby-*` headers (`name=value`, `"name":"value"`,
@@ -2553,7 +2637,9 @@ take the icon from the `.desktop` file of that id. A tarball install has
 none, so on start a Linux release build (`platform/desktop_entry.dart`,
 skipped in debug) writes
 `~/.local/share/applications/dev.foxyz.starsync.desktop` (Exec = the
-running binary, `StartupWMClass` and `Icon` = the id) and the icons into
+running binary with `%u`, `StartupWMClass` and `Icon` = the id,
+`StartupNotify`, the `starsync://` link type: "Link handler" under "App
+events and platform ports") and the icons into
 the hicolor theme, only when they changed, and deletes the entry and
 icons 1.2.x wrote under its id `moe.senkochan.watch_together` (those exact
 files only). The runner also sets the window icon from the bundle (X11).

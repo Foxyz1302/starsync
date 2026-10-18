@@ -7,7 +7,7 @@ import '../app/app_graph.dart';
 import '../screens/home/connect_flow.dart';
 import '../screens/home/connect_status.dart';
 import '../screens/home/health_probe.dart';
-import '../session/invite.dart' show addressIn;
+import '../session/invite.dart' show addressIn, inviteIn;
 import '../session/navigation.dart' show Place;
 import '../state/connect_prefs.dart';
 import '../update/update_controller.dart';
@@ -138,9 +138,17 @@ class JoinCard extends StatelessWidget {
     _join();
   }
 
-  /// An invite or "host:port" pasted into the address: split it.
+  /// An invite (link or text) or "host:port" pasted into the address:
+  /// split it (a link's password goes into the password field).
   void _onAddress(String v) {
     flow.clearError();
+    final link = inviteIn(v);
+    if (link != null) {
+      fields.host.text = link.host;
+      fields.port.text = '${link.port}';
+      if (link.secret.isNotEmpty) fields.secret.text = link.secret;
+      return;
+    }
     final a = addressIn(v);
     if (a == null || v.trim() == a.host) return;
     fields.host.text = a.host;

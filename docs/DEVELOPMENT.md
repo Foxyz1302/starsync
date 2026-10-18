@@ -61,8 +61,9 @@ the timings of each media change (`SwitchTrace`).
 Two instances on one machine: `STARSYNC_PROFILE=<name>` (letters, digits,
 `-`, `_`; at most 32) gives an instance its own Hive boxes (settings,
 profile, connect form, window bounds, folders, Jellyfin sign-ins, the
-client id: two instances without it are one install, and the second takes
-the first's member over) and logs under
+client id: without it a second start is the same install, so it hands
+its arguments to the running app and ends; each profile is its own
+instance) and logs under
 `<app support>/profiles/<name>/`, and ` [<name>]` in the window title;
 yt-dlp, shaders and caches stay shared (`AppDirs`, ARCHITECTURE "Desktop
 UI"). Without it nothing changes. Run one plain instance and one with
@@ -161,7 +162,9 @@ Three suites, run from each package's folder:
   controls, settings, schedule), pure app logic (`StateDiff`, the library's L2 matching against a
   fake AniList (`show_matcher_test`), `media.ref` producers,
   shader list, sound engine with a fake backend, invite addresses, the
-  version gate, the media plan's table with the Jellyfin relay rule and
+  `starsync://` links, the internet address lookup against fake
+  services, the join prompt and one app per profile
+  (`invite_links_test`), the version gate, the media plan's table with the Jellyfin relay rule and
   the "Waiting for" status (`media_plan_test`), watch tracking and the
   device history (`watch_tracker_test`), what continues a file of a
   local show (`queue_logic_test`), the video view's output size and

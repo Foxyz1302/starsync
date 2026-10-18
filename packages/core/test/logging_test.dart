@@ -24,6 +24,12 @@ void main() {
       expect(redactLog('http://user:pw@host/x#frag'), 'http://***@host/x');
     });
 
+    test('an invite link keeps its address, never its password', () {
+      expect(redactLog('link starsync://203.0.113.7:8080/?name=Bob&pw=hunter2'),
+          'link starsync://203.0.113.7:8080/?name&pw=***');
+      expect(redactLog('pw=hunter2 port=1'), 'pw=*** port=1');
+    });
+
     test('member tokens in server paths', () {
       expect(redactLog('open http://1.2.3.4:8080/r/default/$tok/2/0/name'), 'open http://1.2.3.4:8080/r/default/***/2/0/name');
       expect(redactLog('ws://h:1/r/default/$tok/source?q=7'), 'ws://h:1/r/default/***/source?q=…');

@@ -7,6 +7,9 @@
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
+#ifdef GDK_WINDOWING_WAYLAND
+#include <gdk/gdkwayland.h>
+#endif
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -24,17 +27,63 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
+// The desktop's activation token this process was started with
+// (XDG_ACTIVATION_TOKEN on Wayland, DESKTOP_STARTUP_ID on X11), read
+// before GTK starts and consumes it. A second start hands it to the
+// running app (lib/src/platform/single_instance.dart), which brings its
+// window up with it: compositors only let a window take the focus with
+// a fresh token.
+static gchar* launch_token = nullptr;
+
+// Brings the window up with an activation token from another process.
+static void present_with_token(GtkWindow* window, const gchar* token) {
+  if (token != nullptr && token[0] != '\0') {
+    GdkDisplay* display = gtk_widget_get_display(GTK_WIDGET(window));
+#ifdef GDK_WINDOWING_WAYLAND
+    if (GDK_IS_WAYLAND_DISPLAY(display)) {
+      gdk_wayland_display_set_startup_notification_id(display, token);
+    }
+#endif
+#ifdef GDK_WINDOWING_X11
+    if (GDK_IS_X11_DISPLAY(display)) {
+      gtk_window_set_startup_id(window, token);
+    }
+#endif
+  }
+  gtk_window_present(window);
+}
+
 // "starsync/window": `attention` sets the urgency hint while the window is
-// not focused; focusing it clears the hint.
+// not focused (focusing it clears the hint); `launchToken` is this
+// process's activation token ('' when none); `present` brings the window
+// up with a token (argument, may be empty); `exit` ends a second start
+// that handed over (no exit handlers, see main.cc).
 static void window_method_cb(FlMethodChannel* channel, FlMethodCall* call,
                              gpointer user_data) {
   GtkWindow* window = GTK_WINDOW(user_data);
   g_autoptr(FlMethodResponse) response = nullptr;
-  if (g_strcmp0(fl_method_call_get_name(call), "attention") == 0) {
+  const gchar* method = fl_method_call_get_name(call);
+  if (g_strcmp0(method, "attention") == 0) {
     if (!gtk_window_is_active(window)) {
       gtk_window_set_urgency_hint(window, TRUE);
     }
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  } else if (g_strcmp0(method, "launchToken") == 0) {
+    g_autoptr(FlValue) value =
+        fl_value_new_string(launch_token != nullptr ? launch_token : "");
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(value));
+  } else if (g_strcmp0(method, "present") == 0) {
+    FlValue* args = fl_method_call_get_args(call);
+    const gchar* token = nullptr;
+    if (args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_STRING) {
+      token = fl_value_get_string(args);
+    }
+    present_with_token(window, token);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  } else if (g_strcmp0(method, "exit") == 0) {
+    fflush(stdout);
+    fflush(stderr);
+    _exit(0);
   } else {
     response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
   }
@@ -218,6 +267,11 @@ MyApplication* my_application_new() {
   // corresponding .desktop file. This ensures better integration by allowing
   // the application to be recognized beyond its binary name.
   g_set_prgname(APPLICATION_ID);
+
+  // Before GTK starts (it takes these out of the environment).
+  const gchar* token = g_getenv("XDG_ACTIVATION_TOKEN");
+  if (token == nullptr || token[0] == '\0') token = g_getenv("DESKTOP_STARTUP_ID");
+  launch_token = g_strdup(token);
 
   return MY_APPLICATION(g_object_new(my_application_get_type(),
                                      "application-id", APPLICATION_ID, "flags",

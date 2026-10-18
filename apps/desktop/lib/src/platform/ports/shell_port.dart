@@ -43,8 +43,10 @@ abstract interface class ShellPort {
   Future<void> quit();
 
   /// Brings the window up and gives it the focus (restored when
-  /// minimised, shown when hidden): a click on a system notification.
-  Future<void> focus();
+  /// minimised, shown when hidden): a click on a system notification, a
+  /// link handed over by a second start ([activation]: that start's
+  /// desktop activation token, which lets the window take the focus).
+  Future<void> focus({String activation = ''});
 
   /// Points the desktop at the window when it is not focused (taskbar
   /// flash, urgency hint); nothing when it is.
@@ -52,6 +54,10 @@ abstract interface class ShellPort {
 
   /// The clipboard's files, else its text (Ctrl+V outside a text field).
   Future<Paste> readPaste();
+
+  /// The clipboard's text only (the join prompt looks for an invite in
+  /// it); null when there is none or it can't be read.
+  Future<String?> readClipboardText();
 
   /// [child] taking dropped files ([onDrop]: their paths and where they
   /// landed); [enable] off lets drops through.

@@ -29,6 +29,7 @@ import '../widgets/whats_new_card.dart';
 import 'chat_panel.dart';
 import 'connect_cards.dart';
 import 'handoff.dart';
+import 'join_offer_card.dart';
 import 'library_link.dart' show LinkProber;
 import 'library_tab.dart';
 import 'motion.dart';
@@ -662,6 +663,22 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
 
   void _invite() => unawaited(inviteFriends(context));
 
+  /// The join prompt's Join: the invite into the Join card's fields, then
+  /// the join (version gate and all); a failure opens the card with it.
+  Future<void> _acceptOffer() async {
+    final link = _graph.joinOffers.accept();
+    if (link == null) return;
+    final port = '${link.port}';
+    _join.host.text = link.host;
+    _join.port.text = port;
+    _join.secret.text = link.secret;
+    await _flow.submit((f) => f
+      ..host = link.host
+      ..port = port
+      ..secret = link.secret);
+    if (mounted && _flow.error != null) _joinFriend();
+  }
+
   // ----------------------------------------------------------------- build
 
   @override
@@ -818,6 +835,12 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
           ),
           if (online && _shown != PlayerMode.none) _playerLayer(area),
           _toasts(full && online),
+          Positioned(
+            top: 12,
+            left: 16,
+            right: 16,
+            child: Center(child: JoinOfferCard(offers: _graph.joinOffers, onJoin: _acceptOffer)),
+          ),
         ],
       );
     });

@@ -19,16 +19,25 @@ void main() {
         ..createSync(recursive: true);
       final otherIcon = File('$share/icons/hicolor/48x48/apps/other.png')..createSync();
 
-      await installDesktopEntry(executable: '$root/starsync', dataHome: share, force: true);
+      final registered = <String>[];
+      await installDesktopEntry(
+          executable: '$root/starsync',
+          dataHome: share,
+          force: true,
+          registerScheme: (file, dir) async => registered.add('$file in $dir'));
 
       expect(oldEntry.existsSync(), isFalse);
       expect(oldIcon.existsSync(), isFalse);
       expect(other.existsSync(), isTrue);
       expect(otherIcon.existsSync(), isTrue);
       final entry = File('${apps.path}/dev.foxyz.starsync.desktop').readAsStringSync();
-      expect(entry, contains('Exec="$root/starsync"'));
-      expect(entry, contains('StartupWMClass=dev.foxyz.starsync'));
+            expect(entry, contains('StartupWMClass=dev.foxyz.starsync'));
       expect(entry, contains('Icon=dev.foxyz.starsync'));
+      // starsync:// links: the entry takes them and becomes their default.
+      expect(entry, contains('Exec="$root/starsync" %u'));
+      expect(entry, contains('MimeType=x-scheme-handler/starsync;'));
+      expect(entry, contains('StartupNotify=true'));
+      expect(registered, ['dev.foxyz.starsync.desktop in ${apps.path}']);
       expect(File('$share/icons/hicolor/48x48/apps/dev.foxyz.starsync.png').existsSync(), isTrue);
     } finally {
       await tmp.delete(recursive: true);

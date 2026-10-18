@@ -6,7 +6,6 @@ import '../screens/home/ui.dart' show appName, displayVersion, shortVersion;
 import '../session/delivery.dart';
 import '../session/party.dart';
 import '../app/app_graph.dart';
-import '../session/app_events.dart' show ActionFailed;
 import '../session/invite.dart';
 import '../session/navigation.dart' show Place;
 import '../widgets/app_keys.dart';
@@ -16,6 +15,9 @@ import '../widgets/window_buttons.dart';
 import 'avatar.dart';
 import 'delivery_line.dart';
 import 'motion.dart';
+import 'your_invite.dart';
+
+export 'your_invite.dart' show YourInvite, inviteFriends;
 
 /// The shell's tabs, in strip order.
 enum ShellTab {
@@ -506,9 +508,10 @@ class MembersCard extends StatelessWidget {
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
                         key: const ValueKey('copy-invite'),
-                        onPressed: () => copyToClipboard(context, address, done: 'Invite address copied'),
+                        onPressed: () => copyToClipboard(context, friendInviteLink(address, nav.serverLabel.peek()),
+                            done: 'Invite link copied'),
                         icon: const Icon(Icons.copy, size: 16),
-                        label: const Text('Copy invite address'),
+                        label: const Text('Copy invite link'),
                       ),
                     ),
                   ),
@@ -623,90 +626,11 @@ class VersionText extends StatelessWidget {
 bool versionDiffers(String version, {String own = appVersion}) =>
     version.isNotEmpty && own != '0.0.0-dev' && version != '0.0.0-dev' && version != own;
 
-/// Your server in the members card: shared, the invite's address
-/// (Copy invite), a hint for friends outside the network and Stop
-/// sharing; not shared, Invite (opens it and copies the invite).
-class YourInvite extends StatelessWidget {
-  const YourInvite({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
-    final graph = AppScope.of(context);
-    final yours = graph.yourServer;
-    return SignalBuilder(builder: (context) {
-      final invite = yours.shared.value;
-      final busy = yours.busy.value || yours.port.value == null;
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-        child: Column(
-          key: const ValueKey('your-invite'),
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (invite == null) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
-                child: Text('Only you can reach it. Invite opens it to friends; nothing you watch stops.',
-                    style: TextStyle(color: muted, fontSize: 12)),
-              ),
-              TextButton.icon(
-                key: const ValueKey('copy-invite'),
-                onPressed: busy ? null : () => inviteFriends(context),
-                icon: const Icon(Icons.group_add_outlined, size: 16),
-                label: const Text('Invite'),
-              ),
-            ] else ...[
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Text(invite.address,
-                    key: const ValueKey('invite-address'), style: const TextStyle(fontFamily: 'monospace')),
-              ),
-              Wrap(
-                spacing: 4,
-                children: [
-                  TextButton.icon(
-                    key: const ValueKey('copy-invite'),
-                    onPressed: () => copyToClipboard(context, invite.text, done: 'Invite copied'),
-                    icon: const Icon(Icons.copy, size: 16),
-                    label: const Text('Copy invite'),
-                  ),
-                  TextButton(
-                    key: const ValueKey('stop-sharing'),
-                    onPressed: busy ? null : () => yours.stopSharing(),
-                    child: const Text('Stop sharing'),
-                  ),
-                ],
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
-                child: Text(
-                  'Works for friends on your network. Friends elsewhere need port ${invite.port} '
-                  'forwarded on your router, or a server they can all reach (like a VPS). '
-                  'Stop sharing sends everyone else out; you and Up next stay.',
-                  style: TextStyle(color: muted, fontSize: 12),
-                ),
-              ),
-            ],
-          ],
-        ),
-      );
-    });
-  }
-}
-
-/// Invite: opens your server to friends if it is not yet and copies the
-/// invite ("Invite copied"); a port that can't be opened is a notice.
-Future<void> inviteFriends(BuildContext context) async {
-  final graph = AppScope.of(context);
-  final Invite invite;
-  try {
-    invite = await graph.yourServer.invite();
-  } catch (e) {
-    final port = graph.forms.form.hostPort;
-    graph.notifier.notify(ActionFailed(
-        "couldn't open your server on port $port: $e — pick another port in Settings → Party & network"));
-    return;
-  }
-  if (!context.mounted) return;
-  await copyToClipboard(context, invite.text, done: 'Invite copied · ${invite.address}');
+/// The invite link to a friend's server you are in ([address] as dialled,
+/// "host:port"; never its password).
+String friendInviteLink(String address, String name) {
+  final a = addressIn(address);
+  final port = a == null ? null : int.tryParse(a.port);
+  if (a == null || port == null) return address;
+  return InviteLink(host: a.host, port: port, name: name).uri;
 }
