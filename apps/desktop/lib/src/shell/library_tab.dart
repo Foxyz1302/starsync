@@ -27,7 +27,7 @@ HelloMedia putUpJellyfinMedia(JellyfinAccounts accounts, JellyfinMedia media) {
     throw const FormatException('that Jellyfin server is not linked any more — pick again');
   }
   if (accounts.statusOf(media.serverId) == JellyfinAccountStatus.expired) {
-    throw const FormatException('Jellyfin sign-in expired — reconnect it in Settings → Jellyfin & integrations');
+    throw const FormatException('Jellyfin sign-in expired — reconnect it in Settings → Library & accounts');
   }
   return mediaForPick(media);
 }
@@ -81,7 +81,7 @@ class LibraryTab extends StatefulWidget {
   /// Adds a pick to Up next; null without a server (no queue actions).
   final AddToQueue? onAddToQueue;
   final VoidCallback? onPutUpDone;
-  final VoidCallback? onOpenIntegrations;
+  final VoidCallback? onOpenAccounts;
   /// Defaults to [RecentLinks.instance].
   final RecentLinks? recentLinks;
   /// What a link is; defaults to the app's.
@@ -103,7 +103,7 @@ class LibraryTab extends StatefulWidget {
     this.onAddToQueue,
     this.onPutUpDone,
     this.jellyfinStart,
-    this.onOpenIntegrations,
+    this.onOpenAccounts,
     this.recentLinks,
     this.probe,
     this.filesBuilder,
@@ -259,7 +259,7 @@ class _LibraryTabState extends State<LibraryTab> {
             onSelect: _c.select,
             onPutUp: _doublePutUp,
             onAddToQueue: widget.onAddToQueue == null ? null : _cardQueue,
-            onOpenIntegrations: widget.onOpenIntegrations,
+            onOpenAccounts: widget.onOpenAccounts,
             start: widget.jellyfinStart,
             libraryStrip: false,
             empty: (context) => NoJellyfinPanel(

@@ -26,7 +26,7 @@ class AppSoundsSetting extends StatelessWidget {
       builder: (context) => SettingTrack(
         key: const ValueKey('app-sounds'),
         label: 'App sounds',
-        help: "The app's own cues: ready, joins, chat. Not the video, whose volume is in the player. "
+        help: "The app's own cues: ready, joins, chat. Not the video (Settings → Player → Volume). "
             'Letting go of the slider plays the ready sound',
         brief: 'Ready, joins and chat cues, not the video',
         readout: '${(s.soundVolume.value * 100).round()} %',

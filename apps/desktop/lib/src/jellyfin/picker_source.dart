@@ -15,7 +15,7 @@ class JellyfinPickerSource extends StatefulWidget {
   final ValueChanged<JellyfinSelection> onSelect;
   final ValueChanged<JellyfinSelection> onPutUp;
   final void Function(JellyfinSelection item, {bool next})? onAddToQueue;
-  final VoidCallback? onOpenIntegrations;
+  final VoidCallback? onOpenAccounts;
   final BrowseStart? start;
   final bool libraryStrip;
   /// Shown while no server is linked.
@@ -29,7 +29,7 @@ class JellyfinPickerSource extends StatefulWidget {
     this.onAddToQueue,
     this.controller,
     this.selected,
-    this.onOpenIntegrations,
+    this.onOpenAccounts,
     this.libraryStrip = true,
     this.empty,
   });
@@ -55,7 +55,7 @@ class _JellyfinPickerSourceState extends State<JellyfinPickerSource> {
           return const Center(child: CircularProgressIndicator(strokeWidth: 2));
         }
         if (a.isEmpty && widget.empty != null) return widget.empty!(context);
-        if (a.isEmpty) return _LinkFirst(accounts: a, onOpenIntegrations: widget.onOpenIntegrations);
+        if (a.isEmpty) return _LinkFirst(accounts: a, onOpenAccounts: widget.onOpenAccounts);
         return JellyfinBrowser(
           key: const ValueKey('media-jellyfin'),
           accounts: a,
@@ -64,7 +64,7 @@ class _JellyfinPickerSourceState extends State<JellyfinPickerSource> {
           onSelect: widget.onSelect,
           onPutUp: widget.onPutUp,
           onAddToQueue: widget.onAddToQueue,
-          onOpenIntegrations: widget.onOpenIntegrations,
+          onOpenAccounts: widget.onOpenAccounts,
           start: widget.start,
           libraryStrip: widget.libraryStrip,
         );
@@ -75,8 +75,8 @@ class _JellyfinPickerSourceState extends State<JellyfinPickerSource> {
 
 class _LinkFirst extends StatelessWidget {
   final JellyfinAccounts accounts;
-  final VoidCallback? onOpenIntegrations;
-  const _LinkFirst({required this.accounts, this.onOpenIntegrations});
+  final VoidCallback? onOpenAccounts;
+  const _LinkFirst({required this.accounts, this.onOpenAccounts});
 
   @override
   Widget build(BuildContext context) {
@@ -92,16 +92,16 @@ class _LinkFirst extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text('Link a Jellyfin server to browse it here. '
-                    'You can manage linked servers in Integrations.',
+                    'You can manage linked servers in Settings → Library & accounts.',
                     style: TextStyle(color: Colors.grey)),
                 const SizedBox(height: kGap),
                 JellyfinSignInPanel(accounts: accounts),
-                if (onOpenIntegrations != null) ...[
+                if (onOpenAccounts != null) ...[
                   const SizedBox(height: 8),
                   Align(
                     alignment: Alignment.centerLeft,
                     child: TextButton(
-                        onPressed: onOpenIntegrations, child: const Text('Open Integrations')),
+                        onPressed: onOpenAccounts, child: const Text('Open Library & accounts')),
                   ),
                 ],
               ],

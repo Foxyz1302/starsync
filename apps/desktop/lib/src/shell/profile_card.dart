@@ -40,7 +40,7 @@ class ProfileCard extends StatefulWidget {
 }
 
 class _ProfileCardState extends State<ProfileCard> {
-  final _p = Profile.instance;
+  late final _p = AppScope.of(context).profile;
   late final _name = TextEditingController(text: _p.name.peek());
 
   @override
@@ -178,8 +178,8 @@ class _ProfileCardState extends State<ProfileCard> {
                       },
                     ),
                   _link(
-                    Icons.extension_outlined,
-                    'Jellyfin & integrations',
+                    Icons.video_library_outlined,
+                    'Library & accounts',
                     trailing: ListenableBuilder(
                       listenable: JellyfinAccounts.instance,
                       builder: (context, _) {
@@ -187,9 +187,9 @@ class _ProfileCardState extends State<ProfileCard> {
                         return Text(n == 0 ? 'none' : '$n linked', style: small);
                       },
                     ),
-                    onTap: () => _open(SettingsSection.integrations),
+                    onTap: () => _open(SettingsSection.library),
                   ),
-                  _link(Icons.settings_outlined, 'Settings', onTap: () => _open(SettingsSection.profile)),
+                  _link(Icons.settings_outlined, 'Settings', onTap: () => _open(SettingsSection.party)),
                   ValueListenableBuilder(
                     valueListenable: (widget.updates ?? UpdateController.instance).status,
                     builder: (context, s, _) {
@@ -203,7 +203,7 @@ class _ProfileCardState extends State<ProfileCard> {
                       );
                     },
                   ),
-                  _link(Icons.info_outline, 'About', onTap: () => _open(SettingsSection.about)),
+                  _link(Icons.help_outline, 'Help & about', onTap: () => _open(SettingsSection.help)),
                 ]),
               ),
             ],

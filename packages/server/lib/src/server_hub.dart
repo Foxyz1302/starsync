@@ -157,7 +157,7 @@ class ServerHub {
         !const {unsupportedUrlText, notFoundText, unreachableText}.contains(plain) &&
         y.cookies.read(count: false) == null;
     return cookiesMightHelp
-        ? '$head: it has no cookies (set them in Settings → Player → yt-dlp on the hosting app, or --yt-dlp-cookies)'
+        ? '$head: it has no cookies (set them in Settings → Library & accounts → Web links on the hosting app, or --yt-dlp-cookies)'
         : '$head: $why';
   }
 

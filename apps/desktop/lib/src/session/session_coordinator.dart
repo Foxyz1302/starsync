@@ -54,17 +54,6 @@ final _log = createLogger('session');
 /// (Jellyfin-style links carry api_key there and names are broadcast).
 String linkDisplayName(String url) => linkName(url);
 
-/// "Unready when the video changes": a state with a newer [mediaId] than
-/// the last one this session saw ([lastMediaId], -1 before the first) while
-/// self is ready (or a fresh member after a reconnect is restoring it). A
-/// swap keeps the server's ready flags, so the client unreadies itself.
-bool unreadyForNewMedia(
-        {required bool enabled,
-        required int lastMediaId,
-        required int mediaId,
-        required bool ready}) =>
-    enabled && lastMediaId >= 0 && mediaId != lastMediaId && ready;
-
 String? stateMediaUrl(StateBroadcast state) {
   final media = state.media;
   if (media == null) return null;
@@ -765,19 +754,7 @@ class SessionCoordinator {
       _lastReady = self.ready;
     }
     _lastAway = self.presence == Presence.away;
-    final last = _seenMediaId;
     _seenMediaId = r.mediaId;
-    // A ready restored by a reconnect may not have echoed yet: unready
-    // anyway (it was sent first, so this one lands last).
-    if (unreadyForNewMedia(
-        enabled: settings.unreadyOnSwap.peek(),
-        lastMediaId: last,
-        mediaId: r.mediaId,
-        ready: self.ready || _restoringReady)) {
-      _lastReady = false;
-      _restoringReady = false;
-      connection.sendReady(false, source: 'auto');
-    }
   }
 
   /// Sitting out: nothing open, nothing pulled. A relay this member
@@ -1733,13 +1710,9 @@ class SessionCoordinator {
       media.renumber(now.mediaId);
       _seenMediaId = now.mediaId;
     }
-    // The intent the server lost: ready (unless the video changed and the
-    // user unreadies then), and sitting out.
-    var wantReady = _lastReady && !_lastAway;
-    if (changed && !restoring && wantReady && _seenMediaId >= 0 && settings.unreadyOnSwap.peek()) {
-      wantReady = false;
-      _lastReady = false;
-    }
+    // The intent the server lost: ready (a swap keeps the ready flags,
+    // so a changed video too), and sitting out.
+    final wantReady = _lastReady && !_lastAway;
     if (_lastAway) {
       connection.sendPresence(PresenceIntent(
           state: Presence.away, reason: autoSitOut.autoAway ? PresenceReason.idle : PresenceReason.manual));

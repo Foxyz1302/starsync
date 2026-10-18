@@ -475,7 +475,7 @@ void main() {
         await _poll(() => b.jellyfinBlocked.peek() != null, 'blocked');
         expect(b.serverState.peek()!.relay, isFalse);
         expect(b.jellyfinBlocked.peek()!.message, contains('nobody is passing it on'));
-        // Linking an account (Integrations) retries by itself.
+        // Linking an account (Library & accounts) retries by itself.
         await accB.link(
             baseUrl: jelly.base,
             server: const JellyfinServerInfo(id: _sid, name: 'Fake Jellyfin', version: '10.11.11'),

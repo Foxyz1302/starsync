@@ -229,24 +229,7 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
   certificate in 1.3.0, pinned self-signed via the Invite `fp` later.
 - `err` code `rate`: reserved, nothing sends it.
 
-## Settings cleanup (decided, next)
-
-What is where, what you see first, what is folded. Each setting has one
-home in Settings; the player panel is the watching subset, drawn with the
-same widgets; common rows first, the rest under "More". Left to do:
-**Sections**: Player · Party (absorbs Profile: picture, name and colour
-   edited in place; Away; Your server; Recent servers) · Notifications &
-   sounds (Over the video: toasts or danmaku, chat pop-ups, joins and
-   leaves; Sounds) · Library & accounts (Jellyfin, AnimeFlow, Web links:
-   yt-dlp and cookies) · Updates (channel under More) · Help & about
-   (diagnostics, shortcuts, about, developer). Ctrl+, opens on Player.
-   Dropped for their defaults: the controls' hide delay (3 s), "Unready
-   when the video changes" (off), "Check for updates automatically"
-   (always, D8), the Time display row (the clock click sets it), the
-   Settings switch for hiding re-releases (stays in the row's menu).
-   The study with the full inventory and migration list:
-   kept outside the repo; redo it from the code if needed.
-
+## Backlog
 
 0. **media_kit fork evaluation** (after the restructure): upstream
    media-kit releases stalled at media_kit_video 2.0.1 (Dec 2025) though

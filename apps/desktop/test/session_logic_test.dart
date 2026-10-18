@@ -1,5 +1,4 @@
-// Pure session logic: auto sit-out on a fake clock, link names, the
-// unready-on-swap rule.
+// Pure session logic: auto sit-out on a fake clock, link names.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart' show Presence, PresenceReason;
 import 'package:starsync/src/platform/ports/shell_port.dart' show WindowActivity;
@@ -123,15 +122,5 @@ void main() {
       expect(n, 'Download');
       expect(n.contains('SECRET'), isFalse);
     });
-  });
-
-  test('unreadyForNewMedia: only a real swap while ready, setting on', () {
-    bool u({bool enabled = true, int last = 2, int id = 3, bool ready = true}) =>
-        unreadyForNewMedia(enabled: enabled, lastMediaId: last, mediaId: id, ready: ready);
-    expect(u(), isTrue);
-    expect(u(enabled: false), isFalse);
-    expect(u(ready: false), isFalse);
-    expect(u(id: 2), isFalse, reason: 'same media');
-    expect(u(last: -1), isFalse, reason: 'first state of a session is no swap');
   });
 }

@@ -48,10 +48,10 @@ Update from the app: the app looks for a new version at start and every
 few hours, and when one exists a band across the top of the window says so
 (never over a playing video), with its first changes. "What's new" lists
 them all ([CHANGELOG.md](CHANGELOG.md)); the first start after an update
-shows that list once, and Settings → About has it again. "Update and
+shows that list once, and Settings → Help & about has it again. "Update and
 restart" downloads, verifies, applies in place and restarts; "Later" hides
 it until the next check; the install folder must be writable by you. The version you run is
-at the bottom of every Settings page (and in the Settings tab's tooltip). Settings has Check now and an auto-check toggle. From a terminal:
+at the bottom of every Settings page (and in the Settings tab's tooltip). Settings → Updates has Check now. From a terminal:
 `./starsync-server --upgrade` (no display needed, so it works on a
 server box too), `./starsync --upgrade`, or the shipped `update.sh` /
 `update.bat` (which run the first). Each updates the whole folder, app and
@@ -170,7 +170,7 @@ minimised for 10 minutes (playing or not), sits you out by itself, so
 nobody waits for you; you are back as soon as you return (a key, the
 mouse, the window's focus). It never happens when you are alone, and an
 away you chose (or someone else's) stays until you join back. Settings →
-Party & network → "Auto sit-out" turns it off.
+Party → "Auto sit-out" turns it off.
 
 **Reconnects.** A bad connection does not throw you out: the video keeps
 playing, the pill says "Connection unstable…" and then "Reconnecting…",
@@ -190,8 +190,8 @@ attention when the window is in the background).
 
 Your server starts with the app and stops when it closes. Only this app
 can reach it until you press **Invite** (in the strip, or in the member
-list): that opens it on your network at the port from Settings → Party &
-network (default 8080, with the password set there; blank = anyone can
+list): that opens it on your network at the port from Settings → Party
+(default 8080, with the password set there; blank = anyone can
 join) and copies an invite link (`starsync://203.0.113.7:8080/?name=…`,
 just the link) to send to friends. Nothing restarts: what plays and Up next carry on, and you are
 the host (the crown).
@@ -318,7 +318,7 @@ link the server fetched has to be added again).
 
 The week's airing anime, one column per day (AniList), each episode
 marked with what the Jellyfin server has of it when AnimeFlow is
-connected (Settings, Jellyfin & integrations): **on Jellyfin** (Put it
+connected (Settings → Library & accounts): **on Jellyfin** (Put it
 up, right-click to queue), **downloading**, **waiting for release**
 (aired in Japan, AnimeFlow downloads it by itself once a release
 appears; with when AnimeFlow last searched, or **release rejected** when
@@ -360,7 +360,7 @@ To run it as a service, unpack the tarball to `/opt/starsync` and use
 A service set up before the rename (`/opt/watch-together`, running
 `watch-together-server`) keeps working as it is.
 
-Something not playing? Settings → About → **Copy diagnostics** puts the
+Something not playing? Settings → Help & about → **Copy diagnostics** puts the
 app's recent log (passwords, tokens and cookies left out) on the
 clipboard: paste it to whoever helps you, from both sides if you can.
 
@@ -370,10 +370,10 @@ merges everyone's lines and its own into one session log
 keeps it in the app's logs folder), so a problem can be read afterwards from every
 side. Chat is never logged anywhere, nor passwords, tokens and cookies.
 When something goes wrong, press **Mark a problem** (Ctrl+Shift+B, also in
-the player's ⋯ and Settings → About) and add a few words if you like: a
+the player's ⋯ and Settings → Help & about) and add a few words if you like: a
 marker with your name goes in the session log at that moment. In a server,
 Copy diagnostics can add the session log of the last 6 hours (any member
-may read it). Don't want to share? Settings → About → **Share diagnostics
+may read it). Don't want to share? Settings → Help & about → **Share diagnostics
 with the server** off: your log stays on your machine (the server only
 notes that you don't share; a problem you mark still goes in).
 
@@ -402,16 +402,33 @@ join. Leave goes back to your own server.
 
 ## Settings
 
-The Settings tab (Ctrl+,) has a page per topic, each setting with a line
-of help: Profile; Party & network (your server's port and password for
-Invite, recent servers with remove); Player (below); Jellyfin &
-integrations (linked Jellyfin servers, below, the AnimeFlow connection:
-"connected as <name>" with what you may do, or why not, and playing the
-next episode automatically); Notifications & sounds (what pops up, chat
-pop-ups, what reaches you while sitting out or in the background; the sound
-volume and sound set, and every sound with a preview, its own set and a switch); Updates; Keyboard shortcuts (read-only); About
-(the version, also at the bottom of every Settings page and in the
-Settings tab's tooltip; and the credits, e.g. that the Minimal player design is inspired by uosc).
+The Settings tab (Ctrl+, opens the page you last had, Player at first)
+has six pages, each setting with a line of help, the common ones first
+and the rest folded under More:
+
+- **Player**: Sound (the video's volume), Subtitles (size, above the
+  controls), Picture (upscaling shader; under More your own shader
+  files, sharp video, hardware decoding), Controls (player design,
+  controls size, progress line; under More which buttons sit in the
+  bar) and Playback (play the next episode automatically).
+- **Party**: you (picture, name and colour, edited right there), Away
+  (auto sit-out), Your server (port and password for Invite) and Recent
+  servers (forget the ones you no longer use).
+- **Notifications & sounds**: Over the video (toasts or danmaku, chat
+  pop-ups, joins and leaves while sitting out or in the background;
+  under More the danmaku look and what pops up when) and Sounds (App
+  sounds, the sound set; each sound with a preview, its own set and a
+  switch folded below).
+- **Library & accounts**: linked Jellyfin servers (below), the AnimeFlow
+  connection ("connected as <name>" with what you may do, or why not)
+  and Web links (yt-dlp and its cookies, below).
+- **Updates**: where updates stand and Check now; the update channel
+  under More.
+- **Help & about**: Something wrong? (copy diagnostics, mark a problem,
+  the logs folder, sharing diagnostics with the server), every keyboard
+  shortcut, and About (the version, also at the bottom of every
+  Settings page and in the Settings tab's tooltip; and the credits, e.g.
+  that the Minimal player design is inspired by uosc).
 
 Player settings live in the player too: ⚙ in the player's bar opens a
 narrow panel at the right edge of the player that stays open while you
@@ -424,18 +441,17 @@ custom value), Over the video (toasts or danmaku, chat pop-ups, the
 danmaku look) and Controls (player design, controls size, progress
 line). They are Settings' own rows with the same names, only smaller.
 Its All settings button opens the Settings page of the section you last
-used there (the player goes to the mini). Settings → Player has the
-same ones (plus the controls' layout and the custom shader files). Player
-design: Standard or Minimal (below); progress line when hidden (on by
-default: a thin line at the bottom of the video while the controls are
-hidden); upscaling shader (see below); hardware decoding (auto, off or
-custom; auto is mpv's `auto-copy` on Windows, `auto` elsewhere; the env
-var `SYNC_RELAY_HWDEC` overrides it); subtitle size; subtitles above the
-controls (off by default: bottom lines move up while the control bar
-shows; the quick chat box always moves them). Settings → Player → Controls: time display (elapsed / total
-or remaining), controls size (normal or large), hide the controls after
-2, 3 or 5 s, and which optional buttons sit in the bar (chapter buttons,
-subtitles, audio, chat; hidden ones are still in ⋯). Every change
+used there (the player goes to the mini). Player design: Standard or
+Minimal (below); controls size (normal or large); progress line when
+hidden (on by default: a thin line at the bottom of the video while the
+controls are hidden); upscaling shader (see below); hardware decoding
+(auto, off or custom; auto is mpv's `auto-copy` on Windows, `auto`
+elsewhere; the env var `SYNC_RELAY_HWDEC` overrides it); subtitle size;
+subtitles above the controls (off by default: bottom lines move up while
+the control bar shows; the quick chat box always moves them); the
+optional bar buttons (chapter buttons, subtitles, audio, chat; hidden
+ones are in ⋯). The controls hide 3 s after the mouse last moved, and a
+click on the time switches between elapsed and remaining. Every change
 applies right away.
 
 Anywhere in a server (unless you are typing): Space = ready / unready,
@@ -510,7 +526,7 @@ server listens on 127.0.0.1 and a free port only.
 
 ## Jellyfin
 
-Settings > Jellyfin & integrations > Add server: type the address, then sign in with
+Settings → Library & accounts → Add server: type the address, then sign in with
 Quick Connect (the app shows a code; approve it in Jellyfin under Profile >
 Quick Connect) or your username and password. Several servers can be
 linked; each shows its status, and a star picks the default. Sign out
@@ -562,7 +578,7 @@ Episodes: the ⏮ / ⏭ buttons next to play (or `<` / `>`,
 Shift+P / Shift+N) put up the previous or next episode for everyone. From
 the ending (when it is known, see Skipping above; else in the last two
 minutes) a "Next episode" button floats in the corner while the controls
-are up. With "Play the next episode automatically" (Settings, on by
+are up. With "Play the next episode automatically" (Settings → Player, on by
 default), the episode you put up continues with the next one: when it
 ends, everyone sees a 10 s countdown, and anyone can cancel it (see Up
 next). Anyone with an account can put the next one up; friends watching
@@ -592,10 +608,11 @@ and YouTube may start asking any day). Under "Other ways" there are two more:
 
 Web pages work in all three: the app and the dedicated server each
 download [yt-dlp](https://github.com/yt-dlp/yt-dlp) by themselves (checked
-against the release's checksums, updated once a day; Settings → Player
-shows its version and has "Update now"), so there is nothing to install.
+against the release's checksums, updated once a day; Settings → Library
+& accounts → Web links shows its version and has "Update now"), so there
+is nothing to install.
 Sites that refuse guests (Bilibili answers "HTTP Error 412", YouTube may
-ask to sign in) need cookies: Settings → Player → yt-dlp → Cookies reads
+ask to sign in) need cookies: Settings → Library & accounts → Web links → Cookies reads
 them from a browser, or from a cookies.txt or a cookie extension's JSON
 export (picked or dropped; every site in it is kept). They stay on this
 computer and are used by its yt-dlp only (your own playback, "through

@@ -7,10 +7,10 @@ import 'package:flutter_test/flutter_test.dart';
 /// (`AppGraph`, widgets through `AppScope`); this list may only shrink.
 /// Lower a number when a use goes; never raise one or add a class.
 const baseline = {
-  'AppSettings': 29,
+  'AppSettings': 17,
   'JellyfinAccounts': 10,
-  'UpdateController': 8,
-  'Profile': 8,
+  'UpdateController': 7,
+  'Profile': 7,
   'FolderStore': 6,
   'AppYtDlp': 2,
   'RecentLinks': 3,

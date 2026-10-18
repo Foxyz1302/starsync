@@ -81,10 +81,44 @@ video for subtitle placement and sharpness (default
 `~/Videos/starsync-sub-test.mkv`): an .ass track with a top sign
 (`\an8`) and bottom dialogue (English and Japanese), and an SRT track.
 
+## Where a new setting goes
+
+Anything new goes straight to its home in the settings layout
+(ARCHITECTURE "Desktop UI", Settings; "Setting rows" for the widgets),
+and every change is checked against someone who joins once from a link
+and never opens Settings.
+
+- **Prefer a good default to a new switch.** A choice earns a row only
+  when people really differ on it; otherwise pick the default, or put the
+  control where its effect is seen (the clock's click, the Latest row's
+  ⋮).
+- **A one-time joiner touches nothing**: the name prompt, Space or play,
+  the volume and fullscreen are all they need, with the defaults right.
+- **One home per setting**, in one of the six pages:
+  - *Player*: how the video looks and sounds and how the controls
+    behave (volume, subtitles, picture, controls, playback).
+  - *Party*: you (picture, name, colour), being away, your server for
+    Invite, recent servers.
+  - *Notifications & sounds*: what shows over the video and what makes a
+    sound.
+  - *Library & accounts*: where media comes from (Jellyfin, AnimeFlow,
+    web links and their cookies).
+  - *Updates*: what version you run and get.
+  - *Help & about*: diagnostics and sharing them, keyboard shortcuts,
+    about, developer tools.
+- **Common rows first, the rest under More** (`SettingFold`) on each
+  page; troubleshooting and tinkerer rows are always folded.
+- **The player panel** shows only what you adjust while watching, with
+  the same widget and label as Settings (dense under `SettingDensity`);
+  never a second implementation of a row.
+- A new key needs no schema step (missing means the default); renaming
+  or dropping one does (ARCHITECTURE "Settings schema"). Strings that
+  name a Settings path change with the page.
+
 ## Dev tools
 
 Test builds and runs from source (a version with `-dev`) and debug runs
-(`devTools`, `screens/home/ui.dart`) get Settings → About → Developer;
+(`devTools`, `screens/home/ui.dart`) get Settings → Help & about → Developer;
 releases never show it:
 
 - **Danmaku preview** (`danmaku/danmaku_preview.dart`): the danmaku layer
@@ -318,7 +352,7 @@ follow it until a release moves the pubspec) and replaces the assets of the
 the changelog's Unreleased, which also becomes the prerelease's text). Dev builds
 update from it on the Dev update channel, which a test build starts on
 and keeps after a release ([Updater](ARCHITECTURE.md#updater)). Any
-install switches channel in Settings → Updates; the command the script
+install switches channel in Settings → Updates → More; the command the script
 prints is a shortcut that moves a stable install onto the test build at
 once (run with the app open: it finds the install from the running
 process, copies the new files over it and writes the `update-channel`
@@ -368,10 +402,10 @@ app: `dart run packages/server/bin/server.dart`.
 After a session, read the log files rather than reproducing
 ("Logging" in [ARCHITECTURE.md](ARCHITECTURE.md) has what goes in them):
 the app's are `~/.local/share/dev.foxyz.starsync/logs/app-*.log`
-on Linux (on Windows `%APPDATA%\foxyz\Starsync\logs`; Settings → About → "Open logs
+on Linux (on Windows `%APPDATA%\foxyz\Starsync\logs`; Settings → Help & about → "Open logs
 folder" finds it anywhere), with your server's lines
 in the same file; a dedicated server prints its folder at start
-(`--log-dir`). Users send theirs with Settings → About → "Copy
+(`--log-dir`). Users send theirs with Settings → Help & about → "Copy
 diagnostics".
 
 A Windows friend without a terminal habit: `tool/windows_report.cmd`

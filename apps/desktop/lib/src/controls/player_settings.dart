@@ -18,7 +18,8 @@ export '../widgets/setting_rows.dart';
 
 // Every player setting, defined once: Settings → Player and the player
 // panel (`player_panel.dart`, dense under a [SettingDensity]) draw these
-// same widgets with the same labels. Each reads and writes [AppSettings]
+// same widgets with the same labels (the clock's elapsed / remaining is
+// only its click). Each reads and writes [AppSettings]
 // and applies to a running player right away.
 
 AppSettings _settings(BuildContext context) => AppScope.of(context).coordinator.settings;
@@ -52,8 +53,8 @@ class VideoVolumeSetting extends StatelessWidget {
       return SettingTrack(
         key: const ValueKey('video-volume'),
         label: 'Volume',
-        help: "The video's volume, yours only; the next start begins here. In the player: M mutes, "
-            'scroll or ↑ / ↓ steps',
+        help: "The video's, yours only; each start begins here. In the player M mutes, the wheel or ↑ / ↓ "
+            'steps it',
         readout: '${v.round()} %',
         readoutColor: v > 100 ? vol.boostColor : null,
         // In line with the sliders around it: their colours, inset by
@@ -361,28 +362,6 @@ class PlayerDesignSetting extends StatelessWidget {
   }
 }
 
-/// The bar's clock: elapsed / total or the time left. Live.
-class TimeDisplaySetting extends StatelessWidget {
-  const TimeDisplaySetting({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final s = _settings(context);
-    return SignalBuilder(
-      builder: (context) => SettingRow(
-        label: 'Time display',
-        help: 'Also switched by a click on the time',
-        control: AppSelect<TimeDisplay>(
-          key: const ValueKey('time-display'),
-          value: s.timeDisplay.value,
-          items: [for (final t in TimeDisplay.values) (t, t.label)],
-          onChanged: s.setTimeDisplay,
-        ),
-      ),
-    );
-  }
-}
-
 /// Normal or large bar and buttons. Live.
 class ControlsSizeSetting extends StatelessWidget {
   const ControlsSizeSetting({super.key});
@@ -399,28 +378,6 @@ class ControlsSizeSetting extends StatelessWidget {
           value: s.controlsSize.value,
           items: [for (final z in ControlsSize.values) (z, z.label)],
           onChanged: s.setControlsSize,
-        ),
-      ),
-    );
-  }
-}
-
-/// How long the controls stay up without mouse movement. Live.
-class HideDelaySetting extends StatelessWidget {
-  const HideDelaySetting({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final s = _settings(context);
-    return SignalBuilder(
-      builder: (context) => SettingRow(
-        label: 'Hide the controls after',
-        help: 'Without mouse movement over the video',
-        control: AppSelect<int>(
-          key: const ValueKey('controls-hide'),
-          value: s.controlsHideSecs.value,
-          items: [for (final secs in controlsHideChoices) (secs, '$secs s')],
-          onChanged: s.setControlsHideSecs,
         ),
       ),
     );
@@ -466,27 +423,3 @@ class ProgressLineSetting extends StatelessWidget {
     );
   }
 }
-
-/// The controls' own choices (Settings → Player → Controls).
-List<Widget> controlsSettingRows() => [
-  const TimeDisplaySetting(),
-  const ControlsSizeSetting(),
-  const HideDelaySetting(),
-  const Padding(
-    padding: EdgeInsets.only(top: 10, bottom: 2),
-    child: Text('Buttons in the bar (hidden ones stay in ⋯)', style: TextStyle(fontWeight: FontWeight.w600)),
-  ),
-  for (final c in OptionalControl.values) BarButtonSetting(control: c),
-];
-
-/// The player rows of Settings → Player, in order (the player panel
-/// shows the same widgets).
-List<Widget> playerSettingRows({ReadonlySignal<RenderMode>? renderMode}) => [
-      const PlayerDesignSetting(),
-      const ProgressLineSetting(),
-      ShaderPresetSetting(renderMode: renderMode),
-      ScreenResSetting(renderMode: renderMode),
-      const HwdecSetting(),
-      const SubScaleSetting(),
-      const LiftSubtitlesSetting(),
-    ];

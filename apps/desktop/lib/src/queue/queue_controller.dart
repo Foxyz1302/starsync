@@ -166,7 +166,7 @@ class QueueController {
         final accounts = coord.jellyfin;
         if (accounts.account(pick.serverId) == null) return 'that Jellyfin server is not linked any more';
         if (accounts.statusOf(pick.serverId) == JellyfinAccountStatus.expired) {
-          return 'Jellyfin sign-in expired — reconnect it in Settings → Jellyfin & integrations';
+          return 'Jellyfin sign-in expired — reconnect it in Settings → Library & accounts';
         }
         final client = accounts.clientFor(pick.serverId);
         final thumb = client == null ? null : await _jellyfinThumb(client, pick.itemId);

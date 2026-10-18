@@ -4,7 +4,7 @@ import 'package:signals/signals_flutter.dart';
 import '../../platform/app_log.dart';
 import '../../shell/mark_problem.dart';
 import '../../app/app_graph.dart';
-import '../../state/settings.dart';
+import '../../widgets/setting_rows.dart';
 import '../../update/update_controller.dart';
 import '../../update/whats_new.dart';
 import '../../widgets/whats_new_card.dart';
@@ -47,7 +47,7 @@ class DeveloperPanel extends StatelessWidget {
 }
 
 /// Name, version, update state, What's new in this version, the source
-/// link and the logs (Settings → About).
+/// link and the credits (Settings → Help & about).
 class AboutPanel extends StatelessWidget {
   final UpdateController? updates;
   final WhatsNew? whatsNew;
@@ -102,49 +102,64 @@ class AboutPanel extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(uoscCredit, key: const ValueKey('uosc-credit'), style: t.bodySmall?.copyWith(color: Colors.grey)),
-              const SizedBox(height: kGap),
-              Text('Something went wrong? Copy diagnostics and send them to whoever helps you: '
-                  'versions and the last hours of the log, passwords, tokens and cookies left out. '
-                  'In a session it can add the server\'s session log, everyone\'s lines merged. '
-                  'Mark a problem (Ctrl+Shift+B) when it happens so the spot is easy to find.',
-                  style: t.bodySmall?.copyWith(color: Colors.grey)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  Builder(
-                    builder: (context) => FilledButton.tonalIcon(
-                      key: const ValueKey('copy-diagnostics'),
-                      onPressed: () => _copyDiagnostics(context),
-                      icon: const Icon(Icons.bug_report_outlined, size: 18),
-                      label: const Text('Copy diagnostics'),
-                    ),
-                  ),
-                  const MarkProblemButton(outlined: true),
-                  OutlinedButton.icon(
-                    onPressed: appLogDir == null ? null : () => _openLogs(context),
-                    icon: const Icon(Icons.folder_open, size: 18),
-                    label: const Text('Open logs folder'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              SignalBuilder(
-                builder: (context) => SwitchListTile(
-                  key: const ValueKey('share-diagnostics'),
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Share diagnostics with the server'),
-                  subtitle: const Text('In a session, this app\'s log goes to the server\'s session log, '
-                      'merged with everyone\'s, so a problem can be read afterwards. Never chat; '
-                      'passwords and tokens left out. Off: only a problem you mark is sent.'),
-                  value: AppSettings.instance.shareDiagnostics.value,
-                  onChanged: AppSettings.instance.setShareDiagnostics,
-                ),
-              ),
             ],
           ),
         );
+  }
+}
+
+/// Settings → Help & about → Something wrong?: copy diagnostics, mark a
+/// problem, the logs folder, and whether this app's log goes to the
+/// server's session log.
+class DiagnosticsPanel extends StatelessWidget {
+  const DiagnosticsPanel({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final s = AppScope.of(context).coordinator.settings;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Copy diagnostics and send them to whoever helps you: versions and the last hours of the log, '
+            'passwords, tokens and cookies left out. In a session it can add the server\'s session log, '
+            'everyone\'s lines merged. Mark a problem (Ctrl+Shift+B) when it happens so the spot is easy to find.',
+            style: t.bodySmall?.copyWith(color: Colors.grey)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            Builder(
+              builder: (context) => FilledButton.tonalIcon(
+                key: const ValueKey('copy-diagnostics'),
+                onPressed: () => _copyDiagnostics(context),
+                icon: const Icon(Icons.bug_report_outlined, size: 18),
+                label: const Text('Copy diagnostics'),
+              ),
+            ),
+            const MarkProblemButton(outlined: true),
+            OutlinedButton.icon(
+              onPressed: appLogDir == null ? null : () => _openLogs(context),
+              icon: const Icon(Icons.folder_open, size: 18),
+              label: const Text('Open logs folder'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        SignalBuilder(
+          builder: (context) => SettingSwitch(
+            switchKey: const ValueKey('share-diagnostics'),
+            label: 'Share diagnostics with the server',
+            help: 'In a session, this app\'s log goes to the server\'s session log, merged with everyone\'s, so a '
+                'problem can be read afterwards. Never chat; passwords and tokens left out. Off: no log lines go, '
+                'only a note that sharing is off and the problems you mark.',
+            value: s.shareDiagnostics.value,
+            onChanged: s.setShareDiagnostics,
+          ),
+        ),
+      ],
+    );
   }
 
   /// In a session it asks whether to add the server's session log.

@@ -12,7 +12,8 @@ import 'standard/standard_controls.dart';
 
 // The session's controls: one [ControlsFrame] (when they are up) around the
 // skin the settings pick, both drawing the same [PlayerControlsModel].
-// Skin, size and the hide delay follow the settings live.
+// Skin and size follow the settings live; the controls hide 3 s after the
+// mouse last moved ([ControlsFrame.hideAfter]).
 
 /// The bottom controls' height in [skin] at [size] (the player's floating
 /// pills sit just above it).
@@ -62,7 +63,6 @@ class SessionControls extends StatelessWidget {
           shown: shown,
           holdBy: hold,
           suppress: suppress,
-          hideAfter: Duration(seconds: s.controlsHideSecs.value),
           onDoubleClick: onDoubleClick,
           barTop: controlsTopHeight(skin),
           barBottom: controlsBottomHeight(skin, size),

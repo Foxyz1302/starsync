@@ -68,7 +68,7 @@ class SessionPlayer extends StatefulWidget {
   final VoidCallback onToggleFullscreen;
   final VoidCallback onToggleChat;
   final VoidCallback onChangeVideo;
-  final VoidCallback onOpenIntegrations;
+  final VoidCallback onOpenAccounts;
   /// Opens a Settings page (the player panel's "All settings"; the shell
   /// takes the player to the mini).
   final ValueChanged<SettingsSection>? onOpenSettings;
@@ -100,7 +100,7 @@ class SessionPlayer extends StatefulWidget {
     required this.onToggleFullscreen,
     required this.onToggleChat,
     required this.onChangeVideo,
-    required this.onOpenIntegrations,
+    required this.onOpenAccounts,
     required this.onLeave,
     this.onOpenSettings,
     this.chatOpen = false,
@@ -734,7 +734,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
               hold: _hold,
               child: JellyfinBlockedCard(
                 blocked: blocked,
-                onLinkAccount: widget.onOpenIntegrations,
+                onLinkAccount: widget.onOpenAccounts,
                 onRetry: _coord.retryJellyfin,
               ),
             ),
@@ -964,8 +964,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
 
 /// The Settings page that holds a player panel section's settings.
 SettingsSection settingsPageFor(PanelSection s) => switch (s) {
-  PanelSection.sound || PanelSection.overVideo => SettingsSection.notifications,
-  PanelSection.subtitles || PanelSection.picture || PanelSection.controls => SettingsSection.player,
+  PanelSection.overVideo => SettingsSection.notifications,
+  PanelSection.sound || PanelSection.subtitles || PanelSection.picture || PanelSection.controls =>
+    SettingsSection.player,
 };
 
 /// The mini player's empty controls slot (see [SessionPlayer]'s video).

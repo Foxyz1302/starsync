@@ -48,7 +48,7 @@ attach and detach the network listener (below).
   server, the navigation starts a new one and goes home to it.
 - **Listeners**: `SyncServer.share(port, secret, jellyfin)` attaches a
   second listener on every IPv4 interface at the port from Settings →
-  Party & network (default 8080) to the running server (Relic serves the
+  Party → Your server (default 8080) to the running server (Relic serves the
   same routes on both), sets the password and the Jellyfin relay logins
   (one per linked account, `relayCredentialsFor`, so guests without an
   account watch Jellyfin items through the server with your sign-in on
@@ -226,12 +226,10 @@ Loosely modeled on Syncplay, with a different readiness design.
   PLAYING (any media, the one the server started with included); joining
   while PLAYING it stays out (`ready=false`) until it readies. A swap puts
   every member in the set and keeps everyone's ready flag, so the next
-  video starts once everyone ready has buffered (the client setting
-  "Unready when the video changes", `AppSettings.unreadyOnSwap`, default
-  off, sends `ready=false` itself on a new `mediaId`; not for the first
-  state of a session, and a reconnect does not restore a ready that a
-  swap meanwhile would have dropped). A player error removes from the
-  set; presence decides whether a member in the set counts.
+  video starts once everyone ready has buffered (the client never
+  unreadies itself on a swap; a reconnect restores a ready across one).
+  A player error removes from the set; presence decides whether a member
+  in the set counts.
 - **Identity**: an install sends a random client id (`hello.client`,
   private: never broadcast, never logged) and a `seq` that rises with
   every connection. The server maps the client id to one member for its
@@ -541,7 +539,7 @@ That, a page's resolve error (yt-dlp's words and the cookies it used,
 D11, see "yt-dlp") and a failed open become the coordinator's
 `playerError` in plain words (`playErrorText`, core
 `link_probe.dart`: 412/precondition/login/cookies/sign in → "This site
-needs cookies — Settings → Player → yt-dlp → Cookies", 403 → "Not allowed
+needs cookies — Settings → Library & accounts → Web links → Cookies", 403 → "Not allowed
 (403)", 404/410 → "Not found (404)", "Unsupported URL" → "Not a video
 page yt-dlp knows", network errors → "Couldn't reach the site", anything
 else as is; `withCookieNote` adds the cookies to the two sign-in texts).
@@ -614,7 +612,8 @@ fails every seek until a fresh open, so the coordinator runs "Reload
 video" once per media for it (`mpvStreamLost`, `onStreamLost`).
 
 Output size ("Sharp video and subtitles", `AppSettings.screenResVideo`,
-on by default, live; Settings → Player and the player panel):
+on by default, live; Settings → Player → Picture → More and the player
+panel's Troubleshooting):
 media_kit renders mpv into a texture the size of the video and Flutter
 scales it, so libass subtitles, mpv's scaler and the shaders all work on
 a 720p image for a 720p file. With the setting on and the GPU renderer
@@ -1222,8 +1221,9 @@ all three link modes. Nothing is bundled or installed by hand.
   place. If the download fails, a `yt-dlp` on PATH is the fallback. After
   that, at most once a day (`last-check` stamp in the folder) and in the
   background, a newer tag is downloaded the same way; nothing waits for
-  it. `version`, `lastError`, `busy` and `changes` feed Settings → Player
-  → yt-dlp ("Update now" forces the check). Every failure is non-fatal.
+  it. `version`, `lastError`, `busy` and `changes` feed Settings →
+  Library & accounts → Web links ("Update now" forces the check). Every
+  failure is non-fatal.
   Folders: the app's is `<app support>/yt-dlp` (`AppYtDlp`, warmed up at
   start), shared with your server; the dedicated server's is
   `--yt-dlp-dir`, else `$STATE_DIRECTORY/yt-dlp` (systemd), else
@@ -1369,7 +1369,7 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   `jf: false`. Else, when `media.relay` names a source, the `/r/` URL:
   `RelayPlay`. Else `BlockedPlay`: the session shows "No Jellyfin account
   here for <server>, and nobody is passing it on" with a button that
-  opens Integrations over the session; linking (or reconnecting) the
+  opens Settings → Library & accounts over the session; linking (or reconnecting) the
   account retries by itself. A 401 marks the account expired. The member
   list shows "via server" for members whose `jf` is false for the current
   item (see "Relay", Stats). A reconnect to the same item with `OwnPlay` keeps playing as is.
@@ -2153,19 +2153,41 @@ panel) and chat messages (Copy message, and a link in it).
   and goes through the shell's put-up; right-click queues it the same
   way. Requests and the owner's inbox are in `requests_sheet.dart`. It refreshes every minute; mouse drag and
   Shift+wheel scroll the board sideways, the plain wheel scrolls a column.
-  Settings (`settings_tab.dart`) has a left nav with icons
-  (icon chips under 760 px) over pages of rounded Material cards
-  (`SettingsPanel`), one help line under every setting: profile, party &
-  network (your server's port and password, used the next time it is
-  shared, in the connect form; recent
-  servers), player (the shared rows below, the controls' choices, custom
-  shader files),
-  Jellyfin & integrations (linked servers, AnimeFlow's `/me` via
-  `AnimeFlowClient.fromAccounts`, "Play the next episode automatically":
-  whether this app adds the continuation, see "What's next"), notifications & sounds
-  (what pops up, chat pop-ups, toasts or danmaku over the player with the
-  danmaku look, joins and leaves while sitting out or in
-  the background), updates, shortcuts, about.
+  Settings (`settings_tab.dart`, `SettingsSection`) has a left nav with
+  icons (icon chips under 760 px) over pages of rounded Material cards
+  (`SettingsPanel`) drawn with the setting rows (see "Setting rows"),
+  one help line under every setting; each page shows its common rows
+  first and folds the rest under More (`SettingFold`). Ctrl+, opens the
+  page last shown, Player at first. Every setting has one home (where a
+  new one goes: DEVELOPMENT "Where a new setting goes"):
+  - **Player**: Sound (Volume, `playerVolume`), Subtitles (size, above
+    the controls), Picture (Upscaling shader with HQ / Fast; More: custom
+    shader files, sharp video, hardware decoding), Controls (player
+    design, controls size, progress line; More: the bar's optional
+    buttons), Playback ("Play the next episode automatically": whether
+    this app adds the continuation, see "What's next"). A line says the
+    player's ⚙ opens these while watching.
+  - **Party**: You (picture, name and colour edited in place with the
+    profile card's `ProfilePicture` / `ProfileColors`; the profile card's
+    Settings link opens this page), Away (auto sit-out), Your server
+    (port and password, used the next time it is shared, in the connect
+    form), Recent servers (Forget, as on the Join card).
+  - **Notifications & sounds**: Over the video (Notifications: toasts or
+    danmaku, Chat pop-ups, Joins and leaves too; More: the danmaku look
+    with its preview strip and what pops up when), Sounds (App sounds,
+    Sound set; folded: each sound with a preview, its own set and a
+    switch).
+  - **Library & accounts**: Jellyfin servers, AnimeFlow (`/me` via
+    `AnimeFlowClient.fromAccounts`), Web links (yt-dlp and its cookies).
+  - **Updates**: status, Check now, Show update; More: the channel.
+  - **Help & about**: Something wrong? (Copy diagnostics, Mark a
+    problem, Open logs folder, Share diagnostics with the server),
+    Keyboard shortcuts (the player's; folded: anywhere and the library),
+    About, Developer (dev builds).
+  No row for what has a fixed default or a place in context: the
+  controls hide after 3 s, a swap never unreadies, update checks always
+  run (D8), the clock's click switches elapsed / remaining, the Latest
+  row's ⋮ hides re-releases (stored values: "Settings schema").
 - **Drop and paste** (`handoff.dart`, `fox_utils`): the shell is one
   `DropTarget` (a "Drop to open" overlay while dragging) and a
   `HardwareKeyboard` handler for Ctrl+V outside a text field (clipboard
@@ -2202,7 +2224,7 @@ panel) and chat messages (Copy message, and a link in it).
   (`warmUp`), so neither startup nor the first sound waits on it; if it
   can't open, the engine logs `no sounds: audio init failed` once and drops
   every play. App close disposes the engine (deinit, 500 ms bound)
-  before leaving the server. Settings → Notifications & sounds has the volume, the
+  before leaving the server. Settings → Notifications & sounds → Sounds has App sounds (also in the player panel), the
   overall sound set (`soundPreset`), and per sound a preview, its own set
   (`soundPresetFor`, else the overall one) and a switch; a preview always
   re-renders, so an edited spec plays after a hot reload.
@@ -2225,7 +2247,7 @@ panel) and chat messages (Copy message, and a link in it).
   brings it back, and joining back with it closed shows the mini. Fullscreen
   is `windowManager.setFullScreen` with the strip hidden (party avatars in
   a corner while paused); F, Esc and double-click on the picture toggle it.
-  The player keys (Settings → Keyboard shortcuts) work while the player is
+  The player keys (Settings → Help & about → Keyboard shortcuts) work while the player is
   full and nothing is in front of it; ↑ / ↓ step the volume, M mutes. Space (ready)
   and Tab (chat) are app-wide: `AppKeys` (`widgets/app_keys.dart`, around
   the shell) takes them first while in a server, unless a text field (or
@@ -2384,8 +2406,8 @@ panel) and chat messages (Copy message, and a link in it).
   Enter, typing and sending never show the cursor or the controls.
 - **Subtitle lift** (`video_view.dart`): bottom subtitles move above what
   covers the bottom of the full player: the quick chat box (always), and the control bar while it is up when
-  `AppSettings.liftSubtitles` is on (off by default; Settings → Player
-  and the player panel, "Subtitles above the controls"); 8 px above it.
+  `AppSettings.liftSubtitles` is on (off by default; Settings → Player →
+  Subtitles and the player panel, "Subtitles above the controls"); 8 px above it.
   `SubtitleLift` steps the covered height toward each new target in
   `liftStepCount` (4) eased-out steps `liftStepGap` (42 ms) apart, the
   first at once: about one step per frame of a 24 fps video, so each
@@ -2436,7 +2458,8 @@ panel) and chat messages (Copy message, and a link in it).
   dialogue and sample lines in the current look; it plays for 16 s after
   it opens or a knob moves, then rests until clicked).
 
-**Setting rows** (`widgets/setting_rows.dart`): every setting is one
+**Setting rows** (`widgets/setting_rows.dart`; which page and fold a new
+one gets: DEVELOPMENT "Where a new setting goes"): every setting is one
 widget, drawn the same way in Settings and in the player panel with the
 same label: `SettingRow` (label, help under it, the control at the
 right, `below` for an extra line), `SettingSwitch`, `SettingTrack` (a
@@ -2485,7 +2508,12 @@ applies the ordered `settingsMigrations` steps past the stored version up
 to `settingsSchemaVersion`, stamping the version after each. 1 is the
 layout of 1.2.x (a box without a version is at 1); 2: auto sit-out
 replaces the idle switch; 3: the video volume is kept (`playerVolume`,
-100 % when missing). A box from a newer build is left alone. Link media names are a web page's title (see "yt-dlp"), else
+100 % when missing); 4: the settings cleanup deletes `controlsHideSecs`,
+`unreadyOnSwap` and `autoCheckUpdates` (`droppedSettingKeys`: their
+defaults hold; an older build reading the box finds them missing and
+uses the same defaults), while `timeDisplay` and `hideReReleases` stay
+(the clock's click, the Latest row's menu). A box from a newer build is
+left alone. Link media names are a web page's title (see "yt-dlp"), else
 derived from the URL path, never containing a query string.
 
 Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
@@ -2500,7 +2528,8 @@ Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
   signed-in client; `cached()` memoises browse calls for 3 min.
 - `sign_in.dart` + `sign_in_panel.dart`: address -> `/System/Info/Public`
   -> Quick Connect (code, poll, cancel) or password; reconnect must hit the
-  same ServerId. `accounts_panel.dart` is the Integrations card.
+  same ServerId. `accounts_panel.dart` is the Jellyfin card of Settings →
+  Library & accounts.
 - `browser.dart`: back stack of `BrowseRoute`s (Home rows, library grid,
   series) kept alive under `Visibility(maintainState)` so back keeps
   scroll and loaded pages; search (300 ms debounce) overlays them. Where
@@ -2523,8 +2552,8 @@ Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
   resume point and hides the series (`dismissed:<serverId>` in the
   `jellyfin` box) until it is played again. "Latest in X" loads single
   items (`groupItems=false`) and `latestCards` makes one series card per
-  series (its poster, "S1E1" or "N new"); with `hideReReleases` (setting,
-  row menu, default on) items added over 30 days after they aired are left
+  series (its poster, "S1E1" or "N new"); with `hideReReleases` (the
+  row's ⋮ menu, default on) items added over 30 days after they aired are left
   out. "Show all" opens the library sorted by date added, newest first.
 - Picking an item gives a `JellyfinMedia` (serverId, baseUrl, itemId,
   mediaSourceId?, title, subtitle, runtime; no credentials). The library
@@ -2551,7 +2580,7 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   `seek` through `player.seek`, the user path; `nudge`, `skipForward`,
   `skip`, `stepChapter`, `pickChapter`; `next` = the queue's first item
   (Up next's, else the continuation), else the next episode, `previous`; volume set / step (flashes) / mute;
-  `pickTrack`, `pickShader`; time display; fullscreen, chat, change
+  `pickTrack`, `pickShader`; the clock's click (elapsed / remaining); fullscreen, chat, change
   video, collapse, leave, reload, mark everyone ready, link). The
   player keys call the same actions. `ControlsSnapshot` (computed) is
   what the layout depends on.
@@ -2571,7 +2600,7 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   are defined there too, once.
 - **Shared pieces**: `ControlsFrame` (`frame.dart`): when the controls
   are up (real mouse movement shows them, see "Quick chat"; `suppress`
-  holds them hidden; `controlsHideSecs` without movement or the
+  holds them hidden; 3 s without movement, `hideAfter`, or the
   mouse leaving hides them and the cursor), holds (`hold` during a seek
   drag, `holdDuring` / `holdWhile` around menus and popovers, `holdBy`
   the session's `ControlsHold`), and the double-click on the picture
@@ -2617,11 +2646,11 @@ part not downloaded still reads; chapter cuts are a light dark line.
   shown.
 - **Settings** (`AppSettings`, `model/controls_prefs.dart`, all live):
   `controlsSkin` (`ControlsSkin` standard / minimal; a stored
-  `mpvControls: true` from before becomes minimal), `timeDisplay`,
-  `controlsSize` (normal / large: the bottom bar ×1.25),
-  `controlsHideSecs` (2 / 3 / 5), `hiddenControls`, `progressLine`.
-  The player panel has the skin and the progress line; Settings →
-  Player → Controls has the rest.
+  `mpvControls: true` from before becomes minimal), `timeDisplay` (set
+  by the clock's click), `controlsSize` (normal / large: the bottom bar
+  ×1.25), `hiddenControls`, `progressLine`. The player panel has the
+  skin, the size and the progress line; Settings → Player → Controls has
+  them too and, under More, the bar's buttons.
 - Pills (Skip OP / ED / 1:30, Next episode) and cards live outside the
   controls, in the action area ("Player overlay"). The cards stay up; a
   pill (`PillGate`) shows only while the controls are up (the frame's
@@ -2771,17 +2800,18 @@ dedicated server (`package:logging` loggers named by area: `relay`,
   diagnostics`, and `N lines dropped` when the app's buffer overflowed.
   Limits and rate caps: PROTOCOL "Diagnostics"; a refused batch stays in
   the app's buffer for the next try.
-- **Opting out**: Settings → About → "Share diagnostics with the server"
-  (default on). Off: no lines are kept or sent; one batch per connection
-  says so (`share:false`). The local log is unchanged.
-- **Mark a problem**: Ctrl+Shift+B (`AppKeys`), the player panel and
-  Settings → About open a small card with an optional note (200
+- **Opting out**: Settings → Help & about → "Share diagnostics with the
+  server" (default on). Off: no lines are kept or sent; one batch per
+  connection says so (`share:false`), and problem marks still go. The
+  local log is unchanged.
+- **Mark a problem**: Ctrl+Shift+B (`AppKeys`), the player's ⋯ and panel, and
+  Settings → Help & about open a small card with an optional note (200
   characters, one line); the mark goes at once with the lines waiting,
   opted out or not, and the server writes `[who] === PROBLEM marked by
   <name>: <note> ===` at its time. The app's own log gets
   `=== PROBLEM marked: <note> ===` (logger `problem`, never sent). Out
   of a session only the app's log gets it. The toast says which.
-- **Getting it**: Settings → About → "Copy diagnostics" puts the app and
+- **Getting it**: Settings → Help & about → "Copy diagnostics" puts the app and
   OS versions, mpv/ffmpeg and yt-dlp versions, whether yt-dlp has
   cookies, and the last 6 hours of the log (up to 4 MiB) on the
   clipboard, already redacted, and saves the same text as
@@ -2881,13 +2911,13 @@ packaged install says to replace the folder by hand. The shell keeps the
 band off the full player while a video is on (not finished); it shows on
 the tabs, the mini player's views and once the video ends. A required
 update has no Later. Nothing downloads before the click. The app checks at
-start and every 4 hours while running (`updateCheckEvery`), both with the
-auto-check setting on; a re-check never touches an install under way.
-Settings has Check now and the auto-check toggle. The manifest is `updates/manifest.json` in
+start and every 4 hours while running (`updateCheckEvery`), always (D8:
+nothing installs without asking); a re-check never touches an install
+under way. Settings → Updates has Check now. The manifest is `updates/manifest.json` in
 this repo, written by `tool/release.sh`.
 
 **Update channel.** `UpdateChannel` stable or dev, the setting
-`updateChannel` (Settings → Updates, "Update channel", which also says
+`updateChannel` (Settings → Updates → More, "Update channel", which also says
 the channel and version running). Dev also reads `devManifestUrl`, the
 `manifest.json` of the `dev` prerelease (`tool/dev_release.sh`), and takes
 the newer of the two by semver (`pickManifest`, `fetchLatestManifest`): a
@@ -2917,7 +2947,7 @@ Changed / Fixed sections, each with its icon and colour, on `AppGlass` in
 a popover, the rows easing in one after another, the list scrolling in a
 short window; notes alone show as one paragraph. Three ways open it: the
 band's What's new (the offered version, with Update and restart), the
-first start of a new version, and Settings → About ("What's new in X.Y.Z",
+first start of a new version, and Settings → Help & about ("What's new in X.Y.Z",
 once this version's notes are known). The first start (`WhatsNew`,
 `update/whats_new.dart`): before restarting, the update keeps the new
 version's notes in settings (`UpdateController.beforeRestart`); an update

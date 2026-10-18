@@ -5,7 +5,7 @@ import 'accounts.dart';
 import 'browser.dart' show JellyfinAvatar, StatusDot, showReconnectDialog;
 import 'sign_in_panel.dart';
 
-/// Integrations > Jellyfin: linked servers (avatar, status, default,
+/// Settings → Library & accounts → Jellyfin: linked servers (avatar, status, default,
 /// reconnect, sign out) and the inline add-server flow.
 class JellyfinAccountsPanel extends StatefulWidget {
   final JellyfinAccounts accounts;

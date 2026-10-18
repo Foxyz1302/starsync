@@ -77,10 +77,10 @@ String notAVideoText(String? ytDlpError) =>
 const noRelayFormatText = "This page has no video a relay can read. Choose 'Everyone fetches it' instead.";
 
 /// The plain-words texts of [playErrorText].
-const needsCookiesText = 'This site needs cookies — Settings → Player → yt-dlp → Cookies';
+const needsCookiesText = 'This site needs cookies — Settings → Library & accounts → Web links → Cookies';
 /// yt-dlp read the page but got no video, typically a site that hides it
 /// from signed-out visitors (Bilibili does for some videos).
-const noFormatsText = 'No video found: it may need signing in (cookies: Settings → Player → yt-dlp)';
+const noFormatsText = 'No video found: it may need signing in (cookies: Settings → Library & accounts → Web links)';
 const notAllowedText = 'Not allowed (403)';
 const notFoundText = 'Not found (404)';
 const unsupportedUrlText = 'Not a video page yt-dlp knows';
@@ -106,7 +106,7 @@ bool mayNeedSignIn(String error) {
 /// texts about signing in; anything else as is.
 String withCookieNote(String plain, String? note) {
   if (note == null || note.isEmpty) return plain;
-  if (plain == needsCookiesText) return 'This site needs cookies ($note) — Settings → Player → yt-dlp → Cookies';
+  if (plain == needsCookiesText) return 'This site needs cookies ($note) — Settings → Library & accounts → Web links → Cookies';
   if (plain == noFormatsText) return 'No video found: it may need signing in ($note)';
   return plain;
 }

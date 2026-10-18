@@ -56,9 +56,3 @@ enum OptionalControl {
   final String help;
   const OptionalControl(this.label, this.help);
 }
-
-/// The auto-hide delays offered (seconds).
-const controlsHideChoices = [2, 3, 5];
-
-/// The default auto-hide delay (seconds).
-const defaultControlsHideSecs = 3;

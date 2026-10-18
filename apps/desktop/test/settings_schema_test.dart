@@ -48,6 +48,24 @@ void main() {
       expect(box.get('playerVolume'), 40.0);
     });
 
+    test('4: the dropped choices go, whatever was stored; the rest stays', () async {
+      final box = await Hive.openBox('settings');
+      await box.putAll({
+        settingsSchemaKey: 3,
+        'controlsHideSecs': 5,
+        'unreadyOnSwap': true,
+        'autoCheckUpdates': false,
+        'timeDisplay': 'remaining',
+        'hideReReleases': false,
+      });
+      expect(await migrateSettings(box), hasLength(1));
+      for (final k in droppedSettingKeys) {
+        expect(box.containsKey(k), isFalse, reason: k);
+      }
+      expect(box.get('timeDisplay'), 'remaining', reason: 'the clock click still sets it');
+      expect(box.get('hideReReleases'), isFalse, reason: 'the Latest row\'s menu still sets it');
+    });
+
     test('steps run in order, only past the stored version', () async {
       final box = await Hive.openBox('settings');
       await box.put(settingsSchemaKey, 1);

@@ -5,13 +5,16 @@ import 'package:sync_relay_core/core.dart' show UpdateChannel, isDevBuild;
 import '../../app/app_graph.dart';
 import '../../state/settings.dart';
 import '../../update/update_controller.dart';
+import '../../widgets/setting_rows.dart';
 import 'ui.dart';
 import 'update_indicator.dart';
 
-/// Session keys: Space and Tab anywhere in a server (`AppKeys`), the
-/// rest by the session player's key handler (while it fills the window).
-const sessionShortcuts = [
-  ('Space', 'Toggle ready'),
+/// The keys, by where they work (Settings → Help & about → Keyboard
+/// shortcuts). The player's: Space and Tab anywhere in a server
+/// (`AppKeys`), the rest by the session player's key handler while it
+/// fills the window.
+const playerShortcuts = [
+  ('Space', 'Toggle ready (anywhere in a server)'),
   ('← / →', 'Seek back / forward 10 s'),
   ('↑ / ↓, wheel', 'Volume up / down (up to 150 %)'),
   ('M', 'Mute / unmute'),
@@ -19,14 +22,27 @@ const sessionShortcuts = [
   ('PgUp / PgDn', 'Previous / next chapter'),
   ('F', 'Toggle fullscreen'),
   ('Enter', 'Quick chat box (Enter sends, Esc closes)'),
-  ('Tab', 'Open / close chat & activity'),
+  ('Tab', 'Open / close chat & activity (anywhere in a server)'),
   ('Ctrl+R', 'Reload the video'),
-  ('> or Shift+N', 'Put up the next Jellyfin episode'),
-  ('< or Shift+P', 'Put up the previous Jellyfin episode'),
+  ('> or Shift+N', 'Play what is next: Up next, else the next episode'),
+  ('< or Shift+P', 'Put up the previous episode'),
   ('Ctrl+1…6', 'Shaders: Anime4K mode A, B, C, A+A, B+B, C+A'),
   ('Ctrl+0', 'Shaders off'),
   ('Esc', 'Close a menu, the player settings panel, the chat or fullscreen, shrink the player, then ask to leave'),
-  ('Ctrl+Shift+B', 'Mark a problem in the session log (anywhere)'),
+];
+
+/// Keys that work all over the app.
+const anywhereShortcuts = [
+  ('Ctrl+,', 'Settings'),
+  ('Ctrl+V', 'Open a pasted link, file or invite (outside a text field)'),
+  ('Ctrl+Shift+B', 'Mark a problem in the session log'),
+];
+
+/// The Jellyfin library's keys.
+const libraryShortcuts = [
+  ('/ or Ctrl+F', 'Search'),
+  ('Esc', 'Clear the search, then go back'),
+  ('Backspace, Alt+←', 'Back'),
 ];
 
 /// One titled card of the Settings tab (rounded Material, so list tiles
@@ -60,38 +76,11 @@ class SettingsPanel extends StatelessWidget {
   }
 }
 
-/// A tinted hint card at the top of a Settings page.
-class SettingsHintCard extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  const SettingsHintCard({super.key, required this.icon, required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      margin: const EdgeInsets.only(bottom: kGap),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: scheme.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: scheme.primary),
-          const SizedBox(width: 12),
-          Expanded(child: Text(text)),
-        ],
-      ),
-    );
-  }
-}
-
-/// The .glsl files of the "Custom shaders" preset, in mpv order.
+/// The .glsl files of the "Custom shaders" choice, in mpv order.
 class CustomShaderFiles extends StatelessWidget {
   const CustomShaderFiles({super.key});
 
-  Future<void> _addFiles(BuildContext context) async {
+  Future<void> _addFiles(BuildContext context, AppSettings s) async {
     final folders = AppScope.of(context).ports.folders;
     final List<String> files;
     try {
@@ -102,7 +91,6 @@ class CustomShaderFiles extends StatelessWidget {
     } catch (_) {
       return;
     }
-    final s = AppSettings.instance;
     final current = s.customShaders.peek();
     final added = [
       for (final p in files)
@@ -113,59 +101,59 @@ class CustomShaderFiles extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = AppSettings.instance;
+    final s = AppScope.of(context).coordinator.settings;
     final muted = TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant);
     return SignalBuilder(builder: (context) {
       final custom = s.customShaders.value;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text('Your own mpv shaders for the "Custom shaders" choice; they run in this order.',
-                    style: muted),
-              ),
-              TextButton.icon(
-                onPressed: () => _addFiles(context),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Add .glsl files'),
-              ),
-            ],
-          ),
-          if (custom.isEmpty)
-            Text('None picked.', style: muted)
-          else
-            for (final (i, path) in custom.indexed)
-              Row(
-                children: [
-                  Expanded(
-                    child: Tooltip(
-                      message: path,
-                      child: Text(path.split(RegExp(r'[/\\]')).last, overflow: TextOverflow.ellipsis),
+      return SettingRow(
+        label: 'Custom shader files',
+        help: 'Your own mpv shaders for the "Custom shaders" choice; they run in this order',
+        control: TextButton.icon(
+          key: const ValueKey('add-shaders'),
+          onPressed: () => _addFiles(context, s),
+          icon: const Icon(Icons.add, size: 18),
+          label: const Text('Add .glsl files'),
+        ),
+        below: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (custom.isEmpty)
+              Text('None picked.', style: muted)
+            else
+              for (final (i, path) in custom.indexed)
+                Row(
+                  children: [
+                    Expanded(
+                      child: Tooltip(
+                        message: path,
+                        child: Text(path.split(RegExp(r'[/\\]')).last, overflow: TextOverflow.ellipsis),
+                      ),
                     ),
-                  ),
-                  IconButton(
-                    tooltip: 'Remove',
-                    icon: const Icon(Icons.close, size: 18),
-                    onPressed: () => s.setCustomShaders([...custom]..removeAt(i)),
-                  ),
-                ],
-              ),
-        ],
+                    IconButton(
+                      tooltip: 'Remove',
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () => s.setCustomShaders([...custom]..removeAt(i)),
+                    ),
+                  ],
+                ),
+          ],
+        ),
       );
     });
   }
 }
 
+/// Where updates stand, Check now and Show update; the channel under
+/// More. Checks run by themselves (at start and every few hours); nothing
+/// installs without asking.
 class UpdateSettings extends StatelessWidget {
   final UpdateController? controller;
   const UpdateSettings({super.key, this.controller});
 
   @override
   Widget build(BuildContext context) {
-    final c = controller ?? UpdateController.instance;
-    final s = AppSettings.instance;
+    final c = controller ?? AppScope.of(context).updates;
+    final s = AppScope.of(context).coordinator.settings;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -196,18 +184,10 @@ class UpdateSettings extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 8),
-        UpdateChannelSetting(controller: c, settings: s),
-        SignalBuilder(
-          builder: (context) => SwitchListTile(
-            key: const ValueKey('auto-check-updates'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Check for updates automatically'),
-            subtitle: const Text('When the app opens and every few hours; nothing installs without asking'),
-            value: s.autoCheckUpdates.value,
-            onChanged: s.setAutoCheckUpdates,
-          ),
-        ),
+        const SizedBox(height: 4),
+        Text('Checked when the app opens and every few hours; nothing installs without asking.',
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
+        SettingFold(children: [UpdateChannelSetting(controller: c, settings: s)]),
       ],
     );
   }
@@ -282,19 +262,20 @@ class UpdateChannelSetting extends StatelessWidget {
   }
 }
 
+
+/// Settings → Player → Playback.
 class AutoAdvanceSetting extends StatelessWidget {
   const AutoAdvanceSetting({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final s = AppSettings.instance;
+    final s = AppScope.of(context).coordinator.settings;
     return SignalBuilder(
-      builder: (context) => SwitchListTile(
-        key: const ValueKey('auto-advance'),
-        contentPadding: EdgeInsets.zero,
-        title: const Text('Play the next episode automatically'),
-        subtitle: const Text('When you put up an episode (Jellyfin, or a file of a show in Files), the next one '
-            'continues it after a 10 s countdown everyone sees; anyone can cancel it'),
+      builder: (context) => SettingSwitch(
+        switchKey: const ValueKey('auto-advance'),
+        label: 'Play the next episode automatically',
+        help: 'When you put up an episode (Jellyfin, or a file of a show in Files), the next one continues it '
+            'after a 10 s countdown everyone sees; anyone can cancel it',
         value: s.autoAdvance.value,
         onChanged: s.setAutoAdvance,
       ),
@@ -302,61 +283,54 @@ class AutoAdvanceSetting extends StatelessWidget {
   }
 }
 
-class HideReReleasesSetting extends StatelessWidget {
-  const HideReReleasesSetting({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final s = AppSettings.instance;
-    return SignalBuilder(
-      builder: (context) => SwitchListTile(
-        key: const ValueKey('hide-re-releases'),
-        contentPadding: EdgeInsets.zero,
-        title: const Text('Hide re-releases in Latest'),
-        subtitle: const Text('Skips episodes added more than 30 days after they aired '
-            '(re-uploads, upgrades); also in each Latest row\'s ⋮ menu'),
-        value: s.hideReReleases.value,
-        onChanged: s.setHideReReleases,
-      ),
-    );
-  }
-}
-
+/// Every key, by where it works: the player's first, the rest folded.
 class ShortcutList extends StatelessWidget {
   const ShortcutList({super.key});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('While watching:', style: TextStyle(color: Colors.grey)),
-        const SizedBox(height: 8),
-        for (final (key, what) in sessionShortcuts)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 96,
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(key,
-                          style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
+    final muted = TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12);
+    Widget row((String, String) k) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 152,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(6),
                     ),
+                    child: Text(k.$1, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
                   ),
                 ),
-                Expanded(child: Text(what)),
-              ],
-            ),
+              ),
+              Expanded(child: Text(k.$2)),
+            ],
           ),
+        );
+    Widget heading(String text) => Padding(
+          padding: const EdgeInsets.only(top: 6, bottom: 4),
+          child: Text(text, style: muted),
+        );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        heading('While the player fills the window'),
+        for (final k in playerShortcuts) row(k),
+        SettingFold(
+          title: 'Anywhere, and in the library',
+          children: [
+            heading('Anywhere'),
+            for (final k in anywhereShortcuts) row(k),
+            heading('Jellyfin library'),
+            for (final k in libraryShortcuts) row(k),
+          ],
+        ),
       ],
     );
   }

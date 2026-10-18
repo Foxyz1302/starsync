@@ -22,7 +22,6 @@ const settingsBoxName = 'settings';
 
 const _keyHwdecMode = 'hwdecMode';
 const _keyHwdecCustom = 'hwdecCustom';
-const _keyAutoCheckUpdates = 'autoCheckUpdates';
 const _keyShaderPreset = 'shaderPreset';
 const _keyShaderQuality = 'shaderQuality';
 const _keyCustomShaders = 'customShaders';
@@ -33,7 +32,6 @@ const _keyMpvControls = 'mpvControls';
 const _keyControlsSkin = 'controlsSkin';
 const _keyTimeDisplay = 'timeDisplay';
 const _keyControlsSize = 'controlsSize';
-const _keyControlsHideSecs = 'controlsHideSecs';
 const _keyHiddenControls = 'hiddenControls';
 const _keyHideReReleases = 'hideReReleases';
 const _keyProgressLine = 'progressLine';
@@ -42,7 +40,6 @@ const _keySoundsOff = 'soundsOff';
 const _keySoundPreset = 'soundPreset';
 const _keyWelcomeDismissed = 'welcomeDismissed';
 const _keySoundPresetFor = 'soundPresetFor';
-const _keyUnreadyOnSwap = 'unreadyOnSwap';
 const keyAutoSitOut = 'autoSitOut';
 const _keyChatPopups = 'chatPopups';
 const _keyNotifyPeople = 'notifyPeople';
@@ -100,7 +97,6 @@ class AppSettings {
 
   final hwdecMode = signal(HwdecMode.auto);
   final hwdecCustom = signal('');
-  final autoCheckUpdates = signal(true);
   /// Where updates come from (Settings → Updates). Never chosen: dev for
   /// a test build, else stable; a test build stores dev on its first
   /// start, so the install stays on test builds after a release (also
@@ -110,29 +106,27 @@ class AppSettings {
   /// continued by the next one (Up next's `auto` item, the server's
   /// countdown at its end).
   final autoAdvance = signal(true);
-  /// Session: send ready=false when the video changes (a swap keeps the
-  /// server's ready flags).
-  final unreadyOnSwap = signal(false);
   /// Session: auto sit-out (idle while nothing plays, or minimised for a
   /// while, sets you away; coming back sets you in).
   final autoSitOut = signal(true);
   /// The player controls' skin (`controls/`). Applies live.
   final controlsSkin = signal(ControlsSkin.standard);
-  /// The bar's clock: elapsed / total or the time left.
+  /// The bar's clock: elapsed / total or the time left (a click on the
+  /// clock switches it).
   final timeDisplay = signal(TimeDisplay.elapsed);
   final controlsSize = signal(ControlsSize.normal);
-  /// Seconds without mouse movement before the controls hide.
-  final controlsHideSecs = signal(defaultControlsHideSecs);
   /// Optional bar buttons switched off (they stay in the top bar's ⋯).
   final hiddenControls = signal<Set<OptionalControl>>(const {});
   /// Library: leave out of "Latest in X" what was added long after it
-  /// first aired (re-uploads, old seasons added late).
+  /// first aired (re-uploads, old seasons added late); set in the Latest
+  /// row's ⋮ menu.
   final hideReReleases = signal(true);
   /// A 2 px progress line at the bottom of the video while the controls
   /// are hidden (both skins). Applies live.
   final progressLine = signal(true);
   /// Send this app's log lines to the server's session log while in a
-  /// session (never chat). Off: nothing is sent but a note that it is off.
+  /// session (never chat). Off: no lines are sent, only a note that it is
+  /// off and the problems the user marks.
   final shareDiagnostics = signal(true);
   /// The video output renders at the player's size on screen, so mpv
   /// scales the picture (and runs shaders) and draws subtitles at screen
@@ -218,13 +212,9 @@ class AppSettings {
           HwdecMode.auto;
       final custom = box.get(_keyHwdecCustom);
       if (custom is String) hwdecCustom.value = custom;
-      final auto = box.get(_keyAutoCheckUpdates);
-      if (auto is bool) autoCheckUpdates.value = auto;
       await _loadUpdateChannel(box);
       final advance = box.get(_keyAutoAdvance);
       if (advance is bool) autoAdvance.value = advance;
-      final unready = box.get(_keyUnreadyOnSwap);
-      if (unready is bool) unreadyOnSwap.value = unready;
       final autoOut = box.get(keyAutoSitOut);
       if (autoOut is bool) autoSitOut.value = autoOut;
       controlsSkin.value =
@@ -233,8 +223,6 @@ class AppSettings {
       timeDisplay.value = TimeDisplay.values.where((t) => t.name == time).firstOrNull ?? TimeDisplay.elapsed;
       final size = box.get(_keyControlsSize);
       controlsSize.value = ControlsSize.values.where((t) => t.name == size).firstOrNull ?? ControlsSize.normal;
-      final hide = box.get(_keyControlsHideSecs);
-      if (hide is int && controlsHideChoices.contains(hide)) controlsHideSecs.value = hide;
       final hidden = box.get(_keyHiddenControls);
       if (hidden is List) {
         hiddenControls.value = Set.unmodifiable(OptionalControl.values.where((c) => hidden.contains(c.name)));
@@ -307,11 +295,6 @@ class AppSettings {
     _put(_keyHwdecCustom, value);
   }
 
-  void setAutoCheckUpdates(bool on) {
-    autoCheckUpdates.value = on;
-    _put(_keyAutoCheckUpdates, on);
-  }
-
   Future<void> _loadUpdateChannel(Box box) async {
     UpdateChannel? requested;
     final file = channelFile;
@@ -341,11 +324,6 @@ class AppSettings {
     _put(_keyAutoAdvance, on);
   }
 
-  void setUnreadyOnSwap(bool on) {
-    unreadyOnSwap.value = on;
-    _put(_keyUnreadyOnSwap, on);
-  }
-
   void setAutoSitOut(bool on) {
     autoSitOut.value = on;
     _put(keyAutoSitOut, on);
@@ -364,11 +342,6 @@ class AppSettings {
   void setControlsSize(ControlsSize size) {
     controlsSize.value = size;
     _put(_keyControlsSize, size.name);
-  }
-
-  void setControlsHideSecs(int secs) {
-    controlsHideSecs.value = secs;
-    _put(_keyControlsHideSecs, secs);
   }
 
   void setControlShown(OptionalControl c, bool on) {

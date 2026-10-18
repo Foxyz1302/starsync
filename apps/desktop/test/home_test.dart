@@ -227,21 +227,21 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
     await tester.pumpAndSettle();
-    expect(find.text('Name, picture and colour: click your avatar in the top left'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('settings-player')));
+    // Player first (also for Ctrl+,).
+    expect(find.text('Upscaling shader'), findsOneWidget);
+    expect(find.text('Play the next episode automatically'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('settings-party')));
     await tester.pumpAndSettle();
-    expect(find.text('Hardware decoding'), findsOneWidget);
+    expect(find.byKey(const ValueKey('party-name')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('settings-updates')));
     await tester.pumpAndSettle();
-    expect(find.text('Check for updates automatically'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('settings-shortcuts')));
+    expect(find.text('Check now'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('settings-library')));
     await tester.pumpAndSettle();
-    expect(find.text('Toggle ready'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('settings-integrations')));
+    expect(find.text('Web links'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('settings-help')));
     await tester.pumpAndSettle();
-    expect(find.text('Play the next episode automatically'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('settings-about')));
-    await tester.pumpAndSettle();
+    expect(find.text('Toggle ready (anywhere in a server)'), findsOneWidget);
     expect(find.text('Dev build — update checks are off'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('tab-library')));
     await tester.pumpAndSettle();

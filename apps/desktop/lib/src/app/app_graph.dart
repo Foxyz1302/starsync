@@ -69,6 +69,9 @@ class AppGraph {
   /// The join prompt for a clicked invite link or one on the clipboard.
   final JoinOffers joinOffers;
 
+  /// Your name, picture and colour.
+  final Profile profile;
+
   AppGraph._({
     required this.ports,
     required this.sfx,
@@ -83,6 +86,7 @@ class AppGraph {
     required this.updates,
     required this.whatsNew,
     required this.joinOffers,
+    required this.profile,
   });
 
   /// The desktop app's graph. Tests pass their own [ports], [identity]
@@ -159,7 +163,7 @@ class AppGraph {
     );
     // The profile keeps its name in the connect form and pushes changes
     // to whichever server this app is in.
-    Profile.instance
+    final profile = Profile.instance
       ..forms = forms
       ..push = ({String? name, String? avatar}) {
         if (navigation.online.peek()) coordinator.updateProfile(name: name, avatar: avatar);
@@ -182,6 +186,7 @@ class AppGraph {
       updates: updates,
       whatsNew: whatsNew,
       joinOffers: JoinOffers(navigation: navigation, yourServer: yourServer, forms: forms),
+      profile: profile,
     );
   }
 

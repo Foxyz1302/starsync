@@ -63,7 +63,7 @@ void main() {
               onToggleFullscreen: () {},
               onToggleChat: () {},
               onChangeVideo: () {},
-              onOpenIntegrations: () {},
+              onOpenAccounts: () {},
               onLeave: () {},
               windowControls: false,
               videoBuilder: (context, controls) => Stack(fit: StackFit.expand, children: [
@@ -86,7 +86,7 @@ void main() {
         expect(opacity(), 0, reason: '$what: gone after the second');
 
         // Controls hidden (no mouse movement past the hide delay).
-        await tester.pump(Duration(seconds: s.controlsHideSecs.value + 1));
+        await tester.pump(const Duration(seconds: 4));
         await tester.pump(const Duration(milliseconds: 500));
         expect(tester.state<ControlsFrameState>(find.byType(ControlsFrame)).visible, isFalse, reason: what);
         await wheel();

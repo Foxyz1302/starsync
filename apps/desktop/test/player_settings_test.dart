@@ -13,6 +13,7 @@ import 'package:starsync/src/schedule/animeflow.dart';
 import 'package:starsync/src/shaders/shader_presets.dart';
 import 'package:starsync/src/shell/avatar.dart';
 import 'package:starsync/src/shell/party_strip.dart';
+import 'package:starsync/src/shell/profile_card.dart' show ProfileColors, ProfilePicture;
 import 'package:starsync/src/shell/settings_tab.dart';
 import 'package:starsync/src/state/settings.dart';
 import 'package:starsync/src/update/update_controller.dart';
@@ -54,7 +55,6 @@ void main() {
     s.controlsSkin.value = ControlsSkin.standard;
     s.timeDisplay.value = TimeDisplay.elapsed;
     s.controlsSize.value = ControlsSize.normal;
-    s.controlsHideSecs.value = defaultControlsHideSecs;
     s.hiddenControls.value = const {};
     s.progressLine.value = true;
     s.shaderPreset.value = ShaderPreset.off;
@@ -200,14 +200,12 @@ void main() {
         expect(tester.takeException(), isNull, reason: section.name);
       }
       expect(SettingsSection.values.map((s) => s.label), [
-        'Profile',
-        'Party & network',
         'Player',
-        'Jellyfin & integrations',
+        'Party',
         'Notifications & sounds',
+        'Library & accounts',
         'Updates',
-        'Keyboard shortcuts',
-        'About',
+        'Help & about',
       ]);
       expect(find.byIcon(Icons.hub_outlined), findsOneWidget);
     });
@@ -250,33 +248,41 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    testWidgets('Player: the card\'s rows, a pointer to it, and the controls\' choices', (tester) async {
+    testWidgets('Player: sound, subtitles, picture, controls, playback; the rarer rows under More', (tester) async {
       await pumpSettings(tester, SettingsSection.player, size: const Size(1280, 2400));
-      expect(find.textContaining('also in the player: ⚙ in the bar'), findsOneWidget);
+      expect(find.textContaining('Also in the player: ⚙'), findsOneWidget);
       for (final key in [
-        'player-design',
-        'progress-line',
-        'shader-preset',
-        'hwdec',
+        'video-volume',
         'sub-scale',
         'lift-subtitles',
-        'time-display',
+        'shader-preset',
+        'player-design',
         'controls-size',
-        'controls-hide',
-        for (final c in OptionalControl.values) 'bar-${c.name}',
+        'progress-line',
+        'auto-advance',
       ]) {
         expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
       }
+      // Dropped for their defaults: no time display or hide delay rows.
+      expect(find.text('Time display'), findsNothing);
+      expect(find.text('Hide the controls after'), findsNothing);
       expect(find.byKey(const ValueKey('audio-track')), findsNothing, reason: 'tracks only in the player');
+      // Folded: the custom files, sharp video, hardware decoding; the bar's buttons.
+      for (final key in ['hwdec', 'screen-res-video', 'add-shaders', 'bar-chat']) {
+        expect(find.byKey(ValueKey(key)), findsNothing, reason: '$key folded');
+      }
+      for (final more in find.byKey(const ValueKey('fold-More')).evaluate().toList()) {
+        await tester.tap(find.byWidget(more.widget));
+        await tester.pumpAndSettle();
+      }
+      for (final key in ['hwdec', 'screen-res-video', 'add-shaders', for (final c in OptionalControl.values) 'bar-${c.name}']) {
+        expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
+      }
       expect(find.text('Standard'), findsOneWidget);
       await pick(tester, 'player-design', 'Minimal');
       expect(s.controlsSkin.value, ControlsSkin.minimal);
-      await pick(tester, 'time-display', 'Remaining');
-      expect(s.timeDisplay.value, TimeDisplay.remaining);
       await pick(tester, 'controls-size', 'Large');
       expect(s.controlsSize.value, ControlsSize.large);
-      await pick(tester, 'controls-hide', '5 s');
-      expect(s.controlsHideSecs.value, 5);
       await tester.tap(find.byKey(const ValueKey('bar-chat')));
       await tester.pump();
       expect(s.hiddenControls.value, {OptionalControl.chat});
@@ -285,16 +291,26 @@ void main() {
       expect(s.hiddenControls.value, isEmpty);
     });
 
-    testWidgets('Party & network: your server\'s port and password, recent servers with remove', (tester) async {
+    testWidgets('Party: you (picture, name, colour) in place, away, your server, recent servers', (tester) async {
+      final profile = _graph.profile;
+      final name = profile.name.peek();
+      addTearDown(() => profile.name.value = name);
       _graph.forms.recents.value = const [
         RecentServer(host: 'vps.example', port: '8080', secret: 'pw'),
         RecentServer(host: 'friend.example', port: '9000'),
       ];
-      await pumpSettings(tester, SettingsSection.network);
+      await pumpSettings(tester, SettingsSection.party, size: const Size(1280, 1800));
+      final you = find.byKey(const ValueKey('party-you'));
+      expect(find.descendant(of: you, matching: find.byType(ProfilePicture)), findsOneWidget);
+      expect(find.descendant(of: you, matching: find.byType(ProfileColors)), findsOneWidget);
+      await tester.enterText(find.byKey(const ValueKey('party-name')), 'Hana');
+      expect(profile.name.peek(), 'Hana');
+      expect(find.byKey(const ValueKey('auto-sit-out')), findsOneWidget);
       expect(find.text('Your server'), findsOneWidget);
       expect(find.text('Port'), findsOneWidget);
       expect(find.text('vps.example:8080'), findsOneWidget);
       expect(find.text('friend.example:9000'), findsOneWidget);
+      expect(find.text('Unready when the video changes'), findsNothing, reason: 'dropped: ready stays');
       await tester.enterText(find.byKey(const ValueKey('host-port')), '70000');
       await tester.pump();
       expect(find.text('A number from 1 to 65535'), findsOneWidget);
@@ -306,27 +322,55 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('vps.example:8080'), findsNothing);
       _graph.forms.form.hostPort = '8080';
+      await tester.pump(const Duration(seconds: 1)); // the name's push
     });
 
-    testWidgets('Integrations: AnimeFlow says who you are connected as, or why not', (tester) async {
-      await pumpSettings(tester, SettingsSection.integrations,
+    testWidgets('Library & accounts: AnimeFlow says who you are connected as, or why not; web links', (tester) async {
+      await pumpSettings(tester, SettingsSection.library,
           me: () async => const AnimeFlowMe(
               userId: 'u1', name: 'foxyz', scopes: {AnimeFlowScope.view, AnimeFlowScope.request}));
       expect(find.text('connected as foxyz · can view, request'), findsOneWidget);
+      expect(find.byKey(const ValueKey('web-links')), findsOneWidget);
+      expect(find.text('Hide re-releases in Latest'), findsNothing, reason: 'in the Latest row\'s menu only');
       // A fresh tree: the card keeps its first answer otherwise.
       await tester.pumpWidget(scoped(_graph, const SizedBox()));
-      await pumpSettings(tester, SettingsSection.integrations,
+      await pumpSettings(tester, SettingsSection.library,
           me: () async => throw const AnimeFlowException(
               401, AnimeFlowErrorCode.missingToken, 'No linked Jellyfin account for AnimeFlow'));
       expect(find.text('No linked Jellyfin account for AnimeFlow'), findsOneWidget);
     });
 
+    testWidgets('Updates: always checked, the channel under More', (tester) async {
+      await pumpSettings(tester, SettingsSection.updates);
+      expect(find.text('Check now'), findsOneWidget);
+      expect(find.text('Check for updates automatically'), findsNothing, reason: 'always on');
+      expect(find.byKey(const ValueKey('update-channel')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('fold-More')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('update-channel')), findsOneWidget);
+    });
+
+    testWidgets('Help & about: diagnostics first, every key, about', (tester) async {
+      await pumpSettings(tester, SettingsSection.help, size: const Size(1280, 2400));
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      expect(top(find.byKey(const ValueKey('copy-diagnostics'))), lessThan(top(find.text('Keyboard shortcuts'))));
+      expect(find.byKey(const ValueKey('share-diagnostics')), findsOneWidget);
+      expect(find.text('Mute / unmute'), findsOneWidget);
+      expect(find.text('Settings'), findsNothing, reason: 'Anywhere folded');
+      await tester.tap(find.byKey(const ValueKey('fold-Anywhere, and in the library')));
+      await tester.pumpAndSettle();
+      expect(find.text('Ctrl+,'), findsOneWidget);
+      expect(find.text('Ctrl+V'), findsOneWidget);
+      expect(find.text('/ or Ctrl+F'), findsOneWidget);
+      expect(find.byKey(const ValueKey('uosc-credit')), findsOneWidget);
+    });
+
     testWidgets('narrow: icon chips instead of the side nav', (tester) async {
-      await pumpSettings(tester, SettingsSection.network, size: const Size(700, 1000));
+      await pumpSettings(tester, SettingsSection.party, size: const Size(700, 1600));
       expect(find.byType(ChoiceChip), findsWidgets);
-      expect(find.byType(ListTile).evaluate().where((e) => e.widget.key == const ValueKey('settings-profile')),
+      expect(find.byType(ListTile).evaluate().where((e) => e.widget.key == const ValueKey('settings-party')),
           isEmpty, reason: 'no side nav');
-      final chip = tester.widget<ChoiceChip>(find.byKey(const ValueKey('settings-network')));
+      final chip = tester.widget<ChoiceChip>(find.byKey(const ValueKey('settings-party')));
       expect(chip.selected, isTrue);
       expect((chip.avatar! as Icon).icon, Icons.hub_outlined);
       expect(find.text('Port'), findsOneWidget);

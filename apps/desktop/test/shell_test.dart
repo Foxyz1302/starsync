@@ -308,10 +308,16 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(ProfileCard), findsOneWidget);
       expect(find.text('just you'), findsOneWidget);
-      await tester.tap(find.text('About'));
+      await tester.tap(find.text('Help & about'));
       await tester.pumpAndSettle();
       expect(find.byType(ProfileCard), findsNothing);
       expect(find.text('Dev build — update checks are off'), findsOneWidget);
+      // Its Settings link opens Party, where the profile is edited too.
+      await tester.tap(find.byKey(const ValueKey('strip-profile')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.descendant(of: find.byType(ProfileCard), matching: find.text('Settings')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('party-you')), findsOneWidget);
     });
 
     testWidgets('showPopover fades and scales in, Esc closes it', (tester) async {
@@ -523,13 +529,8 @@ void main() {
   for (final skin in ControlsSkin.values) {
     testWidgets('toasts sit above the control bar and follow it (${skin.name})', (tester) async {
       final s = AppSettings.instance;
-      final hide = s.controlsHideSecs.peek();
       s.controlsSkin.value = skin;
-      s.controlsHideSecs.value = 2;
-      addTearDown(() {
-        s.controlsSkin.value = ControlsSkin.standard;
-        s.controlsHideSecs.value = hide;
-      });
+      addTearDown(() => s.controlsSkin.value = ControlsSkin.standard);
       coord.playback.alive.value = true;
       await pumpShell(tester, const Size(1280, 800),
           video: (context, controls) => Stack(fit: StackFit.expand, children: [
@@ -548,8 +549,8 @@ void main() {
       final bar = controlsBottomHeight(skin, s.controlsSize.peek());
       final up = tester.getRect(find.byType(ToastCard));
       expect(up.bottom, lessThanOrEqualTo(body.bottom - bar), reason: 'clear of the control bar');
-      // The controls hide: the toasts come down to the edge.
-      await tester.pump(const Duration(seconds: 2));
+      // The controls hide (3 s): the toasts come down to the edge.
+      await tester.pump(const Duration(seconds: 3));
       await tester.pump(const Duration(milliseconds: 600));
       expect(tester.state<ControlsFrameState>(find.byType(ControlsFrame)).visible, isFalse);
       final down = tester.getRect(find.byType(ToastCard));
@@ -563,10 +564,6 @@ void main() {
 
   group('fullscreen party', () {
     Future<void> fullscreen(WidgetTester tester) async {
-      final s = AppSettings.instance;
-      final hide = s.controlsHideSecs.peek();
-      s.controlsHideSecs.value = 2;
-      addTearDown(() => s.controlsHideSecs.value = hide);
       coord.playback.alive.value = true;
       await pumpShell(tester, const Size(1280, 800),
           video: (context, controls) => Stack(fit: StackFit.expand, children: [
@@ -601,7 +598,7 @@ void main() {
       final frame = tester.state<ControlsFrameState>(find.byType(ControlsFrame));
       expect(frame.visible, isTrue);
       expect(opacity(tester), 1, reason: 'up with the controls, playing');
-      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(seconds: 3));
       await tester.pump(const Duration(milliseconds: 600));
       expect(frame.visible, isFalse);
       expect(opacity(tester), 0, reason: 'hidden with them');

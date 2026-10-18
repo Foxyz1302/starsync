@@ -257,7 +257,7 @@ Future<JellyfinPlan> resolveJellyfinRef(
   final account = accounts.account(ref.serverId);
   String? problem;
   if (account != null && accounts.statusOf(ref.serverId) == JellyfinAccountStatus.expired) {
-    problem = 'your sign-in expired, reconnect it in Integrations';
+    problem = 'your sign-in expired, reconnect it in Settings → Library & accounts';
   } else if (account != null) {
     final client = accounts.clientFor(ref.serverId)!;
     try {
@@ -286,7 +286,7 @@ Future<JellyfinPlan> resolveJellyfinRef(
       debugPrint('jellyfin resolve ${ref.itemId} with own account failed: $e');
       if (e is JellyfinException && e.isUnauthorized) {
         accounts.markExpired(ref.serverId);
-        problem = 'your sign-in expired, reconnect it in Integrations';
+        problem = 'your sign-in expired, reconnect it in Settings → Library & accounts';
       } else if (e is JellyfinException && e.statusCode == 404) {
         problem = 'your account cannot see this item';
       } else {

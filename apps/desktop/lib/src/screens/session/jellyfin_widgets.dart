@@ -50,7 +50,7 @@ class JellyfinBlockedCard extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                   'Whoever put it up passes it on automatically while their app is open; '
-                  'if they left, ask them to put it up again. Or link your own account in Integrations.',
+                  'if they left, ask them to put it up again. Or link your own account in Settings → Library & accounts.',
                   textAlign: TextAlign.center, style: t.bodySmall?.copyWith(color: Colors.grey)),
               const SizedBox(height: 14),
               Wrap(

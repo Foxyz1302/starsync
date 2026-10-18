@@ -6,8 +6,9 @@ import 'package:hive_ce/hive.dart';
 
 /// The layout this build reads. 1: the layout of 1.2.x, where versioning
 /// starts (a box without a version is at 1). 2: auto sit-out replaces the
-/// idle switch. 3: the video volume is kept (`playerVolume`).
-const settingsSchemaVersion = 3;
+/// idle switch. 3: the video volume is kept (`playerVolume`). 4: the
+/// settings cleanup drops three choices for their defaults.
+const settingsSchemaVersion = 4;
 
 /// The box key holding the stored version.
 const settingsSchemaKey = 'schemaVersion';
@@ -25,7 +26,21 @@ class SettingsMigration {
 const settingsMigrations = <SettingsMigration>[
   SettingsMigration(2, 'auto sit-out replaces "when idle, sit out instead of just unready"', _autoSitOut),
   SettingsMigration(3, 'the video volume is kept across starts', _playerVolume),
+  SettingsMigration(4, 'the controls hide after 3 s, the ready flag stays on a swap, updates are always checked',
+      _droppedChoices),
 ];
+
+/// The keys step 4 removes: their choices went for the defaults (the
+/// controls hide after 3 s, ready stays when the video changes, updates
+/// are checked automatically).
+const droppedSettingKeys = ['controlsHideSecs', 'unreadyOnSwap', 'autoCheckUpdates'];
+
+/// 4: the choices themselves are gone; whatever was stored goes with
+/// them, so the defaults hold (a build before 4 reading the box finds them
+/// missing and uses the same defaults).
+Future<void> _droppedChoices(Box box) async {
+  await box.deleteAll(droppedSettingKeys);
+}
 
 /// 3: `playerVolume` is new. Nothing to carry over (every start was at
 /// 100 %, which a missing key still means); a value that is not a number

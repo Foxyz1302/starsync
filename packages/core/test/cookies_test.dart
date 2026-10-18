@@ -69,7 +69,7 @@ void main() {
           "used Chrome's cookies, but yt-dlp couldn't read them: locked");
       expect(withCookieNote(noFormatsText, 'no cookies were used'),
           'No video found: it may need signing in (no cookies were used)');
-      expect(withCookieNote(needsCookiesText, 'x'), 'This site needs cookies (x) — Settings → Player → yt-dlp → Cookies');
+      expect(withCookieNote(needsCookiesText, 'x'), 'This site needs cookies (x) — Settings → Library & accounts → Web links → Cookies');
       expect(withCookieNote(notFoundText, 'x'), notFoundText);
       expect(mayNeedSignIn('No video formats found!'), isTrue);
       expect(mayNeedSignIn('HTTP Error 404'), isFalse);

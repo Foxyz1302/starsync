@@ -69,7 +69,7 @@ void main() {
               onToggleFullscreen: () => fullscreenToggles++,
               onToggleChat: () {},
               onChangeVideo: () {},
-              onOpenIntegrations: () {},
+              onOpenAccounts: () {},
               onLeave: () {},
               windowControls: false,
               quickChat: quick,
@@ -100,7 +100,7 @@ void main() {
   bool fieldFocused() => quick.focus.hasFocus;
 
   Future<void> hideControls(WidgetTester tester) async {
-    await tester.pump(Duration(seconds: s.controlsHideSecs.value + 1));
+    await tester.pump(const Duration(seconds: 4));
     await tester.pump(const Duration(milliseconds: 500));
   }
 

@@ -94,7 +94,8 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   static const _miniMargin = 16.0;
 
   ShellTab _tab = ShellTab.library;
-  SettingsSection _section = SettingsSection.profile;
+  /// The Settings page shown (Ctrl+, opens it), Player at first.
+  SettingsSection _section = SettingsSection.player;
 
   /// Where the player is going ([_mode]) and where it is drawn ([_shown]):
   /// they differ for the first part of a change, while it fades out.
@@ -288,16 +289,13 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
 
   Timer? _updateTimer;
 
-  /// At start, then every [updateCheckEvery] while the app runs (when the
-  /// auto-check setting is on).
+  /// At start, then every [updateCheckEvery] while the app runs (always:
+  /// nothing installs without asking).
   Future<void> _autoCheck() async {
-    final s = AppSettings.instance;
-    await s.ensureLoaded();
+    await _graph.coordinator.settings.ensureLoaded();
     if (!mounted) return;
-    _updateTimer = Timer.periodic(updateCheckEvery, (_) {
-      if (s.autoCheckUpdates.peek()) unawaited(runUpdateCheck(widget.updates, true));
-    });
-    if (s.autoCheckUpdates.peek()) await runUpdateCheck(widget.updates);
+    _updateTimer = Timer.periodic(updateCheckEvery, (_) => unawaited(runUpdateCheck(widget.updates, true)));
+    await runUpdateCheck(widget.updates);
   }
 
   WhatsNew? _whatsNewSource;
@@ -797,7 +795,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
           onPutUp: _putUp,
           // Up next needs a server (yours, once it is up).
           onAddToQueue: online ? coord.queue.add : null,
-          onOpenIntegrations: () => _openSettings(SettingsSection.integrations),
+          onOpenAccounts: () => _openSettings(SettingsSection.library),
           probe: widget.linkProbe,
         ),
       ShellTab.schedule => SchedulePage(
@@ -809,7 +807,6 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       ShellTab.settings => SettingsTab(
           section: _section,
           onSection: (s) => setState(() => _section = s),
-          onEditProfile: () => showProfileCard(context, onOpenSettings: _openSettings, updates: widget.updates),
           updates: widget.updates,
           jellyfin: _jellyfin,
           onDanmakuPreview: _openDanmakuPreview,
@@ -958,7 +955,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
                   onToggleFullscreen: _toggleFullscreen,
                   onToggleChat: _toggleChat,
                   onChangeVideo: _changeVideo,
-                  onOpenIntegrations: () => _openSettings(SettingsSection.integrations),
+                  onOpenAccounts: () => _openSettings(SettingsSection.library),
                   onOpenSettings: _openSettings,
                   onLeave: _confirmLeave,
                   videoBuilder: widget.videoBuilder,

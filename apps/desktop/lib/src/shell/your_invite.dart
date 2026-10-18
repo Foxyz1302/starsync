@@ -193,7 +193,7 @@ Future<void> inviteFriends(BuildContext context) async {
   } catch (e) {
     final port = graph.forms.form.hostPort;
     graph.notifier.notify(ActionFailed(
-        "couldn't open your server on port $port: $e — pick another port in Settings → Party & network"));
+        "couldn't open your server on port $port: $e — pick another port in Settings → Party"));
     return;
   }
   if (!context.mounted) return;

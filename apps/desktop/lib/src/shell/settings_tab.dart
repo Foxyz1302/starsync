@@ -7,6 +7,7 @@ import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart'
     show CookieBrowser, CookieFile, NetscapeCookie, YtDlp, YtDlpCookies, cookieBrowsers, parseCookies;
 
+import '../controls/model/controls_prefs.dart' show OptionalControl;
 import '../controls/player_settings.dart';
 import '../danmaku/danmaku_settings.dart' show DanmakuLookSettings;
 import '../jellyfin/accounts.dart';
@@ -16,26 +17,26 @@ import '../screens/home/about_page.dart';
 import '../screens/home/settings_page.dart';
 import '../screens/home/ui.dart' show appName, devTools, displayVersion;
 import '../session/auto_sit_out.dart' show AutoSitOutTimes;
+import '../session/identity.dart' show Profile;
 import '../sfx/sfx.dart';
 import '../sfx/sound_bank.dart';
 import '../app/app_graph.dart';
-import '../state/settings.dart';
 import '../update/update_controller.dart';
 import '../widgets/app_menu.dart';
 import 'avatar.dart';
 import 'motion.dart';
 import 'notice_settings.dart';
+import 'profile_card.dart' show ProfileColors, ProfilePicture;
 
-/// The Settings tab's pages, in nav order.
+/// The Settings tab's pages, in nav order. Ctrl+, opens the one last
+/// shown, Player at first.
 enum SettingsSection {
-  profile(Icons.person_outline, 'Profile'),
-  network(Icons.hub_outlined, 'Party & network'),
   player(Icons.play_circle_outline, 'Player'),
-  integrations(Icons.extension_outlined, 'Jellyfin & integrations'),
+  party(Icons.hub_outlined, 'Party'),
   notifications(Icons.notifications_none, 'Notifications & sounds'),
+  library(Icons.video_library_outlined, 'Library & accounts'),
   updates(Icons.system_update_alt, 'Updates'),
-  shortcuts(Icons.keyboard_outlined, 'Keyboard shortcuts'),
-  about(Icons.info_outline, 'About');
+  help(Icons.help_outline, 'Help & about');
 
   final IconData icon;
   final String label;
@@ -43,24 +44,23 @@ enum SettingsSection {
 }
 
 /// App-wide settings under a left nav (chips on top when narrow), each
-/// page a column of cards; the shell owns [section] so the profile card
-/// can open a page.
+/// page a column of cards, the common rows first and the rest under
+/// "More"; the shell owns [section] so the profile card and the player
+/// panel can open a page.
 class SettingsTab extends StatelessWidget {
   final SettingsSection section;
   final ValueChanged<SettingsSection> onSection;
-  final VoidCallback? onEditProfile;
   final UpdateController? updates;
   /// Defaults to [JellyfinAccounts.instance].
   final JellyfinAccounts? jellyfin;
-  /// AnimeFlow's `/me` for the integrations page (tests pass a fake).
+  /// AnimeFlow's `/me` for the Library & accounts page (tests pass a fake).
   final Future<AnimeFlowMe> Function()? animeFlowMe;
-  /// Dev builds: About → Developer → Danmaku preview.
+  /// Dev builds: Help & about → Developer → Danmaku preview.
   final VoidCallback? onDanmakuPreview;
   const SettingsTab({
     super.key,
     required this.section,
     required this.onSection,
-    this.onEditProfile,
     this.updates,
     this.jellyfin,
     this.animeFlowMe,
@@ -69,78 +69,79 @@ class SettingsTab extends StatelessWidget {
 
   List<Widget> _page(BuildContext context) {
     switch (section) {
-      case SettingsSection.profile:
+      case SettingsSection.player:
+        final muted = Theme.of(context).colorScheme.onSurfaceVariant;
         return [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Text('Also in the player: ⚙ in the control bar opens these while you watch.',
+                style: TextStyle(color: muted, fontSize: 12)),
+          ),
+          const SettingsPanel(key: ValueKey('player-sound'), title: 'Sound', child: VideoVolumeSetting()),
+          const SettingsPanel(
+            title: 'Subtitles',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [SubScaleSetting(), LiftSubtitlesSetting()],
+            ),
+          ),
+          const SettingsPanel(
+            title: 'Picture',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ShaderPresetSetting(),
+                SettingFold(children: [CustomShaderFiles(), ScreenResSetting(), HwdecSetting()]),
+              ],
+            ),
+          ),
           SettingsPanel(
-            title: 'You',
+            title: 'Controls',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const PlayerDesignSetting(),
+                const ControlsSizeSetting(),
+                const ProgressLineSetting(),
+                SettingFold(children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text('Buttons in the bar (hidden ones are in the top bar\'s ⋯)',
+                        style: TextStyle(color: muted, fontSize: 12)),
+                  ),
+                  for (final c in OptionalControl.values) BarButtonSetting(control: c),
+                ]),
+              ],
+            ),
+          ),
+          const SettingsPanel(title: 'Playback', child: AutoAdvanceSetting()),
+        ];
+      case SettingsSection.party:
+        return [
+          const YouPanel(),
+          SettingsPanel(
+            title: 'Away',
             child: SignalBuilder(
               builder: (context) {
-                final me = selfAvatarInfo();
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: StatusAvatar(info: me, size: 48, badges: false, ring: false),
-                  title: Text(me.name == '?' ? 'No name yet' : me.name),
-                  subtitle: const Text('Name, picture and colour: click your avatar in the top left'),
-                  trailing: onEditProfile == null
-                      ? null
-                      : TextButton(onPressed: onEditProfile, child: const Text('Edit')),
+                final s = AppScope.of(context).coordinator.settings;
+                return SettingSwitch(
+                  switchKey: const ValueKey('auto-sit-out'),
+                  label: 'Auto sit-out',
+                  help: 'Idle for ${AutoSitOutTimes.idle.inMinutes} min while nothing plays, or minimised '
+                      'for ${AutoSitOutTimes.minimised.inMinutes} min, sits you out so nobody waits for you; '
+                      "you're back as soon as you return. Never when you're alone",
+                  value: s.autoSitOut.value,
+                  onChanged: s.setAutoSitOut,
                 );
               },
             ),
           ),
-        ];
-      case SettingsSection.network:
-        return [
           const YourServerPanel(),
           const RecentServersPanel(),
-          SettingsPanel(
-            title: 'Watching',
-            child: SignalBuilder(
-              builder: (context) => SwitchListTile(
-                key: const ValueKey('unready-on-swap'),
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Unready when the video changes'),
-                subtitle: const Text('Otherwise you stay ready and the next video starts once everyone ready has buffered'),
-                value: AppSettings.instance.unreadyOnSwap.value,
-                onChanged: AppSettings.instance.setUnreadyOnSwap,
-              ),
-            ),
-          ),
-          SettingsPanel(
-            title: 'Away',
-            child: SignalBuilder(
-              builder: (context) => SwitchListTile(
-                key: const ValueKey('auto-sit-out'),
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Auto sit-out'),
-                subtitle: Text('Idle for ${AutoSitOutTimes.idle.inMinutes} min while nothing plays, or minimised '
-                    'for ${AutoSitOutTimes.minimised.inMinutes} min, sits you out so nobody waits for you; '
-                    "you're back as soon as you return. Never when you're alone"),
-                value: AppSettings.instance.autoSitOut.value,
-                onChanged: AppSettings.instance.setAutoSitOut,
-              ),
-            ),
-          ),
         ];
-      case SettingsSection.player:
-        return [
-          const SettingsHintCard(
-            icon: Icons.tune,
-            text: "Player settings are also in the player: ⚙ in the bar opens a panel at its right edge "
-                "that stays while you watch.",
-          ),
-          SettingsPanel(
-            title: 'Player',
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: playerSettingRows()),
-          ),
-          SettingsPanel(
-            title: 'Controls',
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: controlsSettingRows()),
-          ),
-          const SettingsPanel(title: 'Custom shaders', child: CustomShaderFiles()),
-          const SettingsPanel(title: 'yt-dlp', child: YtDlpSettings()),
-        ];
-      case SettingsSection.integrations:
+      case SettingsSection.notifications:
+        return const [NotificationsInfo()];
+      case SettingsSection.library:
         final accounts = jellyfin ?? JellyfinAccounts.instance;
         return [
           Padding(
@@ -158,17 +159,14 @@ class SettingsTab extends StatelessWidget {
                   }
                 },
           ),
-          const SettingsPanel(title: 'Episodes', child: AutoAdvanceSetting()),
-          const SettingsPanel(title: 'Jellyfin library', child: HideReReleasesSetting()),
+          const SettingsPanel(key: ValueKey('web-links'), title: 'Web links', child: YtDlpSettings()),
         ];
-      case SettingsSection.notifications:
-        return const [NotificationsInfo()];
       case SettingsSection.updates:
         return [SettingsPanel(title: 'Updates', child: UpdateSettings(controller: updates))];
-      case SettingsSection.shortcuts:
-        return const [SettingsPanel(title: 'Keyboard shortcuts', child: ShortcutList())];
-      case SettingsSection.about:
+      case SettingsSection.help:
         return [
+          const SettingsPanel(title: 'Something wrong?', child: DiagnosticsPanel()),
+          const SettingsPanel(title: 'Keyboard shortcuts', child: ShortcutList()),
           AboutPanel(updates: updates),
           if (devTools) DeveloperPanel(onDanmakuPreview: onDanmakuPreview),
         ];
@@ -206,7 +204,7 @@ class SettingsTab extends StatelessWidget {
                 ),
               )
             : SizedBox(
-                width: 250,
+                width: 280,
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 20, 8, 20),
                   children: [
@@ -267,7 +265,83 @@ class SettingsTab extends StatelessWidget {
   }
 }
 
-/// Party & network: your server's port and password, used when you
+/// Party → You: your picture, name and colour, edited here as on the
+/// profile card (your avatar in the strip), with the same widgets.
+class YouPanel extends StatefulWidget {
+  const YouPanel({super.key});
+
+  @override
+  State<YouPanel> createState() => _YouPanelState();
+}
+
+class _YouPanelState extends State<YouPanel> {
+  late final Profile _p = AppScope.of(context).profile;
+  late final _name = TextEditingController(text: _p.name.peek());
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final small = TextStyle(color: scheme.onSurfaceVariant, fontSize: 12);
+    return SettingsPanel(
+      key: const ValueKey('party-you'),
+      title: 'You',
+      child: SignalBuilder(builder: (context) {
+        final png = _p.picture.value;
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ProfilePicture(profile: _p, info: selfAvatarInfo()),
+            const SizedBox(width: 20),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    key: const ValueKey('party-name'),
+                    controller: _name,
+                    maxLength: 32,
+                    decoration: const InputDecoration(isDense: true, counterText: '', labelText: 'Name'),
+                    onChanged: _p.setName,
+                  ),
+                  const SizedBox(height: 14),
+                  ProfileColors(profile: _p),
+                  if (_p.error.value case final err?)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(err, style: TextStyle(color: scheme.error, fontSize: 12)),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                              'Others see your name and picture; the colour is yours only. Click the picture to '
+                              'change it.',
+                              style: small),
+                        ),
+                        if (png != null)
+                          TextButton(onPressed: () => _p.setPicture(null), child: const Text('Remove picture')),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      }),
+    );
+  }
+}
+
+/// Party: your server's port and password, used when you
 /// Invite (the next time sharing starts).
 class YourServerPanel extends StatefulWidget {
   const YourServerPanel({super.key});
@@ -361,7 +435,7 @@ class _YourServerPanelState extends State<YourServerPanel> {
   }
 }
 
-/// Party & network: the servers Join offers in one click.
+/// Party: the servers Join offers in one click.
 class RecentServersPanel extends StatelessWidget {
   const RecentServersPanel({super.key});
 

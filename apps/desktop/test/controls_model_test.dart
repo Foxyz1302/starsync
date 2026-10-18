@@ -252,11 +252,9 @@ void main() {
     }
 
     testWidgets('Minimal hidden: the timeline stays as a line unless switched off', (tester) async {
-      s.controlsHideSecs.value = 2;
-      addTearDown(() => s.controlsHideSecs.value = defaultControlsHideSecs);
       await pump(tester, ControlsSkin.minimal);
       double opacity() => tester.widget<AnimatedOpacity>(find.byKey(const ValueKey('minimal-timeline-wrap'))).opacity;
-      await tester.pump(const Duration(seconds: 3));
+      await tester.pump(const Duration(seconds: 4));
       await tester.pumpAndSettle();
       expect(opacity(), 1, reason: 'hidden, line on');
       s.progressLine.value = false;

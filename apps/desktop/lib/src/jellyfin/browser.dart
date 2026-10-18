@@ -32,7 +32,7 @@ class JellyfinBrowser extends StatefulWidget {
   final ValueChanged<JellyfinSelection> onPutUp;
   /// Right-click on a card: Add to queue / Play next; null: no server.
   final void Function(JellyfinSelection item, {bool next})? onAddToQueue;
-  final VoidCallback? onOpenIntegrations;
+  final VoidCallback? onOpenAccounts;
   final Duration searchDebounce;
   /// Opens here instead of the remembered location (the series of the
   /// episode playing, after "Change video").
@@ -48,7 +48,7 @@ class JellyfinBrowser extends StatefulWidget {
     this.onAddToQueue,
     this.controller,
     this.selected,
-    this.onOpenIntegrations,
+    this.onOpenAccounts,
     this.libraryStrip = true,
     this.searchDebounce = const Duration(milliseconds: 300),
   });
@@ -298,7 +298,7 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
             current: account,
             compact: narrow,
             onSelect: _c.switchServer,
-            onOpenIntegrations: widget.onOpenIntegrations,
+            onOpenAccounts: widget.onOpenAccounts,
           ),
           IconButton(
             tooltip: 'Back (Esc)',
@@ -359,14 +359,14 @@ class _ServerSwitcher extends StatelessWidget {
   final JellyfinAccounts accounts;
   final JellyfinAccount current;
   final ValueChanged<String> onSelect;
-  final VoidCallback? onOpenIntegrations;
+  final VoidCallback? onOpenAccounts;
   /// Narrow: the name is shorter.
   final bool compact;
   const _ServerSwitcher({
     required this.accounts,
     required this.current,
     required this.onSelect,
-    this.onOpenIntegrations,
+    this.onOpenAccounts,
     this.compact = false,
   });
 
@@ -385,7 +385,7 @@ class _ServerSwitcher extends StatelessWidget {
         ),
       ],
     );
-    if (accounts.accounts.length < 2 && onOpenIntegrations == null) {
+    if (accounts.accounts.length < 2 && onOpenAccounts == null) {
       return Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: chip);
     }
     return MenuAnchor(
@@ -398,10 +398,10 @@ class _ServerSwitcher extends StatelessWidget {
             onPressed: () => onSelect(a.serverId),
             child: Text('${a.displayName}  ·  ${a.userName}'),
           ),
-        if (onOpenIntegrations != null)
+        if (onOpenAccounts != null)
           MenuItemButton(
             leadingIcon: const Icon(Icons.add, size: 18),
-            onPressed: onOpenIntegrations,
+            onPressed: onOpenAccounts,
             child: const Text('Manage servers…'),
           ),
       ],

@@ -357,7 +357,7 @@ void main() {
             onToggleFullscreen: () {},
             onToggleChat: () {},
             onChangeVideo: () {},
-            onOpenIntegrations: () {},
+            onOpenAccounts: () {},
             onLeave: () {},
             windowControls: false,
             videoBuilder: (context, controls) => const ColoredBox(color: Colors.black),

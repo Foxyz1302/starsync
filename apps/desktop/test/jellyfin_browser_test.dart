@@ -357,10 +357,10 @@ void main() {
     final accounts = JellyfinAccounts(store: MemoryJellyfinStore(), httpFactory: () => FakeJellyfin());
     await accounts.ensureLoaded(validate: false);
     await tester.pumpWidget(scoped(_graph, app(JellyfinPickerSource(
-        accounts: accounts, onSelect: (_) {}, onPutUp: (_) {}, onOpenIntegrations: () {}))));
+        accounts: accounts, onSelect: (_) {}, onPutUp: (_) {}, onOpenAccounts: () {}))));
     await tester.pump();
     expect(find.byKey(const ValueKey('jf-sign-in')), findsOneWidget);
-    expect(find.text('Open Integrations'), findsOneWidget);
+    expect(find.text('Open Library & accounts'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
