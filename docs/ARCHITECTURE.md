@@ -2707,7 +2707,10 @@ process without `exit()`'s handlers: Linux `_exit` after
 Windows `TerminateProcess` after the message loop (no DLL detach
 handlers, which can hang on threads already gone). Every step is bounded
 and logs (`close: ...`) when it is slow or fails. Backstops, so no process
-stays behind a hidden window: 3 s after asking the window to close the
+stays behind a hidden window: 20 s after `shutDownApp` starts the app
+kills itself whatever it is still waiting for (a step's timeout only
+stops waiting, and asking the window to close has none); 3 s after asking
+the window to close the
 app kills itself (`Process.killPid`, no exit handlers; it only gets there
 if the close did not go through); the runners end the process 15 s after
 the first close request (Linux: a `delete-event` handler connected before
