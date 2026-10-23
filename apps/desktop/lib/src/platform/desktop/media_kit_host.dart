@@ -11,6 +11,7 @@ import 'package:sync_relay_core/core.dart' show LogThrottle, createLogger;
 
 import '../../state/settings.dart';
 import '../ports/player_host.dart';
+import 'native_heap.dart';
 
 // The desktop's players: media_kit over libmpv. Everything mpv-specific
 // that is not about one media lives here: the cache and HTTP pins, hwdec,
@@ -364,6 +365,9 @@ class MediaKitHost implements PlayerHost {
     try {
       await p.mk.dispose();
     } catch (_) {}
+    // After media_kit's own deferred destroy of the mpv core (5 s): a
+    // session switch, leaving, a thumbnail batch.
+    trimNativeHeapSoon();
   }
 
   @override

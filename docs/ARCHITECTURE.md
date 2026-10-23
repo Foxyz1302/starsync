@@ -690,7 +690,11 @@ routes mpv's log, and owns the order players go in: `retire` (pause, let
 the view drop the texture: two frames and a route pop, then dispose; a
 new session player waits for the last one, so at most one old player
 lingers), `dispose` (one no view showed) and `disposeAll` (app close:
-every live player, each bounded). A `HostedPlayer` is one mpv: state and
+every live player, each bounded). On Linux each disposal also trims
+glibc's heap 6 s later, after media_kit's own deferred destroy of the
+mpv core (5 s), one trim for a run of them (`native_heap.dart`,
+`malloc_trim(0)`): what mpv's threads freed otherwise stays in the
+malloc arenas, and the app's memory grew with every player. A `HostedPlayer` is one mpv: state and
 streams (position, duration, buffer, volume, completed, width, log),
 open, play/pause/stop, `seek` (the user's, see "User seeks") and
 `syncSeek`, rate, volume, properties, commands, `pin` (set and read
