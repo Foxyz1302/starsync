@@ -24,6 +24,13 @@ recorded, the others with `patch -p1`):
   its other calls wait for that setup under a lock all players share, so
   one such player kept every player from going (their mpv cores stayed
   up). It now waits only for the app's first frame.
+- `texture-name-context.patch` (from the media_kit fork's integration
+  branch): Flutter's texture name of an output was deleted on the platform
+  thread, where Flutter's GL context is not current, so the name and the
+  frame it holds through its EGLImage stayed in video memory, one per
+  player (~10.5 MiB at 2560x1080). A name is now deleted in the context
+  that made it: at once when it is current, else at the next populate of
+  a texture there; the 1x1 placeholder before the first frame goes too.
 
 To update: copy the new upstream version over this folder (minus
 `example/`), re-apply the patches, run the app under X11
