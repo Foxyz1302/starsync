@@ -2804,12 +2804,7 @@ Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
   on start (`/Users/Me`, each known address in turn): online, offline, or
   expired (kept, shown as Reconnect; never dropped silently). A 401 while
   browsing also marks it expired. `clientFor(serverId)` gives the shared
-  signed-in client; `cached()` memoises browse calls for 3 min. On load,
-  addresses on a domain that moved (`moved_hosts.dart`, `movedDomains`:
-  `example.org` -> `example.org`) take the new name, the same name
-  under it with scheme, port and path kept, in the accounts and the last
-  pick; saved at once and logged, so it happens once. The token stays
-  (Jellyfin keys it by device, not address).
+  signed-in client; `cached()` memoises browse calls for 3 min.
 - `sign_in.dart` + `sign_in_panel.dart`: address -> `/System/Info/Public`
   -> Quick Connect (code, poll, cancel) or password; reconnect must hit the
   same ServerId. `accounts_panel.dart` is the Jellyfin card of Settings →

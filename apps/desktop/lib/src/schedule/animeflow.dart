@@ -5,7 +5,6 @@ import 'dart:io';
 import 'package:sync_relay_core/core.dart';
 
 import '../jellyfin/accounts.dart';
-import '../jellyfin/moved_hosts.dart';
 
 // AnimeFlow app API: what the media server tracks, has, downloads and was
 // asked for. Authenticated with the user's own Jellyfin access token
@@ -19,6 +18,14 @@ import '../jellyfin/moved_hosts.dart';
 // for a minute at most.
 
 final _log = createLogger('animeflow');
+
+/// pol's server answers under both names (Gitea and AnimeFlow moved to
+/// `example.org`, Jellyfin stayed on `jelly.example.org`): an account
+/// on either name is the same server for AnimeFlow's token.
+const _sameServer = {'example.org', 'example.org'};
+
+/// [domain], or both of pol's names when it is one of them.
+Set<String> sameServerDomains(String domain) => _sameServer.contains(domain) ? _sameServer : {domain};
 
 const animeFlowDefaultBase = 'https://anime.example.org/api/app/v1';
 

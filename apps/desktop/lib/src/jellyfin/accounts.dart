@@ -8,7 +8,6 @@ import 'package:hive_ce/hive.dart';
 import 'package:sync_relay_core/core.dart';
 
 import '../screens/home/picked_media.dart';
-import 'moved_hosts.dart';
 
 // Linked Jellyfin servers, one account per ServerId, in their own Hive box.
 //
@@ -255,7 +254,6 @@ class JellyfinAccounts extends ChangeNotifier {
       _defaultServerId = def is String ? def : null;
       final pick = _store.get(_keyLastPick);
       _lastPick = pick is String ? JellyfinMedia.fromJson(_tryJson(pick)) : null;
-      await _moveHosts();
     } catch (e, st) {
       debugPrint('load jellyfin accounts failed: $e\n$st');
       if (_deviceId.isEmpty) _deviceId = _newDeviceId();
@@ -263,40 +261,6 @@ class JellyfinAccounts extends ChangeNotifier {
     _loaded = true;
     _notify();
     if (validate) unawaited(validateAll());
-  }
-
-  /// Saved addresses on a domain that moved ([movedAddress]) go to the
-  /// new name and are saved at once, so this runs (and logs) once. The
-  /// token stays: Jellyfin keys it by device, not by the address.
-  Future<void> _moveHosts() async {
-    var moved = false;
-    final next = <JellyfinAccount>[];
-    for (final a in _accounts) {
-      final urls = {for (final u in a.urls) movedAddress(u)}.toList();
-      if (listEquals(urls, a.urls)) {
-        next.add(a);
-        continue;
-      }
-      debugPrint('jellyfin: ${a.displayName} moved: ${a.urls.join(', ')} -> ${urls.join(', ')}');
-      next.add(a.copyWith(urls: urls));
-      moved = true;
-    }
-    if (moved) {
-      _accounts = next;
-      await _save();
-    }
-    final pick = _lastPick;
-    if (pick != null && movedAddress(pick.baseUrl) != pick.baseUrl) {
-      await rememberPick(JellyfinMedia(
-        serverId: pick.serverId,
-        baseUrl: movedAddress(pick.baseUrl),
-        itemId: pick.itemId,
-        mediaSourceId: pick.mediaSourceId,
-        title: pick.title,
-        subtitle: pick.subtitle,
-        runtime: pick.runtime,
-      ));
-    }
   }
 
   static String _newDeviceId() {
