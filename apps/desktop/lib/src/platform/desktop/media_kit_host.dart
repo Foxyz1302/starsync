@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:ffi' show Int8;
+import 'dart:ffi' show Int8, Pointer;
 import 'dart:io';
 
 import 'package:ffi/ffi.dart' show StringUtf8Pointer, malloc;
@@ -218,8 +218,11 @@ class MediaKitHost implements PlayerHost {
       p.setLogLevel('v'); // back to the session level at the probe's end
     }
     // media_kit's video output sets hwdec itself on attach ('auto' unless
-    // configured), which used to override SYNC_RELAY_HWDEC.
-    final controller = VideoController(p.mk, configuration: VideoControllerConfiguration(hwdec: hwdec));
+    // configured), which used to override SYNC_RELAY_HWDEC. Its own render
+    // at the widget's size (on by default on Linux) is off: the output's
+    // size is the host's alone ([setOutputSize], "Sharp video").
+    final controller = VideoController(p.mk,
+        configuration: VideoControllerConfiguration(hwdec: hwdec, renderAtWidgetSize: false));
     final v = _MkVideo(p, controller);
     _videos.add(v);
     p._video = v;
@@ -242,8 +245,8 @@ class MediaKitHost implements PlayerHost {
   // refused request makes ffmpeg retry and warn on every try); ffmpeg's
   // HTTP status to [httpErrors]; the GL init lines while probing.
   void _route(_MkPlayer p, PlayerLogLine log) {
-    // Windows: the controller can be "ready" before mpv's render context
-    // exists, and an open in that gap fails its video output ("No render
+    // The controller can be "ready" before mpv's render context exists
+    // (Windows; Linux for an app start's first media), and an open in that gap fails its video output ("No render
     // context set"). Open the same media again once, a moment later.
     if (log.prefix == 'cplayer' && log.text.contains('initializing the selected video_out')) {
       final last = p._lastOpen;
@@ -385,12 +388,15 @@ class MediaKitHost implements PlayerHost {
       await v._paramsSub?.cancel();
     }
     await p._logSub?.cancel();
+    // media_kit destroys the mpv handle as its dispose ends: a frame grab
+    // still reading from it on another isolate goes first.
+    await p._grabbing?.timeout(const Duration(seconds: 10), onTimeout: () {});
     try {
       await p.mk.dispose();
     } catch (_) {}
     _lifecycle(p, 'dispose end');
-    // After media_kit's own deferred destroy of the mpv core (5 s): a
-    // session switch, leaving, a thumbnail batch.
+    // mpv's core is destroyed by now: a session switch, leaving, a
+    // thumbnail batch.
     trimNativeHeapSoon();
   }
 
@@ -459,8 +465,20 @@ class _MkPlayer implements HostedPlayer {
   ({String url, Map<String, String> headers, bool play})? _lastOpen;
   bool _voRetried = false;
   _MkVideo? _video;
+  // A frame grab under way on another isolate ([grabFrame]): dispose waits
+  // for it.
+  Future<void>? _grabbing;
 
   dynamic get _mpv => mk.platform;
+
+  // media_kit's mpv handle for a raw call made right now (never kept across
+  // an await: dispose destroys it), or null once this player is going.
+  Pointer? get _handle {
+    if (_retired) return null;
+    final dynamic platform = mk.platform;
+    final Pointer ctx = platform.ctx;
+    return ctx.address == 0 ? null : ctx;
+  }
 
   @override
   PlayerRole get role => _role;
@@ -565,16 +583,25 @@ class _MkPlayer implements HostedPlayer {
 
   @override
   Future<FrameGrab?> grabFrame({required bool subtitles}) async {
-    if (_retired) return null;
+    final Future<FrameGrab?> grab;
     try {
-      final dynamic platform = mk.platform;
-      final int ctx = platform.ctx.address;
-      return await grabMpvFrame(ctx, subtitles: subtitles);
+      final ctx = _handle;
+      if (ctx == null) return null;
+      grab = grabMpvFrame(ctx.address, subtitles: subtitles);
+    } catch (e) {
+      debugPrint('frame grab: $e');
+      return null;
+    }
+    final done = _grabbing = grab.then((_) {}, onError: (Object _) {});
+    try {
+      return await grab;
     } catch (e) {
       // mpv 0.41 with a GPU decoder (`hwdec` without `-copy`) cannot
       // read the frame back; the caller decodes it again.
       if (_role != PlayerRole.thumbnail) _playerLog.info('player #$id: no frame from mpv: $e');
       return null;
+    } finally {
+      if (identical(_grabbing, done)) _grabbing = null;
     }
   }
 
@@ -582,10 +609,12 @@ class _MkPlayer implements HostedPlayer {
   @override
   void setLogLevel(String level) {
     try {
+      final ctx = _handle;
+      if (ctx == null) return;
       final dynamic platform = mk.platform;
       final name = level.toNativeUtf8();
       try {
-        platform.mpv.mpv_request_log_messages(platform.ctx, name.cast<Int8>());
+        platform.mpv.mpv_request_log_messages(ctx, name.cast<Int8>());
       } finally {
         malloc.free(name);
       }
@@ -612,44 +641,31 @@ class _MkVideo implements HostedVideo {
   Future<void> _sizeOp = Future.value();
 
   /// Renders at the host's output size (or the video's own when it has
-  /// none). media_kit's controller sets the output back to the video's
-  /// size whenever the video's parameters change (a new file, a track
-  /// with another size); the fixed size is sent again after it, under
-  /// the controller's own lock so it lands last.
-  Future<void> applySize({bool again = false}) => _sizeOp = _sizeOp.then((_) async {
+  /// none), fitted to the video's display size: fitted again when that
+  /// changes (a new file, a track with another size). A size set here
+  /// stays across files.
+  Future<void> applySize() => _sizeOp = _sizeOp.then((_) async {
         if (player.disposed) return;
         try {
-          // NativeVideoController (Linux, Windows): not exported, reached
-          // through its public fields.
-          final dynamic native = await controller.platform.future;
+          await controller.platform.future;
           final view = player.host._outputSize;
           final params = player.mk.state.videoParams;
           final dw = params.dw ?? 0, dh = params.dh ?? 0;
           final want = view == null ? null : fitOutputSize(view, dw > 0 && dh > 0 ? (dw, dh) : null);
-          if (_sized && want == _sent && !again) return;
-          if (want == null) {
-            if (!_sized) return; // never resized: already the video's size
-            await native.setSize();
-          } else {
-            // setSize skips a size it believes is set; after media_kit's own
-            // reset it is not.
-            native.width = null;
-            await native.setSize(width: want.$1, height: want.$2);
-          }
+          if (_sized ? want == _sent : want == null) return;
+          await controller.setSize(width: want?.$1, height: want?.$2);
           _sent = want;
           _sized = true;
-          // The output takes its new size with the next frame mpv draws;
-          // paused, none comes: a pan too small to see makes mpv redraw.
-          if (!player.state.playing) {
+          // Windows: the output takes its new size with the next frame mpv
+          // draws; paused, none comes, so a pan too small to see makes mpv
+          // redraw. Linux redraws a paused output at a new size itself.
+          if (!Platform.isLinux && !player.state.playing) {
             await player.setProperty('video-pan-x', '0.000001');
             await player.setProperty('video-pan-x', '0');
           }
-          _paramsSub ??= player.mk.stream.videoParams.listen((params) async {
+          _paramsSub ??= player.mk.stream.videoParams.listen((params) {
             if ((params.dw ?? 0) == 0 || _sent == null) return;
-            try {
-              await (native.lock.synchronized(() async {}) as Future);
-            } catch (_) {}
-            unawaited(applySize(again: true));
+            unawaited(applySize());
           });
         } catch (e) {
           debugPrint('video output size: $e');

@@ -29,7 +29,7 @@ Timer? _trim;
 /// Trims the native heap [after] from now (Linux with glibc; nothing
 /// elsewhere). A call before then moves it later: a run of disposals
 /// (a folder's thumbnails) ends in one trim.
-void trimNativeHeapSoon({Duration after = const Duration(seconds: 6)}) {
+void trimNativeHeapSoon({Duration after = const Duration(seconds: 1)}) {
   final trim = _mallocTrim;
   if (trim == null) return;
   _trim?.cancel();

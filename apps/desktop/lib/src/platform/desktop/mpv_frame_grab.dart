@@ -10,10 +10,12 @@ import 'package:media_kit/src/player/native/core/native_library.dart' show Nativ
 import '../ports/player_host.dart' show FrameGrab, RawFrame;
 
 // A screenshot straight from mpv (`screenshot-raw`) on a short-lived
-// isolate, so neither mpv's work nor the pixel copy holds the UI thread,
-// and outside media_kit's own lock (its `Player.screenshot` holds the one
-// lock all players share while it encodes, which would hold up the
-// session's play, pause and seek commands meanwhile).
+// isolate, so neither mpv's work nor the pixel copy holds the UI thread.
+// Not media_kit's `Player.screenshot`: that one holds the player's lock
+// (the session's play, pause and seek wait meanwhile), takes one mode per
+// call and hands back raw pixels without their size. The player host
+// makes a dispose wait for a grab under way, since media_kit destroys the
+// mpv handle as its dispose ends.
 //
 // mpv answers with the frame on screen at the video's display size: the
 // decoded picture scaled for its aspect, and with `subtitles` the

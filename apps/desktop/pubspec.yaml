@@ -9,11 +9,30 @@ dependencies:
   flutter:
     sdk: flutter
   signals: ^7.0.0
-  media_kit: ^1.1.0
-  # Vendored with Starsync's patches (third_party/media_kit_video/starsync).
+  # The owner's media_kit fork, pinned to a tag: every media_kit package
+  # from the same commit (DEVELOPMENT "Build"). The libs packages are the
+  # Linux and Windows ones (mpv: the system's on Linux, a pinned build
+  # fetched on Windows).
+  media_kit:
+    git:
+      url: https://github.com/Foxyz1302/media-kit.git
+      ref: v1.5.0-starsync.1
+      path: media_kit
   media_kit_video:
-    path: ../../third_party/media_kit_video
-  media_kit_libs_video: ^1.0.0
+    git:
+      url: https://github.com/Foxyz1302/media-kit.git
+      ref: v1.5.0-starsync.1
+      path: media_kit_video
+  media_kit_libs_linux:
+    git:
+      url: https://github.com/Foxyz1302/media-kit.git
+      ref: v1.5.0-starsync.1
+      path: libs/linux/media_kit_libs_linux
+  media_kit_libs_windows_video:
+    git:
+      url: https://github.com/Foxyz1302/media-kit.git
+      ref: v1.5.0-starsync.1
+      path: libs/windows/media_kit_libs_windows_video
   path_provider: ^2.1.0
   # The Pictures known folder (screenshots); already in through path_provider.
   path_provider_windows: ^2.3.0
@@ -52,6 +71,14 @@ hooks:
   user_defines:
     flutter_soloud:
       no_xiph_libs: true
+# media_kit_video asks for media_kit from pub.dev; this makes it take the
+# fork's, the same commit as above.
+dependency_overrides:
+  media_kit:
+    git:
+      url: https://github.com/Foxyz1302/media-kit.git
+      ref: v1.5.0-starsync.1
+      path: media_kit
 dev_dependencies:
   flutter_test:
     sdk: flutter

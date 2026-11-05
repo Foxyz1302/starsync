@@ -12,7 +12,6 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 | `apps/desktop` | Flutter app: UI, `AppGraph` (composition root), `SyncClient`, `Connection`, `SessionCoordinator`, `Navigation`, `YourServer` (`ServerIsolate`), `MediaPipeline` (opening media), `QueueController` (what's next on this app), `WatchTracker` (watch tracking), `PlaybackController` (the session player's marks and commands), the player host (`PlayerHost`, `MediaKitHost`: the only media_kit user besides the `Video` widget glue), update UI (`UpdateController`) | ships with `starsync-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
 | `deploy` | systemd unit for the dedicated server | |
-| `third_party/media_kit_video` | upstream media_kit_video 2.0.1 with Starsync's patches (`starsync/README.md`: Flutter ≥ 3.38 EGL display on the platform thread, the X11 GLX step-aside, a `VideoController` that sets up without waiting for a next frame, texture names deleted in Flutter's context) | vendored; re-apply patches on update |
 
 Guard: `packages/core/test/flutter_free_test.dart` fails if anything under
 `core/lib` imports Flutter, `dart:ui` or `signals_flutter`; CI runs
@@ -542,7 +541,13 @@ file is ~8), `demuxer-max-back-bytes=67108864`,
 or a 5xx is retried, at most 3 times per read and 4 s apart at most; a
 4xx (a CDN refusing a request) fails at once instead of being retried
 (older ffmpeg ignores `reconnect_max_retries`), `ytdl=no` (pages are
-resolved by the app, never by mpv's Lua hook). A load that fails (mpv's
+resolved by the app, never by mpv's Lua hook). media_kit itself (the
+owner's fork, see DEVELOPMENT "Build") sets two more the app leaves
+alone: on Linux `video-timing-offset=0.02` (its output draws a frame
+without waiting for the frame's display time, so mpv hands frames over
+20 ms early instead of 50: audio and picture line up within a few ms),
+and on Windows `tls-verify=no` (its libmpv build would verify HTTPS
+certificates but finds no CA store there; earlier builds accepted any). A load that fails (mpv's
 fatal "No video or audio streams selected", or an EDL track that cannot
 be opened) before a duration is known is reported once per open
 (`onLoadError`), with ffmpeg's HTTP status when this player gets
@@ -614,8 +619,9 @@ A player with a video output opens media only once that output is up:
 media_kit sets mpv's `vo=libmpv` before the output's render context
 exists, and a media opened in between gets no video output ("No render
 context set", black picture with sound). On X11 the context comes up
-later, which widens that gap (joining with media already up). On Windows
-the controller can report ready before mpv's render context exists, so
+later, which widens that gap (joining with media already up). The
+controller can still report ready before mpv's render context exists
+(seen on Windows, and on Linux for the first media of an app start), so
 an open that still fails its video output that way (`cplayer`: "Error
 opening/initializing the selected video_out") is opened again once,
 500 ms later (`render: the video output was not up for the open`); the
@@ -650,13 +656,14 @@ the other is rounded down to the view's parity, so the centred picture
 sits on whole pixels and is drawn 1:1. It applies to every live output
 and to each new one once it is up (`NativeVideoController.setSize`,
 which only changes the size the next frame is drawn at); subtitles are
-drawn at that size, inside the picture. media_kit's controller sets an output back to the video's
-size whenever the video's parameters change (each new file), so the host
-sends the size again after it, under the controller's own lock; a fresh
-player's first frame or two show at the video's size. A paused player
-draws no frame for the new size: the host nudges `video-pan-x` by a
-millionth and back so mpv redraws. Off: each output at its video's own
-size again (`setOutputSize(null)`). Measured on a GTX 1080, 1280x720
+drawn at that size, inside the picture. media_kit's own render at the
+widget's size (`renderAtWidgetSize`, on by default on Linux) is turned
+off on every controller, so the host alone sizes an output. A size set
+this way stays across files; the host fits it again when the video's
+display size changes (each new file). On Linux a paused output redraws
+at its new size by itself; on Windows a paused player draws no frame for
+it, so the host nudges `video-pan-x` by a millionth and back. Off: each
+output at its video's own size again (`setOutputSize(null)`). Measured on a GTX 1080, 1280x720
 H.264 at 2560x1080 fullscreen: no difference past the noise in the
 process's GPU (`nvidia-smi pmon`, 9 to 12 % either way) or CPU.
 
@@ -687,10 +694,12 @@ a time, so a chatty level, or ffmpeg logging every retry of a refused
 request, could starve the UI. Shader errors are `error` lines and still
 arrive. The host writes every session and preload player's warnings and
 errors to the app log (`mpv`, a few per kind at a time, `preload `
-before the prepared player's). Thumbnail players log nothing. The hardware path is
-fragile: media_kit borrows whatever EGL context GDK left current on the main
-thread (upstream media-kit#1404), so an X11 session or a Flutter/GDK change
-can silently fall back to software.
+before the prepared player's). Thumbnail players log nothing. On Linux
+media_kit's output renders in an EGL context of its own on the display
+GDK uses (Flutter ≥ 3.38 keeps its contexts on the raster thread) and
+puts GDK's GL context aside meanwhile, GLX on X11 or EGL on Wayland
+(upstream media-kit#1404); a Flutter or GDK change can still make it fall
+back to software, which the probe shows.
 
 **Player host** (`PlayerHost`, `platform/ports/player_host.dart`; the
 desktop's `MediaKitHost`, one per app in `Ports.players`, tests make
@@ -706,9 +715,15 @@ routes mpv's log, and owns the order players go in: `retire` (pause, let
 the view drop the texture: two frames and a route pop, then dispose; a
 new session player waits for the last one, so at most one old player
 lingers), `dispose` (one no view showed) and `disposeAll` (app close:
-every live player, each bounded). On Linux each disposal also trims
-glibc's heap 6 s later, after media_kit's own deferred destroy of the
-mpv core (5 s), one trim for a run of them (`native_heap.dart`,
+every live player, each bounded). media_kit gives each player a lock of
+its own (one player's slow call never holds up another), and its dispose
+is idempotent and ordered: the calls before it finish, the video output
+and mpv's render context go, then the mpv handle is destroyed at once on
+a worker isolate (on Windows inside COM's multithreaded apartment), and
+the dispose ends there. A frame grab (see "Screenshots") reads the
+handle on an isolate of its own, so the host's dispose waits for one
+under way first. On Linux each disposal also trims glibc's heap 1 s
+after it ends, one trim for a run of them (`native_heap.dart`,
 `malloc_trim(0)`): what mpv's threads freed otherwise stays in the
 malloc arenas, and the app's memory grew with every player. A `HostedPlayer` is one mpv: state and
 streams (position, duration, buffer, volume, completed, width, log),
@@ -2591,9 +2606,9 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   everyone: only this window shows the frozen frame. The catch comes from
   mpv, never the screen (`HostedPlayer.grabFrame`,
   `platform/desktop/mpv_frame_grab.dart`): `screenshot-raw` straight on
-  media_kit's mpv handle on a short-lived isolate, outside media_kit's
-  one lock for all players (its `Player.screenshot` holds that lock while
-  it encodes, which would hold up the session's commands), once with
+  media_kit's mpv handle on a short-lived isolate, outside the player's
+  lock (media_kit's `Player.screenshot` holds it, which would hold up the
+  session's commands, and hands back pixels without their size), once with
   `subtitles` (when a subtitle track is on) and once `video`, back to
   back, so the overlay's subtitle switch is instant; a playing video can
   give them a frame apart. Both are the video's own resolution at its
@@ -2980,11 +2995,9 @@ player, the preload and the player still retiring
 `SessionCoordinator.releasePlayers`, which keeps the position for the
 Jellyfin stop report), the Files thumbnail jobs (`cancelAllThumbnails`)
 and the sound engine (500 ms), side by side, then anything the host
-still holds (the host owns the disposal order); on Windows 300 ms more,
-since media_kit_video frees a video output on a thread of its own after
-dispose returns, and an output still up when the engine stops blocks the
-plugin's teardown (`~VideoOutput` waits on a texture callback that never
-comes). Then `Navigation.leave`
+still holds (the host owns the disposal order). A player's dispose ends
+once its video output is gone (an output still up when the engine stops
+blocks the Windows plugin's teardown) and its mpv core destroyed. Then `Navigation.leave`
 (Jellyfin stop report, last diagnostics, then `bye`, flushed: the app
 waits up to 600 ms for the server to close the socket, so others see
 "left" at once) and your server's stop (`YourServer.stop`), 3 s in all. Update and

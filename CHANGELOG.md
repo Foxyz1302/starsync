@@ -66,6 +66,8 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - A Jellyfin item's right-click menu now has everything its details panel has, with the same names and icons: Mark watched or unwatched, Remove from Continue and Open the show page sit next to Put it up, the queue, Copy title and Open in Jellyfin, for episodes, movies, shows and seasons everywhere they show. A mark shows on every row at once
 - Right-click a show in Files to put up its next episode or open its page; a video's right-click works without a server too, and a link's preview has the same menu as a recent link
 - What's new shows a version's few highlights; All changes opens the full list right there
+- Linux: menus, the timeline and chat stay smooth over a playing video instead of stuttering along with it, and sound and picture line up more closely
+- Windows: the video player runs on a much newer mpv, and players are shut down more safely, which should make crashes while opening or switching videos rarer
 
 ### Fixed
 

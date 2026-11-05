@@ -221,53 +221,19 @@ Next, before 1.5.0 is cut (playback and presence is in; protocol 17):
 - **The name "Out"**: fits next to BRB and AFK, but may not be clear
   enough; settle it from the same evenings.
 
-0. **Move to the owner's media_kit fork** (for 1.5.0):
-   `Foxyz1302/media-kit`, branch `integration` (a local checkout sits
-   beside this repo as `../media-kit`). Replacing the
-   vendored `third_party/media_kit_video` brings:
-   - the non-blocking Linux render (`BLOCK_FOR_TARGET_TIME=0`, also in
-     the software path) with `video-timing-offset` 0.02 unless the app
-     set one. Measured at 75 Hz: late UI frames over a video drop from
-     2764/2947 to 1/3681; audio-pts against time-pos goes from −23 ms to
-     +2 ms;
-   - the Linux teardown fixes (a per-texture lock, deferred unref, the
-     SEGV);
-   - the texture-name-context and VideoController first-frame fixes,
-     which make our `starsync/` patches for them unnecessary;
-   - render at widget size (`renderAtWidgetSize`, `setViewSize`), which
-     can replace Sharp video's own sizing;
-   - the Windows plugin rendering on its own thread, publish-under-lock,
-     the normalizeURI fix and the teardown ordering. Windows crashes about
-     once per 5–6 opens or switches in the shared logs (bundled libmpv 0.36,
-     ANGLE/D3D11, d3d11va-copy), with "Failed to create EGL surface" at
-     every player creation.
-
-   Check when switching:
-   - which `starsync/*.patch` are already in the fork;
-   - our hwdec and cache option pinning;
-   - the glsl-shaders read-back compared as a list;
-   - the newer Windows libmpv only needs `tls-verify=no`.
-
-   Also bisect the 44–46 dropped video frames in a 60 s Starsync run,
-   which the fork's player alone does not show (1 drop). Suspects:
-   shaders, Sharp video's resizes, Up next preload, the relay stream.
-
-   The rest of this entry is the earlier evaluation of other forks. Upstream
-   media-kit releases stalled at media_kit_video 2.0.1 (Dec 2025) though
-   main still gets fixes; `Predidit/media-kit` is active (138 ahead, 146
-   behind upstream) with native D3D11 on Windows (no ANGLE: may fix P30
-   and the dxva2-egl error), a bundled libmpv on Linux, triple-buffered
-   Linux rendering, patched FFmpeg. Check: Windows shaders, whether its
-   it plays `edl://` URLs with `http-header-fields` (pages resolve in
-   the app since step 5, so mpv's Lua and ytdl_hook are not needed), offline
-   CI builds (it downloads binaries in a build hook), and the upstream
-   fixes it lacks. Until then we vendor upstream 2.0.1 with the X11/EGL
-   patch in `third_party/media_kit_video`.
-   Upstream isn't merging outside work (20 open PRs, no release since
-   Dec 2025): no upstream PRs. Independent of the fork: the Windows
-   libmpv is a 2023 build fetched by `media_kit_libs_windows_video`;
-   vendoring that package with a current mpv-dev build (and checksum)
-   updates Windows' mpv on its own.
+0. **After the move to the owner's media_kit fork** (for 1.5.0; the app
+   is on it, DEVELOPMENT "Build"):
+   - A Windows test run of a build: the crashes about once per 5–6 opens
+     or switches in the shared logs (bundled libmpv 0.36, ANGLE/D3D11,
+     d3d11va-copy, "Failed to create EGL surface" at every player
+     creation) should be gone with the newer libmpv and the destroy off
+     Flutter's UI thread; likely, not proven.
+   - Bisect the 44–46 dropped video frames in a 60 s Starsync run, which
+     the fork's player alone does not show (1 drop). Suspects: shaders,
+     Sharp video's resizes, Up next preload, the relay stream.
+   - From the fork: a public way to run work on a player's mpv handle
+     that its dispose waits for (or `screenshot-raw` with its size and
+     both modes), so the host's own wait for a frame grab can go.
 
 1. **Auto-skip OP/ED** (undecided): who decides and how (shared for the
    server, personal, per show) is open. Constraint: a skip is a seek and
@@ -375,8 +341,8 @@ Next, before 1.5.0 is cut (playback and presence is in; protocol 17):
      compositor through private Flutter and GTK structures, hands mouse
      motion over once per frame (Flutter 3.48's task runner falls behind
      a 1000 Hz mouse) and skips GTK's background paint in fullscreen.
-     It goes in with the fork move (backlog 0): without the fork's
-     non-blocking render, the UI over a video drops to the video's rate.
+     It needs the fork's non-blocking render (in since the fork move):
+     without it, the UI over a video drops to the video's rate.
      Checked on the owner's display: a 16:9 window is smooth; fullscreen
      2560x1080 on the Schedule gets about 70% of pictures one refresh
      apart, limited by GTK 3 copying each frame (about 6 ms at that

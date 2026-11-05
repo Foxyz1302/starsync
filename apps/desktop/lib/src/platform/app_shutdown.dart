@@ -65,12 +65,9 @@ Future<void> shutDownApp({Future<void> Function()? beforeQuit, bool restart = fa
     _step('thumbnails', cancelAllThumbnails(), const Duration(milliseconds: 1500)),
     _step('sounds', graph.sfx.dispose(), const Duration(milliseconds: 500)),
   ]);
-  // The host owns the disposal order: anything still alive goes now.
+  // The host owns the disposal order: anything still alive goes now. A
+  // player's dispose ends once its video output and mpv core are gone.
   await _step('all players', graph.ports.players.disposeAll(), const Duration(milliseconds: 1500));
-  // Windows: media_kit_video frees a player's video output on a thread of
-  // its own after dispose returns; it must be done before the engine
-  // stops, or the plugin's teardown waits on it for good.
-  if (Platform.isWindows) await Future.delayed(const Duration(milliseconds: 300));
   // Jellyfin stop report, last diagnostics, the bye (flushed), then your
   // server: 3 s in all.
   await _step('leave', graph.navigation.leave(bye: !restart), const Duration(milliseconds: 2500));
