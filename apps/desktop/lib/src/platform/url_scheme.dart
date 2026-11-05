@@ -13,8 +13,9 @@ const schemeMimeType = 'x-scheme-handler/$inviteScheme';
 const windowsSchemeKey = r'Software\Classes\' + inviteScheme;
 
 /// The binary a link should start: `starsync.exe` next to an old-named
-/// copy (`watch_together.exe`, kept for 1.2.x updaters) when it is there,
-/// so links always start the current name.
+/// copy (`watch_together.exe`, the name up to 1.2.x: a 1.4.x update leaves
+/// it until the updater's sweep removes it, and an old shortcut may start
+/// it until then) when it is there, so links always start the current name.
 String schemeExecutable(String exe, {bool Function(String path)? exists}) {
   final has = exists ?? (p) => File(p).existsSync();
   final sep = exe.contains(r'\') ? r'\' : '/';

@@ -27,15 +27,12 @@ bool _isExec(String path) => File(path).statSync().mode & 0x40 != 0;
 // bundle copied into <stage>/starsync-<ver>/, then
 // `tar -czf out -C <stage> starsync-<ver>`. [zip]: like
 // tool/package_windows.ps1 (`tar -a -c -f out.zip`, bsdtar — Windows only).
-// [legacy]: with the launchers by the names up to 1.2.x (Linux: the shell
-// script of apps/desktop/lib/src/update/bundle/watch_together; Windows: a
-// copy of the exe). [app]: the app binary's content (Linux).
+// [app]: the app binary's content (Linux).
 Future<List<int>> _releaseTarball(Directory work,
     {String version = '0.2.0',
     bool windows = false,
     bool bundle = true,
     bool zip = false,
-    bool legacy = true,
     String app = 'binary-v2'}) async {
   final stage = Directory('${work.path}/pkg-$version-${windows ? 'win' : 'lin'}');
   final folder = Directory('${stage.path}/starsync-$version');
@@ -44,9 +41,6 @@ Future<List<int>> _releaseTarball(Directory work,
       .writeAsString('fresh-config');
   if (windows) {
     await File('${folder.path}/starsync.exe').writeAsString('binary-v2');
-    if (legacy) {
-      await File('${folder.path}/watch_together.exe').writeAsString('binary-v2');
-    }
     await File('${folder.path}/flutter_windows.dll').writeAsString('dll-v2');
   } else {
     await File('${folder.path}/starsync').writeAsString(app);
@@ -58,11 +52,6 @@ Future<List<int>> _releaseTarball(Directory work,
     await File('${folder.path}/update.sh')
         .writeAsString('#!/bin/sh\nexec ./starsync-server --upgrade\n');
     final exec = ['starsync', 'update.sh'];
-    if (legacy) {
-      await File('${folder.path}/watch_together').writeAsString(
-          '#!/bin/sh\nexec "\$(dirname "\$(readlink -f "\$0")")/starsync" "\$@"\n');
-      exec.add('watch_together');
-    }
     if (!Platform.isWindows) {
       final r = await Process.run(
           'chmod', ['755', for (final f in exec) '${folder.path}/$f']);
@@ -81,7 +70,8 @@ Future<List<int>> _releaseTarball(Directory work,
   return out.readAsBytes();
 }
 
-// An install as 1.2.x left it: the binary is still called watch_together.
+// An install whose binary still has the name up to 1.2.x (watch_together):
+// it must still update, and the update removes that name.
 Future<Directory> _fakeRoot(Directory work, {bool windows = false}) async {
   final root = Directory('${work.path}/install');
   await Directory('${root.path}/data').create(recursive: true);
@@ -349,7 +339,8 @@ void main() {
           'fresh-config');
       expect(Directory('$p/starsync-0.2.0').existsSync(), isFalse);
       expect(_isExec('$p/starsync'), isTrue);
-      expect(_isExec('$p/watch_together'), isTrue, reason: 'the old name, a launcher');
+      expect(File('$p/watch_together').existsSync(), isFalse,
+          reason: 'the old name goes once starsync is there');
       expect(_isExec('$p/update.sh'), isTrue);
       expect(await Link('$p/lib/libapp.so').target(), 'libapp.so.1');
       expect(await File('$p/lib/libapp.so').readAsString(), 'lib-v2');
@@ -453,8 +444,6 @@ void main() {
       'aside:lib',
       'in:starsync',
       'in:update.sh',
-      'aside:watch_together',
-      'in:watch_together',
     ]) {
       test('failure at $step rolls back', () async {
         final root = await _fakeRoot(work);
@@ -503,40 +492,49 @@ void main() {
       await Directory('${root.path}/.update-backup').create();
       await File('${root.path}/.update-download').writeAsString('partial');
       await File('${root.path}/data/thing.dll.old').writeAsString('o');
-      await cleanupUpdateLeftovers(root);
+      await cleanupUpdateLeftovers(root, windows: false);
       expect(_leftovers(root), isEmpty);
       expect(File('${root.path}/data/thing.dll.old').existsSync(), isFalse);
+      // No starsync next to it: the old name is the install's binary, kept.
+      expect(await File('${root.path}/watch_together').readAsString(), 'binary-v1');
     });
 
-    // A 1.2.x updater checks its own name is in the archive, applies, then
-    // restarts that name: the launcher must start the new binary.
-    test('1.2.x install: the old name is in the archive and starts the new binary',
+    // A 1.4.x updater swaps in only what the archive has, so the old names
+    // outlive that update: the next start's sweep removes them.
+    test('the sweep removes the old names once the new binaries are there',
         () async {
       final root = await _fakeRoot(work);
-      final f = File('${work.path}/script.tar.gz')
-        ..writeAsBytesSync(await _releaseTarball(work,
-            app: '#!/bin/sh\necho "new binary: \$*"\n'));
-      await applyUpdate(f, root,
-          windows: false, executableName: legacyAppBinaryName);
-      final r = await Process.run('${root.path}/watch_together', ['--x']);
-      expect(r.exitCode, 0, reason: '${r.stderr}');
-      expect('${r.stdout}'.trim(), 'new binary: --x');
-      // This build's own restart goes to the new binary directly.
-      expect(relaunchExecutable('${root.path}/watch_together'),
-          '${root.path}/starsync');
-    }, skip: _posixOnly);
+      final p = root.path;
+      for (final n in ['starsync', 'starsync-server', 'watch-together-server']) {
+        await File('$p/$n').writeAsString('x');
+      }
+      await cleanupUpdateLeftovers(root, windows: false);
+      expect(File('$p/watch_together').existsSync(), isFalse);
+      expect(File('$p/watch-together-server').existsSync(), isFalse);
+      expect(File('$p/starsync').existsSync(), isTrue);
+      expect(File('$p/starsync-server').existsSync(), isTrue);
+      // Each old name only goes with its own new binary next to it.
+      final lone = await work.createTemp('lone');
+      await File('${lone.path}/starsync').writeAsString('x');
+      await File('${lone.path}/watch-together-server').writeAsString('x');
+      await removeOldNames(lone, windows: false);
+      expect(File('${lone.path}/watch-together-server').existsSync(), isTrue);
+    });
 
-    test('started by an old name, an archive without it still applies',
+    test('started by an old name: applies, removes the old name, restarts starsync',
         () async {
       final root = await _fakeRoot(work);
       final f = File('${work.path}/plain.tar.gz')
-        ..writeAsBytesSync(await _releaseTarball(work, legacy: false));
+        ..writeAsBytesSync(await _releaseTarball(work));
       await applyUpdate(f, root,
           windows: false, executableName: legacyAppBinaryName);
       expect(await File('${root.path}/starsync').readAsString(), 'binary-v2');
+      expect(File('${root.path}/watch_together').existsSync(), isFalse);
+      expect(relaunchExecutable('${root.path}/watch_together'),
+          '${root.path}/starsync');
       // Unknown names still need their binary in the archive.
       final again = File('${work.path}/plain2.tar.gz')
-        ..writeAsBytesSync(await _releaseTarball(work, version: '0.3.0', legacy: false));
+        ..writeAsBytesSync(await _releaseTarball(work, version: '0.3.0'));
       await expectLater(
           applyUpdate(again, root, windows: false, executableName: 'other'),
           throwsFormatException);
@@ -565,15 +563,21 @@ void main() {
     // Windows file-locking semantics (no Windows runner yet).
     test('windows-style swap applies and parks old files', () async {
       final root = await _fakeRoot(work, windows: true);
-      await applyUpdate(await archive(windows: true), root, windows: true);
       final p = root.path;
+      await File('$p/watch_together.exe.old').writeAsString('older');
+      await File('$p/watch-together-server.exe').writeAsString('server-v1');
+      await applyUpdate(await archive(windows: true), root, windows: true);
       expect(await File('$p/starsync.exe').readAsString(), 'binary-v2');
-      expect(await File('$p/watch_together.exe').readAsString(), 'binary-v2');
       expect(await File('$p/flutter_windows.dll').readAsString(), 'dll-v2');
       expect(await File('$p/data/flutter_assets/fresh.cfg').readAsString(),
           'fresh-config');
       // Not in use here, so the .old copies were deleted right away.
+      expect(File('$p/flutter_windows.dll.old').existsSync(), isFalse);
+      // The old app name goes with its .old copy; the server's old name
+      // stays, this archive has no starsync-server.exe.
+      expect(File('$p/watch_together.exe').existsSync(), isFalse);
       expect(File('$p/watch_together.exe.old').existsSync(), isFalse);
+      expect(File('$p/watch-together-server.exe').existsSync(), isTrue);
       expect(_leftovers(root), isEmpty);
     });
 
@@ -582,7 +586,7 @@ void main() {
       await expectLater(
           applyUpdate(await archive(windows: true), root, windows: true,
               hook: (s) async {
-            if (s == 'in:watch_together.exe') {
+            if (s == 'in:starsync.exe') {
               throw const FileSystemException('injected');
             }
           }),
@@ -597,34 +601,47 @@ void main() {
     });
 
     // The real thing: the release zip (bsdtar, like package_windows.ps1)
-    // applied over an install whose exe is running. Windows refuses to
-    // delete a running image but allows renaming it, so it is parked as
-    // .old and swept on the next start.
+    // applied over an install whose exes are running. Windows refuses to
+    // delete a running image but allows renaming it, so the running
+    // starsync.exe is parked as .old, and so is a running copy by the old
+    // name (no longer in the archive); both are swept on the next start.
     test('windows: zip over a running exe', () async {
       final root = await _fakeRoot(work, windows: true);
-      final exe = '${root.path}/watch_together.exe';
+      final exe = '${root.path}/starsync.exe';
+      final old = '${root.path}/watch_together.exe';
       await File(r'C:\Windows\System32\PING.EXE').copy(exe);
+      await File(r'C:\Windows\System32\PING.EXE').copy(old);
       final zip = File('${work.path}/u.zip')
         ..writeAsBytesSync(
             await _releaseTarball(work, windows: true, zip: true));
-      final running = await Process.start(exe, ['-n', '60', '127.0.0.1']);
+      final running = [
+        for (final e in [exe, old]) await Process.start(e, ['-n', '60', '127.0.0.1'])
+      ];
       try {
-        expect(() => File(exe).deleteSync(), throwsA(isA<FileSystemException>()),
-            reason: 'precondition: a running exe is locked');
+        for (final e in [exe, old]) {
+          expect(() => File(e).deleteSync(), throwsA(isA<FileSystemException>()),
+              reason: 'precondition: a running exe is locked');
+        }
         await applyUpdate(zip, root, windows: true);
         expect(await File(exe).readAsString(), 'binary-v2');
         expect(File('$exe.old').existsSync(), isTrue);
+        expect(File(old).existsSync(), isFalse);
+        expect(File('$old.old').existsSync(), isTrue);
+        expect(relaunchExecutable(old), exe);
         expect(
             await File('${root.path}/data/flutter_assets/fresh.cfg')
                 .readAsString(),
             'fresh-config');
         expect(_leftovers(root), isEmpty);
       } finally {
-        running.kill();
-        await running.exitCode;
+        for (final r in running) {
+          r.kill();
+          await r.exitCode;
+        }
       }
       await cleanupUpdateLeftovers(root);
       expect(File('$exe.old').existsSync(), isFalse);
+      expect(File('$old.old').existsSync(), isFalse);
     }, skip: Platform.isWindows ? null : 'needs Windows');
   });
 }

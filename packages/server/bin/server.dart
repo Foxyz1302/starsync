@@ -8,8 +8,7 @@ import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
 
 /// Dedicated server: `dart compile exe` of this file is shipped as
-/// `starsync-server` (also started by the `watch-together-server`
-/// launcher). Runs [serve] until SIGINT or SIGTERM.
+/// `starsync-server`. Runs [serve] until SIGINT or SIGTERM.
 Future<void> main(List<String> args) async {
   final parser = ArgParser()
     ..addOption('port', abbr: 'p', defaultsTo: '8080', help: 'TCP port to listen on (all IPv4 interfaces).')

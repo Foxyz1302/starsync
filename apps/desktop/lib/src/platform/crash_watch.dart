@@ -123,7 +123,8 @@ Future<void> _windowsCrashes({DateTime? since, bool atQuit = false}) async {
 }
 
 /// The app's executables: `watch_together.exe` is the 1.2.x name, a copy
-/// of `starsync.exe` that installs updated from 1.2.x still start.
+/// of `starsync.exe` that 1.4.x and older shipped; the update away from
+/// 1.4.x quits it, so its teardown records are read once more.
 const appExes = {'starsync.exe', 'watch_together.exe'};
 const appExe = 'starsync.exe';
 

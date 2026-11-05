@@ -1,4 +1,0 @@
-#!/bin/sh
-# Starsync's name up to 1.2.x: their updater restarts it after updating to
-# this release, and launchers or scripts may still point at it.
-exec "$(dirname "$(readlink -f "$0")")/starsync" "$@"

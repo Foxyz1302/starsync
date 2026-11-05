@@ -4,11 +4,9 @@
 # top-level folder starsync-<version>/ with starsync.exe, its DLLs and
 # data/ as built, plus update.bat (runs starsync-server.exe --upgrade) and
 # starsync-server.exe (dedicated server, `dart compile exe` of
-# packages/server/bin/server.dart; both binaries stamped with APP_VERSION),
-# and copies of both under the names up to 1.2.x (watch_together.exe,
-# watch-together-server.exe: a 1.2.x updater checks for and restarts its
-# own name). Same layout as tool/package_linux.sh; the updater strips the
-# top-level folder.
+# packages/server/bin/server.dart; both binaries stamped with APP_VERSION).
+# Same layout as tool/package_linux.sh; the updater strips the top-level
+# folder.
 # Needs: flutter on PATH, tar.exe (ships with Windows 10+, writes zip).
 param([switch]$SkipBuild)
 $ErrorActionPreference = 'Stop'
@@ -70,14 +68,12 @@ if (Test-Path $Stage) { Remove-Item -Recurse -Force $Stage }
 New-Item -ItemType Directory -Force "$Stage/$Folder", $Dist | Out-Null
 Copy-Item -Recurse "$Bundle/*" "$Stage/$Folder/"
 Copy-Item "$App/lib/src/update/bundle/update.bat" "$Stage/$Folder/update.bat"
-Copy-Item "$Stage/$Folder/starsync.exe" "$Stage/$Folder/watch_together.exe"
 
 Push-Location (Join-Path $Root 'packages/server')
 try {
   Invoke-Checked 'dart pub get' { dart pub get | Out-Null }
   Invoke-Checked 'dart compile exe' { dart compile exe "--define=APP_VERSION=$Version" bin/server.dart -o "$Stage/$Folder/starsync-server.exe" }
 } finally { Pop-Location }
-Copy-Item "$Stage/$Folder/starsync-server.exe" "$Stage/$Folder/watch-together-server.exe"
 
 if (Test-Path $Zip) { Remove-Item -Force $Zip }
 # bsdtar writes forward-slash entry names (Compress-Archive on 5.1 doesn't).

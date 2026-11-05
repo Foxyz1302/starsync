@@ -228,8 +228,8 @@ class UpdateController {
     } catch (e) {
       _log.warning('keeping the notes of ${m.version}: $e');
     }
-    // Started by an old name (1.2.x's restart, an old launcher): the new
-    // binary next to it.
+    // Started by an old name (an old shortcut to `watch_together.exe`,
+    // which this update removed): the new binary next to it.
     await restart(relaunchExecutable(_exe), launchArgs);
   }
 }

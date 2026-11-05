@@ -43,10 +43,11 @@ final updatePlatform = '${Platform.operatingSystem}-x64';
 const appBinaryName = 'starsync';
 /// The dedicated server's binary next to it (`.exe` on Windows).
 const serverBinaryName = 'starsync-server';
-/// The names up to 1.2.x. The archive still carries launchers by these
-/// names (tool/package_linux.sh, package_windows.ps1): a 1.2.x updater
-/// checks that its own name is in the archive and restarts it, and VPS
-/// units and `update.sh` copies run the old server name.
+/// The names up to 1.2.x, which archives up to 1.4.x still carried
+/// (launchers on Linux, copies on Windows). No longer shipped:
+/// [removeOldNames] deletes them from an install. An install started by
+/// one still updates ([applyUpdate] accepts the new name for it) and
+/// restarts as the new binary ([relaunchExecutable]).
 const legacyAppBinaryName = 'watch_together';
 const legacyServerBinaryName = 'watch-together-server';
 
@@ -365,13 +366,15 @@ String currentExecutablePath() {
 }
 
 // Sweep what a previous apply left behind: staging/backup dirs from an
-// interrupted run, and Windows `*.old` files that were still in use.
+// interrupted run, Windows `*.old` files that were still in use, and the
+// old names an update by a 1.4.x updater kept (removeOldNames).
 // The running app is complete (it started), so leftovers are garbage.
-Future<void> cleanupUpdateLeftovers(Directory root) async {
+Future<void> cleanupUpdateLeftovers(Directory root, {bool? windows}) async {
   for (final name in [_stagingDir, _backupDir, _downloadFile]) {
     await _deleteQuietly('${root.path}/$name');
   }
   if (!await root.exists()) return;
+  await removeOldNames(root, windows: windows);
   final old = RegExp(r'\.old(\.\d+)?$');
   await for (final e in root.list(recursive: true, followLinks: false)) {
     if (e is File && old.hasMatch(e.path)) {
@@ -380,6 +383,41 @@ Future<void> cleanupUpdateLeftovers(Directory root) async {
       } catch (err) {
         _log.fine('still in use, retry next start: ${e.path} ($err)');
       }
+    }
+  }
+}
+
+/// Deletes the launchers or copies by the names up to 1.2.x
+/// ([legacyAppBinaryName], [legacyServerBinaryName], `.exe` on Windows)
+/// and their `.old` copies from [root], each only when its new binary is
+/// there. A running one (Windows: an app started by the old name) is
+/// renamed to `.old` instead, swept on a later start. Never throws.
+Future<void> removeOldNames(Directory root, {bool? windows}) async {
+  final ext = (windows ?? Platform.isWindows) ? '.exe' : '';
+  for (final (old, now) in [
+    (legacyAppBinaryName, appBinaryName),
+    (legacyServerBinaryName, serverBinaryName),
+  ]) {
+    final path = '${root.path}/$old$ext';
+    try {
+      if (!await File('${root.path}/$now$ext').exists()) continue;
+      try {
+        if (await _exists('$path.old')) await File('$path.old').delete();
+      } on FileSystemException {
+        // Still in use: the sweep of a later start takes it.
+      }
+      if (!await _exists(path)) continue;
+      try {
+        await File(path).delete();
+      } on FileSystemException {
+        // Running (Windows): it can be renamed, not deleted.
+        await File(path).rename(await _exists('$path.old')
+            ? '$path.old.${DateTime.now().millisecondsSinceEpoch}'
+            : '$path.old');
+      }
+      _log.info('removed the old name $old$ext');
+    } catch (e) {
+      _log.warning('old name $old$ext stays for now: $e');
     }
   }
 }
@@ -532,10 +570,11 @@ Future<void> applyUpdate(File archive, Directory root,
   } finally {
     await _deleteQuietly(stage.path);
   }
+  await removeOldNames(root, windows: win);
 }
 
-// The running binary's name, or for an old name its new one (an archive
-// without the old launchers still updates an install started by one).
+// The running binary's name, or for an old name its new one (archives
+// no longer carry the old names; an install started by one still updates).
 Future<bool> _hasBinary(String dir, String name) async {
   if (await File('$dir/$name').exists()) return true;
   final renamed = _renamedBinary(name);

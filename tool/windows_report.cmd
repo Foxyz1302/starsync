@@ -1,6 +1,6 @@
 @echo off
 rem Starsync crash report: put this file in the Starsync folder (next to
-rem starsync.exe or watch_together.exe) and double-click it. It makes
+rem starsync.exe) and double-click it. It makes
 rem starsync-report.zip on the Desktop and copies it: Ctrl+V in Discord.
 set "STARSYNC_REPORT_DIR=%~dp0"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$s = Get-Content -LiteralPath '%~f0' -Raw; iex $s.Substring($s.IndexOf('#STAR' + 'SYNC-PS'))"
@@ -40,12 +40,12 @@ Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000, 1001, 1026;
 
 # Every install found: its files, and one test start of starsync.exe.
 $roots = @([Environment]::GetFolderPath('Desktop'), "$env:USERPROFILE\Downloads", "$env:USERPROFILE\Desktop", $env:LOCALAPPDATA, $env:ProgramFiles, "$env:USERPROFILE\Documents") | Select-Object -Unique
-$exes = foreach ($r in $roots) { Get-ChildItem -Path $r -Recurse -Depth 3 -Include 'starsync.exe', 'watch_together.exe' -File }
+$exes = foreach ($r in $roots) { Get-ChildItem -Path $r -Recurse -Depth 3 -Include 'starsync.exe' -File }
 # The folder this report was started from comes first.
 $here = $env:STARSYNC_REPORT_DIR
 if ($here) { $here = $here.TrimEnd('\') }
 $dirs = @($here) + ($exes | ForEach-Object { $_.DirectoryName }) |
-  Where-Object { $_ -and ((Test-Path (Join-Path $_ 'starsync.exe')) -or (Test-Path (Join-Path $_ 'watch_together.exe'))) } |
+  Where-Object { $_ -and (Test-Path (Join-Path $_ 'starsync.exe')) } |
   Select-Object -Unique
 foreach ($d in $dirs) {
   Say ''
@@ -54,7 +54,6 @@ foreach ($d in $dirs) {
     Say ('  ' + $_.FullName.Substring($d.Length) + '  ' + $_.Length + '  ' + $_.LastWriteTime.ToString('s'))
   }
   $exe = Join-Path $d 'starsync.exe'
-  if (-not (Test-Path $exe)) { $exe = Join-Path $d 'watch_together.exe' }
   $p = Start-Process -FilePath $exe -WorkingDirectory $d -PassThru
   Start-Sleep -Seconds 20
   if ($p.HasExited) {
@@ -64,7 +63,7 @@ foreach ($d in $dirs) {
     Stop-Process -Id $p.Id -Force
   }
 }
-if (-not $dirs) { Say 'No starsync.exe or watch_together.exe found on Desktop, Downloads, Documents, AppData or Program Files.' }
+if (-not $dirs) { Say 'No starsync.exe found on Desktop, Downloads, Documents, AppData or Program Files.' }
 
 # Logs written by the test start.
 Get-ChildItem -Path "$env:APPDATA\*\*\logs\*" -Include 'app-*' | Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-2) } |

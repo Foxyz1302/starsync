@@ -26,29 +26,23 @@ final _posixOnly = Platform.isWindows ? 'POSIX install layout' : null;
 bool _isExec(String path) => File(path).statSync().mode & 0x40 != 0;
 
 // Builds the release archive exactly like tool/package_linux.sh:
-// bundle copied into <stage>/starsync-<ver>/ with the launcher by the
-// old name (lib/src/update/bundle/watch_together, the shipped file), then
-// `tar -czf out -C <stage> starsync-<ver>`. [app]: the app binary's
-// content.
-Future<List<int>> _releaseTarball(Directory work,
-    {String version = '0.2.0', String app = 'binary-v2'}) async {
+// bundle copied into <stage>/starsync-<ver>/ with the shipped update.sh,
+// then `tar -czf out -C <stage> starsync-<ver>`.
+Future<List<int>> _releaseTarball(Directory work, {String version = '0.2.0'}) async {
   final stage = Directory('${work.path}/pkg-$version-lin');
   final folder = Directory('${stage.path}/starsync-$version');
   await Directory('${folder.path}/data/flutter_assets').create(recursive: true);
   await File('${folder.path}/data/flutter_assets/fresh.cfg')
       .writeAsString('fresh-config');
-  await File('${folder.path}/starsync').writeAsString(app);
+  await File('${folder.path}/starsync').writeAsString('binary-v2');
   await Directory('${folder.path}/lib').create();
   await File('${folder.path}/lib/libapp.so.1').writeAsString('lib-v2');
   await Link('${folder.path}/lib/libapp.so').create('libapp.so.1');
-  for (final f in ['update.sh', 'watch_together', 'watch-together-server']) {
-    await File('lib/src/update/bundle/$f').copy('${folder.path}/$f');
-  }
+  await File('lib/src/update/bundle/update.sh').copy('${folder.path}/update.sh');
   if (!Platform.isWindows) {
     final r = await Process.run('chmod', [
       '755',
-      for (final f in ['starsync', 'update.sh', 'watch_together', 'watch-together-server'])
-        '${folder.path}/$f'
+      for (final f in ['starsync', 'update.sh']) '${folder.path}/$f'
     ]);
     expect(r.exitCode, 0);
   }
@@ -58,7 +52,7 @@ Future<List<int>> _releaseTarball(Directory work,
   return out.readAsBytes();
 }
 
-// An install as 1.2.x left it: the binary is still called watch_together.
+// An install whose binary still has the name up to 1.2.x (watch_together).
 Future<Directory> _fakeRoot(Directory work, {bool windows = false}) async {
   final root = Directory('${work.path}/install');
   await Directory('${root.path}/data').create(recursive: true);
@@ -165,10 +159,8 @@ void main() {
       expect(restarts.single.$2, ['--some-flag']);
     }, skip: _posixOnly);
 
-    test('started by the old name: restarts the new binary; the old name launches it',
+    test('started by the old name: restarts the new binary; the old name is gone',
         () async {
-      server.tarball = await _releaseTarball(work,
-          version: '0.2.1', app: '#!/bin/sh\necho "starsync \$*"\n');
       final root = await _fakeRoot(work);
       final restarts = <String>[];
       final c = UpdateController(
@@ -180,11 +172,7 @@ void main() {
       await c.install();
       expect(c.status.value.phase, UpdatePhase.restarting);
       expect(restarts.single, '${root.path}/starsync');
-      // What a 1.2.x app restarts after this update, and the VPS server
-      // name: both launch the new binaries.
-      final app = await Process.run('${root.path}/watch_together', ['--a']);
-      expect('${app.stdout}'.trim(), 'starsync --a', reason: '${app.stderr}');
-      expect(_isExec('${root.path}/watch-together-server'), isTrue);
+      expect(File('${root.path}/watch_together').existsSync(), isFalse);
     }, skip: _posixOnly);
 
     test('newer protocol is a required update, cannot be dismissed',
