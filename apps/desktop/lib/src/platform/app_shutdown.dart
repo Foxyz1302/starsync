@@ -43,6 +43,12 @@ Future<void> shutDownApp({Future<void> Function()? beforeQuit, bool restart = fa
   final graph = _graph;
   if (_shuttingDown || graph == null) return;
   _shuttingDown = true;
+  // Every step is bounded, but a timeout only stops waiting and the quit
+  // itself is not: whatever stalls, the process ends.
+  Timer(const Duration(seconds: 20), () {
+    debugPrint('close: still running after 20 s; ending the process');
+    Process.killPid(pid, ProcessSignal.sigkill);
+  });
   // A start from now on waits for this app to end instead of handing its
   // link to it.
   _instance?.closing();

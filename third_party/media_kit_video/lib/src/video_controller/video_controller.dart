@@ -77,9 +77,12 @@ class VideoController {
     player.platform?.isVideoControllerAttached = true;
 
     () async {
-      final completer = Completer();
-      WidgetsBinding.instance.addPostFrameCallback((_) => completer.complete());
-      await completer.future;
+      // Starsync: the app's first frame, not the next one. A controller
+      // made between frames (from async code while nothing animates)
+      // waited until something else drew, and one made while the window
+      // was hidden (frames off) waited for good; [NativePlayer.dispose]
+      // waits for this setup under a lock all players share.
+      await WidgetsBinding.instance.waitUntilFirstFrameRasterized;
 
       try {
         if (NativeVideoController.supported) {

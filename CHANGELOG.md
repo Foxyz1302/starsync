@@ -30,6 +30,10 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ### Fixed
 
+- Closing the window could leave Starsync running unseen in the background, with its players, for hours; it now ends within a few seconds (and always within 20)
+- A video could take seconds to show, or Up next could stop getting ready, when it was started while nothing on screen moved
+- Video memory no longer grows with every video played (about 10 MB more per video at 2560×1080 until the app was closed)
+- Linux: the app gives memory back after a video (or a folder's thumbnails) is done, instead of keeping more with every video
 - The player panel's hardware decoding offered Custom with nowhere to type the value; it has the field now, as in Settings
 - A chat message that arrived before the sender's picture showed only their initial; the picture now appears as soon as it is there
 - After a server is updated, the members card shows its new version (it kept the old one until you rejoined)

@@ -12,7 +12,7 @@ Plain overview first: [HOW-IT-WORKS.md](HOW-IT-WORKS.md). Wire format:
 | `apps/desktop` | Flutter app: UI, `AppGraph` (composition root), `SyncClient`, `Connection`, `SessionCoordinator`, `Navigation`, `YourServer` (`ServerIsolate`), `MediaPipeline` (opening media), `QueueController` (what's next on this app), `WatchTracker` (watch tracking), `PlaybackController` (the session player's marks and commands), the player host (`PlayerHost`, `MediaKitHost`: the only media_kit user besides the `Video` widget glue), update UI (`UpdateController`) | ships with `starsync-server` |
 | `tool` | harnesses: `range_logger`, `shaper`, `fake_viewer`, `e2e_check` | dev only |
 | `deploy` | systemd unit for the dedicated server | |
-| `third_party/media_kit_video` | upstream media_kit_video 2.0.1 with Starsync's patches (`starsync/README.md`: Flutter ≥ 3.38 EGL display on the platform thread, the X11 GLX step-aside) | vendored; re-apply patches on update |
+| `third_party/media_kit_video` | upstream media_kit_video 2.0.1 with Starsync's patches (`starsync/README.md`: Flutter ≥ 3.38 EGL display on the platform thread, the X11 GLX step-aside, a `VideoController` that sets up without waiting for a next frame, texture names deleted in Flutter's context) | vendored; re-apply patches on update |
 
 Guard: `packages/core/test/flutter_free_test.dart` fails if anything under
 `core/lib` imports Flutter, `dart:ui` or `signals_flutter`; CI runs
@@ -690,7 +690,11 @@ routes mpv's log, and owns the order players go in: `retire` (pause, let
 the view drop the texture: two frames and a route pop, then dispose; a
 new session player waits for the last one, so at most one old player
 lingers), `dispose` (one no view showed) and `disposeAll` (app close:
-every live player, each bounded). A `HostedPlayer` is one mpv: state and
+every live player, each bounded). On Linux each disposal also trims
+glibc's heap 6 s later, after media_kit's own deferred destroy of the
+mpv core (5 s), one trim for a run of them (`native_heap.dart`,
+`malloc_trim(0)`): what mpv's threads freed otherwise stays in the
+malloc arenas, and the app's memory grew with every player. A `HostedPlayer` is one mpv: state and
 streams (position, duration, buffer, volume, completed, width, log),
 open, play/pause/stop, `seek` (the user's, see "User seeks") and
 `syncSeek`, rate, volume, properties, commands, `pin` (set and read
@@ -2707,7 +2711,10 @@ process without `exit()`'s handlers: Linux `_exit` after
 Windows `TerminateProcess` after the message loop (no DLL detach
 handlers, which can hang on threads already gone). Every step is bounded
 and logs (`close: ...`) when it is slow or fails. Backstops, so no process
-stays behind a hidden window: 3 s after asking the window to close the
+stays behind a hidden window: 20 s after `shutDownApp` starts the app
+kills itself whatever it is still waiting for (a step's timeout only
+stops waiting, and asking the window to close has none); 3 s after asking
+the window to close the
 app kills itself (`Process.killPid`, no exit handlers; it only gets there
 if the close did not go through); the runners end the process 15 s after
 the first close request (Linux: a `delete-event` handler connected before
