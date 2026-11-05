@@ -66,6 +66,16 @@ Problems are numbered; delete a line when its fix ships.
   the budget ends the file. Options: a longer `reconnect_delay_max` for
   relay URLs only, or the end-of-file path reopening a relay viewer
   that stopped short while the server plays.
+- P38 Keyboard focus leaks onto the top bar: the arrow keys move focus to
+  its buttons, and Enter on a focused window × closed the app. Window
+  buttons must never take keyboard focus.
+- P39 PgUp / PgDn step chapters the wrong way round.
+- P40 Minimal skin: a click near the clock to seek toggles the time style
+  instead (the clock's hit area is too big at the timeline's end).
+- P41 Putting a video up takes two clicks, adding it to Up next one: the
+  common action should be the shorter one.
+- P42 Autoplay can time out, and the ready system as a whole is not
+  thought through (see "Starting together" under Open decisions).
 
 **Restructure** (in order; reviewed against the code). Truth lives in
 three places: the server (members, presence, gate, transport, queue incl.
@@ -251,7 +261,11 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
 1. **Auto-skip OP/ED** (undecided): who decides and how (shared for the
    server, personal, per show) is open. Constraint: a skip is a seek and
    seeks are shared, and only real ranges (segments, OP/ED chapters) should
-   ever be skipped.
+   ever be skipped. Detection is the harder half: OPs and EDs are often not
+   named (chapters "1"–"5"); a ~1:30 chapter near the start or end of a
+   20+ minute episode is a strong hint, and audio fingerprinting across a
+   show's episodes (the same song at the same spot) finds them without
+   chapters.
 
 2. **yt-dlp follow-ups** (see ARCHITECTURE "yt-dlp"): check that the
    bundled Windows libmpv plays the app's `edl://` URLs (video + audio
@@ -276,7 +290,12 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
    **AniList browser** (wanted next once 1.3.0 holds up): view shows and
    browse older ones (search, seasons, details), and request one from
    there on AnimeFlow; later on Sonarr too, which is what a public
-   release of the app would use.
+   release of the app would use. Browse ALL anime (not only what the
+   Schedule airs), so older finished shows can be requested. A full anime
+   page (cover, synopsis, episodes, relations, studios, where it is on
+   Jellyfin/Files) opened from anywhere a show appears, e.g. a Schedule
+   entry. With the account: track progress on AniList, and carry over
+   what Jellyfin already has as watched.
 
 4. **Ops**: Check shaders on Windows; run the relay e2e "the source drops
    uncleanly and comes back" a few times under the full suite (its
@@ -333,7 +352,17 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
 
 9. **Jellyfin** (epic, below).
 
-10. **Smaller items**
+10. **Folder as a playlist**: put up a whole folder of videos (a
+   collection without a show behind it) as a transient playlist, like a
+   Jellyfin show: one after another with Up next's countdown, nothing
+   saved.
+
+11. **People cards**: a richer hover card for a person anywhere they
+   appear (strip, members card, chat, toasts, danmaku): a larger avatar
+   (click to view it full), name, presence, ready, app version, what
+   they are passing on. Hover and click work wherever a person shows.
+
+12. **Smaller items**
    - The video freeze after GPU idle: next suspect is media_kit's context
      switching on the raster thread with NVIDIA.
    - Timelines: draw mpv's real cached ranges (`demuxer-cache-state`
@@ -362,6 +391,8 @@ What is left (the rest is in [ARCHITECTURE.md](ARCHITECTURE.md), "Jellyfin
 in a session"):
 - Sidecar (external) subtitle streams of Jellyfin items: only embedded
   tracks are mapped to mpv today.
+- Mark a whole show (or season) watched: a button on its page and in its
+  right-click menu.
 
 ## Deferred
 
