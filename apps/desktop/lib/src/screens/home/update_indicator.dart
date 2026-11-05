@@ -233,7 +233,7 @@ class UpdateStatusLine extends StatelessWidget {
           text = 'Dev build — update checks are off';
         } else if (s.phase != UpdatePhase.idle && m != null) {
           text = s.phase == UpdatePhase.failed
-              ? 'Update to v${m.version} failed'
+              ? (s.refused ? '${s.error}' : 'Update to v${m.version} failed')
               : 'Update v${m.version} available';
         } else {
           text = switch (updateCheck.value) {

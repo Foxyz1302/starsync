@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import 'package:sync_relay_core/core.dart' show RemoteConfigSource;
 
 import '../jellyfin/accounts.dart';
 import '../library/library_store.dart';
@@ -101,6 +102,7 @@ class AppGraph {
     ShowMatcher? library,
     WatchHistory? history,
     Future<String?> Function()? publicAddress,
+    String? configDir,
   }) {
     final p = ports ?? desktopPorts();
     final settings = AppSettings.instance;
@@ -172,6 +174,11 @@ class AppGraph {
     final whatsNew = WhatsNew(store: SettingsWhatsNewStore(settings));
     updates.beforeRestart ??= whatsNew.installing;
     updates.channelOf ??= () => settings.updateChannel.peek();
+    // The signed config's last good copy lives in [configDir] (the app
+    // support folder); the config address setting (a mirror) goes first.
+    if (configDir != null) {
+      updates.config = RemoteConfigSource(dir: configDir, extraUrl: () => settings.configAddress.peek());
+    }
     return AppGraph._(
       ports: p,
       sfx: sfx,

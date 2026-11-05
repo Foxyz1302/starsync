@@ -5,13 +5,18 @@ import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 
 import 'constants.dart';
+import 'distribution.dart';
 import 'logging.dart';
+import 'remote_config.dart';
+import 'signing.dart';
 
 // The one updater for both programs: the app (`starsync --upgrade`
 // and the in-app update card, via UpdateController) and the dedicated
 // server (`starsync-server --upgrade`). Both ship in the same
 // release archive, so either one swaps the whole install folder: fetch
-// manifest, download, verify sha256, apply over the live install.
+// manifest (its signature checked, signing.dart), download, verify
+// sha256, apply over the live install. Where the manifests are comes
+// from the signed config (remote_config.dart), else distribution.dart.
 //
 // Apply stages inside the install root (same filesystem, so every move is
 // a rename — /tmp is often tmpfs and rename across filesystems fails).
@@ -24,22 +29,6 @@ import 'logging.dart';
 // (cleanupUpdateLeftovers). CI runs that against a live exe on NTFS.
 
 final _log = createLogger('update');
-
-/// Where the releases' manifest lives, tried in order ([fetchManifest]):
-/// when the server moves, its new address goes first and the old one
-/// stays as long as it works, so installs keep updating across the move.
-/// Never an address that no longer belongs to the project: whoever owns
-/// it next could serve a manifest.
-const updateManifestUrls = [
-  'https://git.example.org/Foxyz/sync_replay_project/raw/branch/main/updates/manifest.json',
-];
-
-/// Test builds (`tool/dev_release.sh`): one Gitea prerelease, tag `dev`,
-/// whose assets each run replaces. Only dev builds read it. Tried in
-/// order, like [updateManifestUrls].
-const devManifestUrls = [
-  'https://git.example.org/Foxyz/sync_replay_project/releases/download/dev/manifest.json',
-];
 
 const appVersion = String.fromEnvironment('APP_VERSION',
     defaultValue: '0.0.0-dev');
@@ -127,6 +116,10 @@ class UpdateManifest {
   final String version;
   final int protocol;
   final String url;
+  /// The archive's sha256 (hex), from the manifest's `assetSha256` for
+  /// this platform. A fetched manifest without one is refused
+  /// ([fetchManifest]), and so is a download without one
+  /// ([downloadAndApply]).
   final String? sha256;
   /// One line for every app (1.2.x and 1.3.x show only this).
   final String notes;
@@ -146,6 +139,9 @@ class UpdateManifest {
 
   // `assets` maps platform → archive URL. Top-level `url` is the Linux
   // tarball, kept for builds from before `assets` existed (<= 0.2.1).
+  // `assetSha256` maps platform → the archive's sha256; apps up to 1.4.x
+  // read only a top-level string `sha256` (for `url`), which manifests no
+  // longer carry, so they skip the check.
   factory UpdateManifest.fromJson(Map<String, Object?> json,
       {String? platform}) {
     final version = json['version'];
@@ -162,12 +158,15 @@ class UpdateManifest {
           ? 'release $version has no ${platform ?? updatePlatform} build'
           : 'update manifest missing version/protocol/url');
     }
-    final sha = json['sha256'];
+    final shas = json['assetSha256'];
+    final sha = shas is Map ? shas[platform ?? updatePlatform] : null;
     return UpdateManifest(
         version: version,
         protocol: protocol,
         url: url,
-        sha256: sha is String && sha.isNotEmpty ? sha : null,
+        sha256: sha is String && RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(sha.trim())
+            ? sha.trim().toLowerCase()
+            : null,
         notes: json['notes'] is String ? json['notes'] as String : '',
         changes: ReleaseChanges.fromJson(json['changes']),
         highlights: releaseHighlights(json['highlights']));
@@ -234,41 +233,59 @@ int compareVersions(String a, String b) {
 bool isNewerVersion(String current, String latest) =>
     compareVersions(latest, current) > 0;
 
-/// The manifest from the first of [urls] that serves a valid one; when
-/// none does, the first address's error.
+/// The manifest from the first of [urls] that serves a valid one, signed
+/// by one of [keys] (`manifest.json.sig` next to it) and with a checksum
+/// for this platform. When none does: an [UpdateRefused] if an address
+/// served one that is refused (unsigned, a bad signature, no checksum),
+/// else the first address's error.
 Future<UpdateManifest> fetchManifest(
-    {HttpClient? http, List<String> urls = updateManifestUrls}) async {
+    {HttpClient? http,
+    List<String> urls = builtInStableManifestUrls,
+    List<String> keys = trustedKeys,
+    String? platform}) async {
   if (urls.isEmpty) throw ArgumentError.value(urls, 'urls', 'no manifest address');
   Object? first;
   StackTrace? firstStack;
+  UpdateRefused? refused;
   for (final url in urls) {
     try {
-      return await _fetchManifestFrom(url, http);
+      return await _fetchManifestFrom(url, http, keys, platform);
+    } on UpdateRefused catch (e) {
+      _log.warning('manifest $url refused: ${e.detail}');
+      refused ??= e;
     } catch (e, st) {
       if (urls.length > 1) _log.warning('manifest $url: $e');
       first ??= e;
       firstStack ??= st;
     }
   }
+  if (refused != null) throw refused;
   Error.throwWithStackTrace(first!, firstStack!);
 }
 
-Future<UpdateManifest> _fetchManifestFrom(String url, HttpClient? http) async {
+const _notSigned = "Update refused: it is not signed by Starsync's developer";
+
+Future<UpdateManifest> _fetchManifestFrom(
+    String url, HttpClient? http, List<String> keys, String? platform) async {
   final client = http ?? HttpClient();
   try {
-    final req = await client
-        .getUrl(Uri.parse(url))
-        .timeout(const Duration(seconds: 15));
-    final res = await req.close().timeout(const Duration(seconds: 15));
-    final body = await res.transform(utf8.decoder).join();
-    if (res.statusCode != 200) {
-      throw HttpException('manifest fetch failed: HTTP ${res.statusCode}');
-    }
-    final decoded = jsonDecode(body);
+    final got = await fetchSigned(client, url);
+    // Not a manifest at all (a moved host's page): an error, not a refusal.
+    final decoded = jsonDecode(utf8.decode(got.body, allowMalformed: true));
     if (decoded is! Map<String, Object?>) {
       throw const FormatException('manifest is not a JSON object');
     }
-    return UpdateManifest.fromJson(decoded);
+    final sig = got.sig;
+    if (sig == null) throw UpdateRefused(_notSigned, 'no signature ($url.sig)');
+    if (await verifyDetached(got.body, sig, keys) == null) {
+      throw UpdateRefused(_notSigned, 'the signature does not match ($url.sig)');
+    }
+    final m = UpdateManifest.fromJson(decoded, platform: platform);
+    if (m.sha256 == null) {
+      throw UpdateRefused('Update refused: ${m.version} has no checksum',
+          'no assetSha256 for ${platform ?? updatePlatform} in $url');
+    }
+    return m;
   } finally {
     if (http == null) client.close();
   }
@@ -278,7 +295,7 @@ Future<UpdateManifest> _fetchManifestFrom(String url, HttpClient? http) async {
 bool isDevBuild(String version) => version.contains('-dev.');
 
 /// Where an install takes its updates from. [stable]: releases only.
-/// [dev]: test builds as well ([devManifestUrls]), whichever of the two is
+/// [dev]: test builds as well (the config's `updates.dev`), whichever of the two is
 /// newer, so a release newer than the running test build is installed and
 /// the next test line after it still is.
 enum UpdateChannel {
@@ -323,14 +340,15 @@ Future<UpdateManifest> fetchLatestManifest(
     {HttpClient? http,
     String currentVersion = appVersion,
     UpdateChannel? channel,
-    List<String> urls = updateManifestUrls,
-    List<String> devUrls = devManifestUrls}) async {
-  final stable = fetchManifest(http: http, urls: urls);
+    List<String> urls = builtInStableManifestUrls,
+    List<String> devUrls = builtInDevManifestUrls,
+    List<String> keys = trustedKeys}) async {
+  final stable = fetchManifest(http: http, urls: urls, keys: keys);
   if ((channel ?? defaultUpdateChannel(currentVersion)) == UpdateChannel.stable) {
     return stable;
   }
   stable.ignore(); // awaited below; don't let an early failure go uncaught
-  final dev = await fetchManifest(http: http, urls: devUrls)
+  final dev = await fetchManifest(http: http, urls: devUrls, keys: keys)
       .then<UpdateManifest?>((m) => m, onError: (Object e) {
     _log.warning('dev manifest: $e');
     return null;
@@ -373,10 +391,12 @@ Future<void> downloadFile(String url, File dest,
   }
 }
 
+/// Throws an [UpdateRefused] unless [file]'s sha256 is [want] (hex).
 Future<void> verifySha256(File file, String want) async {
   final digest = await sha256.bind(file.openRead()).first;
   if (digest.toString() != want.trim().toLowerCase()) {
-    throw const FormatException('sha256 mismatch — download is corrupt');
+    throw UpdateRefused('Update refused: the download does not match its checksum',
+        'sha256 $digest, the manifest says ${want.trim().toLowerCase()}');
   }
 }
 
@@ -720,22 +740,22 @@ Future<void> _swapWindows(Directory stage, Directory root, ApplyHook? hook) asyn
 }
 
 // Shared by the CLI and the in-app banner: download next to the install
-// (same filesystem), verify, apply, clean up.
+// (same filesystem), verify (without a checksum nothing downloads),
+// apply, clean up.
 Future<void> downloadAndApply(UpdateManifest manifest, Directory root,
     {HttpClient? http,
     DownloadProgress? onProgress,
     String? executableName,
     void Function(String line)? say}) async {
+  final want = manifest.sha256;
+  if (want == null) {
+    throw UpdateRefused('Update refused: ${manifest.version} has no checksum', 'no sha256 for ${manifest.url}');
+  }
   final file = File('${root.path}/$_downloadFile');
   try {
     say?.call('downloading ${manifest.url} ...');
     await downloadFile(manifest.url, file, http: http, onProgress: onProgress);
-    if (manifest.sha256 != null) {
-      await verifySha256(file, manifest.sha256!);
-    } else {
-      say?.call('no checksum in manifest — skipping verification '
-          '(HTTPS transit + gzip CRC still apply).');
-    }
+    await verifySha256(file, want);
     say?.call('verified, applying over ${root.path} ...');
     await applyUpdate(file, root, executableName: executableName);
   } finally {
@@ -750,10 +770,14 @@ String requiredUpdateNote(UpdateManifest m) =>
 // Returns a process exit code: 0 ok / already current, 1 failure,
 // 2 not a packaged install (update manually). [program] names the front
 // end in the first line; [restartNote] is the last line after an update.
-// [checkOnly] reports what is available and changes nothing.
+// [checkOnly] reports what is available and changes nothing. The
+// manifests' addresses and the trusted keys come from [config] (default:
+// the built-in values refreshed from the hosts, nothing saved);
+// [manifestUrls] overrides the stable ones.
 Future<int> runUpgrade(
     {String currentVersion = appVersion,
-    List<String> manifestUrls = updateManifestUrls,
+    List<String>? manifestUrls,
+    RemoteConfigSource? config,
     HttpClient? http,
     String? executablePath,
     Directory? installRoot,
@@ -762,9 +786,18 @@ Future<int> runUpgrade(
     bool checkOnly = false}) async {
   stdout.writeln('$program $currentVersion (proto ${RelayConstants.protoVersion})');
   late final UpdateManifest manifest;
+  final source = config ?? RemoteConfigSource();
+  final cfg = await source.refresh(http: http);
   try {
     manifest = await fetchLatestManifest(
-        http: http, currentVersion: currentVersion, urls: manifestUrls);
+        http: http,
+        currentVersion: currentVersion,
+        urls: manifestUrls ?? cfg.stable,
+        devUrls: cfg.dev,
+        keys: source.keys);
+  } on UpdateRefused catch (e) {
+    stdout.writeln('$e (${e.detail}).');
+    return 1;
   } catch (e) {
     stdout.writeln('update check failed: $e');
     return 1;
@@ -793,6 +826,9 @@ Future<int> runUpgrade(
         http: http,
         executableName: installRoot == null ? _basename(exe) : null,
         say: stdout.writeln);
+  } on UpdateRefused catch (e) {
+    stdout.writeln('$e (${e.detail}).');
+    return 1;
   } catch (e) {
     stdout.writeln('update failed: $e');
     return 1;

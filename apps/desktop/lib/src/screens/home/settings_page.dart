@@ -191,7 +191,10 @@ class UpdateSettings extends StatelessWidget {
         const SizedBox(height: 4),
         Text('Checked when the app opens and every few hours; nothing installs without asking.',
             style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
-        SettingFold(children: [UpdateChannelSetting(controller: c, settings: s)]),
+        SettingFold(children: [
+          UpdateChannelSetting(controller: c, settings: s),
+          ConfigAddressSetting(controller: c, settings: s),
+        ]),
       ],
     );
   }
@@ -266,6 +269,64 @@ class UpdateChannelSetting extends StatelessWidget {
   }
 }
 
+/// An extra address for the signed config (a mirror), tried before the
+/// others; Enter checks again. Whatever it serves still needs the
+/// developer's signature, and no key is ever set here.
+class ConfigAddressSetting extends StatefulWidget {
+  final UpdateController controller;
+  final AppSettings settings;
+  const ConfigAddressSetting({super.key, required this.controller, required this.settings});
+
+  @override
+  State<ConfigAddressSetting> createState() => _ConfigAddressSettingState();
+}
+
+class _ConfigAddressSettingState extends State<ConfigAddressSetting> {
+  late final _text = TextEditingController(text: widget.settings.configAddress.peek());
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  static bool _valid(String v) {
+    final u = Uri.tryParse(v.trim());
+    return v.trim().isEmpty || (u != null && (u.scheme == 'https' || u.scheme == 'http') && u.host.isNotEmpty);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SettingRow(
+      label: 'Config address',
+      help: 'A mirror of where Starsync finds its updates, tried first. '
+          "What it serves must still be signed by Starsync's developer. Leave empty if unsure",
+      control: const SizedBox.shrink(),
+      below: Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: ValueListenableBuilder(
+          valueListenable: _text,
+          builder: (context, value, _) => TextField(
+            key: const ValueKey('config-address'),
+            controller: _text,
+            decoration: InputDecoration(
+              isDense: true,
+              labelText: 'https://…/starsync-config.json (Enter checks)',
+              errorText: _valid(value.text) ? null : 'Not a web address',
+              border: const OutlineInputBorder(),
+            ),
+            onChanged: (v) {
+              if (_valid(v)) widget.settings.setConfigAddress(v);
+            },
+            onSubmitted: (v) {
+              if (_valid(v)) runUpdateCheck(widget.controller, true);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 /// Settings → Player → Playback.
 class AutoAdvanceSetting extends StatelessWidget {

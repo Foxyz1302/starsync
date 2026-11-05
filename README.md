@@ -54,7 +54,9 @@ server box too), `./starsync --upgrade`, or the shipped `update.sh` /
 server; restart whichever is running to use the new version. A
 release with a newer protocol is a required update: everyone on a server
 must run the same protocol version, and a mismatch is refused with a message
-telling you to update.
+telling you to update. Updates are signed: Starsync installs only one
+signed by its developer whose download matches its checksum, and says
+in Settings → Updates when it refused one.
 
 ## Getting started
 
@@ -438,7 +440,8 @@ and the rest folded under More:
   connection ("connected as <name>" with what you may do, or why not)
   and Web links (yt-dlp and its cookies, below).
 - **Updates**: where updates stand and Check now; the update channel
-  under More.
+  and a config address (a mirror of where updates are found; leave it
+  empty) under More.
 - **Help & about**: Something wrong? (copy diagnostics, mark a problem,
   the logs folder, sharing diagnostics with the server), every keyboard
   shortcut, and About (the version, also at the bottom of every

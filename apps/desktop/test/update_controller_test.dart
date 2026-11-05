@@ -1,10 +1,10 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:sync_relay_core/core.dart';
+import 'package:sync_relay_core/testing.dart';
 import 'package:starsync/src/state/settings.dart';
 import 'package:starsync/src/update/update_controller.dart';
 
@@ -72,12 +72,21 @@ Future<Directory> _fakeRoot(Directory work, {bool windows = false}) async {
   return root;
 }
 
-// Serves /manifest.json and the tarball. Fields can be overridden per test.
+// Manifests are signed by a throwaway test key, trusted through the
+// config source each controller gets ([_cfg]: no hosts, nothing kept).
+final _signer = TestSigner();
+late String _testKey;
+RemoteConfigSource _cfg() => RemoteConfigSource(builtInKeys: [_testKey], builtInUrls: []);
+
+// Serves /manifest.json (signed: /manifest.json.sig) and the tarball.
+// Fields can be overridden per test.
 class _Server {
   late HttpServer http;
   List<int> tarball;
   Map<String, Object?> manifestExtra = {};
   bool brokenManifest = false;
+  /// Signs the manifest; null: no `.sig`.
+  TestSigner? signer = _signer;
   int tarHits = 0;
   _Server(this.tarball);
 
@@ -87,15 +96,22 @@ class _Server {
   Future<void> start() async {
     http = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     http.listen((req) async {
-      if (req.uri.path == '/manifest.json' && !brokenManifest) {
-        req.response.write(jsonEncode({
+      if ((req.uri.path == '/manifest.json' || req.uri.path == '/manifest.json.sig') && !brokenManifest) {
+        final bytes = TestSigner.bytesOf({
           'version': '0.2.0',
           'protocol': RelayConstants.protoVersion,
           'url': '$base/starsync-0.2.0-linux-x64.tar.gz',
-          'sha256': sha256.convert(tarball).toString(),
+          'assetSha256': {updatePlatform: sha256.convert(tarball).toString()},
           'notes': 'test build',
           ...manifestExtra,
-        }));
+        });
+        if (req.uri.path == '/manifest.json') {
+          req.response.add(bytes);
+        } else if (signer == null) {
+          req.response.statusCode = 404;
+        } else {
+          req.response.write(await signer!.sign(bytes));
+        }
       } else if (req.uri.path == '/starsync-0.2.0-linux-x64.tar.gz') {
         tarHits++;
         req.response.contentLength = tarball.length;
@@ -113,6 +129,8 @@ class _Server {
 // The updater itself is tested in packages/core/test/updater_test.dart
 // (fixtures above mirror it); this covers the app's UpdateController.
 void main() {
+  setUpAll(() async => _testKey = await _signer.publicKey);
+
   group('in-app controller', () {
     late Directory work;
     late _Server server;
@@ -138,6 +156,7 @@ void main() {
       final c = UpdateController(
           currentVersion: '0.1.0',
           manifestUrls: [server.manifestUrl],
+          config: _cfg(),
           executablePath: '${root.path}/starsync',
           restart: (exe, args) async => restarts.add((exe, args)));
       await c.checkOnce();
@@ -166,6 +185,7 @@ void main() {
       final c = UpdateController(
           currentVersion: '0.1.0',
           manifestUrls: [server.manifestUrl],
+          config: _cfg(),
           executablePath: '${root.path}/watch_together',
           restart: (exe, _) async => restarts.add(exe));
       await c.checkOnce();
@@ -181,6 +201,7 @@ void main() {
       final c = UpdateController(
           currentVersion: '0.1.0',
           manifestUrls: [server.manifestUrl],
+          config: _cfg(),
           executablePath: '${work.path}/stray-binary',
           restart: (_, _) async {});
       await c.checkOnce();
@@ -195,6 +216,7 @@ void main() {
       final c = UpdateController(
           currentVersion: '0.1.0',
           manifestUrls: [server.manifestUrl],
+          config: _cfg(),
           executablePath: '${work.path}/stray-binary',
           restart: (_, _) async {});
       await c.checkOnce();
@@ -203,10 +225,46 @@ void main() {
       final dev = UpdateController(
           currentVersion: '0.0.0-dev',
           manifestUrls: [server.manifestUrl],
+          config: _cfg(),
           executablePath: '${work.path}/stray-binary',
           restart: (_, _) async {});
       await dev.checkOnce();
       expect(dev.status.value.phase, UpdatePhase.idle);
+    });
+
+    test('an unsigned manifest is refused: nothing offered, Settings says why', () async {
+      server.signer = null;
+      final c = UpdateController(
+          currentVersion: '0.1.0',
+          manifestUrls: [server.manifestUrl],
+          config: _cfg(),
+          executablePath: '${work.path}/stray-binary',
+          restart: (_, _) async {});
+      await c.checkOnce();
+      expect(c.status.value.phase, UpdatePhase.idle);
+      expect(c.lastCheck.value, "Update refused: it is not signed by Starsync's developer");
+      expect(server.tarHits, 0);
+    });
+
+    test('the manifest addresses come from the config', () async {
+      final config = _cfg();
+      final signed = TestSigner.bytesOf({
+        'schema': 1,
+        'serial': 1,
+        'configUrls': <String>[],
+        'updates': {
+          'stable': [server.manifestUrl],
+          'dev': ['${server.base}/dev.json'],
+        },
+      });
+      expect(await config.accept(signed, await _signer.sign(signed)), isTrue);
+      final c = UpdateController(
+          currentVersion: '0.1.0',
+          config: config,
+          executablePath: '${work.path}/stray-binary',
+          restart: (_, _) async {});
+      await c.checkOnce();
+      expect(c.status.value.manifest?.version, '0.2.0');
     });
 
     test('Later hides it until the next check; a check leaves an install be',
@@ -214,6 +272,7 @@ void main() {
       final c = UpdateController(
           currentVersion: '0.1.0',
           manifestUrls: [server.manifestUrl],
+          config: _cfg(),
           executablePath: '${work.path}/stray-binary',
           restart: (_, _) async {});
       await c.checkOnce();
@@ -231,18 +290,20 @@ void main() {
 
     test('failed install shows error, install untouched, retry works',
         () async {
-      server.manifestExtra = {'sha256': '0' * 64};
+      server.manifestExtra = {'assetSha256': {updatePlatform: '0' * 64}};
       final root = await _fakeRoot(work);
       var restarted = false;
       final c = UpdateController(
           currentVersion: '0.1.0',
           manifestUrls: [server.manifestUrl],
+          config: _cfg(),
           executablePath: '${root.path}/watch_together',
           restart: (_, _) async => restarted = true);
       await c.checkOnce();
       await c.install();
       expect(c.status.value.phase, UpdatePhase.failed);
-      expect(c.status.value.error, contains('sha256'));
+      expect(c.status.value.error, contains('does not match its checksum'));
+      expect(c.status.value.refused, isTrue);
       expect(restarted, isFalse);
       expect(await File('${root.path}/watch_together').readAsString(),
           'binary-v1');
@@ -256,6 +317,7 @@ void main() {
       final c = UpdateController(
           currentVersion: '0.2.0-dev.3',
           manifestUrls: [server.manifestUrl],
+          config: _cfg(),
           devUrls: ['${server.base}/dev.json'],
           executablePath: '${root.path}/watch_together',
           restart: (exe, _) async => restarts.add(exe))
@@ -268,6 +330,7 @@ void main() {
       final behind = UpdateController(
           currentVersion: '0.3.0-dev.1',
           manifestUrls: [server.manifestUrl],
+          config: _cfg(),
           devUrls: ['${server.base}/dev.json'],
           executablePath: '${root.path}/watch_together',
           restart: (exe, _) async => restarts.add(exe))

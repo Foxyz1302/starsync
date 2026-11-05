@@ -11,7 +11,9 @@
 # Token: RELEASE_TOKEN, else the file ~/.config/watch-together-release-token
 # (a Gitea access token with repository read/write; keep the file 0600).
 # The manifest's `highlights` and `changes` (What's new) and the dev
-# release's page are CHANGELOG.md's Unreleased.
+# release's page are CHANGELOG.md's Unreleased. The manifest is signed
+# (manifest.json.sig, uploaded next to it) with STARSYNC_SIGNING_KEY or
+# ~/.config/starsync-signing-key (DEVELOPMENT "Signing").
 # Prints the one-time command that moves a stable install onto test builds
 # and sets its update channel to Dev (the `update-channel` file the app
 # takes at its next start).
@@ -36,6 +38,18 @@ if [[ "$PUBLISH" == "1" && -z "${RELEASE_TOKEN:-}" ]]; then
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The manifest goes out signed (DEVELOPMENT "Signing"): no key, no publish,
+# found out before the build. --no-publish signs only when there is one.
+[[ -f "$ROOT/tool/.dart_tool/package_config.json" ]] || (cd "$ROOT/tool" && dart pub get >/dev/null)
+SIGN=1
+if [[ "$PUBLISH" == "1" ]]; then
+  dart "$ROOT/tool/sign.dart" --check-key
+elif ! dart "$ROOT/tool/sign.dart" --check-key >/dev/null 2>&1; then
+  SIGN=0; echo "no signing key: the manifest stays unsigned (not published anyway)"
+fi
+if [[ -n "$(git -C "$ROOT" status --porcelain -- updates/starsync-config.json)" ]]; then
+  echo "warning: updates/starsync-config.json has changes that are not published: dart tool/sign_config.dart, commit and push" >&2
+fi
 BASE_URL="https://git.example.org/Foxyz/sync_replay_project/releases/download/dev"
 
 PUB="$(sed -n 's/^version: \([0-9.]*\).*/\1/p' "$ROOT/apps/desktop/pubspec.yaml")"
@@ -75,9 +89,11 @@ python3 -I - "$MANIFEST" <<'EOF'
 import json, os, sys
 e = os.environ
 url = e['MANIFEST_URL']
+# `assetSha256` is what apps from 1.5.0 on check (and require); the
+# string `sha256` is for older test builds, which check only that.
 manifest = {'version': e['MANIFEST_VER'], 'protocol': int(e['MANIFEST_PROTO']),
             'url': url, 'sha256': e['MANIFEST_SHA'], 'notes': e['MANIFEST_NOTES'],
-            'assets': {'linux-x64': url}}
+            'assets': {'linux-x64': url}, 'assetSha256': {'linux-x64': e['MANIFEST_SHA']}}
 # What's new in a test build: CHANGELOG.md's Unreleased, when it has items.
 log = json.loads(e['MANIFEST_CHANGES'])
 changes = log.get('changes') or {}
@@ -88,6 +104,8 @@ if any(changes.values()):
 with open(sys.argv[1], 'w') as f:
     json.dump(manifest, f, indent=2, ensure_ascii=False)
 EOF
+rm -f "$MANIFEST.sig"
+if [[ "$SIGN" == "1" ]]; then dart "$ROOT/tool/sign.dart" "$MANIFEST"; fi
 
 if [[ "$PUBLISH" != "1" ]]; then
   echo "built $TARBALL (not published)"; exit 0

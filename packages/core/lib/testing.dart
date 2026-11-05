@@ -3,3 +3,4 @@
 library;
 
 export 'src/testing/flaky_proxy.dart';
+export 'src/testing/test_signer.dart';

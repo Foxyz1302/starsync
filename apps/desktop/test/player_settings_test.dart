@@ -345,14 +345,25 @@ void main() {
       expect(find.text('No linked Jellyfin account for AnimeFlow'), findsOneWidget);
     });
 
-    testWidgets('Updates: always checked, the channel under More', (tester) async {
+    testWidgets('Updates: always checked, the channel and the config address under More', (tester) async {
       await pumpSettings(tester, SettingsSection.updates);
       expect(find.text('Check now'), findsOneWidget);
       expect(find.text('Check for updates automatically'), findsNothing, reason: 'always on');
       expect(find.byKey(const ValueKey('update-channel')), findsNothing);
+      expect(find.byKey(const ValueKey('config-address')), findsNothing);
       await tester.tap(find.byKey(const ValueKey('fold-More')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('update-channel')), findsOneWidget);
+      final s = AppSettings.instance;
+      await tester.enterText(find.byKey(const ValueKey('config-address')), 'not a url');
+      await tester.pump();
+      expect(find.text('Not a web address'), findsOneWidget);
+      expect(s.configAddress.value, isNot('not a url'));
+      await tester.enterText(find.byKey(const ValueKey('config-address')), 'https://mirror.example/starsync-config.json');
+      await tester.pump();
+      expect(find.text('Not a web address'), findsNothing);
+      expect(s.configAddress.value, 'https://mirror.example/starsync-config.json');
+      s.setConfigAddress('');
     });
 
     testWidgets('Help & about: diagnostics first, every key, about', (tester) async {

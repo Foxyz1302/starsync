@@ -2,11 +2,15 @@
   "version": "1.4.0",
   "protocol": 16,
   "url": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.4.0/starsync-1.4.0-linux-x64.tar.gz",
-  "notes": "Links you put up are downloaded once for everyone, quick chat and danmaku in the player, plus What's new and fixes for Windows, the relay and chat.",
   "assets": {
     "linux-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.4.0/starsync-1.4.0-linux-x64.tar.gz",
     "windows-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.4.0/starsync-1.4.0-windows-x64.zip"
   },
+  "assetSha256": {
+    "linux-x64": "63a01f2c02eb1943b875201b1c25e088753f869e958bcd151fc29a556c12286c",
+    "windows-x64": "8cdd2c612e537e99c033d875bf778eaeea4e7760f7f9a487cf55a1b286bc3232"
+  },
+  "notes": "Links you put up are downloaded once for everyone, quick chat and danmaku in the player, plus What's new and fixes for Windows, the relay and chat.",
   "changes": {
     "added": [
       "What's new: the update band shows what changed, and after an update the app shows the full list once (also in Settings → About)",

@@ -52,6 +52,7 @@ const _keyNotifyStyle = 'notifyStyle';
 const _keySubScale = 'subScale';
 const _keyDanmakuStyle = 'danmakuStyle';
 const _keyUpdateChannel = 'updateChannel';
+const _keyConfigAddress = 'configAddress';
 const _keyPlayerVolume = 'playerVolume';
 
 /// A file next to the binary naming a channel (`dev` / `stable`): the
@@ -102,6 +103,10 @@ class AppSettings {
   /// start, so the install stays on test builds after a release (also
   /// when that release updated it).
   late final updateChannel = signal(defaultUpdateChannel(runningVersion));
+  /// An extra address for the signed config, tried before the others
+  /// (Settings → Updates → More, "Config address": a mirror). Empty: none.
+  /// What it serves still needs the developer's signature.
+  final configAddress = signal('');
   /// An episode this app puts up (Jellyfin, a file of a local show) is
   /// continued by the next one (Up next's `auto` item, the server's
   /// countdown at its end).
@@ -213,6 +218,8 @@ class AppSettings {
       final custom = box.get(_keyHwdecCustom);
       if (custom is String) hwdecCustom.value = custom;
       await _loadUpdateChannel(box);
+      final configAt = box.get(_keyConfigAddress);
+      if (configAt is String) configAddress.value = configAt;
       final advance = box.get(_keyAutoAdvance);
       if (advance is bool) autoAdvance.value = advance;
       avatarCircle.value = box.get(_keyAvatarShape) == 'circle';
@@ -316,6 +323,11 @@ class AppSettings {
   void setUpdateChannel(UpdateChannel channel) {
     updateChannel.value = channel;
     _put(_keyUpdateChannel, channel.name);
+  }
+
+  void setConfigAddress(String url) {
+    configAddress.value = url.trim();
+    _put(_keyConfigAddress, url.trim());
   }
 
   void setAutoAdvance(bool on) {

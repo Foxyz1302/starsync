@@ -20,11 +20,14 @@ class UpdateStatus {
   final UpdateManifest? manifest;
   final double? progress;
   final String? error;
+  /// The failure is a refusal ([UpdateRefused]): [error] says it in plain
+  /// words.
+  final bool refused;
   // False for dev runs / unpacked builds: banner tells the user to update
   // by hand instead of offering the button.
   final bool canInstall;
   const UpdateStatus(this.phase,
-      {this.manifest, this.progress, this.error, this.canInstall = false});
+      {this.manifest, this.progress, this.error, this.refused = false, this.canInstall = false});
 }
 
 // Process args as main() received them — restart relaunches with these.
@@ -53,8 +56,15 @@ class UpdateController {
   static final instance = UpdateController();
 
   final String currentVersion;
-  final List<String> manifestUrls;
-  final List<String> devUrls;
+  /// Overrides the config's manifest addresses (tests); null: the
+  /// config's ([config]).
+  final List<String>? manifestUrls;
+  final List<String>? devUrls;
+  /// The signed config: the manifests' addresses and the trusted keys,
+  /// refreshed with every check. The app sets one that keeps its copy in
+  /// the data folder and tries Settings → Updates → More, "Config
+  /// address" first (`AppGraph.build`).
+  RemoteConfigSource config;
   final String? executablePath;
   final Directory? installRoot;
   final RestartFn restart;
@@ -68,14 +78,15 @@ class UpdateController {
 
   UpdateController(
       {this.currentVersion = appVersion,
-      this.manifestUrls = updateManifestUrls,
-      this.devUrls = devManifestUrls,
+      this.manifestUrls,
+      this.devUrls,
+      RemoteConfigSource? config,
       this.executablePath,
       this.installRoot,
       this.restart = _closeAndRestart,
       this.skipDevBuilds = true,
       this.beforeRestart,
-      this.channelOf});
+      this.channelOf}) : config = config ?? RemoteConfigSource();
 
   UpdateChannel get channel => channelOf?.call() ?? defaultUpdateChannel(currentVersion);
 
@@ -125,8 +136,13 @@ class UpdateController {
     if (root != null) await cleanupUpdateLeftovers(root);
     try {
       final ch = channel;
+      final cfg = await config.refresh();
       final m = await fetchLatestManifest(
-          currentVersion: currentVersion, channel: ch, urls: manifestUrls, devUrls: devUrls);
+          currentVersion: currentVersion,
+          channel: ch,
+          urls: manifestUrls ?? cfg.stable,
+          devUrls: devUrls ?? cfg.dev,
+          keys: config.keys);
       latest.value = m;
       stableBehind.value = ch == UpdateChannel.stable && isStableBehind(currentVersion, m) ? m : null;
       if (stableBehind.value != null) {
@@ -148,6 +164,9 @@ class UpdateController {
       if (_installing) return;
       status.value = UpdateStatus(UpdatePhase.available,
           manifest: m, canInstall: root != null);
+    } on UpdateRefused catch (e) {
+      _log.warning('update check: ${e.message} (${e.detail})');
+      lastCheck.value = e.message;
     } catch (e) {
       _log.warning('update check failed: $e');
       lastCheck.value = 'Update check failed: $e';
@@ -159,7 +178,8 @@ class UpdateController {
   /// check failed.
   Future<UpdateManifest?> stableToGoBackTo() async {
     try {
-      final m = await fetchManifest(urls: manifestUrls);
+      final cfg = await config.refresh();
+      final m = await fetchManifest(urls: manifestUrls ?? cfg.stable, keys: config.keys);
       return isStableBehind(currentVersion, m) ? m : null;
     } catch (e) {
       _log.warning('stable manifest: $e');
@@ -215,9 +235,9 @@ class UpdateController {
         }
       }, say: (line) => _log.info(line));
     } catch (e) {
-      _log.warning('update failed: $e');
+      _log.warning('update failed: ${e is UpdateRefused ? '${e.message} (${e.detail})' : e}');
       status.value = UpdateStatus(UpdatePhase.failed,
-          manifest: m, error: '$e', canInstall: true);
+          manifest: m, error: '$e', refused: e is UpdateRefused, canInstall: true);
       return;
     }
     _log.info('updated to ${m.version}, restarting');

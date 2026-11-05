@@ -9,6 +9,8 @@ dependencies:
   path: ^1.9.0
   archive: ^4.0.7
   crypto: ^3.0.0
+  # Ed25519 for signed updates and the signed config (signing.dart).
+  cryptography: ^2.9.0
   web_socket_channel: ^3.0.0
 dev_dependencies:
   lints: ^5.0.0

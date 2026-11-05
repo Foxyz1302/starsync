@@ -2,13 +2,16 @@
 // the release if it doesn't exist yet, then upload (or replace) the asset.
 // The Linux and Windows CI jobs both run this, possibly at the same time,
 // so a lost create race falls back to the release the other job made.
-// The manifest is written by tool/release.sh at release time (predictable
-// asset URLs). The release page's text is the version's CHANGELOG.md
+// CI has no signing key: the stable manifest is written and signed
+// afterwards by the owner (tool/sign_release.sh, from the archives this
+// published). The release page's text is the version's CHANGELOG.md
 // section (tool/changelog.dart).
 // Usage: dart tool/release_publish.dart vX.Y.Z <archive>
 //   (run after tool/package_linux.sh or tool/package_windows.ps1)
 //   dart tool/release_publish.dart dev <archive> <manifest.json>
-//   (tool/dev_release.sh): the `dev` prerelease, its assets all replaced.
+//   (tool/dev_release.sh): the `dev` prerelease, its assets all replaced;
+//   the manifest's signature `<manifest.json>.sig` must be next to it and
+//   is uploaded with it.
 // Env: RELEASE_TOKEN (preferred) or the Actions-provided GITHUB_TOKEN /
 // GITEA_TOKEN. dart: imports only — runs without `pub get`.
 import 'dart:convert';
@@ -28,7 +31,14 @@ Future<void> main(List<String> args) async {
     if (!f.existsSync()) _die('missing: ${f.path}');
   }
   final root = File.fromUri(Platform.script).parent.parent.path;
-  if (dev) return _publishDev(root, files);
+  if (dev) {
+    // Apps from 1.5.0 on refuse a manifest without its signature.
+    final sig = File('${files.last.path}.sig');
+    if (!sig.existsSync()) {
+      _die('missing ${sig.path}: sign the manifest first (dart tool/sign.dart ${files.last.path})');
+    }
+    return _publishDev(root, [files.first, sig, files.last]);
+  }
   final archive = files.single;
   final ver = tag.startsWith('v') ? tag.substring(1) : tag;
   if (!RegExp(r'^\d+\.\d+\.\d+$').hasMatch(ver)) {
@@ -104,8 +114,8 @@ String _apiBase(String root) {
 }
 
 // The `dev` prerelease (created at main's head on first use): [files]
-// uploaded (the manifest last), the previous ones deleted. Its manifest's URL is fixed, so
-// test builds find each new one.
+// (archive, manifest signature, manifest) uploaded, the previous ones
+// deleted. Its manifest's URL is fixed, so test builds find each new one.
 Future<void> _publishDev(String root, List<File> files) async {
   final token = _token();
   final api = _apiBase(root);
@@ -136,15 +146,15 @@ Future<void> _publishDev(String root, List<File> files) async {
       return c.upload('$api/releases/$id/assets?name=${Uri.encodeQueryComponent(name)}', f, name);
     }
 
-    // The archive first, the old assets after, the manifest last: a failed
-    // upload leaves the previous build in place, never an empty release.
-    final manifest = files.last;
-    for (final f in files.take(files.length - 1)) {
-      await upload(f);
-    }
+    // The archive first, the old assets after, the signature and the
+    // manifest last: a failed archive upload leaves the previous build in
+    // place, never an empty release.
+    final [archive, sig, manifest] = files;
+    await upload(archive);
     for (final a in old) {
       await c.delete('$api/releases/$id/assets/${a['id']}');
     }
+    await upload(sig);
     await upload(manifest);
     stdout.writeln('published to dev.');
   } finally {

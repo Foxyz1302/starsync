@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "serial": 1,
+  "configUrls": [
+    "https://raw.githubusercontent.com/Foxyz1302/starsync/main/starsync-config.json",
+    "https://git.example.org/Foxyz/sync_replay_project/raw/branch/main/updates/starsync-config.json",
+    "https://git.example.org/Foxyz/sync_replay_project/raw/branch/main/updates/starsync-config.json"
+  ],
+  "updates": {
+    "stable": [
+      "https://git.example.org/Foxyz/sync_replay_project/raw/branch/main/updates/manifest.json",
+      "https://git.example.org/Foxyz/sync_replay_project/raw/branch/main/updates/manifest.json"
+    ],
+    "dev": [
+      "https://git.example.org/Foxyz/sync_replay_project/releases/download/dev/manifest.json",
+      "https://git.example.org/Foxyz/sync_replay_project/releases/download/dev/manifest.json"
+    ]
+  }
+}

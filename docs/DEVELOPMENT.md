@@ -162,7 +162,9 @@ Three suites, run from each package's folder:
   puts an item up, the countdown on a fake clock), the library's L1
   (release and folder names, `groupLocal` over a real anime folder's
   names: shows across folders, holes, extras, a movie),
-  relay pieces, updater, logging redaction, the watched rule (time In),
+  relay pieces, updater (signed manifests and checksums against a test
+  key), the signed config (serial, saved copy, key handover;
+  `remote_config_test`) and signatures (`signing_test`), logging redaction, the watched rule (time In),
   yt-dlp and
   Jellyfin client parsing against captured fixtures.
 - `cd packages/server && dart test` (well under a minute): live servers
@@ -339,19 +341,21 @@ Traps:
 
 ## Releasing
 
-User pushes tags; CI does the rest.
+The owner tags and signs; CI builds and publishes the archives in
+between. CI has no signing key ([Signing](#signing)), so the manifest
+that makes a release visible to the apps is written and signed on the
+owner's machine from the archives CI published, after checking them.
 
 1. `tool/release.sh [patch|minor|major] [--dry-run]`: derives the next
    version from the latest tag, refuses when the [changelog](#changelog)'s
    Unreleased has no items (warns when it has no Highlights or no summary)
-   and prints it,
-   renames Unreleased to `X.Y.Z` under a fresh empty Unreleased, bumps the
-   three pubspecs in lockstep, writes `updates/manifest.json` (per-platform
-   `assets` URLs are predictable; `url` stays the Linux tarball for builds
-   <= 0.2.1; `notes` is the section's summary, `highlights` and `changes`
-   its lists), commits
-   `Release vX.Y.Z` (with `CHANGELOG.md`), makes an annotated tag.
-   `--dry-run` stops after printing.
+   and prints it; `--dry-run` stops there. Then it checks the signing
+   key is there (stops without one), renames Unreleased to `X.Y.Z` under
+   a fresh empty Unreleased, bumps the three pubspecs in lockstep, signs
+   the config when it changed (`tool/sign_config.dart`), commits
+   `Release vX.Y.Z` (with `CHANGELOG.md`) and makes an annotated tag. It
+   does not touch `updates/manifest.json`: apps keep seeing the previous
+   release until step 5.
 2. Review, then `git push --follow-tags`.
 3. `.gitea/workflows/release.yml` runs one job per platform: Linux builds
    with `tool/package_linux.sh`, Windows (runner `yuuka-windows`, host mode,
@@ -361,6 +365,20 @@ User pushes tags; CI does the rest.
    release if the other job hasn't yet (its text: the version's changelog
    section) and uploads (or replaces) its asset.
    By hand: package, then the same `dart tool/release_publish.dart` line.
+4. Once both jobs are green: `tool/sign_release.sh X.Y.Z` downloads both
+   archives from the release, checks each is the bundle of that version
+   (`starsync-X.Y.Z/starsync`, `.exe` on Windows), writes
+   `updates/manifest.json` (per-platform `assets` URLs and their sha256
+   in `assetSha256`; `url` stays the Linux tarball for builds <= 0.2.1;
+   `notes` is the section's summary, `highlights` and `changes` its
+   lists, `protocol` the tagged code's), signs it (`manifest.json.sig`)
+   and the config when it changed, and commits `Publish vX.Y.Z: signed
+   manifest`. A test run of the downloaded archive before this step is
+   the check that what gets signed is the build.
+5. `git push` (on `main`): apps see the release.
+
+Signing before the tag cannot work: the archives' sha256 is only known
+once CI built them, and a manifest without it is refused.
 
 Test builds (Linux, no tag, no CI): `tool/dev_release.sh [--minor|--major]
 [--no-publish]` (token: `RELEASE_TOKEN` or
@@ -368,10 +386,14 @@ Test builds (Linux, no tag, no CI): `tool/dev_release.sh [--minor|--major]
 repository read/write) builds the working tree here as `<next>-dev.N` (N
 one past the published one; `<next>` the pubspec's next patch, or next
 minor / major when asked, and once such a line is published later runs
-follow it until a release moves the pubspec) and replaces the assets of the
-`dev` prerelease with the tarball and its `manifest.json` (`highlights`
-and `changes`: the changelog's Unreleased, which also becomes the
-prerelease's text). Dev builds
+follow it until a release moves the pubspec), writes its `manifest.json`
+(`assetSha256` and, for test builds older than signing, a string
+`sha256`; `highlights` and `changes`: the changelog's Unreleased, which
+also becomes the prerelease's text), signs it and replaces the assets of
+the `dev` prerelease with the tarball, `manifest.json.sig` and
+`manifest.json` (`release_publish.dart dev` refuses a manifest without
+its `.sig`). Without a signing key it stops before building;
+`--no-publish` then builds and leaves the manifest unsigned. Dev builds
 update from it on the Dev update channel, which a test build starts on
 and keeps after a release ([Updater](ARCHITECTURE.md#updater)). Any
 install switches channel in Settings → Updates → More; the command the script
@@ -381,20 +403,63 @@ process, copies the new files over it and writes the `update-channel`
 file that sets Dev).
 
 Tokens come from the environment (`RELEASE_TOKEN`, or Actions-provided
-`GITHUB_TOKEN`/`GITEA_TOKEN`). The manifest has no `sha256` by default; the
-updater skips the check when absent. Workflows live in `.gitea/workflows`
+`GITHUB_TOKEN`/`GITEA_TOKEN`). Workflows live in `.gitea/workflows`
 (the forge reads `.gitea` before `.github`).
 
 The repo and its releases live on pol's Gitea,
 `https://git.example.org/Foxyz/sync_replay_project` (a GitHub mirror
-feeds the website's downloads). Apps read their manifests there
-(`updateManifestUrls` / `devManifestUrls` in `updater.dart`,
-[Updater](ARCHITECTURE.md#updater)); `tool/dev_release.sh`'s `BASE_URL`
-names it too, and `tool/release.sh` / `tool/release_publish.dart` take
-the server from `origin`. Apps up to 1.4.x read the manifest at
-`git.example.org`, the server's old name, which is gone: they cannot
-update by themselves, so 1.5.0 is a manual install for everyone (from
-the website, its downloads from the GitHub mirror).
+feeds the website's downloads). Apps read their manifests there (the
+signed config, else `distribution.dart`: [Signing](#signing));
+`tool/dev_release.sh`'s `BASE_URL` names it too, and `tool/release.sh`,
+`tool/sign_release.sh` and `tool/release_publish.dart` take the server
+from `origin`. Apps up to 1.4.x have the server's old name,
+`git.example.org`, built in and check no signature: pol keeps that
+name as an alias until everyone is past 1.4.x, and they update to 1.5.0
+through the same `updates/manifest.json` (they ignore the `.sig` and
+`assetSha256`).
+
+### Signing
+
+Every manifest and the config are signed with the owner's Ed25519 key
+([Updater](ARCHITECTURE.md#updater), Signing and the config); from 1.5.0
+on the app installs nothing else.
+
+- **The key.** The private key is the 32-byte seed, base64, in
+  `~/.config/starsync-signing-key` (mode 600), or in
+  `STARSYNC_SIGNING_KEY` for a one-off shell. It is never committed,
+  printed or logged. `dart tool/keygen.dart` made it once (it refuses to
+  overwrite the file) and printed the public key, which is
+  `trustedKeys` in `packages/core/lib/src/distribution.dart`. **Back it
+  up** offline (a password manager or an encrypted USB stick): without
+  it no update can be signed again, and the only way out is a manual
+  reinstall of a build with a new key for everyone.
+- **Tools** (`tool/`, `cd tool && dart pub get` once):
+  `dart tool/sign.dart <file>...` writes `<file>.sig`;
+  `--verify <file>...` checks against `trustedKeys`; `--check-key` says
+  whether the key is there. `dart tool/sign_config.dart` sets the
+  config's serial one above the committed one, checks the config,
+  signs it and stages both files. Both take `--key <path>` (repeatable:
+  one signature line per key). `tool/release.sh`, `tool/sign_release.sh`
+  and `tool/dev_release.sh` use them and stop when there is no key.
+- **Moving an address.** Edit `updates/starsync-config.json` (new
+  address first, the old one kept while it still works), run
+  `dart tool/sign_config.dart`, commit, push. Each app takes it at its
+  next update check, from any address it already knows, and keeps it.
+  For the config's own addresses (`configUrls`), publish the config at
+  the new address too before the old one goes away; an app that missed
+  every move still tries `distribution.dart`'s list. Signatures make any
+  host safe to list: a host can withhold the config, never change it.
+- **Key handover.** `dart tool/keygen.dart --out <path>` makes the new
+  key; put its public key in the config's `nextKey` and sign with both
+  (`dart tool/sign_config.dart --key ~/.config/starsync-signing-key
+  --key <path>`), and sign manifests with both too. Apps that read that
+  config trust the new key; the first config they read signed by the new
+  key alone retires the old one in that app. Put the new key in
+  `distribution.dart` for the next builds, and keep signing with both
+  until apps older than that build are gone.
+- **A fork** changes only `distribution.dart`: its own `trustedKeys`
+  (from its own `tool/keygen.dart`) and its config and manifest
+  addresses; then its own `updates/starsync-config.json`, signed.
 
 ### Changelog
 

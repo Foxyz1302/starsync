@@ -4,7 +4,35 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 import 'package:sync_relay_core/core.dart';
+import 'package:sync_relay_core/testing.dart';
 import 'package:test/test.dart';
+
+// Manifests are signed by a throwaway test key, trusted through the
+// config source each run gets ([_cfg]: no hosts, nothing kept).
+final _signer = TestSigner();
+late String _testKey;
+RemoteConfigSource _cfg() => RemoteConfigSource(builtInKeys: [_testKey], builtInUrls: []);
+
+// Answers a manifest path with [at]'s JSON and its `.sig` with [signer]'s
+// signature (default: the test key); [at] null: 404.
+Future<void> _serveManifest(HttpRequest req, Map<String, Object?>? Function(String path) at,
+    {TestSigner? signer}) async {
+  final path = req.uri.path;
+  final sig = path.endsWith('.sig');
+  final json = at(sig ? path.substring(0, path.length - 4) : path);
+  final by = signer ?? _signer;
+  if (json == null) {
+    req.response.statusCode = 404;
+  } else if (sig) {
+    req.response.write(await by.sign(TestSigner.bytesOf(json)));
+  } else {
+    req.response.add(TestSigner.bytesOf(json));
+  }
+  await req.response.close();
+}
+
+/// A checksum for this platform that is well-formed (not the archive's).
+Map<String, Object?> _anySha() => {'assetSha256': {updatePlatform: 'a' * 64}};
 
 // Work dir base: WT_TEST_TMP or the system temp. Staging lives inside
 // the install root, so the result doesn't depend on which filesystem
@@ -103,6 +131,10 @@ class _Server {
   List<int> tarball;
   Map<String, Object?> manifestExtra = {};
   bool brokenManifest = false;
+  /// Signs the manifest; null: no `.sig`.
+  TestSigner? signer = _signer;
+  /// Serves a `.sig` of other bytes than the manifest's.
+  bool tampered = false;
   int tarHits = 0;
   _Server(this.tarball);
 
@@ -112,15 +144,23 @@ class _Server {
   Future<void> start() async {
     http = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     http.listen((req) async {
-      if (req.uri.path == '/manifest.json' && !brokenManifest) {
-        req.response.write(jsonEncode({
+      if ((req.uri.path == '/manifest.json' || req.uri.path == '/manifest.json.sig') && !brokenManifest) {
+        final json = {
           'version': '0.2.0',
           'protocol': RelayConstants.protoVersion,
           'url': '$base/starsync-0.2.0-linux-x64.tar.gz',
-          'sha256': sha256.convert(tarball).toString(),
+          'assetSha256': {updatePlatform: sha256.convert(tarball).toString()},
           'notes': 'test build',
           ...manifestExtra,
-        }));
+        };
+        final bytes = TestSigner.bytesOf(json);
+        if (req.uri.path == '/manifest.json') {
+          req.response.add(bytes);
+        } else if (signer == null) {
+          req.response.statusCode = 404;
+        } else {
+          req.response.write(await signer!.sign(tampered ? [...bytes, 32] : bytes));
+        }
       } else if (req.uri.path == '/starsync-0.2.0-linux-x64.tar.gz') {
         tarHits++;
         req.response.contentLength = tarball.length;
@@ -136,6 +176,8 @@ class _Server {
 }
 
 void main() {
+  setUpAll(() async => _testKey = await _signer.publicKey);
+
   test('version compare', () {
     expect(isNewerVersion('0.1.0', '0.1.1'), isTrue);
     expect(isNewerVersion('0.1.0', '0.2.0'), isTrue);
@@ -156,7 +198,7 @@ void main() {
     expect(compareVersions('1.2.3-rc1', '1.2.3-rc1'), 0);
   });
 
-  test('manifest rejects missing fields, sha256 is optional', () {
+  test("manifest rejects missing fields; the checksum is this platform's assetSha256", () {
     expect(() => UpdateManifest.fromJson({}), throwsFormatException);
     expect(
         () => UpdateManifest.fromJson({
@@ -171,6 +213,17 @@ void main() {
     });
     expect(noSha.sha256, isNull);
     expect(noSha.isRequired, isFalse);
+    final shas = {
+      'version': '0.2.0',
+      'protocol': 4,
+      'url': 'https://x/y.tar.gz',
+      'sha256': 'b' * 64, // what 1.4.x reads; ignored now
+      'assetSha256': {'linux-x64': 'A' * 64, 'windows-x64': 'c' * 64, 'macos-x64': 'short'},
+    };
+    expect(UpdateManifest.fromJson(shas, platform: 'linux-x64').sha256, 'a' * 64);
+    expect(UpdateManifest.fromJson(shas, platform: 'windows-x64').sha256, 'c' * 64);
+    expect(UpdateManifest.fromJson(shas, platform: 'macos-x64').sha256, isNull);
+    expect(UpdateManifest.fromJson({...shas, 'assetSha256': null}).sha256, isNull);
     expect(
         UpdateManifest.fromJson({
           'version': '0.2.0',
@@ -221,8 +274,18 @@ void main() {
     }
   });
 
-  test('the repo manifest parses, and keeps a one-line string notes for 1.2.x/1.3.x', () {
-    final json = jsonDecode(File('../../updates/manifest.json').readAsStringSync()) as Map<String, Object?>;
+  test('the repo manifest parses, is signed, has every checksum, and keeps a one-line string notes for 1.2.x/1.3.x',
+      () async {
+    final file = File('../../updates/manifest.json');
+    final json = jsonDecode(file.readAsStringSync()) as Map<String, Object?>;
+    expect(await verifyDetached(file.readAsBytesSync(), File('${file.path}.sig').readAsStringSync(), trustedKeys),
+        isNotNull,
+        reason: 'tool/sign_release.sh writes and signs it');
+    for (final platform in (json['assets'] as Map).keys) {
+      expect(UpdateManifest.fromJson(json, platform: '$platform').sha256, isNotNull, reason: '$platform');
+    }
+    // A string sha256 would be checked by 1.4.x against every platform's archive.
+    expect(json['sha256'], isNull);
     // Older apps read `(json['notes'] as String?)`: it must stay a string.
     expect(json['notes'], isA<String>());
     expect((json['notes'] as String).contains('\n'), isFalse);
@@ -265,19 +328,17 @@ void main() {
   test('dev builds also read the dev manifest, the newer wins', () async {
     final versions = {'/stable': '1.1.2', '/dev': '1.1.3-dev.2'};
     final http = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    http.listen((req) async {
-      final v = versions[req.uri.path];
-      if (v == null) {
-        req.response.statusCode = 404;
-      } else {
-        req.response.write(jsonEncode(
-            {'version': v, 'protocol': 1, 'url': 'http://x/$v.tar.gz'}));
-      }
-      await req.response.close();
-    });
+    http.listen((req) => _serveManifest(req, (path) {
+          final v = versions[path];
+          return v == null ? null : {'version': v, 'protocol': 1, 'url': 'http://x/$v.tar.gz', ..._anySha()};
+        }));
     final base = 'http://127.0.0.1:${http.port}';
     Future<String> latest(String current, [UpdateChannel? channel]) async => (await fetchLatestManifest(
-            currentVersion: current, channel: channel, urls: ['$base/stable'], devUrls: ['$base/dev']))
+            currentVersion: current,
+            channel: channel,
+            urls: ['$base/stable'],
+            devUrls: ['$base/dev'],
+            keys: [_testKey]))
         .version;
     try {
       expect(await latest('1.1.2'), '1.1.2'); // stable builds never see dev
@@ -298,19 +359,28 @@ void main() {
 
   test('the manifest comes from the first address that serves one', () async {
     final http = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final stranger = TestSigner(9);
     http.listen((req) async {
-      if (req.uri.path == '/new' || req.uri.path == '/old') {
-        req.response.write(jsonEncode({
-          'version': req.uri.path == '/new' ? '1.5.0' : '1.4.0',
-          'protocol': 1,
-          'url': 'http://x/a.tar.gz'
-        }));
-      } else if (req.uri.path == '/junk') {
+      final path = req.uri.path;
+      if (path == '/junk' || path == '/junk.sig') {
         req.response.write('<html>moved</html>');
-      } else {
-        req.response.statusCode = 404;
+        await req.response.close();
+        return;
       }
-      await req.response.close();
+      await _serveManifest(
+          req,
+          (p) => switch (p) {
+                '/new' || '/old' => {
+                    'version': p == '/new' ? '1.5.0' : '1.4.0',
+                    'protocol': 1,
+                    'url': 'http://x/a.tar.gz',
+                    ..._anySha(),
+                  },
+                '/stranger' => {'version': '6.6.6', 'protocol': 1, 'url': 'http://x/evil.tar.gz', ..._anySha()},
+                '/nosum' => {'version': '1.6.0', 'protocol': 1, 'url': 'http://x/a.tar.gz'},
+                _ => null,
+              },
+          signer: path.startsWith('/stranger') ? stranger : null);
     });
     final base = 'http://127.0.0.1:${http.port}';
     // A port nothing listens on: the connection itself fails.
@@ -318,13 +388,23 @@ void main() {
     final gone = 'http://127.0.0.1:${dead.port}/manifest.json';
     await dead.close();
     Future<String> from(List<String> urls) async =>
-        (await fetchManifest(urls: urls)).version;
+        (await fetchManifest(urls: urls, keys: [_testKey])).version;
     try {
       expect(await from(['$base/new', '$base/old']), '1.5.0');
       expect(await from([gone, '$base/missing', '$base/junk', '$base/old']), '1.4.0');
-      // None serves one: the first address's error.
-      await expectLater(fetchManifest(urls: ['$base/missing', '$base/junk']),
+      // A manifest signed by another key, or without a checksum, is passed over.
+      expect(await from(['$base/stranger', '$base/nosum', '$base/old']), '1.4.0');
+      // None serves one: the first address's error...
+      await expectLater(fetchManifest(urls: ['$base/missing', '$base/junk'], keys: [_testKey]),
           throwsA(isA<HttpException>()));
+      // ... unless one was refused: that says why.
+      await expectLater(fetchManifest(urls: ['$base/missing', '$base/stranger'], keys: [_testKey]),
+          throwsA(isA<UpdateRefused>().having((e) => e.message, 'message', contains('not signed'))));
+      await expectLater(fetchManifest(urls: ['$base/nosum'], keys: [_testKey]),
+          throwsA(isA<UpdateRefused>().having((e) => e.message, 'message', contains('no checksum'))));
+      // Signed by the right key, but the app trusts another one.
+      await expectLater(fetchManifest(urls: ['$base/old'], keys: [await stranger.publicKey]),
+          throwsA(isA<UpdateRefused>()));
     } finally {
       await http.close(force: true);
     }
@@ -372,6 +452,7 @@ void main() {
       final rc = await runUpgrade(
           currentVersion: '0.1.0',
           manifestUrls: [server.manifestUrl],
+          config: _cfg(),
           installRoot: root);
       expect(rc, 0);
       expect(server.tarHits, 1);
@@ -398,6 +479,7 @@ void main() {
       final rc = await runUpgrade(
           currentVersion: '0.2.0',
           manifestUrls: [server.manifestUrl],
+          config: _cfg(),
           installRoot: root);
       expect(rc, 0);
       expect(server.tarHits, 0);
@@ -406,11 +488,12 @@ void main() {
     });
 
     test('bad hash aborts, install untouched', () async {
-      server.manifestExtra = {'sha256': '0' * 64};
+      server.manifestExtra = {'assetSha256': {updatePlatform: '0' * 64}};
       final root = await _fakeRoot(work);
       final rc = await runUpgrade(
           currentVersion: '0.1.0',
           manifestUrls: [server.manifestUrl],
+          config: _cfg(),
           installRoot: root);
       expect(rc, 1);
       expect(await File('${root.path}/watch_together').readAsString(),
@@ -418,22 +501,61 @@ void main() {
       expect(_leftovers(root), isEmpty);
     });
 
-    test('manifest without sha256 still applies', () async {
-      server.manifestExtra = {'sha256': null};
+    test('a manifest without a checksum is refused, nothing downloads', () async {
+      server.manifestExtra = {'assetSha256': null};
       final root = await _fakeRoot(work);
       final rc = await runUpgrade(
           currentVersion: '0.1.0',
           manifestUrls: [server.manifestUrl],
+          config: _cfg(),
           installRoot: root);
-      expect(rc, 0);
-      expect(await File('${root.path}/starsync').readAsString(),
-          'binary-v2');
-    }, skip: _posixOnly);
+      expect(rc, 1);
+      expect(server.tarHits, 0);
+      expect(await File('${root.path}/watch_together').readAsString(), 'binary-v1');
+    });
+
+    for (final (what, setUpServer) in [
+      ('unsigned', (_Server s) => s.signer = null),
+      ('signed by another key', (_Server s) => s.signer = TestSigner(9)),
+      ('tampered after signing', (_Server s) => s.tampered = true),
+    ]) {
+      test('a manifest $what is refused, nothing downloads', () async {
+        setUpServer(server);
+        final root = await _fakeRoot(work);
+        final rc = await runUpgrade(
+            currentVersion: '0.1.0',
+            manifestUrls: [server.manifestUrl],
+            config: _cfg(),
+            installRoot: root);
+        expect(rc, 1);
+        expect(server.tarHits, 0);
+        expect(await File('${root.path}/watch_together').readAsString(), 'binary-v1');
+      });
+    }
+
+    test('downloadAndApply: a checksum mismatch is a refusal; no checksum refuses before downloading', () async {
+      final root = await _fakeRoot(work);
+      final m = UpdateManifest(
+          version: '0.2.0',
+          protocol: RelayConstants.protoVersion,
+          url: '${server.base}/starsync-0.2.0-linux-x64.tar.gz',
+          sha256: '0' * 64,
+          notes: '');
+      await expectLater(downloadAndApply(m, root),
+          throwsA(isA<UpdateRefused>().having((e) => e.message, 'message', contains('does not match'))));
+      expect(server.tarHits, 1);
+      final none = UpdateManifest(version: '0.2.0', protocol: 1, url: m.url, notes: '');
+      await expectLater(downloadAndApply(none, root), throwsA(isA<UpdateRefused>()));
+      expect(server.tarHits, 1);
+      expect(await File('${root.path}/watch_together').readAsString(), 'binary-v1');
+      expect(_leftovers(root), isEmpty);
+    });
 
     test('unknown layout asks for manual update', () async {
       final rc = await runUpgrade(
           currentVersion: '0.1.0',
           manifestUrls: [server.manifestUrl],
+          config: _cfg(),
           executablePath: '${work.path}/stray-binary');
       expect(rc, 2);
     });
@@ -445,6 +567,7 @@ void main() {
       final rc = await runUpgrade(
           currentVersion: '0.1.0',
           manifestUrls: [server.manifestUrl],
+          config: _cfg(),
           installRoot: root);
       expect(rc, 1);
       expect(await File('${root.path}/watch_together').readAsString(),

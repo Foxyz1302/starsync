@@ -2338,7 +2338,8 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
     switch).
   - **Library & accounts**: Jellyfin servers, AnimeFlow (`/me` via
     `AnimeFlowClient.fromAccounts`), Web links (yt-dlp and its cookies).
-  - **Updates**: status, Check now, Show update; More: the channel.
+  - **Updates**: status, Check now, Show update; More: the channel, the
+    config address.
   - **Help & about**: Something wrong? (Copy diagnostics, Mark a
     problem, Open logs folder, Share diagnostics with the server),
     Keyboard shortcuts (the player's; folded: anywhere and the library),
@@ -3237,9 +3238,10 @@ company `foxyz`, product `Starsync`; the window class is
 One implementation, `packages/core/lib/src/updater.dart` (pure Dart, tested
 in `packages/core/test/updater_test.dart`), with two front ends: the app and
 the dedicated server. Both binaries ship in the same archive, so either one
-updates the whole install folder. Reads a manifest (`version`, `protocol`, `url`, optional `sha256`, `notes`,
-optional `changes` and `highlights`) from `updateManifestUrls` (`git.example.org`, the repo's Gitea), compares versions, downloads the tarball, checks
-sha256 when present, then extracts into a staging dir inside the install
+updates the whole install folder. Reads a manifest (`version`, `protocol`, `url`, `assets`,
+`assetSha256`, `notes`, optional `changes` and `highlights`) from the signed config's
+addresses and checks its signature (Signing and the config, below),
+compares versions, downloads the archive, checks its sha256, then extracts into a staging dir inside the install
 folder (same filesystem, so moves are renames; the folder must be
 user-writable). Each top-level entry is moved aside and the new one moved in,
 with rollback on failure (writing the running executable fails with ETXTBSY;
@@ -3266,7 +3268,9 @@ old name the new one next to it. `update.sh` / `update.bat` run
 protocol is newer than the local one is a required update. Windows apply
 renames in-use files to `*.old` (swept on next start); CI tests it against a
 running exe on NTFS. The manifest's `assets` maps `linux-x64` /
-`windows-x64` to archive URLs; top-level `url` (Linux) is for builds <= 0.2.1. The version is
+`windows-x64` to archive URLs and `assetSha256` the same keys to each archive's sha256;
+top-level `url` (Linux) is for builds <= 0.2.1, and a top-level string `sha256` (all
+1.4.x reads, for any platform's archive) is in no stable manifest. The version is
 stamped into both binaries with `APP_VERSION` (`--dart-define` for the app,
 `--define` for `dart compile exe`; dev runs report `0.0.0-dev` and the app
 skips checks). What the app shows (`displayVersion`, `screens/home/ui.dart`;
@@ -3294,16 +3298,59 @@ update has no Later. Nothing downloads before the click. The app checks at
 start and every 4 hours while running (`updateCheckEvery`), always (D8:
 nothing installs without asking); a re-check never touches an install
 under way. Settings → Updates has Check now. The manifest is `updates/manifest.json` in
-this repo, written by `tool/release.sh`. Each manifest address is a list
-tried in order (`fetchManifest`): when the Gitea server moves, its new
-address goes first and the old one stays only while it still belongs to
-the project (a lapsed domain's next owner could serve a manifest). Apps
-older than a move whose old address is gone cannot update by themselves
-([Releasing](DEVELOPMENT.md#releasing)).
+this repo, written and signed by `tool/sign_release.sh` once CI published
+the archives ([Releasing](DEVELOPMENT.md#releasing)). Each manifest
+address is a list tried in order (`fetchManifest`).
+
+**Signing and the config.** Ed25519 (the pure-Dart `DartEd25519` of the
+`cryptography` package, `signing.dart` in core). A file `X` is signed by
+`X.sig` next to it: one line per signing key, each the base64 of the
+signature over X's exact bytes (`verifyDetached`, `signDetached`); keys
+are base64 of their 32 bytes. Apps up to 1.4.x never fetch the `.sig`.
+- `distribution.dart` (core) is the one file a fork edits: `trustedKeys`
+  (the owner's public key) and the built-in addresses: the config's
+  (`builtInConfigUrls`: GitHub's raw `Foxyz1302/starsync`, then pol's
+  Gitea as `git.example.org` and `git.example.org`) and the
+  manifests' (`builtInStableManifestUrls`, `builtInDevManifestUrls`).
+- **Manifests** (`fetchManifest`): `X` and `X.sig` are fetched
+  (`fetchSigned`); a manifest without a `.sig`, with a signature by no
+  trusted key, or without a well-formed `assetSha256` for this platform
+  is refused (`UpdateRefused`, a plain message plus the reason) and the
+  next address tried; a page that is not JSON is an ordinary failure.
+  When no address serves a good one, a refusal wins over the network
+  errors. `downloadAndApply` refuses a manifest without a checksum
+  before downloading and a download whose sha256 differs, before
+  anything is unpacked. A refusal's message is the line in Settings →
+  Updates (`lastCheck`; for a failed install the band and the line,
+  `UpdateStatus.refused`) and the reason is logged (`update`).
+- **The config** (`remote_config.dart`; the repo copy
+  `updates/starsync-config.json`, signed by `tool/sign_config.dart`):
+  `schema` 1, `serial` (rising), `configUrls`, `updates.stable` and
+  `updates.dev` (manifest addresses), optional `nextKey`. Only
+  Starsync's own addresses; a config with another schema, no serial
+  or no manifest address is refused. `RemoteConfigSource.refresh` runs
+  before every update check (`UpdateController`, also for Go back to
+  stable; `runUpgrade` for `--upgrade` of both programs): it tries the
+  config address setting, the current copy's `configUrls`, then
+  `builtInConfigUrls` (each once, `candidates`) and takes the first
+  copy whose signature is good and whose serial is above the current
+  one. The app keeps it in the app support folder
+  (`starsync-config.json` and its `.sig`; `starsync-keys.json` once a
+  handover changed the keys), checks that copy's signature again at
+  start, and goes by it while every fetch fails; without one,
+  `RemoteConfig.builtIn` (serial 0). `--upgrade` keeps nothing.
+- **Key handover**: an accepted config's `nextKey` joins the trusted
+  keys (`RemoteConfigSource.keys`, kept); the first accepted config
+  signed by such a handed-over key retires the keys before it, built-in
+  ones included. A key never comes from anywhere else: not from Settings,
+  not from an unsigned file.
+- **Config address** (Settings → Updates → More, setting
+  `configAddress`): one more address, tried first (a mirror); what it
+  serves needs the same signature. Empty by default.
 
 **Update channel.** `UpdateChannel` stable or dev, the setting
 `updateChannel` (Settings → Updates → More, "Update channel", which also says
-the channel and version running). Dev also reads `devManifestUrls`, the
+the channel and version running). Dev also reads the config's `updates.dev`, the
 `manifest.json` of the `dev` prerelease (`tool/dev_release.sh`), and takes
 the newer of the two by semver (`pickManifest`, `fetchLatestManifest`): a
 release 1.4.0 is offered over 1.4.0-dev.3, and after it 1.4.1-dev.1 is,
