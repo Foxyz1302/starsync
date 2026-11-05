@@ -355,12 +355,24 @@ Next: **Playback and presence** (epic, below; protocol 17).
 
 9. **Jellyfin** (epic, below).
 
-10. **Folder as a playlist**: put up a whole folder of videos (a
+10. **Screenshots** (wanted): catch the frame in the moment, playing
+   or paused, in full quality straight from mpv (`player.screenshot`,
+   the video's own resolution; the app's overlays are never in it), with
+   or without subtitles. Print Screen belongs to the desktop (KDE,
+   Windows), so it gets the app's own key: `s` as in mpv. One press saves
+   (show, episode and time in the name) and copies to the clipboard, and
+   a small toast with the picture offers Edit: the same frame with and
+   without subtitles (both caught at the press, so the toggle is
+   instant) and a crop. Check whether upscaling shaders can be in the
+   capture through media_kit's renderer; if not, the capture is the
+   source resolution.
+
+11. **Folder as a playlist**: put up a whole folder of videos (a
    collection without a show behind it) as a transient playlist, like a
    Jellyfin show: one after another with Up next's countdown, nothing
    saved.
 
-11. **Smaller items**
+12. **Smaller items**
    - Linux frames are capped at 60 Hz whatever the monitor runs at: the
      GTK embedder gives the engine no vsync source (a fixed 1/60 s
      fallback, flutter/flutter#191245) and GTK3's GL window gets no
