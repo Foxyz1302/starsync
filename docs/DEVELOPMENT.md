@@ -416,6 +416,29 @@ any other found on Desktop, Downloads, Documents, AppData, Program
 Files) and a 20 s test start with its exit code, zips them to the
 Desktop and copies the zip (Ctrl+V into Discord).
 
+Where the session logs are and how to pull them (apps upload every 10 s
+and on leaving, `POST /l/<sid>/<token>`, PROTOCOL.md "Diagnostics"; the
+server merges them into its session log):
+
+| Server | Folder |
+|---|---|
+| Stable dedicated server (VPS, port 6969) | `root@hysteria.foxyz.ru:/var/lib/watch-together/logs/` |
+| Dev dedicated server (VPS, port 6970) | `root@hysteria.foxyz.ru:/var/lib/starsync-dev/logs/` |
+| A member's own server (Invite) | that host's app logs folder (above) |
+
+`scp root@hysteria.foxyz.ru:/var/lib/watch-together/logs/session-$(date +%F).log .`
+pulls today's; `server-*.log` next to it is the server's own. Over HTTP,
+a member of that server can read it: `GET /l/<sid>/<token>?hours=N`
+(gzip text; `sid` is `default` on a dedicated server; "Copy
+diagnostics" does this through `DiagShare.fetchSessionLog`).
+
+Crashes and freezes: the session log misses a crashed app's last
+seconds (uploads every 10 s) and everything after a freeze; read that
+machine's own `app-*.log` (written at once, its own clock). A native
+crash ends the log without a Dart error: on Linux `coredumpctl info
+starsync` (with systemd-coredump), on Windows Event Viewer → Application
+(1000/1001/1026) or `tool/windows_report.cmd`.
+
 Start with the session log when there is one: `session-YYYY-MM-DD.log`
 in the server's folder (the hosting app's logs folder, or the dedicated
 server's `--log-dir`), every member's lines and the server's merged in
