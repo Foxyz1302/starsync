@@ -187,8 +187,8 @@ void main() {
       serverTime: DateTime.now().toUtc(),
       mediaId: 0,
       members: [
-        MemberView(id: 'a', name: 'Alex', ready: false, inSet: false, buffered: 0),
-        MemberView(id: 'b', name: 'Bob', ready: false, inSet: false, buffered: 0),
+        MemberView(id: 'a', name: 'Alex', buffered: 0),
+        MemberView(id: 'b', name: 'Bob', buffered: 0),
       ],
     );
     _graph.navigation.place.value = Place.friend;

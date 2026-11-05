@@ -27,7 +27,7 @@ void main() {
           wsUri: Uri.parse('ws://127.0.0.1:${server.boundPort}/sync'),
           secret: '',
           name: 'skewed');
-      client.sendReady(true);
+      client.sendTransport(true);
       client.sendReport(position: 0, buffered: 10, eventId: 0);
       await _poll(() => client.lastState?.transport == 'playing', 'playing');
       for (var i = 0; i < 5; i++) {

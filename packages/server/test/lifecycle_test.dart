@@ -76,7 +76,7 @@ void main() {
       final client = await _ProbeClient.hello(server.boundPort, 'alice');
       await _pollBool(() => server.hub.engine.members.length == 1, 'join visible');
       await client.ws.close();
-      await _pollBool(() => server.hub.engine.members.values.single.presence == Presence.gone, 'gone');
+      await _pollBool(() => server.hub.engine.members.values.single.gone, 'gone');
       expect(server.session.tokens, hasLength(1), reason: 'its token works through the grace');
       expect(server.hub.sockets, isEmpty);
     });

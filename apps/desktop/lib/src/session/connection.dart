@@ -388,8 +388,8 @@ class Connection {
   /// Now on the server's clock (the ping/pong clock offset).
   DateTime serverNow() => client.serverNow();
 
-  void sendReady(bool ready, {String source = 'manual'}) => client.sendReady(ready, source: source);
-  void sendForce(String target, bool ready) => client.sendForce(target, ready);
+  void sendTransport(bool play) => client.sendTransport(play);
+  void sendContinue({String target = ''}) => client.sendContinue(target: target);
   void sendSeek(double position, {int seq = 0}) => client.sendSeek(position, seq: seq);
   void sendSwap(HelloMedia media, {String? queueId, SwapRestore? restore}) =>
       client.sendSwap(media, queueId: queueId, restore: restore);

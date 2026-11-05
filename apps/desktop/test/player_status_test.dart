@@ -33,17 +33,16 @@ final png = Uint8List.fromList(const [
 ]);
 
 MemberView mv(String id, String name,
-        {bool ready = false, bool? inSet, double buffered = 30, bool gone = false, bool away = false}) =>
-    MemberView(
-        id: id,
-        name: name,
-        ready: ready,
-        inSet: inSet ?? ready,
-        buffered: buffered,
-        presence: gone ? Presence.gone : away ? Presence.away : Presence.watching);
+        {double buffered = 30, bool gone = false, Presence presence = Presence.watching, bool loading = false}) =>
+    MemberView(id: id, name: name, buffered: buffered, gone: gone, presence: presence, loading: loading);
 
 StateBroadcast held(List<MemberView> members,
-        {String transport = 'held', double position = 0, int mediaId = 1, MediaRelay? relay}) =>
+        {String transport = 'held',
+        double position = 0,
+        int mediaId = 1,
+        MediaRelay? relay,
+        bool wants = false,
+        HoldInfo? hold}) =>
     StateBroadcast(
       eventId: 1,
       transport: transport,
@@ -52,6 +51,8 @@ StateBroadcast held(List<MemberView> members,
       mediaId: mediaId,
       media: {'name': 'Movie.mkv', 'size': 1, 'duration': 0, if (relay != null) 'relay': relay.toJson()},
       members: members,
+      wantsPlay: wants,
+      hold: hold,
     );
 
 final _now = DateTime.utc(2026, 1, 1, 12);
@@ -65,6 +66,7 @@ Status st(StateBroadcast? state,
         bool ownPlan = false,
         int fetchFailedFor = -1,
         MemberNames? names,
+        String? pausedBy,
         DateTime? now}) =>
     statusOf(StatusFacts(
       conn: conn,
@@ -75,6 +77,7 @@ Status st(StateBroadcast? state,
       ownPlan: ownPlan,
       fetchFailedFor: fetchFailedFor,
       names: names,
+      pausedBy: pausedBy,
       now: now ?? _now,
     ));
 
@@ -91,7 +94,8 @@ void main() {
   });
 
   group('status', () {
-    final me = mv('me', 'Me', ready: true);
+    final me = mv('me', 'Me');
+    final bob = mv('b', 'Bob', presence: Presence.brb);
 
     test('the connection first: reconnecting, unstable, refused, replaced, connecting', () {
       final r = held([me]);
@@ -106,70 +110,98 @@ void main() {
         final v = line(r, self: me, conn: conn)!;
         expect((v.text, v.level, v.action), (text, level, action), reason: '$conn');
       }
-      // Sitting out does not hide the connection.
-      expect(line(held([mv('me', 'Me', away: true)]), self: mv('me', 'Me', away: true), conn: const ConnLost())!.text,
-          'Reconnecting…');
+      // Being out does not hide the connection.
+      final out = mv('me', 'Me', presence: Presence.out);
+      expect(line(held([out]), self: out, conn: const ConnLost())!.text, 'Reconnecting…');
     });
 
-    test('the party line: connecting, reconnecting with the state kept, the ready count', () {
+    test('the party line: connecting, reconnecting with the state kept, who stands where', () {
       expect(st(null, conn: const ConnConnecting()).party, 'connecting…');
-      final r = held([me, mv('b', 'Bob'), mv('z', 'Zed', gone: true)]);
+      final r = held([me, bob, mv('c', 'Cleo', presence: Presence.out), mv('z', 'Zed', gone: true)]);
       expect(st(r, self: me, conn: const ConnLost()).party, 'reconnecting…');
-      expect(st(r, self: me).party, 'ready 1/2', reason: 'gone is not counted');
+      expect(st(r, self: me).party, '1 watching · 1 BRB · 1 out', reason: 'gone is not counted');
     });
 
-    test('nothing to say: playing, everyone ready, nothing up', () {
+    test('nothing to say: playing, about to play, nothing up', () {
       expect(line(held([me], transport: 'playing'), self: me), isNull);
-      expect(line(held([me]), self: me), isNull, reason: 'everyone ready');
+      expect(line(held([me], wants: true), self: me), isNull, reason: 'it wants to play and waits for nobody');
       expect(line(null), isNull);
     });
 
-    test('finished, then whoever is loading', () {
-      expect(line(held([me], transport: 'finished'), self: me)!.text, 'Finished · seek back or pick the next video');
-      final slow = mv('b', 'Bob', ready: true, buffered: RelayConstants.minBufferSecs / 2);
-      final v = line(held([me, slow, mv('c', 'Cleo')]), self: me)!;
-      expect(v.kind, StatusKind.loading);
-      expect(v.text, 'Bob is loading…');
+    test('a plain pause says who paused', () {
+      final r = held([me, mv('c', 'Cleo')]);
+      expect(st(r, self: me).line!.text, 'Paused');
+      expect(st(r, self: me, pausedBy: 'c').line!.text, 'Paused by Cleo');
+      final mine = st(r, self: me, pausedBy: 'me').line!;
+      expect((mine.kind, mine.text), (StatusKind.paused, 'Paused by you'));
+      expect(mine.keys, isEmpty);
+    });
+
+    test('BRB: "Waiting for Bob" when it plays once they are back, "Paused · waiting for" when not; the keys', () {
+      var v = line(held([me, bob], wants: true, hold: const HoldInfo(brb: ['b'])), self: me)!;
+      expect((v.kind, v.text), (StatusKind.waiting, 'Waiting for Bob'));
+      expect(v.keys, [('Space', 'BRB too'), ('Hold Space', 'continue without')]);
+      expect(v.who.single.id, 'b');
+      v = line(held([me, bob], hold: const HoldInfo(brb: ['b'])), self: me)!;
+      expect(v.text, 'Paused · waiting for Bob');
+      final many = [for (final n in ['Bob', 'Chiyo', 'Dan', 'Eve']) mv(n, n, presence: Presence.brb)];
+      v = line(held([me, ...many], wants: true, hold: HoldInfo(brb: [for (final m in many) m.id])), self: me)!;
+      expect(v.text, 'Waiting for Bob, Chiyo and 2 more');
+    });
+
+    test('you are BRB: "Waiting for you", Space brings you back (the pill too)', () {
+      final brbMe = mv('me', 'Me', presence: Presence.brb);
+      var v = line(held([brbMe, bob], wants: true, hold: const HoldInfo(brb: ['me', 'b'])), self: brbMe)!;
+      expect((v.kind, v.text, v.self, v.action), (StatusKind.you, 'Waiting for you and Bob', true, StatusAction.back));
+      expect(v.keys, [('Space', "I'm back"), ('Hold Space', 'continue without')]);
+      expect(v.tappable, isTrue);
+      v = line(held([brbMe, mv('b', 'Bob')], hold: const HoldInfo(brb: ['me'])), self: brbMe)!;
+      expect(v.text, 'Paused · waiting for you');
+      expect(v.keys, [('Space', "I'm back")]);
+    });
+
+    test('a video: whoever is loading, or yours', () {
+      final slow = mv('b', 'Bob', buffered: RelayConstants.minBufferSecs / 2, loading: true);
+      final v = line(held([me, slow, mv('c', 'Cleo')], wants: true, hold: const HoldInfo(video: ['b'])), self: me)!;
+      expect((v.kind, v.text), (StatusKind.waiting, 'Waiting for Bob'));
       expect(v.who.single.id, 'b');
       expect(v.progress, closeTo(0.5, 1e-9));
-      final mine = mv('me', 'Me', ready: true, buffered: 0);
-      expect(line(held([mine]), self: mine)!.text, 'Loading the video…');
+      final mine = mv('me', 'Me', buffered: 0);
+      expect(line(held([mine], wants: true, hold: const HoldInfo(video: ['me'])), self: mine)!.text,
+          'Loading the video…');
+      expect(line(held([me, slow], hold: const HoldInfo(video: ['b'])), self: me)!.text, 'Paused',
+          reason: 'paused, nobody waits for a video');
     });
 
-    test('you, then the others with a ready count', () {
-      final notMe = mv('me', 'Me');
-      final v = line(held([notMe, mv('b', 'Bob')]), self: notMe)!;
-      expect(v.kind, StatusKind.you);
-      expect(v.text, "Press Space when you're ready");
-      expect(v.action, StatusAction.ready);
-      expect(v.self, isTrue);
-      final w = line(held([me, mv('b', 'Bob'), mv('m', 'Mika'), mv('z', 'Zed', gone: true), mv('o', 'Ola', away: true)]),
-          self: me)!;
-      expect(w.kind, StatusKind.waiting);
-      expect(w.text, 'Waiting for Bob and Mika', reason: 'nobody waits for who sits out');
-      expect(w.detail, '1/3 ready');
-      final outMe = mv('me', 'Me', away: true);
-      expect(line(held([outMe, mv('b', 'Bob')]), self: outMe), isNull, reason: 'sitting out: the join-back card speaks');
-      expect(w.who.map((m) => m.name), ['Bob', 'Mika']);
+    test('out and AFK: said, and how to come back', () {
+      final out = mv('me', 'Me', presence: Presence.out);
+      var v = line(held([out, mv('b', 'Bob')], transport: 'playing'), self: out)!;
+      expect((v.kind, v.text, v.action), (StatusKind.out, "You're out", StatusAction.join));
+      expect(v.keys, [('Space', 'Join')]);
+      final afk = mv('me', 'Me', presence: Presence.afk);
+      v = line(held([afk, mv('b', 'Bob')]), self: afk)!;
+      expect((v.kind, v.text), (StatusKind.afk, "You're AFK"));
+      expect(v.keys, [('Any key', 'back')]);
     });
 
-    test("can't play: yours with Reload, a broken player too; others' instead of waiting", () {
+    test('finished', () {
+      expect(line(held([me], transport: 'finished'), self: me)!.text, 'Finished · seek back or pick the next video');
+    });
+
+    test("can't play: yours with Reload, a broken player too; others' instead of a plain pause", () {
       var v = line(held([me]), self: me, playerError: 'Not allowed (403)')!;
       expect((v.kind, v.text, v.action, v.level),
           (StatusKind.problem, "Can't play this: Not allowed (403)", StatusAction.reload, StatusLevel.error));
       v = st(held([me]), self: me, playerFault: 'video reload failed: gone').line!;
       expect((v.text, v.action), ('Video reload failed: gone', StatusAction.reload));
-      final bob = MemberView(id: 'b', name: 'Bob', ready: false, inSet: false, buffered: 0, error: 'Not allowed (403)');
-      v = line(held([me, bob, mv('m', 'Mika', ready: true)]), self: me)!;
+      const bad = MemberView(id: 'b', name: 'Bob', buffered: 0, error: 'Not allowed (403)');
+      v = line(held([me, bad, mv('m', 'Mika')]), self: me)!;
       expect((v.kind, v.text, v.action), (StatusKind.cannotPlay, "Bob can't play this: Not allowed (403)", null));
       expect(v.who.single.id, 'b');
-      final notMe = mv('me', 'Me');
-      v = line(held([notMe, bob]), self: notMe)!;
-      expect((v.kind, v.action), (StatusKind.cannotPlay, StatusAction.ready));
     });
 
     group('the relay', () {
-      final bob = mv('b', 'Bob', ready: true);
+      final bob = mv('b', 'Bob');
       test('the server fetching, then failing', () {
         final r = held([me, bob], relay: const MediaRelay(fetch: true));
         expect((line(r, self: me)!.kind, line(r, self: me)!.text),
@@ -181,11 +213,11 @@ void main() {
       test('waiting for the member passing it on', () {
         final v = line(held([me, bob], relay: const MediaRelay(source: 'b')), self: me)!;
         expect((v.text, v.level), ('Waiting for Bob to pass the video on', StatusLevel.warn));
-        expect(line(held([me, bob], relay: const MediaRelay(source: 'b', live: true)), self: me), isNull);
+        expect(line(held([me, bob], wants: true, relay: const MediaRelay(source: 'b', live: true)), self: me), isNull);
       });
 
       test("the source's connection dropped: what the server has, and for how long; even while playing", () {
-        final gone = MemberView(id: 'b', name: 'Bob', ready: true, inSet: false, buffered: 30, presence: Presence.gone);
+        const gone = MemberView(id: 'b', name: 'Bob', buffered: 30, gone: true);
         final since = _now.subtract(const Duration(seconds: 20));
         final r = held([me, gone],
             transport: 'playing',
@@ -209,7 +241,7 @@ void main() {
       });
 
       test('the source itself sees none of it', () {
-        final r = held([me, bob], relay: const MediaRelay(source: 'me'));
+        final r = held([me, bob], wants: true, relay: const MediaRelay(source: 'me'));
         expect(line(r, self: me), isNull);
       });
     });
@@ -218,13 +250,13 @@ void main() {
       expect(nameList(['Bob']), 'Bob');
       expect(nameList(['Bob', 'Mika']), 'Bob and Mika');
       expect(nameList(['Bob', 'Mika', 'Cleo']), 'Bob, Mika and Cleo');
-      expect(nameList(['Bob', 'Mika', 'Cleo', 'Dan', 'Eve']), 'Bob, Mika and 3 others');
+      expect(nameList(['Bob', 'Mika', 'Cleo', 'Dan', 'Eve']), 'Bob, Mika and 3 more');
     });
   });
 
   group('status transitions', () {
-    final me = mv('me', 'Me', ready: true);
-    final gone = MemberView(id: 'b', name: 'Bob', ready: true, inSet: false, buffered: 30, presence: Presence.gone);
+    final me = mv('me', 'Me');
+    const gone = MemberView(id: 'b', name: 'Bob', buffered: 30, gone: true);
 
     test('the source gone a few seconds: one notice; left: another', () {
       final w = StatusWatch();
@@ -305,7 +337,7 @@ void main() {
     expect(card, findsOneWidget);
     expect(find.text(coord.nowPlaying.value!.title), findsWidgets);
     expect(tester.widget<AnimatedOpacity>(find.byKey(const ValueKey('start-banner'))).opacity, 1);
-    coord.serverState.value = held([mv('a', 'Alex', ready: true)], transport: 'playing');
+    coord.serverState.value = held([mv('a', 'Alex')], transport: 'playing');
     await tester.pump();
     expect(tester.widget<AnimatedOpacity>(find.byKey(const ValueKey('start-banner'))).opacity, 0);
     await tester.pumpAndSettle();
@@ -344,7 +376,7 @@ void main() {
     for (final size in sizes) {
       testWidgets('session player, status pill: ${size.width.toInt()}', (tester) async {
         coord.playback.alive.value = true;
-        coord.serverState.value = held(crowd);
+        coord.serverState.value = held(crowd, wants: true, hold: HoldInfo(brb: [for (final m in crowd) m.id]));
         await sized(
           tester,
           size,

@@ -78,23 +78,25 @@ One window. Along the top, the strip: your avatar (click it for your
 profile: name, picture with a crop editor, colour, and links to the
 settings), the Library / Schedule / Settings tabs, and the party. Alone
 on your server it has just Join a friend and Invite (and "Sharing" while
-your server is open to friends); with others there it shows everyone's avatar
-with a ring for their state (green ready, amber buffering, grey not ready,
-a little faded joining, dimmed reconnecting, dimmed with a moon sitting
-out; a crown on whoever
-hosts, a tower on whoever passes the video on). Click the avatars for the
-member list (each member's app version, amber when it differs from yours,
-and the server's at the top; force ready, Nudge, Sit out; on your
-server where friends can reach it, Copy invite link and Stop sharing,
-on a friend's "Copy invite link"). Beside them the server and "ready n/m" (who is sitting out or
-reconnecting does not count), the chat button with unread
+your server is open to friends); with others there it shows everyone's
+picture, filling a rounded square (or a circle: Settings → Party → More →
+Avatar shape), with a small badge for where they stand (a cup: BRB; "Zz":
+AFK; an eye with a line: out, darkened) and a line running round the
+edge while their video loads (white) or they reconnect (amber); a crown
+on whoever hosts, a tower on whoever passes the video on. Click the
+avatars for the member list (each member's app version, amber when it
+differs from yours, and the server's at the top; Wait for / Don't wait
+for, Nudge, Out; on your server where friends can reach it, Copy invite
+link and Stop sharing, on a friend's "Copy invite link"). Beside them the
+server and "3 watching · 1 BRB" (who reconnects does not count), the chat
+button with unread
 count, and Invite on your server or Leave on a friend's. Empty strip
 space drags the window.
 
 The player fills the window under the strip. Pick a tab and it shrinks to
 a mini player in a corner: drag it anywhere and it snaps to the nearest
-corner; double-click or ⤢ makes it big again, × sits you out (below) and
-× again closes it; the strip's screen button brings it back. F or
+corner; double-click or ⤢ makes it big again, × closes it and sets you
+out (below); the strip's screen button brings it back. F or
 double-click on the picture goes fullscreen (the strip hides; the
 party's avatars and the window buttons come up with the player's controls,
 top right, and work as in the strip: names on hover, a click opens who is
@@ -103,17 +105,19 @@ show's cover, title and episode top left (a web video: its thumbnail and
 name; guests get the art too; right-click to copy the title, or the link
 when you have it, or open it in the browser or Jellyfin); before
 a video first plays, its banner fills the picture until playback starts.
-One pill bottom centre, just above the controls, says what playback waits for ("Press Space
-when you're ready", "Waiting for Bob and Mika · 2/3 ready", "Bob is
-loading…") or what went wrong, with Retry or Cancel when it helps. Chat and activity open in a panel on the right (chat button or
+One pill bottom centre, just above the controls, says what playback waits for
+("Waiting for Bob and Mika" with their pictures, "Paused · waiting for
+Bob", "Paused by Bob") with the keys that act now (`[Space] BRB too
+[Hold Space] continue without`), or what went wrong, with Retry or Cancel
+when it helps; bottom subtitles move up out of its way. Chat and activity open in a panel on the right (chat button or
 Tab), ready to type; it shows messages (select text to copy it, or
 right-click for Copy message and, with a link in it, Copy link / Open in
 browser), and its "Activity" toggle adds
-joins, ready, seeks and the like between them. Joins, leaves, someone
+joins, BRBs, seeks and the like between them. Joins, leaves, someone
 losing connection and coming back, video changes, additions to Up next
 (the title, its picture and who added it), chat and problems also pop up
 bottom left with the person's avatar, above the player's controls (never
-on them); ready, seeks and pauses stay in the activity. Click a message
+on them); BRBs, seeks and pauses stay in the activity. Click a message
 to open the chat (Settings → Notifications & sounds → Chat pop-ups: All
 by default, or Only when paused, or Off; messages always reach the chat,
 with their sound). Watching alone, nothing pops up or sounds about the
@@ -140,7 +144,7 @@ with a live preview (and in the player panel): crossing time, how many
 at once, which lanes of the picture they use, opacity, size, boldness,
 outline, avatars, and a frame round your own lines.
 
-**While sitting out or in the background.** Sitting out, only chat,
+**While out or in the background.** Out or AFK, only chat,
 nudges, "starting now" (the video starts for the others) and Up next
 reach you; joins and leaves too if you turn on Settings → Notifications &
 sounds → "Joins and leaves too". With the window in the background or
@@ -153,32 +157,42 @@ as a small chip top right.
 Your name and picture change for everyone in the server right away; the
 colour is yours only.
 
-**Sitting out.** Step away without leaving: Sit out (your profile, your
-row in the member list, or × on the mini player) unloads the video on your
-end, and nobody waits for you any more; you stay in chat. Anyone can sit
-anyone out, the host too ("Alice sat you out" tells you who). The player
-then shows the cover, title and where the others are; Join back (or Space)
-loads the video there and readies you, in the background while the others
-play on (nobody is paused for you).
+**Play, pause and BRB.** Play and pause are everyone's: Space (or the
+play button) plays or pauses for the whole group, and a new video waits
+for one Play. Hold Space (about half a second; the pill fills and says
+"Keep holding: BRB") to step away: everyone waits for you ("Waiting for
+Bob"), and when you are back (Space again) it plays on if it was
+playing. While someone is BRB, Space makes you BRB too or brings you
+back, and holding it for 2 seconds goes on without them. Right-click
+and hold on the video (or right-click and click) for the same and more:
+↑ BRB / I'm back, → Skip OP, Skip 1:30 or Next episode (in the ending),
+↓ Out / Join. A friend who ran off without pressing anything can be
+waited for from their card ("Wait for Bob"), and anyone waited for can be
+gone on without ("Don't wait for Bob").
 
-**Auto sit-out.** Idle for 5 minutes while nothing plays, or the window
-minimised for 10 minutes (playing or not), sits you out by itself, so
-nobody waits for you; you are back as soon as you return (a key, the
-mouse, the window's focus). It never happens when you are alone, and an
-away you chose (or someone else's) stays until you join back. Settings →
-Party → "Auto sit-out" turns it off.
+**Out.** Step away without leaving: Out (your profile, your row in the
+member list, the right-click menu, or × on the player) means nobody waits
+for you any more; you stay in chat and your player stays where you were.
+Anyone can set anyone out, the host too ("Alice set you out" tells you
+who). Space or Join brings you in at the current moment, loading in the
+background while the others play on, and everyone gets "Rewind for
+you (1:42)" for half a minute in case they want to watch it again with
+you. No input for 10 minutes while nothing plays makes you AFK, which
+is the same as out with its own badge; any key or the mouse brings you
+back. The window minimised for 10 minutes while the video plays sets you
+out. Nothing of this happens when you are alone.
 
 **Reconnects.** A bad connection does not throw you out: the video keeps
 playing, the pill says "Connection unstable…" and then "Reconnecting…",
-and the app comes back on its own as the same member (ready, sitting out,
-your Up next items and the video you pass on all kept) for up to 10
+and the app comes back on its own as the same member (BRB or out, your
+Up next items and the video you pass on all kept) for up to 10
 minutes; the others see you dimmed, "reconnecting…". Only a drop of a
 few seconds or more makes the lost / back sounds. Leave and closing the
 app tell the others at once; Update and restart keeps your place for the
 restarted app. Opening Starsync a second time (another window with the
 same profile) takes your place over, and the first one says so and stops.
 
-**Nudge.** Nudge in the member list pokes someone, sitting out or not:
+**Nudge.** Nudge in the member list pokes someone, out or not:
 only they hear it (a sound, a pop-up, and the taskbar entry asks for
 attention when the window is in the background).
 
@@ -411,11 +425,12 @@ and the rest folded under More:
   files, sharp video, hardware decoding), Controls (player design,
   controls size, progress line; under More which buttons sit in the
   bar) and Playback (play the next episode automatically).
-- **Party**: you (picture, name and colour, edited right there), Away
-  (auto sit-out), Your server (port and password for Invite) and Recent
-  servers (forget the ones you no longer use).
+- **Party**: you (picture, name and colour, edited right there; under
+  More the avatar shape: rounded square or circle), Your server (port and
+  password for Invite) and Recent servers (forget the ones you no longer
+  use).
 - **Notifications & sounds**: Over the video (toasts or danmaku, chat
-  pop-ups, joins and leaves while sitting out or in the background;
+  pop-ups, joins and leaves while out or in the background;
   under More the danmaku look and what pops up when) and Sounds (App
   sounds, the sound set; each sound with a preview, its own set and a
   switch folded below).
@@ -454,8 +469,11 @@ ones are in ⋯). The controls hide 3 s after the mouse last moved, and a
 click on the time switches between elapsed and remaining. Every change
 applies right away.
 
-Anywhere in a server (unless you are typing): Space = ready / unready,
-Tab = chat & activity (Tab never moves between buttons). Anywhere:
+Anywhere in a server (unless you are typing): Space = play / pause for
+everyone, hold Space = BRB (while someone is BRB: Space = BRB too or I'm
+back, hold 2 s = continue without them), Tab = chat & activity (Tab never
+moves between buttons). On the video: right button = the menu (BRB,
+skip ahead, Out). Anywhere:
 Ctrl+Shift+B = mark a problem in the session log. Keys while the
 player fills the window: Left/Right = seek 10 s, Up/Down = volume, M = mute, Shift+Right = skip 1:30,
 PgDn/PgUp = previous / next chapter (as in mpv), F = fullscreen, Enter =
@@ -467,8 +485,8 @@ Ctrl+1..6 = Anime4K mode A, B, C, A+A, B+B, C+A, Ctrl+0 = shaders off.
 Every seek, skip and chapter jump moves everyone.
 
 Controls: both designs have the same buttons in the same places, only
-the look differs. Bottom left: play / pause first (it is your ready, like
-Space: ✓ while you are ready and the others are not), previous / next
+the look differs. Bottom left: play / pause first (everyone's, like
+Space), previous / next
 episode (when there is one; next plays Up next first), previous / next
 chapter (when the video has chapters), volume and the time (click it to
 switch between elapsed / total and the time left). Bottom right:
@@ -478,7 +496,7 @@ closes the panel), chat and fullscreen last. The top bar has the title,
 Up next, ⋯ (video and session) and back to the library (in fullscreen:
 exit fullscreen and the window buttons). ⋯ holds change video, copy
 link, reload video, Skip 1:30, chapters (current one checked; click to
-jump), mark everyone ready, mark a problem and leave server, plus any
+jump), mark a problem and leave server, plus any
 bar button you hid. Volume: its slider sits next to
 the speaker (in a narrow window it slides out while you hover the
 speaker); a click on the speaker or M mutes, scrolling anywhere on the
@@ -557,7 +575,7 @@ Watching:
   saw (reported on start, every 10 s, on pause, resume, seek and track
   change, and when it stops). Watched means you were there while most
   of it played (or while half of it played and it reached the ending),
-  not where it stopped: time you sat out does not count, skipping around
+  not where it stopped: time you were out does not count, skipping around
   does not count, opening a watched episode to check a moment keeps it
   watched, and a quick peek leaves no resume point. Files and links you
   watch are remembered the same way on your computer (a show's next
@@ -666,7 +684,7 @@ fails to load shows a toast and switches shaders off.
 - "wrong server password": password mismatch.
 - "host runs a different version": update the app on both sides.
 - Picture frozen but sound fine: Ctrl+R reloads the video.
-- Everyone waits at "waiting for X": X has not buffered 4 seconds yet or has not pressed Space.
+- Everyone waits at "Waiting for X": X is BRB, or X has not buffered 4 seconds yet (their card has "Don't wait for X").
 - Windows: the build is new; if something is off there, say so.
 
 For contributors: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md),

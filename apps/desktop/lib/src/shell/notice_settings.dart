@@ -86,7 +86,7 @@ class ChatPopupsSetting extends StatelessWidget {
   }
 }
 
-/// Joins and leaves also reach you while sitting out or in the
+/// Joins and leaves also reach you while out or in the
 /// background ([AppSettings.notifyPeople]).
 class NotifyPeopleSetting extends StatelessWidget {
   const NotifyPeopleSetting({super.key});
@@ -98,7 +98,7 @@ class NotifyPeopleSetting extends StatelessWidget {
       builder: (context) => SettingSwitch(
         switchKey: const ValueKey('notify-people'),
         label: 'Joins and leaves too',
-        help: 'While you sit out or the window is in the background, also who joins, leaves or loses connection '
+        help: 'While you are out or the window is in the background, also who joins, leaves or loses connection '
             '(otherwise only chat, nudges, "starting now" and Up next)',
         value: s.notifyPeople.value,
         onChanged: s.setNotifyPeople,

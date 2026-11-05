@@ -62,8 +62,8 @@ void main() {
         mediaId: 2,
         media: const HelloMedia(name: 'Pilot', size: 0, duration: 0, jellyfin: ref).toJson(),
         members: const [
-          MemberView(id: 'm1', name: 'a', ready: false, inSet: false, buffered: 0, jf: {'abc123': false}),
-          MemberView(id: 'm2', name: 'b', ready: false, inSet: false, buffered: 0),
+          MemberView(id: 'm1', name: 'a', jf: {'abc123': false}),
+          MemberView(id: 'm2', name: 'b', ),
         ],
         relay: true,
         relayNext: true,

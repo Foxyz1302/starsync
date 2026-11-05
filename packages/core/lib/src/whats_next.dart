@@ -1,4 +1,3 @@
-import 'presence.dart';
 import 'protocol.dart';
 import 'queue.dart';
 
@@ -13,9 +12,9 @@ import 'queue.dart';
 /// nobody is around right now (it waits).
 typedef QueuePerformer = ({String? id, String? why});
 
-/// Connected and watching (`in` or `joining`): can do things for the
-/// party now (put an Up next item up).
-bool isPresentMember(MemberView m) => m.presence == Presence.watching || m.presence == Presence.joining;
+/// Connected and not out (`in` or `brb`, loading or not): can do things
+/// for the party now (put an Up next item up).
+bool isPresentMember(MemberView m) => !m.gone && !m.isOut;
 
 /// - A link passed on by its adder, or the adder's file: only the adder
 ///   (their app has the file, the cookies). Gone (disconnected, in its
@@ -25,25 +24,29 @@ bool isPresentMember(MemberView m) => m.presence == Presence.watching || m.prese
 ///   present). Nobody: skipped.
 /// - A link everyone opens, or one the server fetches: the adder when
 ///   present, else the lowest present member id; nobody present: it waits.
-QueuePerformer queuePerformer(QueueItem item, List<MemberView> members) {
+/// [pass]: members passed over for this play request (`state.queuePass`:
+/// they did not put it up in time); they count as unable, unless the item
+/// is theirs alone.
+QueuePerformer queuePerformer(QueueItem item, List<MemberView> members, {List<String> pass = const []}) {
   MemberView? adder;
   for (final m in members) {
     if (m.id == item.by) adder = m;
   }
   if (item.how.adderOnly) {
     if (adder == null) return (id: null, why: '${item.byName.isEmpty ? 'who added it' : item.byName} left');
-    if (adder.presence == Presence.gone) return (id: null, why: null);
+    if (adder.gone) return (id: null, why: null);
     return (id: adder.id, why: null);
   }
+  bool present(MemberView m) => isPresentMember(m) && !pass.contains(m.id);
   final ref = item.media.jellyfin;
   if (item.how == QueueHow.jellyfin && ref != null) {
-    bool can(MemberView m) => isPresentMember(m) && m.jf[ref.serverId] == true;
+    bool can(MemberView m) => present(m) && m.jf[ref.serverId] == true;
     if (adder != null && can(adder)) return (id: adder.id, why: null);
     final id = lowestMemberId(members.where(can));
     return id == null ? (id: null, why: 'nobody here has that Jellyfin server') : (id: id, why: null);
   }
-  if (adder != null && isPresentMember(adder)) return (id: adder.id, why: null);
-  return (id: lowestMemberId(members.where(isPresentMember)), why: null);
+  if (adder != null && present(adder)) return (id: adder.id, why: null);
+  return (id: lowestMemberId(members.where(present)), why: null);
 }
 
 /// The lowest member id of [members] ("m2" before "m10"), or null.
@@ -62,13 +65,14 @@ int compareMemberIds(String a, String b) {
 
 /// Who may add the continuation ([QueueItem.auto]) of the current media:
 /// who put it up ([swapBy], a member id), or, when that member is not
-/// `in`, the first member (in [members] order, the join order) who is.
+/// present ([isPresentMember]), the first member (in [members] order, the
+/// join order) who is.
 bool mayAddContinuation(String memberId, String? swapBy, List<MemberView> members) {
   if (memberId.isEmpty) return false;
   if (memberId == swapBy) return true;
   final swapper = members.where((m) => m.id == swapBy).firstOrNull;
-  if (swapper != null && swapper.presence == Presence.watching) return false;
-  return members.where((m) => m.presence == Presence.watching).firstOrNull?.id == memberId;
+  if (swapper != null && isPresentMember(swapper)) return false;
+  return members.where(isPresentMember).firstOrNull?.id == memberId;
 }
 
 /// Whole seconds left of [advance] at [now] (server clock), at least 0.

@@ -4,6 +4,7 @@ import 'dart:io' show File;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:sync_relay_core/core.dart' show PresenceReason;
 
 import '../controls/frame.dart' show DoubleClickListener;
 import '../controls/session_controls.dart' show controlsBottomHeight;
@@ -252,11 +253,11 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
             if (!_chatOpen) setState(() => _unread += chats);
           }));
     }));
-    // Back from sitting out with the player closed: show it (the media
-    // plays again).
+    // Back from out with the player closed: show it (the media plays
+    // again).
     var wasOut = false;
     _stops.add(effect(() {
-      final out = coord.selfAway.value;
+      final out = coord.selfOut.value;
       if (wasOut && !out && nav.online.peek()) {
         _later(() {
           if (_mode == PlayerMode.none) _show(PlayerMode.mini);
@@ -412,15 +413,15 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     _show(PlayerMode.mini);
   }
 
-  /// The player's ×: sit out (stay in the server, nothing loaded; the
-  /// player shows the join-back card). Once out, × closes the player.
+  /// The player's ×: out (stay in the server, nobody waits for you, the
+  /// player keeps your spot) and the player closes. Space, Join on your
+  /// card or the strip brings you back at the current moment.
   void _closePlayer() {
     final coord = _graph.coordinator;
-    if (coord.selfAway.peek()) {
-      _show(PlayerMode.none);
-    } else {
-      coord.sitOut();
+    if (!coord.selfOut.peek() && coord.serverState.peek() != null) {
+      coord.goOut(null, PresenceReason.closed);
     }
+    _show(PlayerMode.none);
   }
 
   Future<void> _setWindowFullscreen(bool on) async {

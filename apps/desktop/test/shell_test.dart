@@ -58,22 +58,22 @@ class _FakeVideoState extends State<FakeVideo> {
 }
 
 MemberView member(String id, String name,
-        {bool ready = false, bool gone = false, String app = '', String avatarHash = ''}) =>
+        {Presence presence = Presence.watching, bool gone = false, String app = '', String avatarHash = ''}) =>
     MemberView(
         id: id,
         name: name,
         avatarHash: avatarHash,
-        ready: ready,
-        inSet: ready,
         buffered: 30,
         app: app,
-        presence: gone ? Presence.gone : Presence.watching);
+        presence: presence,
+        gone: gone);
 
 void main() {
   final session = _graph;
   final coord = session.coordinator;
 
-  void online(List<MemberView> members, {bool media = true, String transport = 'held'}) {
+  void online(List<MemberView> members,
+      {bool media = true, String transport = 'held', bool wants = false, HoldInfo? hold}) {
     coord.serverState.value = StateBroadcast(
       eventId: 1,
       transport: transport,
@@ -82,6 +82,8 @@ void main() {
       mediaId: media ? 1 : 0,
       media: media ? {'name': 'Movie.mkv', 'size': 1, 'duration': 0} : null,
       members: members,
+      wantsPlay: wants,
+      hold: hold,
     );
     session.navigation.place.value = Place.friend;
   }
@@ -119,9 +121,9 @@ void main() {
   }
 
   final party = [
-    member('a', 'Alex', ready: true),
-    member('b', 'Bob'),
-    member('c', 'Cleo', ready: true),
+    member('a', 'Alex'),
+    member('b', 'Bob', presence: Presence.brb),
+    member('c', 'Cleo'),
     member('d', 'Dan'),
     member('e', 'Eve', gone: true),
     member('f', 'Finn'),
@@ -240,9 +242,9 @@ void main() {
       expect(find.byKey(const ValueKey('strip-join')), findsNothing);
       expect(find.byKey(const ValueKey('strip-leave')), findsOneWidget);
       expect(find.byKey(const ValueKey('strip-chat')), findsOneWidget);
-      expect(find.text('ready 2/5'), findsOneWidget, reason: 'Eve is gone: not counted');
+      expect(find.text('4 watching · 1 BRB'), findsOneWidget, reason: 'Eve is gone: not counted');
       final stack = find.byKey(const ValueKey('party-avatars'));
-      // Five shown, the sixth as "+1"; ready ones first.
+      // Five shown, the sixth as "+1"; watching ones first.
       expect(find.descendant(of: stack, matching: find.byType(StatusAvatar)), findsNWidgets(5));
       expect(find.descendant(of: stack, matching: find.text('+1')), findsOneWidget);
       final alex = tester.getTopLeft(find.descendant(of: stack, matching: find.byKey(const ValueKey('stack-a-Alex'))));
@@ -275,7 +277,7 @@ void main() {
       await pumpShell(tester, const Size(1280, 800));
       session.navigation.serverVersion.value = '1.3.0-dev.1';
       addTearDown(() => session.navigation.serverVersion.value = '');
-      online([member('a', 'Alex', ready: true, app: '1.3.0-dev.1'), ...party.skip(1)], media: false);
+      online([member('a', 'Alex', app: '1.3.0-dev.1'), ...party.skip(1)], media: false);
       await tester.pumpAndSettle();
       // The server label opens it (an avatar is its person's card).
       await tester.tap(find.byKey(const ValueKey('server-label')));
@@ -290,11 +292,11 @@ void main() {
       expect(find.descendant(of: card, matching: find.byKey(const ValueKey('version-a'))), findsOneWidget);
       expect(find.descendant(of: card, matching: find.text('1.3.0-dev.1')), findsOneWidget);
       expect(find.descendant(of: card, matching: find.text('Server 1.3.0-dev.1')), findsOneWidget);
-      // Someone else: nudge or sit them out (no kicking).
+      // Someone else: nudge or set them out (no kicking).
       await tester.tap(find.descendant(of: find.byKey(const ValueKey('member-b')), matching: find.byTooltip('More')));
       await tester.pumpAndSettle();
       expect(find.text('Nudge'), findsOneWidget);
-      expect(find.text('Sit out'), findsOneWidget);
+      expect(find.text('Out'), findsOneWidget);
       expect(find.text('Kick'), findsNothing);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
@@ -475,13 +477,18 @@ void main() {
     expect(given[PlayerMode.mini], isNot(same(given[PlayerMode.full])));
   });
 
-  testWidgets('status pill: who is not ready, with the ready count', (tester) async {
+  testWidgets('status pill: who the group waits for, and the keys that act now', (tester) async {
     coord.playback.alive.value = true;
     await pumpShell(tester, const Size(1280, 800));
-    online([member('a', 'Alex', ready: true), member('b', 'Bob'), member('c', 'Cleo')]);
+    online([
+      member('a', 'Alex'),
+      member('b', 'Bob', presence: Presence.brb),
+      member('c', 'Cleo', presence: Presence.brb),
+    ], wants: true, hold: const HoldInfo(brb: ['b', 'c']));
     await tester.pumpAndSettle();
     expect(find.text('Waiting for Bob and Cleo'), findsOneWidget);
-    expect(find.text('1/3 ready'), findsOneWidget);
+    expect(find.text('BRB too'), findsOneWidget);
+    expect(find.text('continue without'), findsOneWidget);
   });
 
   test('a version that is not ours stands out (a dev run matches any)', () {
@@ -657,8 +664,9 @@ void main() {
     });
 
     ImageProvider? toastPicture(WidgetTester tester) => tester
-        .widget<CircleAvatar>(find.descendant(of: find.byType(ToastCard), matching: find.byType(CircleAvatar)))
-        .backgroundImage;
+        .widget<StatusAvatar>(find.descendant(of: find.byType(ToastCard), matching: find.byType(StatusAvatar)))
+        .info
+        .image;
 
     void chat(String id, String name, String text) => coord.notify(ChatPosted(
         FeedMessage(actor: name, actorId: id, action: 'chat', reason: text, at: DateTime.now().toUtc()),

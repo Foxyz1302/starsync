@@ -35,10 +35,12 @@ bool seekLanded({required double ownPosition, required double target}) {
   return true;
 }
 
+/// This player follows the group's play: [memberId] is in the state and
+/// not out (AFK or Out: its player stays at its spot).
 bool localPlayAllowed(StateBroadcast state, String memberId) {
   if (memberId.isEmpty) return false;
   for (final m in state.members) {
-    if (m.id == memberId) return m.inSet && m.ready;
+    if (m.id == memberId) return !m.isOut;
   }
   return false;
 }

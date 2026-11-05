@@ -305,7 +305,12 @@ void main() {
       expect(find.descendant(of: you, matching: find.byType(ProfileColors)), findsOneWidget);
       await tester.enterText(find.byKey(const ValueKey('party-name')), 'Hana');
       expect(profile.name.peek(), 'Hana');
-      expect(find.byKey(const ValueKey('auto-sit-out')), findsOneWidget);
+      expect(find.byKey(const ValueKey('auto-sit-out')), findsNothing, reason: 'AFK has no switch');
+      // The avatar shape lives under More.
+      expect(find.byKey(const ValueKey('avatar-shape')), findsNothing);
+      await tester.tap(find.descendant(of: you, matching: find.text('More')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('avatar-shape')), findsOneWidget);
       expect(find.text('Your server'), findsOneWidget);
       expect(find.text('Port'), findsOneWidget);
       expect(find.text('vps.example:8080'), findsOneWidget);
@@ -426,8 +431,8 @@ void main() {
 
     testWidgets('the state\'s host flag crowns that member for everyone', (tester) async {
       online(const [
-        MemberView(id: 'm1', name: 'Hana', ready: true, inSet: true, buffered: 30, host: true),
-        MemberView(id: 'm2', name: 'Bob', ready: false, inSet: false, buffered: 0),
+        MemberView(id: 'm1', name: 'Hana', buffered: 30, host: true),
+        MemberView(id: 'm2', name: 'Bob', buffered: 0),
       ]);
       final avatars = {for (final a in partyAvatars(coord)) a.name: a};
       expect(avatars['Hana']!.host, isTrue);
@@ -439,14 +444,15 @@ void main() {
           findsOneWidget);
       expect(find.descendant(of: find.byKey(const ValueKey('member-m2')), matching: find.text('host')),
           findsNothing);
-      // The host can be sat out like anyone.
+      // The host can be set out like anyone, or waited for.
       await tester.tap(find.descendant(of: find.byKey(const ValueKey('member-m1')), matching: find.byTooltip('More')));
       await tester.pumpAndSettle();
-      expect(find.text('Sit out'), findsOneWidget);
+      expect(find.text('Out'), findsOneWidget);
+      expect(find.text('Wait for Hana'), findsOneWidget);
     });
 
     testWidgets('your server, not shared: only you, Invite; shared: the invite and Stop sharing', (tester) async {
-      online(const [MemberView(id: 'm1', name: 'Me', ready: false, inSet: false, buffered: 0)]);
+      online(const [MemberView(id: 'm1', name: 'Me', buffered: 0)]);
       _graph.navigation.place.value = Place.yours;
       final yours = _graph.yourServer;
       yours.port.value = 40000; // as if it runs

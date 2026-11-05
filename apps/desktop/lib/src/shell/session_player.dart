@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:sync_relay_core/core.dart' show RewindOffer;
 
 import '../controls/controls_probe.dart';
 import '../controls/minimal/style.dart';
@@ -33,14 +34,15 @@ import '../widgets/window_buttons.dart';
 import 'avatar.dart';
 import 'motion.dart';
 import 'now_playing_title.dart';
-import 'party_strip.dart' show showMembersCard;
+import 'party_strip.dart' show showMembersCard, stripAvatarSize;
 import 'person_card.dart' show DanmakuPersonTaps, PersonRef, showPersonCard;
 import 'player_status.dart';
 import 'quick_chat.dart';
 import 'settings_tab.dart' show SettingsSection;
-import 'sit_out_card.dart';
+import 'player_radial.dart';
 import 'start_banner.dart';
 import 'video_view.dart';
+import 'wait_design.dart';
 
 /// Where the session's video is shown: nowhere, the floating mini player,
 /// or filling the body (and, with fullscreen, the window).
@@ -142,6 +144,10 @@ class _SessionPlayerState extends State<SessionPlayer> {
   double _boxHeight = QuickChatBox.height;
   // What covers the bottom, as bottom subtitles move above it.
   final _lift = SubtitleLift();
+  // The status pill's height (0 while hidden): subtitles keep above it.
+  double _statusHeight = 0;
+  // The radial (right button on the video).
+  late final RadialController _radial = RadialController(_model, _hold);
   // The keys the player took, until they are let go: the focus system
   // never sees them (nor their repeats), so an arrow never moves focus
   // onto a button and Enter never presses one.
@@ -205,7 +211,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
     });
     // Danmaku is the style and the full player is up (not sitting out).
     _stopDanmakuWatch = effect(() {
-      final on = _full.value && _settings.notifyStyle.value == NotifyStyle.danmaku && !_coord.selfAway.value;
+      final on = _full.value && _settings.notifyStyle.value == NotifyStyle.danmaku && !_coord.selfOut.value;
       untracked(() {
         _danmakuOn.value = on;
         widget.danmakuActive?.value = on;
@@ -261,6 +267,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
     _ownShown.dispose();
     _boxUp.dispose();
     _lift.dispose();
+    _radial.dispose();
     _lines.dispose();
     _hold.dispose();
     _model.dispose();
@@ -278,12 +285,25 @@ class _SessionPlayerState extends State<SessionPlayer> {
 
   /// What covers the bottom of the full player, for the subtitle lift:
   /// the box (or its echo) from 16 px up, else the control bar while it is
-  /// up when "Subtitles above the controls" is on; 8 px above it.
+  /// up when "Subtitles above the controls" is on; the status pill always
+  /// (it rides on the controls); 8 px above it.
   void _retargetLift() {
     if (!mounted) return;
     final box = _boxUp.value ? _edge + _boxHeight + 8 : 0.0;
     final bar = _settings.liftSubtitles.peek() && _controlsShown.value ? _bottomControlsHeight() + 8 : 0.0;
-    _lift.animateTo(math.max(box, bar));
+    final pillBottom = _boxUp.value
+        ? _boxHeight + _edge * 2
+        : _controlsShown.value
+            ? _bottomControlsHeight() + _edge
+            : _edge;
+    final pill = _statusHeight > 0 ? pillBottom + _statusHeight + 8 : 0.0;
+    _lift.animateTo(math.max(math.max(box, bar), pill));
+  }
+
+  void _statusSized(Size s) {
+    if (s.height == _statusHeight) return;
+    _statusHeight = s.height;
+    _retargetLift();
   }
 
   void _boxHeightChanged(double h) {
@@ -359,7 +379,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
     final key = event.logicalKey;
     // Enter: the quick chat box (the chat panel's draft), whatever plays.
     if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
-      if (_coord.selfAway.peek()) return false;
+      if (_coord.selfOut.peek()) return false;
       _quick.show();
       return true;
     }
@@ -425,7 +445,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
     }
     if (key == LogicalKeyboardKey.escape) {
       _lastKeyAt = now;
-      if (_model.panelOpen.peek()) {
+      if (_radial.isOpen) {
+        _radial.close();
+      } else if (_model.panelOpen.peek()) {
         _model.panelOpen.value = false;
       } else if (widget.chatOpen) {
         widget.onToggleChat();
@@ -469,7 +491,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
           // Never null for the mini: media_kit keeps the last controls
           // when given null, so the full player's would stay under it.
           final VideoControlsBuilder controls = _isFull ? _sessionControls : _noControls;
-          final video = widget.videoBuilder?.call(context, controls) ?? _video(controls);
+          final raw = widget.videoBuilder?.call(context, controls) ?? _video(controls);
+          // Always wrapped (the mini and the full player share one video).
+          final video = RadialListener(controller: _radial, enabled: _isFull, child: raw);
           // The wheel anywhere on the full player steps the volume
           // (lists, menus and popovers under the mouse scroll instead).
           return VolumeWheel(
@@ -488,11 +512,16 @@ class _SessionPlayerState extends State<SessionPlayer> {
                   _quickChatBox(),
                   _playerPanel(),
                   if (widget.danmaku case final d?) _danmakuPanel(d),
+                  if (waitDesign != WaitDesign.a)
+                    Positioned.fill(
+                      child: ValueListenableBuilder<bool>(
+                        valueListenable: _controlsShown,
+                        builder: (context, up, _) => WaitCard(shown: waitDesign == WaitDesign.c || up),
+                      ),
+                    ),
+                  RadialLayer(controller: _radial),
                 ] else
                   _miniOverlay(),
-                // Sitting out: nothing is loaded; the card covers the
-                // empty player (which stays mounted for joining back).
-                if (_coord.selfAway.value) _sitOut(),
               ],
             ),
           );
@@ -701,7 +730,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
         child: CustomMultiChildLayout(
           delegate: _ActionAreaLayout(gap: _edge),
           children: [
-            LayoutId(id: _ActionSlot.status, child: ControlsHoldRegion(hold: _hold, child: const PlayerStatus())),
+            LayoutId(
+                id: _ActionSlot.status,
+                child: ControlsHoldRegion(hold: _hold, child: PlayerStatus(onSize: _statusSized))),
             LayoutId(id: _ActionSlot.side, child: _actionSide()),
           ],
         ),
@@ -722,15 +753,31 @@ class _SessionPlayerState extends State<SessionPlayer> {
         final pill = coord.nextPromptVisible.value;
         final SkipOffer? skip = coord.skipOffer.value;
         final showNext = next != null && pill;
-        if (upNext != null && finished) {
+        final r = coord.serverState.value;
+        if (upNext != null && (finished || r?.advance != null)) {
           return ControlsHoldRegion(hold: _hold, child: UpNextCard(queue: coord.queue, countdown: upNext));
         }
-        if (!showNext && skip == null) return const SizedBox.shrink();
+        // Someone came back from behind: a rewind to where they were, for
+        // everyone, about 30 s (`state.rewind`).
+        final rewinds = [
+          for (final o in r?.rewind ?? const <RewindOffer>[])
+            if (r!.members.where((m) => m.id == o.id).firstOrNull case final m?) (o, m.name),
+        ];
+        if (!showNext && skip == null && rewinds.isEmpty) return const SizedBox.shrink();
         return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           spacing: 8,
           children: [
+            for (final (o, name) in rewinds)
+              FloatingPill(
+                key: ValueKey('rewind-${o.id}'),
+                label: 'Rewind for $name (${formatClock(Duration(milliseconds: (o.position * 1000).round()))})',
+                tooltip: 'Everyone back to where $name was',
+                icon: Icons.replay_rounded,
+                tapKey: ValueKey('rewind-pill-${o.id}'),
+                onPressed: () => coord.seekTo(o.position),
+              ),
             if (skip != null)
               PillGate(
                 key: const ValueKey('skip-gate'),
@@ -800,6 +847,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                     builder: (context) => AvatarStack(
                       key: const ValueKey('fullscreen-party'),
                       members: partyAvatars(_coord),
+                      size: stripAvatarSize,
                       onTap: _openMembers,
                       onCard: _holdForCard,
                     ),
@@ -857,38 +905,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
         ),
       );
 
-  /// [SitOutCard] with the mini's (or the full player's) expand /
-  /// collapse and close.
-  Widget _sitOut() => Positioned.fill(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            SitOutCard(key: const ValueKey('sit-out-card'), compact: !_isFull),
-            Positioned(
-              top: 4,
-              right: 4,
-              child: ExcludeFocus(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      onPressed: _isFull ? widget.onCollapse : widget.onExpand,
-                      tooltip: _isFull ? 'Small player' : 'Expand',
-                      icon: Icon(_isFull ? Icons.close_fullscreen : Icons.open_in_full, color: Colors.white, size: 18),
-                    ),
-                    IconButton(
-                      onPressed: widget.onClose,
-                      tooltip: 'Close the player',
-                      icon: const Icon(Icons.close, color: Colors.white, size: 18),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-
   /// Mini: title, expand and close on hover; the status, play (the full
   /// player's play button: ready in a server) and the time, and a bar that
   /// seeks. A thin progress line stays while not hovered.
@@ -936,7 +952,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                               onPressed: widget.onExpand),
                           MinimalButton(
                               icon: Icons.close_rounded,
-                              tooltip: 'Sit out (stay in the server)',
+                              tooltip: 'Out (stay in the server)',
                               scale: scale,
                               onPressed: widget.onClose),
                         ],

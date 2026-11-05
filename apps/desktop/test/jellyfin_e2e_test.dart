@@ -285,7 +285,7 @@ void main() {
             isNotEmpty);
 
         for (final x in all) {
-          x.toggleReady();
+          x.play();
         }
         await _poll(() => all.every((x) => x.playback.player.state.playing), 'all playing');
         await Future.delayed(const Duration(seconds: 4));
@@ -296,19 +296,19 @@ void main() {
           expect((p - pos.first).abs(), lessThan(1.0), reason: 'in sync: $pos');
         }
 
-        // Carol sits out for the rest of the episode: she is not tracked as
+        // Carol is out for the rest of the episode: she is not tracked as
         // having watched it (P7).
-        c.sitOut();
-        await _poll(() => c.selfAway.peek(), 'carol away');
+        c.goOut();
+        await _poll(() => c.selfOut.peek(), 'carol out');
 
-        // Pause (A unreadies): an immediate Progress with IsPaused.
-        a.toggleReady();
+        // Pause: an immediate Progress with IsPaused.
+        a.pause();
         await _poll(() => !a.playback.player.state.playing, 'held');
         await _poll(
             () => jelly.sessions(token: 'ATOKEN').any((s) =>
                 _kind(s) == 'Progress' && s.body?['IsPaused'] == true),
             'paused progress');
-        a.toggleReady();
+        a.play();
         await _poll(() => [a, b].every((x) => x.playback.player.state.playing), 'playing again');
 
         // Account holders see the "Next episode" prompt (this item is
@@ -330,13 +330,11 @@ void main() {
         final auto = b.queue.continues.peek()!;
         expect(auto.by, a.connection.memberId);
 
-        // Played to the end: finished -> Stopped, the server's countdown
-        // on every screen, then one swap.
-        await _poll(() => a.serverState.peek()?.transport == 'finished', 'finished',
-            timeout: const Duration(seconds: 40));
+        // Its last 10 s: the server's countdown on every screen; at the
+        // end, one swap at once.
         final finishedId = a.serverState.peek()!.mediaId;
         await _poll(() => [a, b].every((x) => (x.queue.countdown.peek()?.secondsLeft ?? 0) > 0),
-            'everyone sees the countdown');
+            'everyone sees the countdown', timeout: const Duration(seconds: 40));
         expect(a.serverState.peek()!.advance!.id, auto.id);
         expect(a.queue.countdown.peek()!.item.id, auto.id);
         await _poll(() => (a.serverState.peek()?.mediaId ?? 0) > finishedId, 'advanced',
@@ -345,7 +343,7 @@ void main() {
         expect(a.serverState.peek()!.mediaId, finishedId + 1, reason: 'no double swap');
         expect(refOfStateMedia(a.serverState.peek()!.media)!.itemId, _ep2);
         expect(a.serverState.peek()!.queue, isEmpty, reason: 'the swap took the continuation');
-        c.joinBack();
+        c.join();
         await _poll(() => all.every((x) => x.playback.durationSecs > 19 && x.jellyfinPlan.peek() != null),
             'all opened the next episode');
         expect(b.jellyfinPlan.peek(), isA<RelayPlay>());
@@ -532,7 +530,7 @@ void main() {
         expect(b.jellyfinBlocked.peek(), isNull);
         // Everyone present counts for the gate, Dave too.
         for (final x in [a, b, d]) {
-          x.toggleReady();
+          x.play();
         }
         await _poll(() => a.playback.player.state.playing && b.playback.player.state.playing, 'playing');
         await Future.delayed(const Duration(seconds: 3));
@@ -542,7 +540,7 @@ void main() {
         expect(jelly.calls.where((c) => c.path.startsWith('/Videos/')).every((c) =>
             _FakeJellyfin.authFields(c.auth)['Token'] == 'ATOKEN'), isTrue);
         for (final x in [a, b, d]) {
-          x.toggleReady();
+          x.play();
         }
 
         // Dave has no account but a link with a key: he passes it on, the

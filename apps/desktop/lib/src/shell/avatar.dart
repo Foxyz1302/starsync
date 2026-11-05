@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -6,25 +8,41 @@ import 'package:sync_relay_core/core.dart';
 
 import '../session/identity.dart';
 import '../session/delivery.dart';
-import '../session/party.dart';
 import '../session/session_coordinator.dart';
 import '../app/app_graph.dart';
 import 'motion.dart';
 import 'person_card.dart' show PersonHover, PersonRef;
 
-/// What an avatar shows: who, their picture or initial on [color], and
-/// the status the ring and badges carry.
+/// Something happening to someone's player, drawn over the picture's edge
+/// only while it lasts.
+enum AvatarActivity {
+  none,
+
+  /// Its video is loading (joining, catching up, or the group waits for
+  /// its buffer): a white run growing round the edge.
+  loading,
+
+  /// Disconnected, in its grace: an amber stretch going round.
+  reconnecting,
+}
+
+/// What an avatar shows: who, their picture or initial on [color], their
+/// standing (a badge) and what happens to their player (the edge).
 class AvatarInfo {
   final String id;
   final String name;
   final Color color;
   final ImageProvider? image;
-  final bool ready, buffering, relaying, host, self;
-  /// Where they stand: joining (a little faded), away (dimmed with a moon),
-  /// gone (dimmed, grey ring: reconnecting).
+  final bool relaying, host, self;
+  /// Where they stand: BRB (a cup), AFK ("Zz", darkened), Out (an eye
+  /// with a line, darkened).
   final Presence presence;
+  /// Loading or reconnecting: drawn on the edge while it lasts.
+  final AvatarActivity activity;
   /// Since when they are gone; null otherwise.
   final DateTime? goneSince;
+  /// Since when they stand where they do (BRB, AFK, Out); null for in.
+  final DateTime? since;
   /// Why their player cannot open the media (`members[].error`): an error
   /// mark; empty when it can.
   final String error;
@@ -38,11 +56,11 @@ class AvatarInfo {
     required this.name,
     required this.color,
     this.image,
-    this.ready = false,
-    this.buffering = false,
     this.relaying = false,
     this.presence = Presence.watching,
+    this.activity = AvatarActivity.none,
     this.goneSince,
+    this.since,
     this.host = false,
     this.self = false,
     this.error = '',
@@ -56,11 +74,11 @@ class AvatarInfo {
         name: name,
         color: color,
         image: image,
-        ready: ready,
-        buffering: buffering,
         relaying: relaying,
         presence: presence,
+        activity: activity,
         goneSince: goneSince,
+        since: since,
         host: host,
         self: self,
         error: error,
@@ -68,11 +86,14 @@ class AvatarInfo {
         app: app,
       );
 
-  /// Sitting out.
-  bool get away => presence == Presence.away;
+  /// AFK or Out.
+  bool get isOut => presence.isOut;
+
+  /// BRB.
+  bool get brb => presence == Presence.brb;
 
   /// Disconnected, in their grace period.
-  bool get gone => presence == Presence.gone;
+  bool get gone => activity == AvatarActivity.reconnecting;
 }
 
 /// Stable colour for someone else (colours are not on the wire).
@@ -119,8 +140,7 @@ ImageProvider? memberAvatarImage(MemberView m, SessionCoordinator coord) {
 }
 
 /// Your own avatar from the profile (also offline).
-AvatarInfo selfAvatarInfo(
-    {bool ready = false, bool host = false, Presence presence = Presence.watching, String error = ''}) {
+AvatarInfo selfAvatarInfo({bool host = false, Presence presence = Presence.watching, String error = ''}) {
   final p = Profile.instance;
   final png = p.picture.value;
   final name = p.name.value;
@@ -128,7 +148,6 @@ AvatarInfo selfAvatarInfo(
     name: name.isEmpty ? '?' : name,
     color: p.color.value,
     image: png == null ? null : _memo('self', png),
-    ready: ready,
     host: host,
     self: true,
     presence: presence,
@@ -136,22 +155,30 @@ AvatarInfo selfAvatarInfo(
   );
 }
 
+/// [m]'s player activity in [r]: reconnecting while gone; loading while it
+/// joins or catches up, or while the group waits for its video.
+AvatarActivity activityOf(MemberView m, StateBroadcast? r) {
+  if (m.gone) return AvatarActivity.reconnecting;
+  if (r == null || r.media == null || m.isOut) return AvatarActivity.none;
+  if (m.loading || (r.hold?.video.contains(m.id) ?? false)) return AvatarActivity.loading;
+  return AvatarActivity.none;
+}
+
 /// [m] as the party strip, toasts and the chat show it.
 AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator coord) {
   final self = m.id.isNotEmpty && m.id == coord.connection.memberId;
   final relay = r == null ? null : stateMediaRelay(r);
-  final playing = r?.media != null;
   final delivery = r == null ? null : deliveryOf(r, selfId: coord.connection.memberId, names: coord.memberNames);
   return AvatarInfo(
     id: m.id,
     name: m.name,
     color: self ? Profile.instance.color.value : colorForName(m.name),
     image: memberAvatarImage(m, coord),
-    ready: m.ready,
-    buffering: countsForReady(m) && m.ready && playing && m.buffered < r!.bufferNeed,
     relaying: relay != null && relay.source.isNotEmpty && relay.source == m.id,
     presence: m.presence,
+    activity: activityOf(m, r),
     goneSince: m.goneSince,
+    since: m.since,
     // The state marks the host (`members[].host`); your own app also
     // knows before the first state.
     host: m.host || (self && coord.hostFile != null),
@@ -162,92 +189,96 @@ AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator 
   );
 }
 
-/// Everyone in the server, from the latest state.
-List<AvatarInfo> partyAvatars(SessionCoordinator c) {
-  final r = c.serverState.value;
-  return [for (final m in r?.members ?? const <MemberView>[]) memberAvatarInfo(m, r, c)];
+/// The shape people's pictures have: a rounded square (corner 22 % of
+/// the size) or a circle (Settings → Party → More, "Avatar shape").
+class AvatarShape {
+  final bool circle;
+  const AvatarShape({this.circle = false});
+
+  /// Corner as a share of the size.
+  double get corner => circle ? 0.5 : 0.22;
+
+  /// The shape at [size] px.
+  RRect at(double size) => RRect.fromRectAndRadius(Offset.zero & Size.square(size), Radius.circular(size * corner));
+
+  BorderRadius radius(double size) => BorderRadius.circular(size * corner);
+
+  /// The setting's shape (tracked when read in a builder); a rounded
+  /// square outside the app (tests without a graph).
+  static AvatarShape of(BuildContext context) {
+    final graph = AppScope.maybeOf(context);
+    return AvatarShape(circle: graph?.coordinator.settings.avatarCircle.value ?? false);
+  }
 }
 
-/// Rebuilds [builder] when the party state, your profile or a member's
-/// picture changes.
-class PartyWatch extends StatelessWidget {
-  final WidgetBuilder builder;
-  const PartyWatch({super.key, required this.builder});
-
-  @override
-  Widget build(BuildContext context) => ListenableBuilder(
-        listenable: AppScope.of(context).coordinator.avatars,
-        builder: (context, _) => SignalBuilder(builder: (context) => builder(context)),
-      );
-}
-
-/// Circle avatar with a status ring outside it and a gap in the background
-/// colour, so overlapping neighbours never hide the status. Crown = host,
-/// tower = passing the video on, spinner = buffering, a little faded =
-/// joining, dimmed with a grey ring = gone (reconnecting), dimmed with a
-/// moon = sitting out, red "!" = cannot play the media.
+/// A person: the picture fills the whole shape (no ring). BRB, AFK and
+/// Out are a badge in a small dark tile on the bottom-right; AFK and Out
+/// are darkened. Loading and reconnecting run along the shape's edge,
+/// over the picture, only while they last. Crown = host, tower = passing
+/// the video on, red "!" = cannot play the media. [badges]: the crown and
+/// tower (off where the context already says it); [marks]: the standing
+/// and activity (off for tiny pictures in a line); [edge]: an outline in
+/// the background colour (the shape overlaps a neighbour).
 class StatusAvatar extends StatelessWidget {
   final AvatarInfo info;
   final double size;
-
-  /// Host crown and relay tower; off where the context already says it.
   final bool badges;
+  final bool marks;
+  final bool edge;
 
-  /// Ring colour when not ready (the profile shows none at all).
-  final bool ring;
-  const StatusAvatar({super.key, required this.info, required this.size, this.badges = true, this.ring = true});
+  /// A little darkened (someone else stands out).
+  final bool dim;
+  const StatusAvatar({
+    super.key,
+    required this.info,
+    required this.size,
+    this.badges = true,
+    this.marks = true,
+    this.edge = false,
+    this.dim = false,
+  });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => SignalBuilder(builder: (context) => _build(context, AvatarShape.of(context)));
+
+  Widget _build(BuildContext context, AvatarShape shape) {
     final bg = Theme.of(context).colorScheme.surfaceContainerLowest;
-    final ringColor = !ring
-        ? bg
-        : info.gone
-            ? Colors.grey.shade700
-            : info.buffering
-                ? Colors.amber
-                : info.ready
-                    ? Colors.greenAccent.shade400
-                    : Colors.grey;
-    final badge = size * 0.42;
-    // Ring and gap scale with the avatar (2 px at strip size).
-    final stroke = (size * 0.055).clamp(2.0, 4.0);
     final initial = info.name.isEmpty ? '?' : info.name.characters.first.toUpperCase();
+    final mark = (size * 0.42).clamp(10.0, 24.0);
+    final darken = marks && info.isOut ? 0.62 : (dim ? 0.38 : 0.0);
+    // Dimmed by darkening, not transparency: an overlapping neighbour must
+    // not show through.
+    final picture = ClipRRect(
+      borderRadius: shape.radius(size),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: info.color,
+              image: info.image == null ? null : DecorationImage(image: info.image!, fit: BoxFit.cover),
+            ),
+            child: info.image != null
+                ? null
+                : Center(child: Text(initial, style: TextStyle(fontSize: size * 0.42, color: Colors.white))),
+          ),
+          AnimatedContainer(duration: easeTime, curve: ease, color: Colors.black.withValues(alpha: darken)),
+        ],
+      ),
+    );
+    final activity = marks ? info.activity : AvatarActivity.none;
+    final tile = badgeSize(size);
     return SizedBox(
       width: size,
       height: size,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          // Fills the box: a non-positioned Stack child only gets loose
-          // constraints, and CircleAvatar then falls back to 40 px.
-          Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(shape: BoxShape.circle, color: ringColor),
-              padding: EdgeInsets.all(stroke),
-              child: Container(
-                decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
-                padding: EdgeInsets.all(stroke),
-                child: Opacity(
-                  opacity: info.gone || info.away
-                      ? 0.4
-                      : info.presence == Presence.joining
-                          ? 0.7
-                          : 1,
-                  child: CircleAvatar(
-                    radius: size / 2,
-                    backgroundColor: info.color,
-                    backgroundImage: info.image,
-                    child: info.image != null
-                        ? null
-                        : Text(initial, style: TextStyle(fontSize: size * 0.38, color: Colors.white)),
-                  ),
-                ),
-              ),
+          Positioned.fill(child: picture),
+          if (edge || activity != AvatarActivity.none)
+            Positioned.fill(
+              child: AvatarEdge(shape: shape.at(size), edge: edge ? bg : null, activity: activity),
             ),
-          ),
-          if (info.buffering)
-            Positioned.fill(child: CircularProgressIndicator(strokeWidth: stroke, color: ringColor)),
           if (badges && info.host)
             Positioned(
               left: -4,
@@ -256,21 +287,10 @@ class StatusAvatar extends StatelessWidget {
                 angle: -0.4,
                 child: Icon(
                   Icons.workspace_premium,
-                  size: badge,
+                  size: mark,
                   color: Colors.amber,
                   shadows: const [Shadow(blurRadius: 3, color: Colors.black)],
                 ),
-              ),
-            ),
-          if (info.away)
-            Positioned(
-              key: const ValueKey('away-mark'),
-              left: -3,
-              bottom: -3,
-              child: Container(
-                padding: const EdgeInsets.all(2),
-                decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
-                child: Icon(Icons.bedtime, size: (badge * 0.8).clamp(10.0, 24.0), color: Colors.blueGrey.shade200),
               ),
             ),
           if (info.error.isNotEmpty)
@@ -281,18 +301,26 @@ class StatusAvatar extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.all(1),
                 decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
-                child: Icon(Icons.error, size: (badge * 0.8).clamp(10.0, 24.0), color: Colors.redAccent.shade200),
+                child: Icon(Icons.error, size: mark * 0.8, color: Colors.redAccent.shade200),
               ),
             ),
           if (badges && info.relaying)
             Positioned(
-              right: -3,
+              left: -3,
               bottom: -3,
               child: Container(
                 padding: const EdgeInsets.all(2),
                 decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
-                child: Icon(Icons.cell_tower, size: badge * 0.8, color: Colors.lightBlueAccent),
+                child: Icon(Icons.cell_tower, size: mark * 0.8, color: Colors.lightBlueAccent),
               ),
+            ),
+          // The standing's tile sits a third over the bottom-right corner.
+          if (marks && info.presence != Presence.watching)
+            Positioned(
+              key: ValueKey('state-${info.presence.wire}'),
+              right: -tile / 3,
+              bottom: -tile / 3,
+              child: StateBadge(presence: info.presence, size: tile),
             ),
         ],
       ),
@@ -300,9 +328,215 @@ class StatusAvatar extends StatelessWidget {
   }
 }
 
-/// Overlapping avatars, host first then ready (the stack itself reads as
-/// progress); they spread apart on hover. "+N" past [shown]. Each avatar
-/// is its person's ([PersonHover]: card on hover, pinned by a click).
+/// The standing badge's tile for an avatar of [avatar] px (15 at the
+/// pill's 36).
+double badgeSize(double avatar) => (avatar * 0.42).clamp(12.0, 19.0);
+
+/// A standing as a small dark tile with a thin dark outline and a muted
+/// glyph in its colour, calm over the glass and the picture: a cup for
+/// BRB, "Zz" for AFK, an eye with a line through it for Out.
+class StateBadge extends StatelessWidget {
+  final Presence presence;
+  final double size;
+  const StateBadge({super.key, required this.presence, required this.size});
+
+  static Color glyphColor(Presence p) => switch (p) {
+        Presence.brb => const Color(0xFFE8C77A),
+        Presence.afk => const Color(0xFF9FB3C8),
+        _ => const Color(0xFFA0A0A8),
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final color = glyphColor(presence);
+    final g = size * 0.68;
+    final Widget glyph = switch (presence) {
+      Presence.brb => Icon(Icons.coffee_rounded, size: g, color: color),
+      Presence.afk => _Zz(size: g, color: color),
+      _ => Icon(Icons.visibility_off_rounded, size: g, color: color),
+    };
+    return Tooltip(
+      message: switch (presence) {
+        Presence.brb => 'BRB',
+        Presence.afk => 'AFK',
+        Presence.out => 'Out',
+        Presence.watching => '',
+      },
+      child: Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: const Color(0xFF1C1C21),
+          borderRadius: BorderRadius.circular(size * 0.3),
+          border: Border.all(color: const Color(0xCC000000), width: 1),
+        ),
+        child: glyph,
+      ),
+    );
+  }
+}
+
+/// "Zz": a big z low left and a small one high right.
+class _Zz extends StatelessWidget {
+  final double size;
+  final Color color;
+  const _Zz({required this.size, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    TextStyle st(double f) => TextStyle(fontSize: f, height: 1, fontWeight: FontWeight.w800, color: color);
+    return SizedBox.square(
+      dimension: size,
+      child: Stack(
+        children: [
+          Positioned(left: size * 0.02, bottom: -size * 0.04, child: Text('z', style: st(size * 0.82))),
+          Positioned(right: 0, top: -size * 0.06, child: Text('z', style: st(size * 0.55))),
+        ],
+      ),
+    );
+  }
+}
+
+/// Over the picture's edge: the background-colour outline that parts
+/// overlapping shapes, then loading (a white run growing round the shape
+/// from the top) or reconnecting (an amber stretch going round), each on
+/// a thin dark line so it shows on light pictures. Follows the shape: an
+/// arc on a circle, a stretch of outline on a rounded square.
+class AvatarEdge extends StatefulWidget {
+  final RRect shape;
+  final Color? edge;
+  final AvatarActivity activity;
+  const AvatarEdge({super.key, required this.shape, this.edge, this.activity = AvatarActivity.none});
+
+  /// The edge moves; still under `flutter test` (a loop never settles).
+  static final bool motion = !Platform.environment.containsKey('FLUTTER_TEST');
+
+  @override
+  State<AvatarEdge> createState() => _AvatarEdgeState();
+}
+
+class _AvatarEdgeState extends State<AvatarEdge> with SingleTickerProviderStateMixin {
+  late final AnimationController _spin = AnimationController(vsync: this);
+
+  @override
+  void initState() {
+    super.initState();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(AvatarEdge old) {
+    super.didUpdateWidget(old);
+    if (old.activity != widget.activity) _sync();
+  }
+
+  void _sync() {
+    if (widget.activity == AvatarActivity.none) {
+      _spin.stop();
+      return;
+    }
+    _spin.duration = widget.activity == AvatarActivity.loading
+        ? const Duration(seconds: 4)
+        : const Duration(milliseconds: 1400);
+    if (AvatarEdge.motion) {
+      _spin.repeat();
+    } else {
+      _spin.value = 0.6;
+    }
+  }
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+        painter: _EdgePainter(shape: widget.shape, edge: widget.edge, activity: widget.activity, clock: _spin),
+      );
+}
+
+class _EdgePainter extends CustomPainter {
+  final RRect shape;
+  final Color? edge;
+  final AvatarActivity activity;
+  final Animation<double> clock;
+  _EdgePainter({required this.shape, required this.edge, required this.activity, required this.clock})
+      : super(repaint: clock);
+
+  static const _stroke = 2.5;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (edge case final e?) {
+      canvas.drawRRect(
+          shape.deflate(1),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2
+            ..color = e);
+    }
+    if (activity == AvatarActivity.none) return;
+    // The outline, starting at the top middle and going clockwise.
+    final r = shape.deflate(_stroke / 2 + (edge == null ? 0 : 2));
+    final metric = _fromTop(r).computeMetrics().first;
+    final len = metric.length;
+    final t = clock.value;
+    final Path run;
+    final Color color;
+    if (activity == AvatarActivity.loading) {
+      run = metric.extractPath(0, len * Curves.easeInOut.transform(t));
+      color = Colors.white;
+    } else {
+      final a = len * t, b = a + len * 0.28;
+      run = metric.extractPath(a, math.min(b, len));
+      if (b > len) run.addPath(metric.extractPath(0, b - len), Offset.zero);
+      color = Colors.amber;
+    }
+    canvas.drawPath(
+        run,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = _stroke + 1.5
+          ..strokeCap = StrokeCap.round
+          ..color = Colors.black.withValues(alpha: 0.45));
+    canvas.drawPath(
+        run,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = _stroke
+          ..strokeCap = StrokeCap.round
+          ..color = color);
+  }
+
+  /// [r]'s outline as one path from the top middle, clockwise.
+  static Path _fromTop(RRect r) {
+    final rad = r.tlRadiusX;
+    final p = Path()..moveTo(r.center.dx, r.top);
+    p.lineTo(r.right - rad, r.top);
+    if (rad > 0) p.arcToPoint(Offset(r.right, r.top + rad), radius: Radius.circular(rad));
+    p.lineTo(r.right, r.bottom - rad);
+    if (rad > 0) p.arcToPoint(Offset(r.right - rad, r.bottom), radius: Radius.circular(rad));
+    p.lineTo(r.left + rad, r.bottom);
+    if (rad > 0) p.arcToPoint(Offset(r.left, r.bottom - rad), radius: Radius.circular(rad));
+    p.lineTo(r.left, r.top + rad);
+    if (rad > 0) p.arcToPoint(Offset(r.left + rad, r.top), radius: Radius.circular(rad));
+    p.close();
+    return p;
+  }
+
+  @override
+  bool shouldRepaint(_EdgePainter old) =>
+      old.shape != shape || old.edge != edge || old.activity != activity || old.clock != clock;
+}
+
+/// A row of people, host first, then watching, BRB, out, gone. Rounded
+/// squares sit side by side; circles overlap (each with an outline in the
+/// background colour) and spread apart on hover. "+N" past [shown]. Each
+/// avatar is its person's ([PersonHover]: card on hover, pinned by a
+/// click).
 class AvatarStack extends StatefulWidget {
   final List<AvatarInfo> members;
   /// A click on the stack outside an avatar ("+N"), and the people
@@ -333,15 +567,19 @@ class _AvatarStackState extends State<AvatarStack> {
   bool _hover = false;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => SignalBuilder(builder: (context) => _build(context, AvatarShape.of(context)));
+
+  Widget _build(BuildContext context, AvatarShape shape) {
     final size = widget.size;
-    int rank(AvatarInfo m) => m.host ? 0 : (m.gone ? 4 : m.away ? 3 : m.ready ? 1 : 2);
+    int rank(AvatarInfo m) => m.host ? 0 : (m.gone ? 4 : m.isOut ? 3 : m.brb ? 2 : 1);
     final sorted = [...widget.members]..sort((a, b) => rank(a) - rank(b));
     final visible = sorted.take(widget.shown).toList();
     final extra = sorted.length - visible.length;
-    final step = _hover ? size + 6 : size * 0.62;
+    final overlap = shape.circle;
+    final step = !overlap || _hover ? size + 8 : size * 0.62;
     final count = visible.length + (extra > 0 ? 1 : 0);
     final width = count == 0 ? 0.0 : step * (count - 1) + size;
+    Widget avatar(AvatarInfo i) => StatusAvatar(info: i, size: size, edge: overlap && count > 1);
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
@@ -369,7 +607,7 @@ class _AvatarStackState extends State<AvatarStack> {
                           person: PersonRef.of(visible[i]),
                           onEveryone: widget.onTap,
                           onOpen: widget.onCard,
-                          child: StatusAvatar(info: visible[i], size: size),
+                          child: avatar(visible[i]),
                         )
                       : Tooltip(
                           message: [
@@ -379,7 +617,7 @@ class _AvatarStackState extends State<AvatarStack> {
                             if (visible[i].delivery.isNotEmpty) visible[i].delivery,
                             if (visible[i].app.isNotEmpty) 'Starsync ${visible[i].app}',
                           ].join('\n'),
-                          child: StatusAvatar(info: visible[i], size: size),
+                          child: avatar(visible[i]),
                         ),
                 ),
               if (extra > 0)
@@ -388,9 +626,15 @@ class _AvatarStackState extends State<AvatarStack> {
                   curve: ease,
                   left: visible.length * step,
                   top: 0,
-                  child: CircleAvatar(
-                    radius: size / 2,
-                    child: Text('+$extra', style: const TextStyle(fontSize: 12)),
+                  child: Container(
+                    width: size,
+                    height: size,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                      borderRadius: shape.radius(size),
+                    ),
+                    child: Text('+$extra', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                   ),
                 ),
             ],
@@ -399,6 +643,25 @@ class _AvatarStackState extends State<AvatarStack> {
       ),
     );
   }
+}
+
+/// Everyone in the server, from the latest state.
+List<AvatarInfo> partyAvatars(SessionCoordinator c) {
+  final r = c.serverState.value;
+  return [for (final m in r?.members ?? const <MemberView>[]) memberAvatarInfo(m, r, c)];
+}
+
+/// Rebuilds [builder] when the party state, your profile or a member's
+/// picture changes.
+class PartyWatch extends StatelessWidget {
+  final WidgetBuilder builder;
+  const PartyWatch({super.key, required this.builder});
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: AppScope.of(context).coordinator.avatars,
+        builder: (context, _) => SignalBuilder(builder: (context) => builder(context)),
+      );
 }
 
 /// Small coloured label ("host", "passing the video on").
@@ -441,12 +704,12 @@ class LineAvatar extends StatelessWidget {
   final AvatarInfo info;
   final double size;
   final bool badges;
-  final bool ring;
-  const LineAvatar({super.key, required this.info, required this.size, this.badges = false, this.ring = true});
+  final bool marks;
+  const LineAvatar({super.key, required this.info, required this.size, this.badges = false, this.marks = true});
 
   @override
   Widget build(BuildContext context) {
-    Widget avatar(AvatarInfo i) => StatusAvatar(info: i, size: size, badges: badges, ring: ring);
+    Widget avatar(AvatarInfo i) => StatusAvatar(info: i, size: size, badges: badges, marks: marks);
     final graph = AppScope.maybeOf(context);
     if (info.image != null || graph == null) return avatar(info);
     return PartyWatch(builder: (context) {

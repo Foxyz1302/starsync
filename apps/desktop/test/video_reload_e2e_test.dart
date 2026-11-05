@@ -40,7 +40,7 @@ void main() {
         await c.connect(ConnectParams(host: '127.0.0.1', port: server.boundPort, secret: 'reload', name: 'solo'));
         await c.playback.setVolume(0);
         await _poll(() => c.serverState.peek() != null, 'server state');
-        c.toggleReady();
+        c.play();
         await _poll(() => c.playback.playing && c.playback.positionSecs > 2, 'solo playback past 2 s');
         final opens = c.opens;
 
@@ -53,7 +53,7 @@ void main() {
         expect(c.playback.generation.peek(), gen + 1);
         expect(c.opens, opens + 1, reason: 'the same media opened again');
         expect(c.playback.volume.peek(), 0, reason: 'the volume carried over');
-        expect(c.selfMember.peek()?.ready, isTrue);
+        expect(c.serverState.peek()?.wantsPlay, isTrue);
 
         await _poll(() {
           final r = c.serverState.peek();
@@ -61,7 +61,6 @@ void main() {
           final want = serverPositionAt(r, DateTime.now().toUtc());
           return (c.playback.positionSecs - want).abs() < 1.5 && c.playback.positionSecs > 2;
         }, 'reloaded player playing at the synced position');
-        expect(c.selfMember.peek()?.ready, isTrue);
         expect(c.serverState.peek()?.transport, 'playing');
 
         await c.leave();

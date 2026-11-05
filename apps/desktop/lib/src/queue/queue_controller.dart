@@ -27,17 +27,30 @@ import '../sync/avatar_cache.dart';
 // plays next ready (the media pipeline prepares it).
 
 /// The end-of-media card for the first item (Up next's, else the
-/// continuation). [secondsLeft]: the server's countdown (`state.advance`);
-/// null when none runs (cancelled, or nothing counts down), then the card
-/// offers Play now only. [waitingFor]: the countdown ran out and the one
-/// who puts the item up is not here (its name).
+/// continuation). [secondsLeft]: the server's countdown (`state.advance`,
+/// over the media's last 10 s, ending at its end); null when none runs
+/// (cancelled, paused, or nothing counts down), then the card offers Play
+/// now only. [waitingFor]: the countdown ran out and the one who puts the
+/// item up is not here (its name). [short]: the media is under a minute:
+/// the card says only "Up next", no seconds. [ended]: the media finished.
 class UpNextCountdown {
   final int mediaId;
   final QueueItem item;
   final int? secondsLeft;
   final String? waitingFor;
-  const UpNextCountdown({required this.mediaId, required this.item, this.secondsLeft, this.waitingFor});
+  final bool short;
+  final bool ended;
+  const UpNextCountdown(
+      {required this.mediaId,
+      required this.item,
+      this.secondsLeft,
+      this.waitingFor,
+      this.short = false,
+      this.ended = true});
 }
+
+/// Media under this long: no countdown shown, only "Up next".
+const shortMediaSecs = 60;
 
 /// The first item's readiness on this app.
 enum WarmState { idle, warming, ready, failed }
@@ -122,7 +135,7 @@ class QueueController {
     // started (or sitting out) lets the preload go.
     effect(() {
       coord.settledMediaId.value;
-      coord.selfAway.value;
+      coord.selfOut.value;
       final r = coord.serverState.value;
       untracked(() => _warm(r));
     });
@@ -392,19 +405,21 @@ class QueueController {
     final play = r.queuePlay;
     if (play != null) {
       final item = r.queue.where((q) => q.id == play).firstOrNull;
-      if (item != null && queuePerformer(item, r.members).id == _me) _perform(item);
+      // Someone passed over (it did not put it up in time) is not asked
+      // again; the server asks the next one (`queuePass`).
+      if (item != null && queuePerformer(item, r.members, pass: r.queuePass).id == _me) _perform(item);
     }
     _syncCountdown(r);
     _continue(r);
     _warm(r);
   }
 
-  /// Forgets what no longer matters: performing marks after a minute (a
-  /// swap that never landed may be tried again), local picks no longer
-  /// queued.
+  /// Forgets what no longer matters: performing marks after 25 s (a swap
+  /// that never landed is tried again when the server asks again, every
+  /// [RelayConstants.queuePlayTimeoutSecs]), local picks no longer queued.
   void _prune(StateBroadcast r) {
     final now = DateTime.now();
-    _performing.removeWhere((_, at) => now.difference(at) > const Duration(minutes: 1));
+    _performing.removeWhere((_, at) => now.difference(at) > const Duration(seconds: 25));
     final keys = {for (final q in r.queue) q.key};
     // Kept while a restarted server waits for what played: Up next comes
     // back with it.
@@ -413,11 +428,14 @@ class QueueController {
     }
   }
 
-  /// The end card from the server's state: the media ended with something
-  /// next; the seconds of `state.advance` move on with a 1 s timer.
+  /// The end card from the server's state: the countdown runs over the
+  /// media's last 10 s (`state.advance`), or the media ended with
+  /// something next; the seconds move on with a 1 s timer.
   void _syncCountdown(StateBroadcast r) {
     final head = r.queue.firstOrNull;
-    if (r.transport != 'finished' || head == null || r.media == null) {
+    final ended = r.transport == 'finished';
+    final counting = !ended && r.advance != null && r.advance!.id == head?.id;
+    if ((!ended && !counting) || head == null || r.media == null) {
       _timer?.cancel();
       _timer = null;
       if (countdown.peek() != null) countdown.value = null;
@@ -432,7 +450,14 @@ class QueueController {
         waiting = r.members.where((m) => m.id == head.by).firstOrNull?.name ?? head.byName;
       }
     }
-    countdown.value = UpNextCountdown(mediaId: r.mediaId, item: head, secondsLeft: left, waitingFor: waiting);
+    final duration = (r.media?['duration'] as num?)?.toDouble() ?? 0;
+    countdown.value = UpNextCountdown(
+        mediaId: r.mediaId,
+        item: head,
+        secondsLeft: left,
+        waitingFor: waiting,
+        short: duration > 0 && duration < shortMediaSecs,
+        ended: ended);
     if (a == null) {
       _timer?.cancel();
       _timer = null;
@@ -576,9 +601,9 @@ class QueueController {
       case QueueHow.file:
         final local = _local[item.key];
         if (local == null) return "it isn't on this computer any more";
-        // Only this app can pass it on, and a member sitting out has
-        // nothing open: back first.
-        if (coord.selfAway.peek()) coord.joinBack();
+        // Only this app can pass it on, and a member who is out is not
+        // watching: in first.
+        if (coord.selfOut.peek()) coord.join();
         return coord.swapPicked(local.pick, queueId: item.id);
     }
   }
@@ -611,11 +636,11 @@ class QueueController {
 
   /// What this app gets ready: the first item of the queue (Up next's,
   /// else the continuation). Every app does, each its own copy (see
-  /// [_WarmTarget]); while sitting out only the probe of a link this app
+  /// [_WarmTarget]); while out only the probe of a link this app
   /// puts up (its swap reads it). Null: nothing.
   _WarmTarget? _warmTarget(StateBroadcast? r) {
     final t = _warmTargetHere(r);
-    if (t == null || !coord.selfAway.peek()) return t;
+    if (t == null || !coord.selfOut.peek()) return t;
     return t.probe == null ? null : _WarmTarget(t.id, probe: t.probe);
   }
 
@@ -813,7 +838,7 @@ class QueueController {
     final seen = _lastState;
     if (r == null || (seen != null && seen.mediaId > r.mediaId)) r = seen;
     if (r == null) return;
-    final out = coord.selfAway.peek();
+    final out = coord.selfOut.peek();
     if (!out && r.media != null && coord.settledMediaId.peek() != r.mediaId) return;
     final want = out ? null : _preloadWant;
     final media = coord.media;

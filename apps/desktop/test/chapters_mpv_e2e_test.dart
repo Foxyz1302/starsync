@@ -106,8 +106,8 @@ void main() {
         await a.selectTrack(aid: 2);
         expect(a.playback.tracks.peek().where((t) => t.selected && t.type == JellyfinStreamType.audio).single.id, 2);
 
-        a.toggleReady();
-        b.toggleReady();
+        a.play();
+        b.play();
         await _poll(() => a.playback.player.state.playing && b.playback.player.state.playing, 'both playing');
 
         // Into the OP: the pill offers Skip OP to its end.

@@ -32,8 +32,9 @@ enum ShellTab {
 
 const partyStripHeight = 60.0;
 
-/// Every avatar in the strip, yours and the party's.
-const stripAvatarSize = 42.0;
+/// Every avatar in the strip, yours and the party's (the picture fills
+/// it, no ring).
+const stripAvatarSize = 48.0;
 
 /// Below this window width the strip shows 3 avatars and no server text,
 /// so the tabs keep their room.
@@ -105,16 +106,14 @@ class PartyStrip extends StatelessWidget {
               child: InkWell(
                 key: const ValueKey('strip-profile'),
                 canRequestFocus: false,
-                customBorder: const CircleBorder(),
+                borderRadius: AvatarShape.of(context).radius(stripAvatarSize),
                 onTap: onProfile,
                 child: StatusAvatar(
-                  info: selfAvatarInfo(
-                    ready: self?.ready ?? false,
-                    host: social && home,
-                    error: online ? coord.playerError.value : '',
-                  ),
+                  info: self == null
+                      ? selfAvatarInfo(host: social && home, error: online ? coord.playerError.value : '')
+                      : memberAvatarInfo(self, coord.serverState.value, coord),
                   size: stripAvatarSize,
-                  ring: social,
+                  marks: social,
                 ),
               ),
             ),
@@ -568,19 +567,19 @@ class _MemberTile extends StatelessWidget {
     final coord = AppScope.of(context).coordinator;
     final m = member;
     final since = m.goneSince;
-    final status = m.presence == Presence.gone
+    final status = m.gone
         ? 'reconnecting…${since == null ? '' : ' (${sinceText(since, DateTime.now().toUtc())})'}'
-        : m.presence == Presence.away
-        ? 'sitting out'
-        : m.presence == Presence.joining
-        ? 'joining…'
+        : m.presence == Presence.brb
+        ? 'BRB'
+        : m.presence == Presence.afk
+        ? 'AFK'
+        : m.presence == Presence.out
+        ? 'out'
         : m.error.isNotEmpty
         ? "can't play this: ${m.error}"
-        : info.buffering
-        ? 'buffering ${m.buffered.toStringAsFixed(1)} s'
-        : m.ready
-        ? 'ready'
-        : 'not ready';
+        : info.activity == AvatarActivity.loading
+        ? 'loading ${m.buffered.toStringAsFixed(1)} s'
+        : 'watching';
     return ListTile(
       key: ValueKey('member-${m.id}'),
       dense: true,

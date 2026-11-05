@@ -60,7 +60,7 @@ class ServerHub {
     final w = warm;
     if (w == null || w.queueId != queueId || w.fetch || w.sourceToken == null) return false;
     final src = engine.members[w.sourceToken];
-    return src == null || src.presence == Presence.gone;
+    return src == null || src.gone;
   }
 
   static String _randomId() {
@@ -86,7 +86,7 @@ class ServerHub {
     session.tokens.remove(m.token);
     final r = relay;
     if (r != null && !r.fetch && r.sourceToken == m.token) {
-      _endRelay(r, 'its source left', sourceGone: true, since: m.goneSince ?? engine.now);
+      _endRelay(r, 'its source left', sourceGone: true, since: m.goneAt ?? engine.now);
     }
   }
 
@@ -123,10 +123,10 @@ class ServerHub {
     final was = m?.relay;
     if (r == null || m == null || was == null || r.fetch || r.sourceToken == null) return;
     final src = engine.members[r.sourceToken];
-    final gone = src == null || src.presence == Presence.gone;
+    final gone = src == null || src.gone;
     if (gone == was.sourceGone) return;
     _hubLog.info('relay of "${r.name}": source ${gone ? 'gone, viewers play what is buffered' : 'back'}');
-    engine.media = m.copyWith(relay: was.copyWith(sourceGone: gone, sourceGoneSince: src?.goneSince ?? engine.now));
+    engine.media = m.copyWith(relay: was.copyWith(sourceGone: gone, sourceGoneSince: src?.goneAt ?? engine.now));
   }
 
   bool get _sourceGone => engine.media?.relay?.sourceGone ?? false;
@@ -210,7 +210,7 @@ class ServerHub {
     final w = warm, id = w?.queueId;
     if (w == null || id == null) return null;
     final src = w.sourceToken == null ? null : engine.members[w.sourceToken];
-    final gone = src?.presence == Presence.gone;
+    final gone = src?.gone ?? false;
     return (
       id: id,
       relay: MediaRelay(
@@ -219,7 +219,7 @@ class ServerHub {
           live: w.live,
           tracks: w.live ? w.tracks : const [],
           sourceGone: gone,
-          sourceGoneSince: gone ? src?.goneSince : null),
+          sourceGoneSince: gone ? src?.goneAt : null),
     );
   }
 
@@ -238,14 +238,15 @@ class ServerHub {
   }
 
   bool _othersHere(String? memberId) =>
-      engine.members.values.any((m) => m.id != memberId && m.presence != Presence.gone);
+      engine.members.values.any((m) => m.id != memberId && !m.gone);
 
   /// A Jellyfin [ref] someone here cannot play while someone can, outside
   /// the server's login.
   bool _jellyfinNeedsWarm(JellyfinRef ref) =>
       !_onLogin(ref) &&
       engine.members.values
-          .any((m) => engine.policy.countsFor(m.presence, Purpose.preload) && m.jf[ref.serverId] != true) &&
+          .any((m) => const PresencePolicy().countsFor(m.presence, Purpose.preload, gone: m.gone) &&
+              m.jf[ref.serverId] != true) &&
       engine.members.values.any((m) => m.jf[ref.serverId] == true);
 
   bool _keepWarm(ActiveRelay w, QueueItem first) {
@@ -688,15 +689,15 @@ void mountSyncRoute(
         final type = decoded['t'];
         try {
           switch (type) {
-            case 'ready':
+            case 'play' || 'pause':
               if (token == null) return;
-              final intent = ReadyIntent.fromJson(decoded);
-              hub.engine.applyReady(token, intent.ready, source: intent.source);
+              final intent = TransportIntent.fromJson(decoded);
+              hub.engine.applyTransport(token, intent.play);
               hub.changed();
-            case 'force':
+            case 'continue':
               if (token == null) return;
-              final intent = ForceIntent.fromJson(decoded);
-              hub.engine.applyForce(token, intent.target, intent.ready);
+              final intent = ContinueIntent.fromJson(decoded);
+              hub.engine.applyContinue(token, targetId: intent.target);
               hub.changed();
             case 'seek':
               if (token == null) return;
@@ -911,9 +912,10 @@ void mountSyncRoute(
             case 'presence':
               if (token == null) return;
               final intent = PresenceIntent.fromJson(decoded);
-              final refused = hub.engine.applyPresence(token, intent.target, intent.state, reason: intent.reason);
+              final refused = hub.engine
+                  .applyPresence(token, intent.target, intent.state, reason: intent.reason, resume: intent.resume);
               if (refused != null) {
-                wsErr(ws, refused, 'only a member itself comes back in', forType: 'presence');
+                wsErr(ws, refused, 'only a member itself comes back in or goes AFK', forType: 'presence');
               }
               hub.changed();
             case 'bye':

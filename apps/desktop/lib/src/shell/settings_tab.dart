@@ -16,7 +16,6 @@ import '../schedule/animeflow.dart';
 import '../screens/home/about_page.dart';
 import '../screens/home/settings_page.dart';
 import '../screens/home/ui.dart' show appName, devTools, displayVersion;
-import '../session/auto_sit_out.dart' show AutoSitOutTimes;
 import '../session/identity.dart' show Profile;
 import '../sfx/sfx.dart';
 import '../sfx/sound_bank.dart';
@@ -119,23 +118,6 @@ class SettingsTab extends StatelessWidget {
       case SettingsSection.party:
         return [
           const YouPanel(),
-          SettingsPanel(
-            title: 'Away',
-            child: SignalBuilder(
-              builder: (context) {
-                final s = AppScope.of(context).coordinator.settings;
-                return SettingSwitch(
-                  switchKey: const ValueKey('auto-sit-out'),
-                  label: 'Auto sit-out',
-                  help: 'Idle for ${AutoSitOutTimes.idle.inMinutes} min while nothing plays, or minimised '
-                      'for ${AutoSitOutTimes.minimised.inMinutes} min, sits you out so nobody waits for you; '
-                      "you're back as soon as you return. Never when you're alone",
-                  value: s.autoSitOut.value,
-                  onChanged: s.setAutoSitOut,
-                );
-              },
-            ),
-          ),
           const YourServerPanel(),
           const RecentServersPanel(),
         ];
@@ -331,6 +313,7 @@ class _YouPanelState extends State<YouPanel> {
                       ],
                     ),
                   ),
+                  const SettingFold(children: [AvatarShapeSetting()]),
                 ],
               ),
             ),
@@ -868,11 +851,11 @@ class NotificationsInfo extends StatelessWidget {
                     'across the picture with Danmaku)'),
                 line('Added to Up next', 'With the title, its picture and who added it'),
                 line('Chat messages', 'As Chat pop-ups says; always in Chat & activity (Tab)'),
-                line('Sat out or nudged by someone', 'Only on your end, with their picture'),
-                line('Ready, seeks and pauses', 'Only in Chat & activity (Tab), never as a pop-up'),
+                line('Set out, waited for or nudged by someone', 'Only on your end, with their picture'),
+                line('BRBs, seeks and pauses', 'Only in Chat & activity (Tab), never as a pop-up'),
                 line('Watching alone', 'No pop-ups or sounds about the party: there is nobody else'),
-                line('App notices', 'Shader changes, copies, errors, auto sit-out setting you away'),
-                line('Sitting out or in the background',
+                line('App notices', 'Shader changes, copies, errors, being set AFK'),
+                line('Out or in the background',
                     'Only chat, nudges, "starting now" and Up next (and joins and leaves when switched on); with '
                     'the window in the background or minimised they go out as system notifications, and a click '
                     'brings the window up (a chat one opens the chat)'),
@@ -976,5 +959,28 @@ class SoundSettings extends StatelessWidget {
         ],
       );
     });
+  }
+}
+
+/// "Avatar shape": everyone's picture as a rounded square (the default) or
+/// a circle, everywhere people show. Settings → Party → More only.
+class AvatarShapeSetting extends StatelessWidget {
+  const AvatarShapeSetting({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context).coordinator.settings;
+    return SignalBuilder(
+      builder: (context) => SettingRow(
+        label: 'Avatar shape',
+        help: "How everyone's picture is cut, in the strip, the player and the cards",
+        control: AppSelect<bool>(
+          key: const ValueKey('avatar-shape'),
+          value: s.avatarCircle.value,
+          items: const [(false, 'Rounded square'), (true, 'Circle')],
+          onChanged: s.setAvatarCircle,
+        ),
+      ),
+    );
   }
 }

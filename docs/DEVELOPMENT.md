@@ -96,7 +96,7 @@ and never opens Settings.
 - **One home per setting**, in one of the six pages:
   - *Player*: how the video looks and sounds and how the controls
     behave (volume, subtitles, picture, controls, playback).
-  - *Party*: you (picture, name, colour), being away, your server for
+  - *Party*: you (picture, name, colour; More: how pictures are cut), your server for
     Invite, recent servers.
   - *Notifications & sounds*: what shows over the video and what makes a
     sound.
@@ -136,6 +136,12 @@ releases never show it:
   the real subtitles do: over the player when the quick chat box opens,
   and on the stand-in page, which has its own quick chat box (Enter;
   what you send flies as your own line). Tests: `danmaku_test`.
+- **Waiting designs** (`shell/wait_design.dart`, until real evenings
+  decide; removed before release): `STARSYNC_WAIT_DESIGN=c` shows the
+  group waiting for someone's BRB as a card in the middle of the paused
+  picture instead of the pill (design A, the default and the only one in
+  a release); `d` the same card fading with the controls (a Space hold
+  always shows it). Read once at start, in dev builds only; no setting.
 
 ## Tests
 
@@ -210,7 +216,7 @@ source, a source that drops and resumes; a seek past what a slow source
 has sent, timed; a source that drops while a viewer seeks past
 the buffer and another joins: no seek loop, "Waiting for", all resume
 (D6)), `jellyfin_e2e` (account holders report what they watched, one
-who sat out is not marked watched, the next episode continues for
+who is out is not marked watched, the next episode continues for
 everyone), `whats_next_e2e` (a file of a show continued by its next
 episode with the gap said, the server's countdown on both screens, a
 shared cancel, the watch history), `queue_switch_e2e` (times Up next switches
@@ -250,15 +256,16 @@ the server: server `flaky_link_test`. For manual runs with real apps use
 
 Long durations on a fake clock: `SyncServer(clock:, liveness:)` and
 `SyncEngine(clock:, liveness:)` take the engine clock and the server's
-limits (`Liveness`: silence, grace, gone notice, joiner hold, joining
-timeout; ARCHITECTURE "Sync model"), so a test can pass short limits or
+limits (`Liveness`: silence, grace, gone notice; ARCHITECTURE "Sync
+model"), so a test can pass short limits or
 step a fake clock through minutes: move the clock, then call
 `ServerHub.heartbeat()` (or `SyncEngine.tick()`) yourself; the real 1 s
 heartbeat still ticks and reads the same clock. On the app side
 `Connection(now:, unstableAfter:, silenceLimit:, lostSoundAfter:,
 reconnectDelay:, identity:)` (`connection_test` drives one against a
-scripted fake server), and `AutoSitOut` takes the time on every call
-(`session_logic_test` steps it through minutes).
+scripted fake server), and `AfkWatch` takes the time on every call
+(`session_logic_test` steps it through minutes, with the pure
+`SpaceGesture` fed hold times).
 
 Safety-net scenarios: the core flows every restructure step must keep
 working. What covers them today and which step adds the rest (steps as
@@ -266,11 +273,11 @@ in [ROADMAP.md](ROADMAP.md)):
 
 | Scenario | Covered today | Missing, added in |
 |---|---|---|
-| Drop and reconnect while sharing a relay | server `flaky_link_test` (blackhole: `gone` with ready, queue item and relay kept, the same member back; reset), `sync_wave_test` (takeover by client id, `replaced`, `stale`), `presence_test` (grace on a fake clock, restart), `relay_test` "the source drops (D6)" (`sourceGone`, buffer served, same `info` continues, another 4002, a second channel 4003, leave ends it); desktop `relay_e2e` "the source drops uncleanly and comes back" (gone past the server's silence, the relay kept, the source re-dials and continues), `coord_presence` (a half-open drop while playing: same member, no reopen, the state kept; 10 flaps: at most one lost/back sound; `replaced` is terminal; a restarted server gets the ready again, and what played if it came back empty), server `queue_test` (the first restore offer wins), `connection_test` (the hello's id, `seq`, caps, `feedAfter`) | |
-| Join mid-playback | core `sync_engine_test` "D2: joiners" (never changes the transport while playing, at most 15 s while held, joining ends on error or timeout), `presence_test` (the table); server `relay_test` "a late joiner gets its own /r/ URL"; desktop `coord_presence` (the returning member plays on in sync) | |
-| Sit out / Away and back | core `sync_engine_test` "away" (only oneself comes back, through joining), "return" (away survives a drop), `presence_test` (`isAlone`); server `hardening_test` (anyone sets anyone away, `forbidden`); desktop `server_isolate_test` (the host sat out through `presence` on your shared server), `notice_table_test` (the feed actions one-to-one, matched by id; sitting out gets only chat, nudges, "starting now", Up next and the chosen joins and leaves; alone no social sounds), `session_logic_test` (auto sit-out on a fake clock: never alone, a manual away stays), `player_status_test` / `shell_test` (the ready counter leaves away and gone out); core `watch_session_test`, desktop `watch_tracker_test`, `jellyfin_session_test` "sat out", `jellyfin_e2e` (sat out: not tracked as watched, P7) | |
-| Swap, also while someone is Away or gone | core `sync_engine_test` "swap" (a gone member stays out of the gate, comes back joining), "away" (a swap leaves it away), `queue_test` (a swap takes its item, drops the `auto` one); server `queue_test` (a gone adder's item waits), `relay_test` (a swap drops the buffer); desktop `sync_playback_e2e`, `media_switch_e2e` (no command reaches a player mid-switch) | |
-| Up next advance | core `queue_test` (skip, play request timeout, `auto` and `cancel`; the countdown: start, follow the first item, seek, cancel, hold for a gone performer or source, skip what nobody can put up), `whats_next_test`; server `queue_test` (the countdown and cancel shared, a skip by the server); `relay_test` "warm relay"; desktop `jellyfin_session_test` (end card), `jellyfin_e2e` and `whats_next_e2e` (the continuation and the countdown end to end), `queue_switch_e2e` (prepared and promoted through the media pipeline) | |
+| Drop and reconnect while sharing a relay | server `flaky_link_test` (blackhole: `gone` with its BRB, queue item and relay kept, the same member back; reset), `sync_wave_test` (takeover by client id, `replaced`, `stale`), `presence_test` (grace on a fake clock, restart), `relay_test` "the source drops (D6)" (`sourceGone`, buffer served, same `info` continues, another 4002, a second channel 4003, leave ends it); desktop `relay_e2e` "the source drops uncleanly and comes back" (gone past the server's silence, the relay kept, the source re-dials and continues), `coord_presence` (a half-open drop while playing: same member, no reopen, the state kept; 10 flaps: at most one lost/back sound; `replaced` is terminal; a restarted server gets the BRB again, and what played if it came back empty), server `queue_test` (the first restore offer wins), `connection_test` (the hello's id, `seq`, caps, `feedAfter`) | |
+| Join mid-playback | core `sync_engine_test` "loading (joiners)" (never changes the transport while playing, waited for while held and wanting to play, loading ends on an error), "rewind" (back from behind offers a rewind), `presence_test` (the table); server `relay_test` "a late joiner gets its own /r/ URL"; desktop `coord_presence` (the returning member plays on in sync) | |
+| BRB, AFK, Out and back | core `sync_engine_test` "the wish" (nothing starts by itself, one play for everyone, a pause holds at once), "BRB" (holds, plays again only if it wanted to, Wait for Bob, survives a drop and a swap, the last BRB leaving leaves a pause), "out and AFK" (only oneself comes back, loading at the current moment; AFK never while playing nor on BRB), "continue", `presence_test` (`isAlone`); server `hardening_test` (anyone sets anyone out, `forbidden`), `server_auth_test` (a 1.4.x hello gets the version refusal); desktop `sync_playback_e2e` (one Play, a pause and a BRB over real players; Space as the keys feed it: taps, the BRB hold, BRB too, continue without, Space in from out), `player_radial_test` (the radial: drag to pick, click mode, its places by standing; Space held through `AppKeys`: the fill, the words from 150 ms, repeats ignored, a lost key-up drops the press), `server_isolate_test` (the host set out through `presence` on your shared server), `notice_table_test` (the feed actions one-to-one, matched by id; out gets only chat, nudges, "starting now", Up next and the chosen joins and leaves; alone no social sounds), `session_logic_test` (AFK and the Space gesture on a fake clock), `player_status_test` / `shell_test` (the pill's lines and keys, the party line leaves gone out), `person_card_test` (Wait for / Don't wait for, Out / Join); core `watch_session_test`, desktop `watch_tracker_test`, `jellyfin_session_test` "sat out", `jellyfin_e2e` (out: not tracked as watched, P7) | |
+| Swap, also while someone is out or gone | core `sync_engine_test` "swap" (waits for every video again, keeps the wish), "BRB" / "out and AFK" (a swap keeps them), `queue_test` (a swap takes its item, drops the `auto` one); server `queue_test` (a gone adder's item waits), `relay_test` (a swap drops the buffer); desktop `sync_playback_e2e`, `media_switch_e2e` (no command reaches a player mid-switch) | |
+| Up next advance | core `queue_test` (skip, a play request asked again then skipped, `auto` and `cancel`; the countdown over the last 10 s ending at the end, a pause during it, after the end, follow the first item, seek, cancel, hold for a gone performer or source, skip what nobody can put up), `whats_next_test`; server `queue_test` (the countdown and cancel shared, a skip by the server); `relay_test` "warm relay"; desktop `jellyfin_session_test` (end card), `jellyfin_e2e` and `whats_next_e2e` (the continuation and the countdown end to end), `queue_switch_e2e` (prepared and promoted through the media pipeline) | |
 | Close the app cleanly, incl. `bye` | server `lifecycle_test` (a close keeps the member `gone`, `bye` leaves at once, server stop closes sockets); desktop `server_isolate_test` (stop frees the port; Stop sharing tells guests with 4016 and keeps you and Up next; a friend's server and back keeps yours), `coord_presence` (Stop sharing and your server's stop release their ports; leave sends `bye` and others see "left" at once, leaving for a restart keeps the member `gone`), `video_reload_e2e` (leave releases every player); the close smoke run on the built app (`tool/smoke_windows.ps1` in CI, `tool/smoke_linux.sh` by hand) | |
 
 A test file whose first line is `// restructure: rewrite in step N` pins

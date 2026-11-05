@@ -60,7 +60,6 @@ void main() {
       expect(menuActions(const ControlsSnapshot(), none), [
         ControlAction.changeVideo,
         ControlAction.reload,
-        ControlAction.markAllReady,
         ControlAction.markProblem,
         ControlAction.leave,
       ]);
@@ -70,12 +69,9 @@ void main() {
         ControlAction.reload,
         ControlAction.skipForward,
         ControlAction.chapters,
-        ControlAction.markAllReady,
         ControlAction.markProblem,
         ControlAction.leave,
       ]);
-      expect(menuActions(const ControlsSnapshot(alone: true), none), isNot(contains(ControlAction.markAllReady)),
-          reason: 'nobody to mark ready');
       expect(controlTooltip(BarControl.settings, const ControlsSnapshot()), 'Player settings');
       expect(controlIcon(BarControl.settings, const ControlsSnapshot(panelOpen: true)), Icons.settings_rounded);
     });

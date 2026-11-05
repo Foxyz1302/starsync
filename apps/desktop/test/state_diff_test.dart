@@ -125,30 +125,17 @@ void main() {
   });
 
   group('local play gate', () {
-    const ready = MemberView(
-        id: 'm1',
-        name: 'a',
-        ready: true,
-        inSet: true,
-        buffered: 9);
-    const catchingUp = MemberView(
-        id: 'm2',
-        name: 'b',
-        ready: false,
-        inSet: false,
-        buffered: 0);
-    const unreadyInSet = MemberView(
-        id: 'm3',
-        name: 'c',
-        ready: false,
-        inSet: true,
-        buffered: 9);
+    const watching = MemberView(id: 'm1', name: 'a', buffered: 9);
+    const brb = MemberView(id: 'm2', name: 'b', buffered: 9, presence: Presence.brb);
+    const out = MemberView(id: 'm3', name: 'c', buffered: 9, presence: Presence.out);
+    const afk = MemberView(id: 'm4', name: 'd', buffered: 9, presence: Presence.afk);
 
-    test('only in-set ready members may follow transport to playing', () {
-      final state = _stateWithMembers([ready, catchingUp, unreadyInSet]);
+    test('everyone but out and AFK follows the group (their player stays at its spot)', () {
+      final state = _stateWithMembers([watching, brb, out, afk]);
       expect(localPlayAllowed(state, 'm1'), isTrue);
-      expect(localPlayAllowed(state, 'm2'), isFalse);
+      expect(localPlayAllowed(state, 'm2'), isTrue);
       expect(localPlayAllowed(state, 'm3'), isFalse);
+      expect(localPlayAllowed(state, 'm4'), isFalse);
       expect(localPlayAllowed(state, 'nope'), isFalse);
       expect(localPlayAllowed(state, ''), isFalse);
     });

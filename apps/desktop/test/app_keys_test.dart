@@ -48,7 +48,7 @@ void main() {
       theme: ThemeData.dark(),
       shortcuts: appShortcuts,
       home: AppKeys(
-        onToggleReady: () {},
+        onSpace: () {},
         child: AppShell(
           updates: UpdateController(currentVersion: '0.0.0-dev'),
           autoUpdateCheck: false,
@@ -86,7 +86,7 @@ void main() {
       serverTime: DateTime.now().toUtc(),
       mediaId: 1,
       media: const {'name': 'Movie.mkv', 'size': 1, 'duration': 0},
-      members: [MemberView(id: 'a', name: 'Alex', ready: false, inSet: false, buffered: 0)],
+      members: [MemberView(id: 'a', name: 'Alex', buffered: 0)],
     );
     session.navigation.place.value = Place.friend;
     await tester.pumpAndSettle();
@@ -141,7 +141,7 @@ void main() {
       theme: ThemeData.dark(),
       shortcuts: appShortcuts,
       home: AppKeys(
-        onToggleReady: () => readies++,
+        onSpace: () => readies++,
         child: AppShell(
           updates: UpdateController(currentVersion: '0.0.0-dev'),
           autoUpdateCheck: false,
@@ -156,7 +156,7 @@ void main() {
       position: 0,
       serverTime: DateTime.now().toUtc(),
       mediaId: 0,
-      members: [MemberView(id: 'a', name: 'Alex', ready: false, inSet: false, buffered: 0)],
+      members: [MemberView(id: 'a', name: 'Alex', buffered: 0)],
     );
     session.navigation.place.value = Place.friend;
     await tester.pumpAndSettle();

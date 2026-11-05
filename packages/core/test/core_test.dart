@@ -271,34 +271,44 @@ void main() {
       expect([back.feed.single.seq, back.feed.single.replayed], [3, true]);
     });
 
-    test('presence intent, bye', () {
-      const p = PresenceIntent(target: 'm2', state: Presence.away, reason: PresenceReason.idle);
-      expect(p.toJson(), {'t': 'presence', 'target': 'm2', 'state': 'away', 'reason': 'idle'});
+    test('presence, play, pause and continue intents, bye', () {
+      const p = PresenceIntent(target: 'm2', state: Presence.out, reason: PresenceReason.continued);
+      expect(p.toJson(), {'t': 'presence', 'target': 'm2', 'state': 'out', 'reason': 'continue'});
       final back = PresenceIntent.fromJson(rt(p.toJson()));
-      expect([back.target, back.state, back.reason], ['m2', Presence.away, PresenceReason.idle]);
+      expect([back.target, back.state, back.reason], ['m2', Presence.out, PresenceReason.continued]);
+      const brb = PresenceIntent(state: Presence.brb, resume: true);
+      expect(brb.toJson(), {'t': 'presence', 'state': 'brb', 'resume': true});
+      expect(PresenceIntent.fromJson(rt(brb.toJson())).resume, isTrue);
       expect(PresenceIntent.fromJson({'t': 'presence', 'state': 'in'}).target, isEmpty);
-      expect(() => PresenceIntent.fromJson({'t': 'presence', 'state': 'gone'}), throwsA(isA<ProtocolException>()));
+      expect(() => PresenceIntent.fromJson({'t': 'presence', 'state': 'away'}), throwsA(isA<ProtocolException>()));
+      expect(const TransportIntent(play: true).toJson(), {'t': 'play'});
+      expect(TransportIntent.fromJson(const {'t': 'pause'}).play, isFalse);
+      expect(const ContinueIntent().toJson(), {'t': 'continue'});
+      expect(ContinueIntent.fromJson(const {'t': 'continue', 'target': 'm3'}).target, 'm3');
       expect(const ByeMessage().toJson(), {'t': 'bye'});
     });
 
-    test('members carry presence, goneSince, app and caps; no out, no stale', () {
+    test('members carry presence, since, loading, goneSince, app and caps; no ready', () {
       final since = DateTime.utc(2026, 1, 1, 12);
       final v = MemberView(
           id: 'm1',
           name: 'a',
-          ready: true,
-          inSet: false,
-          buffered: 0,
-          presence: Presence.gone,
+          presence: Presence.brb,
+          since: since,
+          loading: true,
+          gone: true,
           goneSince: since,
           app: '1.3.0',
           caps: const ClientCaps(jellyfin: true));
       final json = v.toJson();
-      expect([json['presence'], json['goneSince'], json['app'], json['caps']],
-          ['gone', since.toIso8601String(), '1.3.0', {'jellyfin': true}]);
-      expect(json.containsKey('out') || json.containsKey('stale'), isFalse);
+      expect([json['presence'], json['since'], json['loading'], json['goneSince'], json['app'], json['caps']],
+          ['brb', since.toIso8601String(), true, since.toIso8601String(), '1.3.0', {'jellyfin': true}]);
+      expect(json.containsKey('ready') || json.containsKey('inSet'), isFalse);
       final back = MemberView.fromJson(rt(json));
-      expect([back.presence, back.goneSince, back.caps.jellyfin], [Presence.gone, since, true]);
+      expect([back.presence, back.since, back.loading, back.gone, back.goneSince, back.caps.jellyfin],
+          [Presence.brb, since, true, true, since, true]);
+      final plain = MemberView.fromJson(rt(const MemberView(id: 'm2', name: 'b').toJson()));
+      expect([plain.presence, plain.since, plain.loading, plain.gone], [Presence.watching, null, false, false]);
     });
 
     test('media.ref rides along, at most 2 KiB; relay sourceGone', () {
@@ -316,7 +326,7 @@ void main() {
       expect(r.copyWith(sourceGone: false).toJson().containsKey('sourceGoneSince'), isFalse);
     });
 
-    test('state carries hold and advance', () {
+    test('state carries hold, advance, the wish, rewinds and passed-over members', () {
       final at = DateTime.utc(2026);
       final s = StateBroadcast(
           eventId: 1,
@@ -325,11 +335,20 @@ void main() {
           serverTime: at,
           mediaId: 1,
           members: const [],
-          hold: HoldInfo(reason: HoldReason.joining, members: const ['m2'], until: at),
-          advance: QueueAdvance(id: 'q3', at: at, secs: 10));
-      final back = StateBroadcast.fromJson(rt(s.toJson()));
-      expect([back.hold!.reason, back.hold!.members, back.hold!.until], [HoldReason.joining, ['m2'], at]);
+          hold: const HoldInfo(brb: ['m2'], video: ['m3'], source: true),
+          advance: QueueAdvance(id: 'q3', at: at, secs: 10),
+          wantsPlay: true,
+          rewind: const [RewindOffer(id: 'm4', position: 102.5)],
+          queuePass: const ['m1']);
+      final json = s.toJson();
+      expect(json['wish'], 'play');
+      final back = StateBroadcast.fromJson(rt(json));
+      expect([back.hold!.brb, back.hold!.video, back.hold!.source, back.hold!.members],
+          [['m2'], ['m3'], true, ['m2', 'm3']]);
       expect([back.advance!.id, back.advance!.secs], ['q3', 10]);
+      expect([back.wantsPlay, back.rewind.single.id, back.rewind.single.position, back.queuePass], [true, 'm4', 102.5, ['m1']]);
+      expect(HoldInfo.fromJson(const {}), isNull, reason: 'nobody waited for: no hold');
+      expect(StateBroadcast.fromJson(rt({...json, 'wish': 'pause'})).wantsPlay, isFalse);
     });
 
     test('close codes are distinct', () {

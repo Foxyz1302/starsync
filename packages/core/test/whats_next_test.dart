@@ -2,9 +2,8 @@ import 'package:sync_relay_core/core.dart';
 import 'package:test/test.dart';
 
 MemberView member(String id,
-        {Presence presence = Presence.watching, Map<String, bool> jf = const {}, String name = ''}) =>
-    MemberView(
-        id: id, name: name.isEmpty ? id : name, ready: false, inSet: true, buffered: 0, presence: presence, jf: jf);
+        {Presence presence = Presence.watching, bool gone = false, Map<String, bool> jf = const {}, String name = ''}) =>
+    MemberView(id: id, name: name.isEmpty ? id : name, presence: presence, gone: gone, jf: jf);
 
 QueueItem item(QueueHow how, {String by = 'm2', String byName = 'Bob'}) => QueueItem(
       id: 'q1',
@@ -21,9 +20,9 @@ void main() {
   group('queuePerformer: who puts an item up (the server and every app read it the same)', () {
     test('a link passed on or a file: only its adder; gone waits for it, left means skipped', () {
       for (final how in [QueueHow.through, QueueHow.file]) {
-        expect(queuePerformer(item(how), [member('m1'), member('m2', presence: Presence.away)]).id, 'm2',
-            reason: 'sitting out, it comes back to put its own item up');
-        final waits = queuePerformer(item(how), [member('m1'), member('m2', presence: Presence.gone)]);
+        expect(queuePerformer(item(how), [member('m1'), member('m2', presence: Presence.out)]).id, 'm2',
+            reason: 'out, its app still puts its own item up');
+        final waits = queuePerformer(item(how), [member('m1'), member('m2', gone: true)]);
         expect((waits.id, waits.why), (null, null), reason: 'a gone adder may come back within its grace');
         final left = queuePerformer(item(how), [member('m1'), member('m3')]);
         expect((left.id, left.why), (null, 'Bob left'));
@@ -39,7 +38,7 @@ void main() {
           'm3');
       expect(
           queuePerformer(
-                  item(QueueHow.jellyfin), [member('m3', jf: access, presence: Presence.away), member('m2')])
+                  item(QueueHow.jellyfin), [member('m3', jf: access, presence: Presence.afk), member('m2')])
               .why,
           'nobody here has that Jellyfin server');
     });
@@ -48,8 +47,8 @@ void main() {
       for (final how in [QueueHow.direct, QueueHow.server]) {
         expect(queuePerformer(item(how), [member('m1'), member('m2')]).id, 'm2');
         expect(
-            queuePerformer(item(how), [member('m4'), member('m2', presence: Presence.gone), member('m3')]).id, 'm3');
-        final nobody = queuePerformer(item(how), [member('m2', presence: Presence.away)]);
+            queuePerformer(item(how), [member('m4'), member('m2', gone: true), member('m3')]).id, 'm3');
+        final nobody = queuePerformer(item(how), [member('m2', presence: Presence.out)]);
         expect((nobody.id, nobody.why), (null, null), reason: 'nobody around is not a skip');
       }
     });
@@ -61,10 +60,19 @@ void main() {
     });
   });
 
-  test('the continuation: who put the media up, else the first member in', () {
-    final members = [member('m1', presence: Presence.away), member('m2'), member('m3')];
+  test('passed over for a play request: someone else who can, never the adder of its own file', () {
+    final access = {'S': true};
+    final members = [member('m1', jf: access), member('m2', jf: access), member('m3')];
+    expect(queuePerformer(item(QueueHow.jellyfin), members, pass: ['m2']).id, 'm1');
+    expect(queuePerformer(item(QueueHow.jellyfin), members, pass: ['m1', 'm2']).why, isNotNull);
+    expect(queuePerformer(item(QueueHow.direct), members, pass: ['m2']).id, 'm1');
+    expect(queuePerformer(item(QueueHow.file), members, pass: ['m2']).id, 'm2', reason: 'only its adder has the file');
+  });
+
+  test('the continuation: who put the media up, else the first member present', () {
+    final members = [member('m1', presence: Presence.out), member('m2', presence: Presence.brb), member('m3')];
     expect(mayAddContinuation('m1', 'm1', members), isTrue, reason: 'the swapper itself');
-    expect(mayAddContinuation('m2', 'm1', members), isTrue, reason: 'the swapper is away: the first in');
+    expect(mayAddContinuation('m2', 'm1', members), isTrue, reason: 'the swapper is out: the first present (BRB counts)');
     expect(mayAddContinuation('m3', 'm1', members), isFalse);
     expect(mayAddContinuation('m2', 'm3', members), isFalse, reason: 'the swapper is in');
     expect(mayAddContinuation('m2', null, members), isTrue, reason: 'the media the server started with');

@@ -725,29 +725,67 @@ class ErrorFrame {
   }
 }
 
-/// Client to server: set [target] (a member id; empty = oneself) [state]
-/// `away` (anyone may, on anyone) or `in` (only oneself; else `err`
-/// `forbidden`). Coming back `in` goes through `joining`.
+/// Client to server: set [target] (a member id; empty = oneself) to
+/// [state] (PROTOCOL.md "Presence"): `brb` and `out` on anyone (Wait for
+/// Bob, Don't wait for Bob), `in` and `afk` only on oneself (else `err`
+/// `forbidden`). [resume] with `brb`: the group was playing when this
+/// press began (its own pause on key-down came first), so it plays again
+/// once the last one is back. [reason] goes into the feed line.
 class PresenceIntent {
   final String target;
-  /// [Presence.watching] (`in`) or [Presence.away].
   final Presence state;
   final PresenceReason reason;
-  const PresenceIntent({this.target = '', required this.state, this.reason = PresenceReason.manual});
+  final bool resume;
+  const PresenceIntent({this.target = '', required this.state, this.reason = PresenceReason.manual, this.resume = false});
 
-  Map<String, Object?> toJson() =>
-      {'t': 'presence', if (target.isNotEmpty) 'target': target, 'state': state.wire, 'reason': reason.name};
+  Map<String, Object?> toJson() => {
+        't': 'presence',
+        if (target.isNotEmpty) 'target': target,
+        'state': state.wire,
+        if (reason != PresenceReason.manual) 'reason': reason.wire,
+        if (resume) 'resume': true,
+      };
 
   factory PresenceIntent.fromJson(Map<String, Object?> json) {
     if (json['t'] != 'presence') throw const ProtocolException('not a presence intent');
     final state = Presence.parse(json['state']);
-    if (state != Presence.watching && state != Presence.away) {
-      throw const ProtocolException('presence state must be in or away');
-    }
+    if (state == null) throw const ProtocolException('presence state must be in, brb, afk or out');
     return PresenceIntent(
         target: json['target'] is String ? json['target'] as String : '',
-        state: state!,
-        reason: PresenceReason.parse(json['reason']));
+        state: state,
+        reason: PresenceReason.parse(json['reason']),
+        resume: json['resume'] == true);
+  }
+}
+
+/// Client to server: the group's wish, `{"t":"play"}` or `{"t":"pause"}`
+/// (anyone's). Playing waits for whoever the group waits for.
+class TransportIntent {
+  final bool play;
+  const TransportIntent({required this.play});
+
+  Map<String, Object?> toJson() => {'t': play ? 'play' : 'pause'};
+
+  factory TransportIntent.fromJson(Map<String, Object?> json) {
+    final t = json['t'];
+    if (t != 'play' && t != 'pause') throw const ProtocolException('not a play or pause intent');
+    return TransportIntent(play: t == 'play');
+  }
+}
+
+/// Client to server: continue without [target] (a member id), or
+/// without everyone the group waits for (empty; the group then plays). A
+/// BRB member becomes `out`; someone whose video holds the group stays
+/// `in` and catches up.
+class ContinueIntent {
+  final String target;
+  const ContinueIntent({this.target = ''});
+
+  Map<String, Object?> toJson() => {'t': 'continue', if (target.isNotEmpty) 'target': target};
+
+  factory ContinueIntent.fromJson(Map<String, Object?> json) {
+    if (json['t'] != 'continue') throw const ProtocolException('not a continue intent');
+    return ContinueIntent(target: json['target'] is String ? json['target'] as String : '');
   }
 }
 
@@ -783,38 +821,6 @@ class NudgeNotice {
   factory NudgeNotice.fromJson(Map<String, Object?> json) {
     if (json['t'] != 'nudge') throw const ProtocolException('not a nudge notice');
     return NudgeNotice(from: (json['from'] as String?) ?? '', name: (json['name'] as String?) ?? '');
-  }
-}
-
-class ReadyIntent {
-  final bool ready;
-  final String source;
-  const ReadyIntent({required this.ready, this.source = 'manual'});
-
-  Map<String, Object?> toJson() => {'t': 'ready', 'ready': ready, 'source': source};
-
-  factory ReadyIntent.fromJson(Map<String, Object?> json) {
-    if (json['t'] != 'ready') throw const ProtocolException('not a ready intent');
-    return ReadyIntent(
-      ready: (json['ready'] as bool?) ?? false,
-      source: (json['source'] as String?) ?? 'manual',
-    );
-  }
-}
-
-class ForceIntent {
-  final String target;
-  final bool ready;
-  const ForceIntent({required this.target, required this.ready});
-
-  Map<String, Object?> toJson() => {'t': 'force', 'target': target, 'ready': ready};
-
-  factory ForceIntent.fromJson(Map<String, Object?> json) {
-    if (json['t'] != 'force') throw const ProtocolException('not a force intent');
-    return ForceIntent(
-      target: (json['target'] as String?) ?? '',
-      ready: (json['ready'] as bool?) ?? false,
-    );
   }
 }
 
@@ -1048,21 +1054,24 @@ class MemberView {
   /// Content hash of the member's picture, fetched at `/a/...`; empty when
   /// none.
   final String avatarHash;
-  final bool ready;
-  /// Counts for the ready gate now: in the set and its presence counts
-  /// ([PresencePolicy], [Purpose.gate]).
-  final bool inSet;
   final double buffered;
   /// Where it stands ([Presence]).
   final Presence presence;
-  /// When it went `gone`; null otherwise.
+  /// When [presence] began (BRB, AFK, Out); null for `in`.
+  final DateTime? since;
+  /// Its player is not with the group yet (just joined, back from out or
+  /// a drop, or left behind by a continue): the "Loading" label.
+  final bool loading;
+  /// Disconnected and kept for the grace: the "Reconnecting" label.
+  final bool gone;
+  /// When it went [gone]; null otherwise.
   final DateTime? goneSince;
   /// Last `report.jf` of this member; empty when never reported.
   final Map<String, bool> jf;
   /// The hosting app's own member (sent the server's host key).
   final bool host;
   /// Why its player cannot open the current media (`report.error`); empty
-  /// while it can. Errored: outside the ready gate.
+  /// while it can. Errored: never waited for.
   final String error;
   /// Bytes per second the server sent this member lately (its file, the
   /// Jellyfin relay or the relay); 0 when none.
@@ -1075,10 +1084,11 @@ class MemberView {
     required this.id,
     required this.name,
     this.avatarHash = '',
-    required this.ready,
-    required this.inSet,
-    required this.buffered,
+    this.buffered = 0,
     this.presence = Presence.watching,
+    this.since,
+    this.loading = false,
+    this.gone = false,
     this.goneSince,
     this.jf = const {},
     this.host = false,
@@ -1088,15 +1098,22 @@ class MemberView {
     this.caps = const ClientCaps(),
   });
 
+  /// BRB.
+  bool get brb => presence == Presence.brb;
+
+  /// AFK or Out: not watching, not waited for.
+  bool get isOut => presence.isOut;
+
   Map<String, Object?> toJson() => {
         'id': id,
         'name': name,
         if (avatarHash.isNotEmpty) 'avatarHash': avatarHash,
-        'ready': ready,
-        'inSet': inSet,
         'buffered': buffered,
         'presence': presence.wire,
-        if (presence == Presence.gone && goneSince != null) 'goneSince': goneSince!.toUtc().toIso8601String(),
+        if (presence != Presence.watching && since != null) 'since': since!.toUtc().toIso8601String(),
+        if (loading) 'loading': true,
+        if (gone)
+          'goneSince': (goneSince ?? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)).toUtc().toIso8601String(),
         if (jf.isNotEmpty) 'jf': jf,
         if (host) 'host': true,
         if (error.isNotEmpty) 'error': error,
@@ -1107,15 +1124,17 @@ class MemberView {
 
   factory MemberView.fromJson(Map<String, Object?> json) {
     final presence = Presence.parse(json['presence']) ?? Presence.watching;
+    final gone = json['goneSince'] != null;
     return MemberView(
       id: (json['id'] as String?) ?? '',
       name: (json['name'] as String?) ?? '',
       avatarHash: (json['avatarHash'] as String?) ?? '',
-      ready: (json['ready'] as bool?) ?? false,
-      inSet: (json['inSet'] as bool?) ?? false,
       buffered: finiteDouble(json['buffered'], 'buffered'),
       presence: presence,
-      goneSince: presence == Presence.gone ? DateTime.tryParse('${json['goneSince']}') : null,
+      since: presence == Presence.watching || json['since'] == null ? null : DateTime.tryParse('${json['since']}'),
+      loading: json['loading'] == true,
+      gone: gone,
+      goneSince: gone ? DateTime.tryParse('${json['goneSince']}') : null,
       jf: jfAccessFromJson(json['jf']) ?? const {},
       host: json['host'] == true,
       error: memberErrorFromJson(json['error']),
@@ -1126,59 +1145,61 @@ class MemberView {
   }
 }
 
-/// Why the server is HELD (`state.hold`), most pressing first: a joiner
-/// still loading within its bound ([joining], [until] when the bound
-/// ends), someone not ready ([ready]), someone's buffer short ([buffer]),
-/// the same while a relayed media's source is `gone` ([source]), or
-/// nobody in the set to start ([start]: someone has to ready up).
-enum HoldReason {
-  joining,
-  ready,
-  buffer,
-  source,
-  start;
-
-  static HoldReason? parse(Object? v) {
-    for (final r in values) {
-      if (r.name == v) return r;
-    }
-    return null;
-  }
-}
-
-/// `state.hold`: present while `transport` is `held` with media up.
-/// [members]: the member ids the gate waits for (empty with
-/// [HoldReason.start]). [until]: when that wait ends by itself (the
-/// joiners' bound), on the server's clock.
+/// `state.hold`: present while `transport` is `held` with media up and
+/// someone is waited for: [brb] the BRB members (whatever the wish),
+/// [video] the members whose video holds the group (only while it wants
+/// to play: still loading, or a buffer short of `bufferNeed`), [source]
+/// the relayed media's source is `gone` (the short buffers are its doing).
 class HoldInfo {
-  final HoldReason reason;
-  final List<String> members;
-  final DateTime? until;
-  const HoldInfo({required this.reason, this.members = const [], this.until});
+  final List<String> brb;
+  final List<String> video;
+  final bool source;
+  const HoldInfo({this.brb = const [], this.video = const [], this.source = false});
+
+  bool get isEmpty => brb.isEmpty && video.isEmpty;
+
+  /// Everyone waited for, BRB first.
+  List<String> get members => [...brb, ...video];
 
   Map<String, Object?> toJson() => {
-        'reason': reason.name,
-        'members': members,
-        if (until != null) 'until': until!.toUtc().toIso8601String(),
+        if (brb.isNotEmpty) 'brb': brb,
+        if (video.isNotEmpty) 'video': video,
+        if (source) 'source': true,
       };
 
   static HoldInfo? fromJson(Object? j) {
     if (j is! Map) return null;
-    final reason = HoldReason.parse(j['reason']);
-    if (reason == null) return null;
-    final m = j['members'];
-    return HoldInfo(
-        reason: reason,
-        members: m is List ? m.whereType<String>().toList() : const [],
-        until: j['until'] == null ? null : DateTime.tryParse('${j['until']}'));
+    List<String> ids(Object? v) => v is List ? v.whereType<String>().toList() : const [];
+    final h = HoldInfo(brb: ids(j['brb']), video: ids(j['video']), source: j['source'] == true);
+    return h.isEmpty ? null : h;
   }
 }
 
-/// `state.advance`: the shared countdown to Up next's first item when the
-/// media finishes. At [at] + [secs] (server clock) the server sets
-/// `queuePlay` to [id] (holding while its performer or its relay's source
-/// is `gone`); `{"t":"queue","op":"cancel"}` and a seek clear it for
-/// everyone (see `SyncEngine.whatsNext`).
+/// `state.rewind`: someone came back with the group from further behind
+/// than [RelayConstants.rewindBehindSecs]: a rewind to [position], where
+/// they were, offered to everyone for [RelayConstants.rewindSecs].
+class RewindOffer {
+  /// The member who came back.
+  final String id;
+  final double position;
+  const RewindOffer({required this.id, required this.position});
+
+  Map<String, Object?> toJson() => {'id': id, 'position': position};
+
+  static RewindOffer? fromJson(Object? j) {
+    if (j is! Map || j['id'] is! String) return null;
+    final p = j['position'];
+    if (p is! num || !p.isFinite || p < 0) return null;
+    return RewindOffer(id: j['id'] as String, position: p.toDouble());
+  }
+}
+
+/// `state.advance`: the shared countdown to Up next's first item over the
+/// media's last [secs] (or from an item coming first once it finished).
+/// At [at] + [secs] (server clock; the media's end while it plays) the
+/// server sets `queuePlay` to [id] (holding while its performer or its
+/// relay's source is `gone`); `{"t":"queue","op":"cancel"}`, a pause and
+/// a seek clear it for everyone (see `SyncEngine.whatsNext`).
 class QueueAdvance {
   final String id;
   final DateTime at;
@@ -1197,7 +1218,7 @@ class QueueAdvance {
 }
 
 class StateBroadcast {
-  /// Buffer an in-set member needs before playback can go on, as the
+  /// Buffer a watching member needs before playback can go on, as the
   /// server's gate counts it: [RelayConstants.minBufferSecs], less near the
   /// end (mpv cannot buffer past it), none once finished.
   double get bufferNeed => bufferNeedAt(DateTime.now().toUtc());
@@ -1236,8 +1257,17 @@ class StateBroadcast {
   /// The queued item someone asked to play now, waiting for the member
   /// who can put it up; null when none.
   final String? queuePlay;
-  /// Why it is held ([HoldInfo]); null unless `held` with media up.
+  /// Who the group waits for ([HoldInfo]); null unless `held` with media
+  /// up and someone is waited for.
   final HoldInfo? hold;
+  /// The group's wish: play (true) or pause. It plays when it wants to
+  /// and nobody is waited for.
+  final bool wantsPlay;
+  /// Rewinds offered for whoever came back from behind ([RewindOffer]).
+  final List<RewindOffer> rewind;
+  /// Members passed over for the current play request (`queuePlay`): they
+  /// did not put it up in time, so [queuePerformer] asks someone else.
+  final List<String> queuePass;
   /// The shared countdown to Up next's first item ([QueueAdvance]); null when none runs.
   final QueueAdvance? advance;
   const StateBroadcast({
@@ -1256,6 +1286,9 @@ class StateBroadcast {
     this.queuePlay,
     this.hold,
     this.advance,
+    this.wantsPlay = false,
+    this.rewind = const [],
+    this.queuePass = const [],
   });
 
   Map<String, Object?> toJson() => {
@@ -1275,6 +1308,9 @@ class StateBroadcast {
         if (queuePlay != null) 'queuePlay': queuePlay,
         if (hold != null) 'hold': hold!.toJson(),
         if (advance != null) 'advance': advance!.toJson(),
+        'wish': wantsPlay ? 'play' : 'pause',
+        if (rewind.isNotEmpty) 'rewind': [for (final o in rewind) o.toJson()],
+        if (queuePass.isNotEmpty) 'queuePass': queuePass,
       };
 
   factory StateBroadcast.fromJson(Map<String, Object?> json) {
@@ -1304,6 +1340,11 @@ class StateBroadcast {
       queuePlay: json['queuePlay'] is String ? json['queuePlay'] as String : null,
       hold: HoldInfo.fromJson(json['hold']),
       advance: QueueAdvance.fromJson(json['advance']),
+      wantsPlay: json['wish'] == 'play',
+      rewind: json['rewind'] is List
+          ? (json['rewind'] as List).map(RewindOffer.fromJson).whereType<RewindOffer>().toList()
+          : const [],
+      queuePass: json['queuePass'] is List ? (json['queuePass'] as List).whereType<String>().toList() : const [],
     );
   }
 }

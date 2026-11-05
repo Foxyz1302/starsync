@@ -1,19 +1,21 @@
 /// The app's sounds. Only events that carry news get one: no sound for
 /// what the video itself makes obvious (start, pause, end, seeks).
 enum SfxKind {
-  /// Someone readies up; pitch climbs with [SfxCue.readyIndex].
+  /// Someone is back from BRB ([SfxCue.readyIndex] pitches it).
   ready,
+  /// Someone is BRB.
   unready,
-  /// Someone marks everyone ready.
+  /// Someone continued without the ones the group waited for.
   forceReady,
   join,
   leave,
-  /// Someone sat you out (played by the session, not from a feed action).
+  /// Someone set you out, BRB, or went on without you (played by the
+  /// session, not from a feed action).
   kick,
   /// A new video or episode is put up.
   swap,
   chat,
-  /// Auto sit-out set you away (idle, minimised).
+  /// This app set you AFK or out (idle, minimised).
   warn,
   /// The connection to the server dropped / came back.
   lost,
@@ -29,9 +31,9 @@ class SfxCue {
 }
 
 SfxKind? sfxForFeedAction(String action) => switch (action) {
-      'ready' => SfxKind.ready,
-      'unready' => SfxKind.unready,
-      'force-ready' => SfxKind.forceReady,
+      'back' => SfxKind.ready,
+      'brb' => SfxKind.unready,
+      'continue' => SfxKind.forceReady,
       'join' => SfxKind.join,
       'leave' => SfxKind.leave,
       'swap' => SfxKind.swap,

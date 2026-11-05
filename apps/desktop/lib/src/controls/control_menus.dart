@@ -106,8 +106,6 @@ Future<void> runControlAction(BuildContext context, PlayerControlsModel model, C
       if (link != null) await copyToClipboard(context, link, done: 'Link copied');
     case ControlAction.reload:
       model.reload();
-    case ControlAction.markAllReady:
-      model.markAllReady();
     case ControlAction.markProblem:
       await ControlsFrame.holdWhile(context, () => showMarkProblem(context));
     case ControlAction.leave:

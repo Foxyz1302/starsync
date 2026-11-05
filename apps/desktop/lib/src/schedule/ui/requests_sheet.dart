@@ -67,7 +67,7 @@ class RequestsSheet extends StatelessWidget {
           StatusAvatar(
             info: AvatarInfo(name: who, color: colorForName(who)),
             size: 32,
-            ring: false,
+            marks: false,
             badges: false,
           ),
           const SizedBox(width: 10),

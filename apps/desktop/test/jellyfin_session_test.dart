@@ -68,10 +68,8 @@ MemberView member(String id, String name, {Map<String, bool> jf = const {}, bool
     MemberView(
         id: id,
         name: name,
-        ready: true,
-        inSet: true,
         buffered: 10,
-        presence: gone ? Presence.gone : Presence.watching,
+        gone: gone,
         jf: jf);
 
 void main() {

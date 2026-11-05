@@ -15,18 +15,17 @@ sealed class AppEvent {
 /// in the activity log.
 sealed class FeedEvent extends AppEvent {
   final FeedMessage feed;
-  /// This member is the actor (its own chat, ready, queue add...).
+  /// This member is the actor (its own chat, BRB, queue add...).
   final bool own;
   const FeedEvent(this.feed, {this.own = false});
 
   String get actor => feed.actor;
 
   /// [feed] as its typed event. [selfId]: this member's id (people are
-  /// matched by `actorId` / `targetId`, never by name); [readyCount]:
-  /// members ready in the latest state (the pitch of a `ready` sound);
-  /// [queueThumb]: the picture hash of the Up next item a `queue-add`
-  /// added (from the state that came with it), '' when none.
-  factory FeedEvent.of(FeedMessage f, {String selfId = '', int readyCount = 0, String queueThumb = ''}) {
+  /// matched by `actorId` / `targetId`, never by name); [queueThumb]: the
+  /// picture hash of the Up next item a `queue-add` added (from the state
+  /// that came with it), '' when none.
+  factory FeedEvent.of(FeedMessage f, {String selfId = '', String queueThumb = ''}) {
     bool isSelf(String id) => selfId.isNotEmpty && id == selfId;
     final own = isSelf(f.actorId);
     return switch (f.action) {
@@ -34,17 +33,16 @@ sealed class FeedEvent extends AppEvent {
       'leave' => MemberLeft(f, own: own),
       'gone' => MemberGone(f, own: own),
       'return' => MemberReturned(f, own: own),
-      'away' => MemberSatOut(f,
+      'brb' => MemberBrb(f, own: own, atYou: isSelf(f.targetId) && !isSelf(f.actorId)),
+      'back' => MemberBackFromBrb(f, own: own),
+      'afk' || 'out' => MemberOut(f,
           own: own,
+          afk: f.action == 'afk',
           atYou: isSelf(f.targetId) && !isSelf(f.actorId),
-          autoSelf: isSelf(f.actorId) && f.targetId.isEmpty && f.reason.isNotEmpty),
-      'in' => MemberBack(f, own: own),
-      'ready' => ReadyChanged(f, own: own, ready: true, readyIndex: readyCount),
-      'unready' => ReadyChanged(f, own: own, ready: false),
-      'force-ready' => ForcedReady(f, own: own, ready: true),
-      'force-unready' => ForcedReady(f, own: own, ready: false),
-      'force-play' => ForcedTransport(f, own: own, play: true),
-      'force-hold' => ForcedTransport(f, own: own, play: false),
+          autoSelf: isSelf(f.actorId) && f.targetId.isEmpty && (f.action == 'afk' || f.reason == 'minimised')),
+      'in' => MemberIn(f, own: own),
+      'continue' => ContinuedWithout(f, own: own, atYou: isSelf(f.targetId) && !isSelf(f.actorId)),
+      'play' => Played(f, own: own),
       'swap' => MediaSwapped(f, own: own),
       'seek' => Seeked(f, own: own),
       'pause' => Paused(f, own: own),
@@ -82,37 +80,44 @@ class MemberReturned extends FeedEvent {
   const MemberReturned(super.feed, {super.own});
 }
 
-/// Someone sat out (`away`: the actor itself, or `target` sat out by the
-/// actor; `reason` `idle` / `minimised` for an automatic one); [atYou]:
-/// someone else sat this member out; [autoSelf]: this app's auto sit-out
-/// set this member away.
-class MemberSatOut extends FeedEvent {
+/// Someone is BRB (`brb`: the actor itself, or `target` set BRB by the
+/// actor, "Wait for Bob"); [atYou]: someone else set this member BRB.
+class MemberBrb extends FeedEvent {
+  final bool atYou;
+  const MemberBrb(super.feed, {super.own, this.atYou = false});
+}
+
+/// Back from BRB (`back`).
+class MemberBackFromBrb extends FeedEvent {
+  const MemberBackFromBrb(super.feed, {super.own});
+}
+
+/// Someone is out (`out`: the actor itself, or `target` set out by the
+/// actor; `reason` `minimised` / `closed` / `continue`) or AFK (`afk`,
+/// [afk]); [atYou]: someone else set this member out; [autoSelf]: this
+/// app set it by itself (AFK, minimised).
+class MemberOut extends FeedEvent {
+  final bool afk;
   final bool atYou;
   final bool autoSelf;
-  const MemberSatOut(super.feed, {super.own, this.atYou = false, this.autoSelf = false});
+  const MemberOut(super.feed, {super.own, this.afk = false, this.atYou = false, this.autoSelf = false});
 }
 
-/// Back from sitting out (`in`).
-class MemberBack extends FeedEvent {
-  const MemberBack(super.feed, {super.own});
+/// Back from AFK or out (`in`): joined at the current moment.
+class MemberIn extends FeedEvent {
+  const MemberIn(super.feed, {super.own});
 }
 
-class ReadyChanged extends FeedEvent {
-  final bool ready;
-  /// Members ready when it came (pitch of the ready sound).
-  final int readyIndex;
-  const ReadyChanged(super.feed, {super.own, required this.ready, this.readyIndex = 0});
+/// Someone continued without the ones the group waited for (`continue`;
+/// `target` one member); [atYou]: without this member.
+class ContinuedWithout extends FeedEvent {
+  final bool atYou;
+  const ContinuedWithout(super.feed, {super.own, this.atYou = false});
 }
 
-class ForcedReady extends FeedEvent {
-  final bool ready;
-  const ForcedReady(super.feed, {super.own, required this.ready});
-}
-
-/// Force play / hold.
-class ForcedTransport extends FeedEvent {
-  final bool play;
-  const ForcedTransport(super.feed, {super.own, required this.play});
+/// Someone pressed play (`play`).
+class Played extends FeedEvent {
+  const Played(super.feed, {super.own});
 }
 
 class MediaSwapped extends FeedEvent {

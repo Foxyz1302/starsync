@@ -32,7 +32,7 @@ Future<void> _quiet(SessionCoordinator c) async {
 
 void main() {
   test(
-    'two app coordinators split play on readiness over real server',
+    'two app coordinators: one Play for everyone, a pause, a BRB, over a real server',
     timeout: const Timeout(Duration(minutes: 4)),
     () async {
       MediaKit.ensureInitialized();
@@ -67,21 +67,74 @@ void main() {
         expect(viewer.playback.player.state.playing, isFalse);
 
         await _poll(() => host.serverState.peek() != null, 'host server state');
-        host.toggleReady();
-        await Future.delayed(const Duration(seconds: 5));
-        expect(host.serverState.peek()?.transport, 'held',
-            reason: 'one Space with company present must not solo-play');
-        expect(host.playback.player.state.playing, isFalse);
-        expect(viewer.playback.player.state.playing, isFalse);
-
-        viewer.toggleReady();
+        // Nothing starts because time passed: the media waits for one Play.
+        await Future.delayed(const Duration(seconds: 3));
+        expect(host.serverState.peek()?.transport, 'held');
+        // One Play is everyone's: both players start once both have it.
+        host.play();
         await _poll(
           () =>
               host.serverState.peek()?.transport == 'playing' &&
               viewer.playback.player.state.playing &&
               host.playback.player.state.playing,
-          'both players playing once quorum readies',
+          'both players playing on one Play',
         );
+        // A pause is anyone's too.
+        viewer.pause();
+        await _poll(() => !host.playback.player.state.playing && !viewer.playback.player.state.playing,
+            'both paused');
+        // BRB holds the group; when the viewer is back it plays again (it
+        // wanted to when the BRB began).
+        viewer.play();
+        await _poll(() => host.playback.player.state.playing, 'playing again');
+        viewer.brb();
+        await _poll(() => !host.playback.player.state.playing, 'held for the BRB');
+        expect(host.serverState.peek()?.hold?.brb, [viewer.connection.memberId]);
+        viewer.back();
+        await _poll(() => host.playback.player.state.playing && viewer.playback.player.state.playing,
+            'playing once back');
+
+        // Space, as the keys feed it: a tap pauses (on key-down), a tap plays
+        // (on key-up).
+        final viewerId = viewer.connection.memberId;
+        final hostId = host.connection.memberId;
+        void tap(SessionCoordinator c) {
+          c.space.keyDown();
+          c.space.keyUp();
+        }
+
+        Future<void> hold(SessionCoordinator c, Duration d) async {
+          c.space.keyDown();
+          await Future.delayed(d);
+          c.space.tick();
+          c.space.keyUp();
+        }
+
+        tap(viewer);
+        await _poll(() => host.serverState.peek()?.wantsPlay == false && !host.playback.player.state.playing,
+            'a tap paused everyone');
+        tap(viewer);
+        await _poll(() => host.playback.player.state.playing, 'a tap played');
+        // A 0.6 s hold: BRB, and it plays again once back (it was playing).
+        await hold(viewer, const Duration(milliseconds: 700));
+        await _poll(() => host.serverState.peek()?.hold?.brb.contains(viewerId) ?? false, 'BRB by the hold');
+        expect(host.serverState.peek()!.wantsPlay, isTrue, reason: 'it plays once the viewer is back');
+        expect(host.playback.player.state.playing, isFalse);
+        // While the viewer is BRB a tap makes the host BRB too; the viewer's
+        // 2 s hold continues without the host: out, the viewer back, playing.
+        tap(host);
+        await _poll(() => host.serverState.peek()?.hold?.brb.contains(hostId) ?? false, 'BRB too');
+        await hold(viewer, const Duration(milliseconds: 2100));
+        await _poll(
+            () =>
+                host.selfOut.peek() &&
+                viewer.serverState.peek()?.transport == 'playing' &&
+                viewer.playback.player.state.playing,
+            'continued without the host');
+        expect(host.playback.player.state.playing, isFalse, reason: "out: the host's player stays at its spot");
+        // Space while out: in at the current moment.
+        tap(host);
+        await _poll(() => !host.selfOut.peek() && host.playback.player.state.playing, 'the host joined');
       } finally {
         await host.dispose();
         await viewer.dispose();

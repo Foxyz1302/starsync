@@ -124,6 +124,27 @@ void main() {
       expect(server.session.tokens, isEmpty);
     });
 
+    test('a 1.4.x hello (proto 16) gets the version refusal its app words as "update the app"', () async {
+      final ch = WebSocketChannel.connect(Uri.parse('ws://127.0.0.1:${server.boundPort}/sync'));
+      ch.sink.add(jsonEncode({
+        't': 'hello',
+        'protoMin': 16,
+        'proto': 16,
+        'secret': 'shh',
+        'user': {'name': 'old', 'avatar': ''},
+        'media': {},
+        'client': 'abcdefghijklmnopqrstuv',
+      }));
+      final frames = await ch.stream.toList().timeout(const Duration(seconds: 5));
+      final err = jsonDecode('${frames.single}') as Map;
+      // A 1.4.x app reads `min` above its own 16: "the host runs a newer
+      // Starsync — update the app" (and its /health gate says the same first).
+      expect([err['t'], err['code'], err['min'], err['max']], ['err', 'version', 17, 17]);
+      expect(err['message'], startsWith('proto mismatch: got 16'));
+      expect(ch.closeCode, CloseCodes.version);
+      expect(server.session.tokens, isEmpty);
+    });
+
     test('media: no token 401, bad token 401, good token 200 byte-exact',
         () async {
       final good = await hello('shh');
@@ -187,7 +208,7 @@ void main() {
       }
       expect(wsClosed, isTrue);
       expect(ch.closeCode, CloseCodes.silent);
-      expect(server.hub.engine.members[token]!.presence, Presence.gone);
+      expect(server.hub.engine.members[token]!.gone, isTrue);
       expect(server.session.tokens.containsKey(token), isTrue);
       try {
         await sub.cancel();

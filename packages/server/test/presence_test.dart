@@ -79,7 +79,7 @@ void main() {
     final alice = await join('alice', client: install, seq: 1);
     final bob = await join('bob');
     await alice.ws.close();
-    await _until(() => server.hub.engine.byClient(install)?.presence == Presence.gone, 'gone');
+    await _until(() => server.hub.engine.byClient(install)?.gone ?? false, 'gone');
     expect(alice.welcome.grace, RelayConstants.graceSecs);
     // Bob keeps talking; alice says nothing.
     for (var i = 0; i < 59; i++) {
@@ -104,10 +104,10 @@ void main() {
     final alice = await join('alice', client: install, seq: 1);
     final bob = await join('bob');
     await alice.ws.close();
-    await _until(() => server.hub.engine.byClient(install)?.presence == Presence.gone, 'gone');
+    await _until(() => server.hub.engine.byClient(install)?.gone ?? false, 'gone');
     await _until(
         () => bob.frames.any((f) =>
-            f['t'] == 'state' && (f['members'] as List).any((m) => (m as Map)['presence'] == 'gone')),
+            f['t'] == 'state' && (f['members'] as List).any((m) => (m as Map)['goneSince'] != null)),
         'presence in state at once');
     step(const Duration(seconds: 5));
     final quick = await join('alice', client: install, seq: 2);
@@ -116,7 +116,7 @@ void main() {
     expect(bob.feed.map((f) => f['action']), isNot(anyOf(contains('gone'), contains('return'), contains('leave'))));
     expect(bob.feed.where((f) => f['action'] == 'join'), hasLength(1), reason: "bob's own join only");
     await quick.ws.close();
-    await _until(() => server.hub.engine.byClient(install)?.presence == Presence.gone, 'gone again');
+    await _until(() => server.hub.engine.byClient(install)?.gone ?? false, 'gone again');
     step(const Duration(seconds: 10));
     await _until(() => bob.feed.any((f) => f['action'] == 'gone'), 'gone line after 10 s');
     await join('alice', client: install, seq: 3);
@@ -128,20 +128,20 @@ void main() {
   test('feed lines carry ids and seq; a reconnect replays what came after feedAfter', () async {
     final alice = await join('alice', client: install, seq: 1);
     final bob = await join('bob');
-    bob.ws.add(jsonEncode(const ReadyIntent(ready: true).toJson()));
-    await _until(() => alice.feed.any((f) => f['action'] == 'ready'), 'ready line');
+    bob.ws.add(jsonEncode(const PresenceIntent(state: Presence.brb).toJson()));
+    await _until(() => alice.feed.any((f) => f['action'] == 'brb'), 'brb line');
     final seqs = [for (final f in alice.feed) f['seq'] as int];
     expect(seqs, orderedEquals([...seqs]..sort()));
-    final ready = alice.feed.firstWhere((f) => f['action'] == 'ready');
+    final ready = alice.feed.firstWhere((f) => f['action'] == 'brb');
     expect(ready['actorId'], bob.welcome.memberId);
     final last = seqs.last;
     await alice.ws.close();
     bob.ws.add(jsonEncode(const ChatMessage(text: 'while you were out').toJson()));
-    bob.ws.add(jsonEncode(const ReadyIntent(ready: false).toJson()));
+    bob.ws.add(jsonEncode(const PresenceIntent(state: Presence.watching).toJson()));
     await _until(() => server.hub.engine.feed.lastSeq >= last + 2, 'lines while away');
     final again = await join('alice', client: install, seq: 2, feedAfter: last);
     final replayed = again.welcome.feed;
-    expect(replayed.map((f) => f.action), containsAllInOrder(['chat', 'unready']));
+    expect(replayed.map((f) => f.action), containsAllInOrder(['chat', 'back']));
     expect(replayed.every((f) => f.replayed && f.seq > last), isTrue);
     expect(again.feed, isEmpty, reason: 'replayed only inside welcome');
   });
@@ -168,7 +168,7 @@ void main() {
     await old.drain<void>().timeout(const Duration(seconds: 5));
     expect(old.closeCode, CloseCodes.stale);
     await alice.ws.close();
-    await _until(() => server.hub.engine.byClient(install)?.presence == Presence.gone, 'gone');
+    await _until(() => server.hub.engine.byClient(install)?.gone ?? false, 'gone');
     final again = await join('alice', client: install, seq: 4);
     await _until(() => again.frames.any((f) => f['t'] == 'state'), 'state');
     final state = again.frames.lastWhere((f) => f['t'] == 'state');

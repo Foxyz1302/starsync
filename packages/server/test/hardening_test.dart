@@ -135,20 +135,20 @@ void main() {
         server.hub.engine.members.values.firstWhere((m) => m.name == name).id;
     EngineMember of(String name) =>
         server.hub.engine.members.values.firstWhere((m) => m.name == name);
-    friend.send(jsonEncode(PresenceIntent(target: idOf('host'), state: Presence.away).toJson()));
+    friend.send(jsonEncode(PresenceIntent(target: idOf('host'), state: Presence.out).toJson()));
     var feed = await friend.next('feed');
-    while (feed['action'] != 'away') {
+    while (feed['action'] != 'out') {
       feed = await friend.next('feed');
     }
     expect([feed['actor'], feed['target'], feed['actorId'], feed['targetId']],
         ['friend', 'host', idOf('friend'), idOf('host')]);
-    expect(of('host').presence, Presence.away);
-    expect(server.hub.engine.countsForGate(of('host')), isFalse);
+    expect(of('host').presence, Presence.out);
+    expect(server.hub.engine.videoCounts(of('host')), isFalse);
     // Only oneself comes back.
     friend.send(jsonEncode(PresenceIntent(target: idOf('host'), state: Presence.watching).toJson()));
     final err = await friend.next('err');
     expect([err['code'], err['for']], ['forbidden', 'presence']);
-    expect(of('host').presence, Presence.away);
+    expect(of('host').presence, Presence.out);
     host.send(jsonEncode(const PresenceIntent(state: Presence.watching).toJson()));
     await Future.delayed(const Duration(milliseconds: 200));
     expect(of('host').presence, Presence.watching, reason: 'no media up: nothing to load');

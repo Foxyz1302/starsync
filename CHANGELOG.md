@@ -24,23 +24,38 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - M mutes and unmutes the video
 - When Starsync crashes or freezes, it now notes it in the diagnostics it shares by itself (on Windows with the system's crash report from the next start), so a problem can be tracked down without you sending anything
 - Mark a whole Jellyfin show or season watched (or unwatched) from its page or its right-click menu; a whole show asks first
-- People cards: rest the mouse on someone (their avatar in the top bar or in fullscreen, a member's row, a chat line, a toast, or click a danmaku line's name) for a card with a bigger picture (click it to see it full size), whether they are watching, away or reconnecting, ready, their Starsync version and what they pass on, plus Nudge, Force ready and Sit out. A click keeps it open
+- People cards: rest the mouse on someone (their avatar in the top bar or in fullscreen, a member's row, a chat line, a toast, or click a danmaku line's name) for a card with a bigger picture (click it to see it full size), whether they are watching, BRB, AFK, out or reconnecting, their Starsync version and what they pass on, plus Wait for / Don't wait for, Nudge and Out. A click keeps it open
+- BRB: hold Space for half a second and everyone waits for you ("Waiting for Bob"); when you are back it plays on if it was playing. While someone is BRB, Space makes you BRB too or brings you back, and holding it for 2 seconds goes on without them
+- Right-click and hold on the video (or right-click, then click) for a round menu: BRB or I'm back, Skip OP, Skip 1:30 or Next episode, Out or Join
+- "Wait for Bob" on someone's card when they ran off without pressing anything, and "Don't wait for Bob" to go on without whoever everyone waits for
+- Someone who comes back from further behind (out, a crash, a stalled video) gives everyone "Rewind for Alice (1:42)" for half a minute
+- Up next counts down over the last 10 seconds of a video and the next one starts the moment it ends; a pause or Cancel stops it at the end. Clips under a minute just say what is up next
+- Avatar shape: everyone's picture as a rounded square, or as a circle (Settings → Party → More)
 
 ### Changed
 
+- Play and pause are everyone's: one press of Space or the play button plays or pauses for the whole group, and nobody presses "ready" any more (the ready count, Force ready and Mark everyone ready are gone). A new video waits for one Play, and putting something up keeps it playing or paused
+- Nothing starts by itself because time passed: the group waits for a video that is still loading until it is there or someone goes on without it
+- The pill at the bottom says who everyone waits for, with their pictures and the keys that do something now ("Space: BRB too · Hold Space: continue without"); holding Space fills it, and subtitles move up out of its way
+- Out replaces sitting out: nobody waits for you, your player stays where you were, and Space or Join brings you in at the current moment. Closing the player, or the window minimised for 10 minutes while it plays, sets you out
+- AFK replaces auto sit-out: 10 minutes without input while nothing plays; any key or the mouse brings you back. It has no switch any more
+- Pictures fill their shape, with a small badge for BRB (a cup), AFK (Zz) and out (a crossed eye) instead of a coloured ring; loading and reconnecting run round the edge, and the pictures in the top bar are bigger
+- "Next episode" shows through the ending, or the last 90 seconds when the ending is not known
+- An Up next item that does not come up in time is asked of someone else who can put it up (or once more) instead of quietly stopping
+- Everyone needs this version: an older app is told to update before it joins
 - The server's name in the top bar shows it can be clicked (a ▾, a hover and a tooltip): it opens everyone in the server
 - A pasted or dropped link or video says "Opening youtube.com…" (or "Adding … to Up next…") at the bottom of the window until it is up
 - The player's timeline shows exactly which parts of the video are downloaded, also behind you and around a jump, not just how far ahead (both designs, and Minimal's thin line)
 - The volume slider now stays next to the speaker in the player (in a narrow window it still slides out when you point at the speaker)
 - The player panel opens with Sound: the video's volume and App sounds (how loud the app's own cues are, so the two are no longer confused); its All settings button opens the matching Settings page
-- ⚙ in the player now opens and closes the player settings panel directly. Change video, Copy link, Reload video, Skip 1:30, Chapters, Mark everyone ready, Mark a problem and Leave server moved to a new ⋯ button in the player's top bar ("Video and session"), next to Up next. The shader is picked in the panel (or with Ctrl+0…6)
+- ⚙ in the player now opens and closes the player settings panel directly. Change video, Copy link, Reload video, Skip 1:30, Chapters, Mark a problem and Leave server moved to a new ⋯ button in the player's top bar ("Video and session"), next to Up next. The shader is picked in the panel (or with Ctrl+0…6)
 - The player panel shows the same rows with the same names as Settings: Subtitles & audio together, the upscaling shader with HQ or Fast under it, sharp video and hardware decoding folded under Troubleshooting, and now chat pop-ups and the controls size too
 - Settings → Notifications & sounds starts with what shows over the video (toasts or danmaku, chat pop-ups, joins and leaves); the danmaku look with its preview, what pops up when, and each sound's own settings are under More
 - Settings has six pages: Player, Party, Notifications & sounds, Library & accounts, Updates, and Help & about. Each starts with the settings people change and folds the rest under More, and Ctrl+, opens on Player
-- Your picture, name and colour can be changed right in Settings → Party, next to auto sit-out, your server and recent servers
+- Your picture, name and colour can be changed right in Settings → Party, next to your server and recent servers
 - yt-dlp and its cookies are in Settings → Library & accounts → Web links (where a "needs cookies" message now points), and "Play the next episode automatically" is in Settings → Player
 - Diagnostics, sharing them with the server, the keyboard shortcuts (now all of them: M, Ctrl+, Ctrl+V and the library's keys) and About are together in Settings → Help & about
-- A few choices made way for their defaults: the controls always hide after 3 s, you stay ready when the video changes, and updates are always checked (nothing installs without asking). The time display follows a click on the time, and hiding re-releases is in the Latest row's menu
+- A few choices made way for their defaults: the controls always hide after 3 s, and updates are always checked (nothing installs without asking). The time display follows a click on the time, and hiding re-releases is in the Latest row's menu
 - Joining without a name no longer stops with an error: the app asks "Wait, what do we call you?" right there (your computer's user name to start with, plus picture and colour), and OK carries on with the join
 - In fullscreen the party's avatars come up with the controls, also while the video plays, and work like the ones in the strip
 - A click on an avatar in the top bar now opens that person's card; who is in the server opens from the server's name next to the avatars (or "Everyone in the server" on a card)

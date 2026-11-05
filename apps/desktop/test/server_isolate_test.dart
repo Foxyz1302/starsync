@@ -189,13 +189,13 @@ void main() {
       }));
       await _poll(() => coord.queue.items.peek().length == 1, 'queued by the friend');
       expect(coord.alone.peek(), isFalse);
-      // Anyone may sit the host out; its player unloads, the server serves on.
-      friend.ws.add(jsonEncode(PresenceIntent(target: me, state: Presence.away).toJson()));
-      await _poll(() => coord.selfAway.peek(), 'host sat out');
+      // Anyone may set the host out; its player stays, the server serves on.
+      friend.ws.add(jsonEncode(PresenceIntent(target: me, state: Presence.out).toJson()));
+      await _poll(() => coord.selfOut.peek(), 'host out');
       final friendId = _members(state).firstWhere((m) => m['name'] == 'friend')['id'];
       coord.nudgeMember('$friendId');
       expect((await friend.next('nudge'))['name'], isNotEmpty);
-      coord.joinBack();
+      coord.join();
 
       await yours.stopSharing();
       expect(await friend.done.future.timeout(const Duration(seconds: 5)), CloseCodes.closed,

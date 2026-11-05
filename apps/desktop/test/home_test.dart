@@ -241,7 +241,7 @@ void main() {
     expect(find.text('Web links'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('settings-help')));
     await tester.pumpAndSettle();
-    expect(find.text('Toggle ready (anywhere in a server)'), findsOneWidget);
+    expect(find.text('Play / pause for everyone; hold: BRB (anywhere in a server)'), findsOneWidget);
     expect(find.text('Dev build — update checks are off'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('tab-library')));
     await tester.pumpAndSettle();

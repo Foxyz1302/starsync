@@ -117,7 +117,7 @@ class MemberDelivery {
   final DeliveryKind kind;
   /// Bytes per second the server sends it lately.
   final int rate;
-  /// Null when it does not count: sitting out, reconnecting, cannot play.
+  /// Null when it does not count: out, reconnecting, cannot play.
   final BufferHealth? health;
   final double buffered;
   /// The media is a Jellyfin item (direct = its own account).
@@ -160,7 +160,7 @@ class Delivery {
   final DateTime? at;
   /// `media.relay.rate` / `need` (0 unknown).
   final int rate, need;
-  /// Members (not sitting out, not the source) reading from the server,
+  /// Members (not out, not the source) reading from the server,
   /// and fetching it themselves.
   final int viaServer, direct;
   const Delivery({
@@ -293,7 +293,7 @@ Delivery? deliveryOf(StateBroadcast r, {required String selfId, MemberNames? nam
       ? SourceState.ok
       : kind == DeliveryKind.memberRelay && source == null
           ? SourceState.left
-          : kind == DeliveryKind.memberRelay && (relay.sourceGone || source?.presence == Presence.gone)
+          : kind == DeliveryKind.memberRelay && (relay.sourceGone || (source?.gone ?? false))
               ? SourceState.gone
           : !relay.live
               ? SourceState.waiting
@@ -338,7 +338,7 @@ DeliveryRoute? routeOf(MemberView m, DeliveryKind kind, String sourceId, Jellyfi
 
 /// [m]'s route and buffer for [d] (from [deliveryOf] on [r]).
 MemberDelivery memberDeliveryOf(MemberView m, StateBroadcast r, Delivery d) {
-  final counts = countsForReady(m);
+  final counts = watchingNow(m);
   final need = r.bufferNeed;
   final ref = refOfStateMedia(r.media);
   final health = !counts
@@ -349,7 +349,7 @@ MemberDelivery memberDeliveryOf(MemberView m, StateBroadcast r, Delivery d) {
               ? BufferHealth.starving
               : BufferHealth.low;
   return MemberDelivery(
-    route: m.presence == Presence.away ? null : routeOf(m, d.kind, d.sourceId, ref, r.relay),
+    route: m.isOut ? null : routeOf(m, d.kind, d.sourceId, ref, r.relay),
     kind: d.kind,
     jellyfin: ref != null,
     rate: m.rate,

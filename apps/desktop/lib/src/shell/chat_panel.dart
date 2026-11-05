@@ -90,7 +90,7 @@ class _ChatPanelState extends State<ChatPanel> {
                   builder: (context, on, _) => FilterChip(
                     key: const ValueKey('chat-activity'),
                     label: const Text('Activity', style: TextStyle(fontSize: 12)),
-                    tooltip: 'Show joins, ready, seeks and other activity',
+                    tooltip: 'Show joins, BRBs, seeks and other activity',
                     selected: on,
                     showCheckmark: false,
                     visualDensity: VisualDensity.compact,
@@ -274,18 +274,19 @@ Future<void> _messageMenu(BuildContext context, String text, String? link) async
     case 'leave':
       final reason = f.reason == 'grace' ? ' · lost signal too long' : '';
       return (Icons.logout, Colors.grey, 'left$reason');
-    case 'ready':
-      return (Icons.check_circle, Colors.green, 'is ready');
-    case 'unready':
-      return (Icons.radio_button_unchecked, Colors.grey, "isn't ready");
-    case 'force-ready':
-      return (Icons.how_to_reg, Colors.orange, 'marked ${f.target ?? ''} ready');
-    case 'force-unready':
-      return (Icons.how_to_reg, Colors.orange, 'marked ${f.target ?? ''} not ready');
-    case 'force-play':
-      return (Icons.play_arrow, Colors.green, 'started playback for everyone');
-    case 'force-hold':
-      return (Icons.pause, Colors.orange, 'held playback for everyone');
+    case 'play':
+      return (Icons.play_arrow, Colors.green, 'pressed play');
+    case 'pause':
+      return (Icons.pause, Colors.orange, 'paused');
+    case 'brb':
+      final who = f.target;
+      return (Icons.coffee_rounded, Colors.amber, who == null || who.isEmpty ? 'is BRB' : 'waits for $who (BRB)');
+    case 'back':
+      return (Icons.waving_hand_rounded, Colors.green, "is back");
+    case 'continue':
+      final who = f.target;
+      return (Icons.fast_forward_rounded, Colors.orange,
+          who == null || who.isEmpty ? 'went on without the others' : "doesn't wait for $who");
     case 'seek':
       return (Icons.fast_forward, scheme.primary, 'seeked');
     case 'swap':
@@ -294,12 +295,19 @@ Future<void> _messageMenu(BuildContext context, String text, String? link) async
       return (Icons.cloud_off, Colors.orange, 'lost signal');
     case 'return':
       return (Icons.cloud_done, Colors.green, 'is back');
-    case 'away':
+    case 'afk':
+      return (Icons.snooze_rounded, Colors.blueGrey, 'is AFK');
+    case 'out':
       final who = f.target;
-      final why = f.reason.isEmpty ? '' : ' · ${f.reason}';
-      return (Icons.bedtime, Colors.blueGrey, '${who == null || who.isEmpty ? 'is sitting out' : 'sat $who out'}$why');
+      final why = switch (f.reason) {
+        'minimised' => ' · minimised',
+        'closed' => ' · closed the player',
+        'continue' => ' · the others went on',
+        _ => '',
+      };
+      return (Icons.visibility_off_rounded, Colors.blueGrey, '${who == null || who.isEmpty ? 'is out' : 'set $who out'}$why');
     case 'in':
-      return (Icons.login, Colors.green, 'joined back');
+      return (Icons.login, Colors.green, 'joined');
     case 'queue-add':
       return (Icons.playlist_add_rounded, scheme.primary, 'added ${f.target ?? ''} to Up next');
     case 'queue-remove':
@@ -318,8 +326,8 @@ Future<void> _messageMenu(BuildContext context, String text, String? link) async
   }
 }
 
-/// The server's own lines (pause / resume, the end, an Up next item
-/// nobody here can put up).
+/// The server's own lines (waiting for a video and going on, the end, an
+/// Up next item nobody here can put up).
 (IconData, Color, String) serverFeedStyle(FeedMessage f) => switch (f.action) {
       'resume' => (Icons.play_arrow, Colors.green, 'Playback resumed'),
       'finished' => (Icons.stop_circle_outlined, Colors.grey, 'Finished'),
@@ -328,7 +336,7 @@ Future<void> _messageMenu(BuildContext context, String text, String? link) async
           Colors.orange,
           'Skipped ${f.target ?? ''}${f.reason.isEmpty ? '' : ' · ${f.reason}'}'
         ),
-      _ => (Icons.pause, Colors.orange, 'Playback paused · waiting for readiness'),
+      _ => (Icons.pause, Colors.orange, 'Waiting for a video to load'),
     };
 
 String _clock(DateTime at) {

@@ -7,8 +7,9 @@ import 'package:hive_ce/hive.dart';
 /// The layout this build reads. 1: the layout of 1.2.x, where versioning
 /// starts (a box without a version is at 1). 2: auto sit-out replaces the
 /// idle switch. 3: the video volume is kept (`playerVolume`). 4: the
-/// settings cleanup drops three choices for their defaults.
-const settingsSchemaVersion = 4;
+/// settings cleanup drops three choices for their defaults. 5: BRB, AFK
+/// and Out replace the ready system: auto sit-out goes.
+const settingsSchemaVersion = 5;
 
 /// The box key holding the stored version.
 const settingsSchemaKey = 'schemaVersion';
@@ -28,7 +29,14 @@ const settingsMigrations = <SettingsMigration>[
   SettingsMigration(3, 'the video volume is kept across starts', _playerVolume),
   SettingsMigration(4, 'the controls hide after 3 s, the ready flag stays on a swap, updates are always checked',
       _droppedChoices),
+  SettingsMigration(5, 'AFK replaces auto sit-out (no switch)', _noAutoSitOut),
 ];
+
+/// 5: AFK is always on (it never holds anyone back), so the auto sit-out
+/// switch goes.
+Future<void> _noAutoSitOut(Box box) async {
+  await box.delete('autoSitOut');
+}
 
 /// The keys step 4 removes: their choices went for the defaults (the
 /// controls hide after 3 s, ready stays when the video changes, updates

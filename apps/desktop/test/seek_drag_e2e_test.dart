@@ -57,7 +57,7 @@ void main() {
             name: 'solo'));
         await c.playback.player.setVolume(0);
         await _poll(() => c.serverState.peek() != null, 'server state');
-        c.toggleReady();
+        c.play();
         await _poll(
             () => c.playback.player.state.playing && c.playback.positionSecs > 1,
             'solo playback');
@@ -128,8 +128,8 @@ void main() {
           await c.playback.player.setVolume(0);
         }
         await _poll(() => a.serverState.peek()?.members.length == 2, 'both in');
-        a.toggleReady();
-        b.toggleReady();
+        a.play();
+        b.play();
         await _poll(
             () => a.playback.player.state.playing && b.playback.player.state.playing,
             'both playing');

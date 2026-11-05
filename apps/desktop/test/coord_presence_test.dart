@@ -118,7 +118,7 @@ void main() {
     expect(await up.swapPicked(LinkMedia(link, anyway: true)), isNull);
     await _poll(() => xs.every((x) => x.playback.durationSecs > 100), 'all opened it', timeout: const Duration(seconds: 30));
     for (final x in xs) {
-      x.toggleReady();
+      x.play();
     }
     await _poll(() => xs.every((x) => x.playback.player.state.playing), 'all playing');
   }
@@ -149,7 +149,8 @@ void main() {
         if (s == null || s.media == null) lostState = true;
         if (bob.stateStale.peek()) sawStale = true;
         if (bob.unstable.peek()) sawUnstable = true;
-        return proxy.links.length > 1 && bob.connection.state.peek() is ConnOnline;
+        // Back online after going stale (another link may be a log upload).
+        return sawStale && proxy.links.length > 1 && bob.connection.state.peek() is ConnOnline;
       }, 'bob back online', timeout: const Duration(seconds: 30));
       expect(lostState, isFalse, reason: 'the state (and the update band off the video) survives the drop');
       expect(sawUnstable, isTrue, reason: '"connection unstable" before lost');
@@ -278,7 +279,7 @@ void main() {
       final restarter = await member(server.boundPort, 'restarter');
       final rid = restarter.connection.memberId;
       await restarter.leave(bye: false);
-      await _poll(() => server.hub.engine.byId(rid)?.presence == Presence.gone, 'gone, kept for its grace');
+      await _poll(() => server.hub.engine.byId(rid)?.gone ?? false, 'gone, kept for its grace');
       await Future.delayed(const Duration(seconds: 1));
       expect(feed.where((f) => f.action == 'leave' && f.actorId == rid), isEmpty);
     } finally {
@@ -337,7 +338,7 @@ void main() {
     }
   });
 
-  test('a restarted server (not resumed): the app sends its ready again (force-all included)',
+  test('a restarted server (not resumed): the app reports its BRB again (Wait for it included)',
       timeout: const Timeout(Duration(minutes: 2)), () async {
     final first = SyncServer(const AppConfig(port: 0, secret: 'force', name: 'force'));
     await first.start();
@@ -347,16 +348,17 @@ void main() {
     try {
       final coord = await member(port, 'watcher', secret: 'force');
       await friend.connect(wsUri: Uri.parse('ws://127.0.0.1:$port/sync'), secret: 'force', name: 'friend');
-      // Never pressed Space locally; a friend marks everyone ready.
-      friend.sendForce('all', true);
-      await _poll(() => coord.selfMember.peek()?.ready == true, 'forced ready to reach watcher');
+      // Never pressed Space locally; a friend waits for the watcher.
+      await _poll(() => coord.connection.memberId.isNotEmpty, 'watcher in');
+      friend.sendPresence(PresenceIntent(target: coord.connection.memberId, state: Presence.brb));
+      await _poll(() => coord.selfMember.peek()?.brb == true, 'the BRB to reach watcher');
       await friend.disconnect();
       await first.stop();
       await _poll(() => coord.reconnecting.peek(), 'reconnect to engage');
       second = SyncServer(AppConfig(port: port, secret: 'force', name: 'force'));
       await second.start();
-      await _poll(() => second!.hub.engine.members.values.any((m) => m.name == 'watcher' && m.ready),
-          'watcher to come back ready');
+      await _poll(() => second!.hub.engine.members.values.any((m) => m.name == 'watcher' && m.presence == Presence.brb),
+          'watcher to come back BRB');
     } finally {
       await friend.dispose();
       await second?.stop();
@@ -420,7 +422,7 @@ void main() {
       await _poll(() => [alice, bob].every((x) => x.playback.durationSecs > 100), 'both opened it',
           timeout: const Duration(seconds: 30));
       for (final x in [alice, bob]) {
-        x.toggleReady();
+        x.play();
       }
       await _poll(() => [alice, bob].every((x) => x.playback.player.state.playing), 'both playing');
       await Future.delayed(const Duration(seconds: 3));

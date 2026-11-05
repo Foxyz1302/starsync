@@ -56,7 +56,7 @@ ShellToast shellToastFor(ToastItem t, AvatarInfo Function(String name) avatar) {
 /// in, stays while the Notifier keeps it (it drops it after its time),
 /// then slides out and collapses its gap. A click on a chat toast opens
 /// the chat ([onOpenChat]); the rest let clicks through. What pops up at
-/// all (chat pop-ups, sitting out, alone) is the Notifier's policy.
+/// all (chat pop-ups, out, alone) is the Notifier's policy.
 class PartyToasts extends StatefulWidget {
   final VoidCallback? onOpenChat;
 

@@ -88,7 +88,7 @@ void main() {
       c.seekTo(12);
       c.seekTo(20);
       await c.playback.setVolume(30);
-      c.toggleReady();
+      c.play();
       expect(c.playback.seeksSent, seeks, reason: 'nothing reached mpv yet');
       await _poll(() => !c.playback.switching, 'loaded', timeout: const Duration(seconds: 20));
       await _poll(() => c.playback.playing && c.playback.positionSecs > 20, 'playing from 20 s');

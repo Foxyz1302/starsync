@@ -514,7 +514,7 @@ class _DanmakuLayerState extends State<DanmakuLayer> with SingleTickerProviderSt
       mainAxisSize: MainAxisSize.min,
       children: [
         if (avatar != null) ...[
-          LineAvatar(info: avatar, size: avatarSize, ring: false),
+          LineAvatar(info: avatar, size: avatarSize, marks: false),
           SizedBox(width: avatarGap),
         ],
         text,

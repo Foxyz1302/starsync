@@ -15,7 +15,7 @@ const _server = ServerAddress('h', 9, 'TOK');
 const _jf = JellyfinRef(serverId: 'S1', itemId: 'I1', title: 'Ep');
 
 MemberView _m(String id, {Presence presence = Presence.watching, Map<String, bool> jf = const {}, ClientCaps caps = const ClientCaps()}) =>
-    MemberView(id: id, name: id.toUpperCase(), ready: false, inSet: true, buffered: 0, presence: presence, jf: jf, caps: caps);
+    MemberView(id: id, name: id.toUpperCase(), buffered: 0, presence: presence, jf: jf, caps: caps);
 
 StateBroadcast _state(Map<String, Object?>? media,
         {List<MemberView>? members, bool relay = false, HoldInfo? hold, String transport = 'held'}) =>
@@ -120,7 +120,7 @@ void main() {
     expect(jellyfinRelayNeeded(with_([_m('m2', caps: const ClientCaps(jellyfin: true))]), _jf, 'm1'), isFalse,
         reason: 'its accounts are not reported yet: asked again with the next state');
     expect(jellyfinRelayNeeded(with_([_m('m2')], relay: true), _jf, 'm1'), isFalse, reason: "the server's login passes it on");
-    expect(jellyfinRelayNeeded(with_([_m('m2', presence: Presence.away)]), _jf, 'm1'), isFalse, reason: 'sitting out');
+    expect(jellyfinRelayNeeded(with_([_m('m2', presence: Presence.out)]), _jf, 'm1'), isFalse, reason: 'out');
     expect(jellyfinRelayNeeded(with_([]), _jf, 'm1'), isFalse, reason: 'alone');
   });
 
@@ -177,9 +177,9 @@ void main() {
     final r = _state({'name': 'f.mkv', 'relay': _relay(const MediaRelay(source: 'm2', live: true, sourceGone: true))},
         members: [
           _m('m1'),
-          MemberView(id: 'm2', name: 'Bob', ready: true, inSet: true, buffered: 0, presence: Presence.gone, goneSince: DateTime.utc(2026)),
+          MemberView(id: 'm2', name: 'Bob', buffered: 0, gone: true, goneSince: DateTime.utc(2026)),
         ],
-        hold: const HoldInfo(reason: HoldReason.source, members: ['m1']));
+        hold: const HoldInfo(video: ['m1'], source: true));
     for (final own in [false, true]) {
       final line = statusOf(StatusFacts(state: r, selfId: 'm1', ownPlan: own, now: DateTime.utc(2026))).line!;
       expect(line.text, 'Waiting for Bob');

@@ -69,15 +69,30 @@ void main() {
     expect(titles(), ['one']);
   });
 
-  test('skip asks for the first item; a play request times out', () {
+  test('skip asks for the first item; a request nobody acts on is asked again, then skipped', () {
     engine.applySwap('a', const HelloMedia(name: 'up', size: 0, duration: 0, url: 'https://x/up'));
     expect(engine.applyQueuePlay('a', ''), isFalse, reason: 'nothing queued');
     engine.applyQueueAdd('a', link('one'));
     expect(engine.applyQueuePlay('a', ''), isTrue);
     expect(engine.queue.play, idOf('one'));
-    t = t.add(const Duration(seconds: RelayConstants.queuePlayTimeoutSecs + 1));
-    engine.tick();
+    void late() {
+      t = t.add(const Duration(seconds: RelayConstants.queuePlayTimeoutSecs + 1));
+      engine
+        ..touch('a')
+        ..touch('b')
+        ..tick();
+    }
+
+    late();
+    expect(engine.queue.play, idOf('one'), reason: 'asked again');
+    expect(engine.broadcast().queuePass, ['m1'], reason: 'alice did not put it up: bob is asked');
+    expect(queuePerformer(engine.queue.items.first, engine.broadcast().members, pass: engine.queuePass).id, 'm2');
+    late();
+    expect(engine.queuePass, ['m1']);
+    late();
     expect(engine.queue.play, isNull);
+    expect(titles(), isEmpty, reason: "bob didn't either, twice: skipped");
+    expect(engine.feed.drain().lastWhere((f) => f.action == 'queue-skip').reason, "bob didn't put it up");
   });
 
   test('full at the cap', () {
@@ -132,8 +147,8 @@ void main() {
       expect(engine.applyQueueAdd('b', next('Ep02'))!.code, ErrCode.forbidden);
       expect(engine.applyQueueAdd('a', link('Ep02').copyWith(auto: true, forMedia: 99))!.code, ErrCode.bad);
       expect(engine.applyQueueAdd('a', next('Ep02')), isNull);
-      engine.applyPresence('a', '', Presence.away);
-      expect(engine.applyQueueAdd('b', next('Ep02b')), isNull, reason: 'the swapper is away: bob is the first in');
+      engine.applyPresence('a', '', Presence.out);
+      expect(engine.applyQueueAdd('b', next('Ep02b')), isNull, reason: 'the swapper is out: bob is the first present');
       expect(titles(), ['Ep02b'], reason: 'a newer one replaces it');
     });
 
@@ -186,17 +201,59 @@ void main() {
         ..tick();
     }
 
-    /// Ep01 (20 s) up by alice, both ready and buffered, played to its end.
-    void finish() {
+    /// Ep01 (20 s) up by alice, played, both buffered, second by second
+    /// to [secs].
+    void play() {
       engine.applySwap('a', const HelloMedia(name: 'Ep01', size: 0, duration: 20, url: 'https://example.com/1'));
+      engine.applyTransport('a', true);
       for (final tok in ['a', 'b']) {
-        engine.applyReady(tok, true);
         engine.applyReport(tok, 0, 100, engine.eventId, mediaId: engine.mediaId);
       }
       expect(engine.transport, Transport.playing);
-      after(21);
+    }
+
+    void playTo(int secs) {
+      for (var i = 0; i < secs; i++) {
+        after(1);
+      }
+    }
+
+    /// [play], then to its end.
+    void finish() {
+      play();
+      playTo(21);
       expect(engine.transport, Transport.finished);
     }
+
+    test('over the last 10 s, ending at the end: the next item is asked for the moment it ends', () {
+      engine.applyQueueAdd('b', link('two'));
+      play();
+      playTo(9);
+      expect(engine.advance, isNull, reason: '11 s left');
+      after(1);
+      final a = engine.advance!;
+      expect([a.id, a.secs], [idOf('two'), RelayConstants.advanceSecs]);
+      expect(a.at.add(Duration(seconds: a.secs)), DateTime.utc(2026, 1, 1, 0, 0, 20), reason: 'ends at the end');
+      playTo(10);
+      expect(engine.transport, Transport.finished);
+      expect(engine.queue.play, idOf('two'), reason: 'at once, no countdown after the end');
+    });
+
+    test('a pause during the countdown stops it at the end; one before it does not', () {
+      engine.applyQueueAdd('b', link('two'));
+      play();
+      playTo(5);
+      engine.applyTransport('b', false);
+      engine.applyTransport('b', true);
+      playTo(7);
+      expect(engine.advance, isNotNull, reason: 'a pause before the countdown changes nothing');
+      engine.applyTransport('b', false);
+      expect(engine.advance, isNull);
+      engine.applyTransport('b', true);
+      playTo(12);
+      expect(engine.transport, Transport.finished);
+      expect((engine.advance, engine.queue.play), (null, null), reason: 'stopped at the end');
+    });
 
 
     test('nothing up: the first item is asked for at once', () {
@@ -227,29 +284,30 @@ void main() {
     });
 
     test('a seek stops it; cancel stops it for this media and drops the continuation', () {
-      engine.applyQueueAdd('b', link('two'));
       finish();
+      engine.applyQueueAdd('b', link('two'));
       expect(engine.advance, isNotNull);
       engine.applySeek('b', 5);
       expect(engine.advance, isNull);
       expect(engine.transport, isNot(Transport.finished));
-      // Played to the end again: a fresh countdown.
-      after(16);
-      expect(engine.transport, Transport.finished);
+      // Playing towards the end again: a fresh countdown.
+      playTo(6);
       expect(engine.advance, isNotNull);
+      expect(engine.transport, Transport.playing);
       engine.applyQueueAdd('a', link('Ep02').copyWith(auto: true, forMedia: engine.mediaId));
       engine.feed.drain();
       expect(engine.applyQueueCancel('b'), isTrue);
       expect(engine.advance, isNull);
       expect(titles(), ['two']);
       expect(engine.feed.drain().single.action, 'advance-cancel');
-      after(30);
+      playTo(30);
+      expect(engine.transport, Transport.finished);
       expect((engine.advance, engine.queue.play), (null, null), reason: 'cancelled for this media');
     });
 
     test("holds while its performer is gone, plays once they're back", () {
-      engine.applyQueueAdd('b', file('bobs'));
       finish();
+      engine.applyQueueAdd('b', file('bobs'));
       engine.applyGone('b');
       after(12);
       expect(engine.queue.play, isNull, reason: 'held: only bob has the file');
@@ -262,8 +320,8 @@ void main() {
     test("holds while the item's relay source is gone", () {
       var sourceGone = true;
       engine.itemSourceGone = (_) => sourceGone;
-      engine.applyQueueAdd('b', link('two'));
       finish();
+      engine.applyQueueAdd('b', link('two'));
       after(12);
       expect(engine.queue.play, isNull);
       sourceGone = false;
@@ -272,9 +330,9 @@ void main() {
     });
 
     test('what nobody here can put up is skipped by the server', () {
+      finish();
       engine.applyQueueAdd('b', file('bobs'));
       engine.applyQueueAdd('a', link('next'));
-      finish();
       engine.applyLeave('b', reason: 'bye');
       engine.feed.drain();
       after(11);

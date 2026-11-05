@@ -13,7 +13,7 @@ A five-minute tour. Details: [ARCHITECTURE.md](ARCHITECTURE.md), wire format:
            | sync (WebSocket)               | sync (WebSocket)
            v                                v
         +----------------------------------------+
-        |  server  (who is ready, where are we)  |
+        |  server  (who is here, where are we)   |
         +----------------------------------------+
 
  video bytes come from somewhere else:
@@ -28,7 +28,7 @@ A five-minute tour. Details: [ARCHITECTURE.md](ARCHITECTURE.md), wire format:
 ```
 
 - **App**: the desktop window. It draws the video with mpv, shows who is
-  here, and sends what you do (ready, seek, chat).
+  here, and sends what you do (play, pause, BRB, seek, chat).
 - **Server**: keeps one shared clock and the list of people. It never sees
   video frames, only "position 123 s, playing". There is exactly one server
   and one watch session on it.
@@ -64,43 +64,51 @@ brings you back.
    (version, password, name, avatar). Wrong password or version: refused with
    a reason. Otherwise the server answers with a welcome and the current state.
 2. **Catch up.** The app opens the current video, jumps to where the server
-   says we are, and buffers. Arriving while the video is stopped, you are
-   waited for; arriving while it plays, you never hold anyone back.
-3. **Ready gate.** Press Space to say you are ready. The server starts
-   playback only when everyone who is ready has at least 4 seconds buffered
-   (or what is left, near the end). At the end everyone stops and the server
-   stays finished until someone seeks back or changes the video.
-   Everyone who was there before it started must be ready, so one person
-   alone cannot start it for the others. A lone viewer can play alone.
-4. **Play.** The server owns the clock. Each app compares its mpv position
+   says we are, and buffers. Arriving while the video is stopped and wanted
+   to play, you are waited for; arriving while it plays, you never hold
+   anyone back.
+3. **Play and pause.** Play and pause are anyone's, one press for
+   everyone (Space, or the play button). Nothing starts because time
+   passed: a new video waits for one Play, then starts once everyone
+   watching has at least 4 seconds buffered (or what is left, near the
+   end). At the end everyone stops and the server stays finished until
+   someone seeks back or changes the video.
+4. **BRB.** Hold Space (or pick BRB in the right-click menu) and everyone
+   waits for you: "Waiting for Bob". When the last one is back it plays
+   again, if it was playing. While someone is BRB, Space makes you BRB too
+   (or brings you back), and a long hold goes on without them. Out means
+   nobody waits for you (closing the player, the menu, being gone on
+   without, or AFK: a while without input with nothing playing); Space
+   brings you in at the current moment, and the others get a "Rewind for
+   you" offer for half a minute.
+5. **Play.** The server owns the clock. Each app compares its mpv position
    to the clock: a small lead slows mpv a little (0.95x), a big gap (over 5 s)
-   jumps. If someone's buffer runs dry the server pauses everyone and resumes
-   when they have caught up.
-5. **Seek.** Anyone can seek, anytime. The server moves the clock and
-   everybody follows. Seeking does not change anyone's ready flag.
-6. **Swap.** Anyone can change the video by pasting another link. Everybody
-   stops at 0 and the gate runs again for everyone there; ready flags stay
-   as they were (a setting unreadies you instead).
-7. **What's next.** Up next is one list on the server for everyone, and
-   an episode you put up is followed by its next one. When a video ends
-   with something next, the server counts down 10 s on every screen;
-   anyone can cancel it for everyone (a seek stops it too). At zero the
-   app that has what plays next puts it up; if that person is away for a
-   moment, the countdown waits for them.
-8. **Leave.** Closing the app or Leave says goodbye and drops you from the
+   jumps. If someone's buffer runs dry the server waits for them and goes
+   on when they have caught up.
+6. **Seek.** Anyone can seek, anytime. The server moves the clock and
+   everybody follows.
+7. **Swap.** Anyone can change the video by pasting another link. Everybody
+   stops at 0 and it plays again once everyone has it, if it was playing.
+8. **What's next.** Up next is one list on the server for everyone, and
+   an episode you put up is followed by its next one. Over a video's last
+   10 s the server counts down on every screen and the next one starts the
+   moment it ends; anyone can cancel it for everyone (a pause or a seek
+   stops it too). The app that has what plays next puts it up; if that
+   person is away for a moment, it waits for them.
+9. **Leave.** Closing the app or Leave says goodbye and drops you from the
    server; the others keep going. If you vanish without a goodbye, after 15 s
-   of silence you are "gone": you stop blocking but keep your place
-   (ready flag, sitting out, Up next items, the video you pass on) for
+   of silence you are "gone": nobody waits for your video, but you keep
+   your place (BRB, out, Up next items, the video you pass on) for
    10 minutes. The app keeps playing and reconnects by itself, with an id
    of its own, and takes that place back.
 
-There are no roles: anyone can seek, swap, force-ready others, nudge
-anyone, and sit anyone out (the host too). Someone sitting out stays
-connected and in the chat, but their app loads nothing and nobody waits
-for them until they join back.
+There are no roles: anyone can play, pause, seek, swap, wait for someone
+or go on without them, nudge anyone, and set anyone out (the host too).
+Someone out stays connected and in the chat, their player stays where
+they were, and nobody waits for them until they join.
 
 Watched or not is counted by the time you were there while it played:
-sitting out, skipping around or a quick look never counts as watching.
+being out, skipping around or a quick look never counts as watching.
 Jellyfin hears it for your account; files and links are remembered on
 your computer.
 

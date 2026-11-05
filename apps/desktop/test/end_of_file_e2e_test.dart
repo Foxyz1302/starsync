@@ -42,7 +42,7 @@ void main() {
         await _poll(
             () => (c.serverState.peek()?.media?['duration'] as num? ?? 0) > 13,
             'server learns the duration from reports');
-        c.toggleReady();
+        c.play();
         await _poll(() => c.playback.player.state.playing, 'playing');
         c.seekTo(7);
         final transports = <String>[];

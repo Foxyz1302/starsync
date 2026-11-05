@@ -11,11 +11,11 @@ import 'whats_next.dart';
 
 typedef SyncClock = DateTime Function();
 
-/// How the server treats silence, drops and joiners (PROTOCOL.md
-/// "Presence"). Everything but [pingInterval] is measured on the engine's
-/// clock ([SyncEngine.clock]) by its 1 s sweep ([SyncEngine.tick]), so a
-/// test with a fake clock steps through them without waiting;
-/// [pingInterval] is the WebSocket's own timer (real time).
+/// How the server treats silence and drops (PROTOCOL.md "Presence").
+/// Everything but [pingInterval] is measured on the engine's clock
+/// ([SyncEngine.clock]) by its 1 s sweep ([SyncEngine.tick]), so a test
+/// with a fake clock steps through them without waiting; [pingInterval]
+/// is the WebSocket's own timer (real time).
 class Liveness {
   /// No frame for longer than this: the socket is closed and the member
   /// is `gone`.
@@ -25,18 +25,12 @@ class Liveness {
   /// The feed says `gone` only once a member has been gone this long (a
   /// quick return says nothing).
   final Duration goneNotice;
-  /// A `joining` member holds a HELD gate at most this long (D2).
-  final Duration joinerHold;
-  /// A `joining` member is `in` after this at the latest.
-  final Duration joiningTimeout;
   /// WebSocket ping on every `/sync` socket.
   final Duration pingInterval;
   const Liveness({
     this.silence = const Duration(seconds: RelayConstants.silenceSecs),
     this.grace = const Duration(seconds: RelayConstants.graceSecs),
     this.goneNotice = const Duration(seconds: RelayConstants.goneNoticeSecs),
-    this.joinerHold = const Duration(seconds: RelayConstants.joinerHoldSecs),
-    this.joiningTimeout = const Duration(seconds: RelayConstants.joiningTimeoutSecs),
     this.pingInterval = const Duration(seconds: RelayConstants.pingIntervalSecs),
   });
 }
@@ -73,6 +67,7 @@ String avatarHashOf(List<int> bytes) => sha256.convert(bytes).toString().substri
   return null;
 }
 
+
 class EngineMember {
   final String id;
   final String token;
@@ -85,18 +80,13 @@ class EngineMember {
   /// Picture bytes, served at `/a/...`; only [avatarHash] is broadcast.
   Uint8List? avatarBytes;
   String avatarHash = '';
-  bool ready = false;
-  /// In the ready gate's set (joined it while not playing, readied, or
-  /// was there at a swap); whether it counts also depends on [presence]
-  /// and [error] ([SyncEngine.countsForGate]).
-  bool inSet = false;
   double buffered = 0;
   /// Last reported Jellyfin access by ServerId (`report.jf`).
   Map<String, bool> jf = const {};
   /// The hosting app's own member (set by the server from the host key).
   bool host = false;
-  /// Its player cannot open the current media (`report.error`): outside
-  /// the ready gate until a report clears it or the media changes.
+  /// Its player cannot open the current media (`report.error`): never
+  /// waited for until a report clears it or the media changes.
   String error = '';
   /// Bytes per second the server sent it lately (set by the server).
   int rate = 0;
@@ -104,13 +94,28 @@ class EngineMember {
   String app;
   String platform;
   ClientCaps caps;
-  Presence presence;
-  /// When [presence] began (joining since, gone since, ...).
-  DateTime presenceSince;
+  /// Where it stands (`in`, `brb`, `afk`, `out`).
+  Presence presence = Presence.watching;
+  /// When [presence] began.
+  DateTime since;
+  /// Its player is not with the group yet (just joined, back from out or
+  /// a drop, left behind by a continue): until a report holds the current
+  /// media at the server position with the buffer the gate needs.
+  bool loading = false;
+  /// Someone continued without its video: never waited for until it is
+  /// with the group again ([loading] ends).
+  bool skipped = false;
+  /// Disconnected, kept for the grace.
+  bool gone = false;
+  DateTime? goneAt;
   /// Gone: whether the feed has said so yet (after [Liveness.goneNotice]).
   bool goneNoticed = false;
-  /// Gone: it was `away` before, and comes back `away`.
-  bool awayBeforeGone = false;
+  /// Its last reported position in the current media (null before one).
+  double? spot;
+  /// Where it fell behind the group (went out, dropped, was continued
+  /// without); coming back with the group from further back than
+  /// [RelayConstants.rewindBehindSecs] offers everyone a rewind there.
+  double? behind;
   DateTime lastSeen;
   EngineMember({
     required this.id,
@@ -123,9 +128,8 @@ class EngineMember {
     this.app = '',
     this.platform = '',
     this.caps = const ClientCaps(),
-    this.presence = Presence.watching,
   })  : lastSeen = now,
-        presenceSince = now {
+        since = now {
     setAvatar(avatar);
   }
 
@@ -148,18 +152,16 @@ class EngineMember {
     return true;
   }
 
-  /// When it went `gone`; null otherwise.
-  DateTime? get goneSince => presence == Presence.gone ? presenceSince : null;
-
-  MemberView view({required bool inGate}) => MemberView(
+  MemberView view() => MemberView(
         id: id,
         name: name,
         avatarHash: avatarHash,
-        ready: ready,
-        inSet: inGate,
         buffered: buffered,
         presence: presence,
-        goneSince: goneSince,
+        since: presence == Presence.watching ? null : since,
+        loading: loading && !presence.isOut,
+        gone: gone,
+        goneSince: gone ? goneAt : null,
         jf: jf,
         host: host,
         error: error,
@@ -223,10 +225,18 @@ class EngineFeed {
       ];
 }
 
+
+/// A rewind offered to everyone ([RewindOffer]) until [until].
+class _Rewind {
+  final String id;
+  final double position;
+  final DateTime until;
+  const _Rewind(this.id, this.position, this.until);
+}
+
 class SyncEngine {
   final SyncClock clock;
   final Liveness liveness;
-  final PresencePolicy policy;
   final EngineFeed feed = EngineFeed();
   /// Members by token, in join order.
   final Map<String, EngineMember> members = {};
@@ -237,6 +247,10 @@ class SyncEngine {
   DateTime serverTime;
   int mediaId = 1;
   HelloMedia? media;
+  /// The group's wish (`state.wish`): play or pause. A pause lasts until
+  /// someone plays; a swap keeps it; it plays when it wants to and nobody
+  /// is waited for ([waitedFor]).
+  bool wantsPlay = false;
   /// Token of the member who made the current swap; null before any swap.
   String? swapBy;
   /// Art of the current media (`art`), served at `/i/...`; only the hashes
@@ -246,19 +260,25 @@ class SyncEngine {
   /// Up next ([EngineQueue]): in `state.queue`, edited by `queue`
   /// messages, taken from by swaps that name an item.
   final EngineQueue queue = EngineQueue();
-  /// The shared countdown to Up next's first item at the end of the media
-  /// (`state.advance`, see [whatsNext]).
+  /// The shared countdown to Up next's first item (`state.advance`, see
+  /// [whatsNext]).
   QueueAdvance? advance;
   /// The relay of Up next item `queueId` waits for its source, who is
   /// `gone` (set by the server: the engine does not hold relays). The
   /// countdown holds while it does.
   bool Function(String queueId)? itemSourceGone;
-  // The mediaId whose countdown was cancelled (`cancel`): it does not
-  // start again for that media.
+  // The mediaId whose countdown was cancelled (`cancel`, or a pause during
+  // it): it does not start again for that media.
   int _advanceOffFor = -1;
   // The item last asked to play for the current media: not counted down
   // again.
   String? _advancedId;
+  // Members passed over for the play request [_passFor] (`queuePass`),
+  // and whether its only performer was asked twice.
+  final List<String> _pass = [];
+  String? _passFor;
+  bool _reasked = false;
+  final List<_Rewind> _rewinds = [];
   /// A member went `gone` (its socket closed or fell silent): the server
   /// closes the socket and marks a relay it serves.
   void Function(EngineMember member)? onGone;
@@ -273,7 +293,6 @@ class SyncEngine {
 
   SyncEngine({SyncClock? clock, this.liveness = const Liveness()})
       : clock = clock ?? (() => DateTime.now().toUtc()),
-        policy = PresencePolicy(joinerHold: liveness.joinerHold),
         serverTime = (clock ?? (() => DateTime.now().toUtc()))();
 
   DateTime get now => clock();
@@ -284,13 +303,18 @@ class SyncEngine {
     return position + t.difference(serverTime).inMilliseconds / 1000.0;
   }
 
-  /// Whether [member] counts for the ready gate now: in the set, no
-  /// player error, and its presence counts ([PresencePolicy], D2).
-  bool countsForGate(EngineMember member, [DateTime? at]) =>
-      member.inSet &&
+  /// The BRB members, connected or not: the group waits for them.
+  Iterable<EngineMember> get brbs => members.values.where((m) => m.presence == Presence.brb);
+
+  /// Whether the group waits for [member]'s video: watching, connected,
+  /// its player can open the media, nobody continued without it, and not
+  /// still loading while the group plays (a joiner never pauses anyone).
+  bool videoCounts(EngineMember member) =>
+      member.presence == Presence.watching &&
+      !member.gone &&
       member.error.isEmpty &&
-      policy.countsFor(member.presence, Purpose.gate,
-          playing: transport == Transport.playing, joiningFor: (at ?? now).difference(member.presenceSince));
+      !member.skipped &&
+      !(member.loading && transport == Transport.playing);
 
   /// Media length in seconds, null while nobody has reported it.
   double? get duration {
@@ -298,8 +322,8 @@ class SyncEngine {
     return d > 0 ? d : null;
   }
 
-  /// Buffer every in-set member needs: [RelayConstants.minBufferSecs], or
-  /// less near the end where that much is not left to buffer.
+  /// Buffer every watching member needs: [RelayConstants.minBufferSecs],
+  /// or less near the end where that much is not left to buffer.
   double requiredBufferSecs([DateTime? at]) {
     final d = duration;
     const full = RelayConstants.minBufferSecs;
@@ -326,38 +350,86 @@ class SyncEngine {
       reason: reason,
       at: now);
 
-  /// Heartbeat (1 s): silence, joining timeouts, gone notices, grace,
-  /// a stale play request, end of media, what's next.
+  /// Heartbeat (1 s): silence, gone notices, grace, rewinds running out,
+  /// a play request nobody acted on, end of media, what's next.
   void tick() {
     sweepSilent();
     sweepPresence();
-    queue.tick(now);
+    final t = now;
+    _rewinds.removeWhere((r) => !t.isBefore(r.until));
+    _askAgain();
     evaluate();
     whatsNext();
+  }
+
+  /// A play request nobody acted on within
+  /// [RelayConstants.queuePlayTimeoutSecs] is asked again: of someone else
+  /// who can put it up when there is one (the one who did not goes into
+  /// `queuePass`), else of the same member once more; then the item is
+  /// skipped (feed `queue-skip`). While nobody is around it keeps waiting.
+  void _askAgain() {
+    final play = queue.play;
+    if (play == null || !queue.overdue(now)) return;
+    final item = queue.item(play);
+    if (item == null) return;
+    _syncPass();
+    final views = [for (final m in members.values) m.view()];
+    final perf = queuePerformer(item, views, pass: _pass).id;
+    if (perf == null) {
+      queue.reask(now);
+      return;
+    }
+    final other = queuePerformer(item, views, pass: [..._pass, perf]).id;
+    if (other != null && other != perf) {
+      _pass.add(perf);
+      queue.reask(now);
+    } else if (!_reasked) {
+      _reasked = true;
+      queue.reask(now);
+    } else {
+      final name = views.where((m) => m.id == perf).firstOrNull?.name ?? 'who puts it up';
+      _skipQueued(item, "$name didn't put it up");
+    }
+  }
+
+  /// [_pass] belongs to the current play request only.
+  void _syncPass() {
+    if (_passFor == queue.play) return;
+    _passFor = queue.play;
+    _pass.clear();
+    _reasked = false;
+  }
+
+  /// `state.queuePass`: members passed over for the current play request.
+  List<String> get queuePass {
+    _syncPass();
+    return List.unmodifiable(_pass);
   }
 
   /// What's next (PROTOCOL.md "Queue"), on every tick and queue change:
   /// - a play request (`queuePlay`) nobody here can serve is skipped
   ///   (feed `queue-skip`, actor `server`, with why: [queuePerformer]);
   /// - with nothing up, the first item is asked to play at once;
-  /// - at the end of the media with an item first, the countdown
-  ///   ([advance], [RelayConstants.advanceSecs]) starts (not again for a
-  ///   media whose countdown was cancelled, nor for the item it already
-  ///   asked for); it follows the first item when that changes, keeping
-  ///   its end; it ends with the end of `finished` (a seek), an empty
-  ///   queue, `cancel` or a swap. At its end the first item is asked to
-  ///   play (`queuePlay`) and the countdown is over, unless nobody can
-  ///   put it up (skipped) or its performer is not around or its relay's
-  ///   source is `gone` ([itemSourceGone]): then it holds until they are
-  ///   back.
+  /// - over the media's last [RelayConstants.advanceSecs] with an item
+  ///   first, the countdown ([advance]) runs, ending at the media's end
+  ///   (not for a media whose countdown was cancelled or paused, nor
+  ///   again for the item it already asked for); an item coming first
+  ///   once the media finished starts a countdown of its own; it follows
+  ///   the first item when that changes, keeping its end; a seek, an
+  ///   empty queue, `cancel`, a pause and a swap end it. At its end the
+  ///   first item is asked to play (`queuePlay`) and the countdown is
+  ///   over, unless nobody can put it up (skipped) or its performer is not
+  ///   around or its relay's source is `gone` ([itemSourceGone]): then it
+  ///   holds until they are back.
   /// Returns whether anything changed.
   bool whatsNext() {
     var changed = false;
-    final views = [for (final m in members.values) m.view(inGate: false)];
+    final views = [for (final m in members.values) m.view()];
     final play = queue.play;
+    _syncPass();
     if (play != null) {
       final item = queue.item(play);
-      final why = item == null ? null : queuePerformer(item, views).why;
+      final why = item == null ? null : queuePerformer(item, views, pass: _pass).why;
       if (item != null && why != null) {
         _skipQueued(item, why);
         changed = true;
@@ -369,13 +441,34 @@ class SyncEngine {
       return changed;
     }
     var a = advance;
-    if (a != null && (transport != Transport.finished || first == null || queue.play != null)) {
-      advance = a = null;
-      changed = true;
+    if (first == null || queue.play != null) {
+      if (a != null) {
+        advance = null;
+        changed = true;
+      }
+      return changed;
     }
-    if (transport != Transport.finished || first == null || queue.play != null) return changed;
+    final off = _advanceOffFor == mediaId || _advancedId == first.id;
+    if (transport != Transport.finished) {
+      final d = duration;
+      final left = d == null ? double.infinity : d - positionAt();
+      if (off || left > RelayConstants.advanceSecs || transport != Transport.playing && !wantsPlay) {
+        if (a != null) {
+          advance = null;
+          changed = true;
+        }
+        return changed;
+      }
+      // Ends at the media's end (while held its end moves on with now).
+      final at = now.add(Duration(milliseconds: ((left - RelayConstants.advanceSecs) * 1000).round()));
+      if (a == null || a.id != first.id || (a.at.difference(at).inMilliseconds).abs() > 400) {
+        advance = QueueAdvance(id: first.id, at: at, secs: RelayConstants.advanceSecs);
+        changed = true;
+      }
+      return changed;
+    }
     if (a == null) {
-      if (_advanceOffFor == mediaId || _advancedId == first.id) return changed;
+      if (off) return changed;
       advance = a = QueueAdvance(id: first.id, at: now, secs: RelayConstants.advanceSecs);
       changed = true;
     } else if (a.id != first.id) {
@@ -414,23 +507,18 @@ class SyncEngine {
         actor: 'server', actorId: 'server', action: 'queue-skip', target: item.title, reason: why, at: now));
   }
 
-  /// `cancel` for the current media: no countdown for it any more.
+  /// `cancel` (or a pause during the countdown) for the current media: no
+  /// countdown for it any more.
   void cancelAdvance() {
     advance = null;
     _advanceOffFor = mediaId;
   }
 
-  /// Joining: loads in the background until its reports hold the media
-  /// (D2); with nothing up there is nothing to load.
-  Presence get _arriving => media == null ? Presence.watching : Presence.joining;
-
-  /// A new member ([client] empty: one that cannot be taken over).
+  /// A new member ([client] empty: one that cannot be taken over). With
+  /// media up it loads first ([EngineMember.loading]).
   String applyJoin(String token, String name, String avatar,
       {String client = '', int seq = 0, String app = '', String platform = '', ClientCaps caps = const ClientCaps()}) {
     final id = 'm${_nextId++}';
-    // Joining while not playing: in the set, so the start waits for them
-    // (at most [Liveness.joinerHold]); while playing, out until they ready
-    // (a late joiner never pauses).
     final m = members[token] = EngineMember(
         id: id,
         token: token,
@@ -441,9 +529,8 @@ class SyncEngine {
         seq: seq,
         app: app,
         platform: platform,
-        caps: caps,
-        presence: _arriving)
-      ..inSet = transport != Transport.playing;
+        caps: caps)
+      ..loading = media != null;
     feed.add(_line('join', actor: m));
     evaluate();
     return id;
@@ -459,9 +546,9 @@ class SyncEngine {
   }
 
   /// A newer hello of the same client took [token]'s member over (see
-  /// `hello.client`): back from `gone` it is `joining` again (`away` if it
-  /// was), ready flag kept, feed `return` when the feed had said `gone`.
-  /// Returns whether it came back from `gone`.
+  /// `hello.client`): back from `gone` it keeps its standing and loads
+  /// again, feed `return` when the feed had said `gone`. Returns whether
+  /// it came back from `gone`.
   bool applyTakeover(String token,
       {required int seq, String app = '', String platform = '', ClientCaps caps = const ClientCaps()}) {
     final m = members[token];
@@ -472,28 +559,28 @@ class SyncEngine {
       ..platform = platform
       ..caps = caps;
     _seen(m);
-    if (m.presence != Presence.gone) return false;
+    if (!m.gone) return false;
     final noticed = m.goneNoticed;
     m
+      ..gone = false
+      ..goneAt = null
       ..goneNoticed = false
-      ..presence = m.awayBeforeGone ? Presence.away : _arriving
-      ..presenceSince = now
-      ..awayBeforeGone = false
-      ..inSet = m.error.isEmpty && (m.ready || transport != Transport.playing);
+      ..loading = media != null;
     if (noticed) feed.add(_line('return', actor: m));
     evaluate();
     return true;
   }
 
   /// [token]'s socket closed or fell silent: `gone`, kept for the grace
-  /// with everything it had. No feed line yet ([Liveness.goneNotice]).
+  /// with everything it had (a BRB is still waited for). No feed line yet
+  /// ([Liveness.goneNotice]).
   void applyGone(String token) {
     final m = members[token];
-    if (m == null || m.presence == Presence.gone) return;
+    if (m == null || m.gone) return;
+    if (m.presence == Presence.watching) _markBehind(m, m.spot);
     m
-      ..awayBeforeGone = m.presence == Presence.away
-      ..presence = Presence.gone
-      ..presenceSince = now
+      ..gone = true
+      ..goneAt = now
       ..goneNoticed = false;
     evaluate();
     onGone?.call(m);
@@ -505,7 +592,7 @@ class SyncEngine {
     final t = now;
     final silent = [
       for (final m in members.values)
-        if (m.presence != Presence.gone && t.difference(m.lastSeen) > liveness.silence) m.token,
+        if (!m.gone && t.difference(m.lastSeen) > liveness.silence) m.token,
     ];
     for (final token in silent) {
       applyGone(token);
@@ -513,38 +600,41 @@ class SyncEngine {
     return silent;
   }
 
-  /// Joining timeouts, the delayed `gone` line, grace expiry (leave).
+  /// The delayed `gone` line, grace expiry (leave).
   void sweepPresence() {
     final t = now;
     for (final m in members.values.toList()) {
-      final since = t.difference(m.presenceSince);
-      switch (m.presence) {
-        case Presence.joining:
-          if (since >= liveness.joiningTimeout) _becomeIn(m);
-        case Presence.gone:
-          if (since >= liveness.grace) {
-            applyLeave(m.token, reason: 'grace');
-          } else if (!m.goneNoticed && since >= liveness.goneNotice) {
-            m.goneNoticed = true;
-            feed.add(_line('gone', actor: m));
-          }
-        case Presence.watching:
-        case Presence.away:
-          break;
+      final at = m.goneAt;
+      if (!m.gone || at == null) continue;
+      final since = t.difference(at);
+      if (since >= liveness.grace) {
+        applyLeave(m.token, reason: 'grace');
+      } else if (!m.goneNoticed && since >= liveness.goneNotice) {
+        m.goneNoticed = true;
+        feed.add(_line('gone', actor: m));
       }
     }
   }
 
-  /// Joining is over: `in`. In the set if it is ready, or (not playing)
-  /// if it was in it; while playing an unready member waits for its own
-  /// `ready`, so coming in never pauses anyone.
-  void _becomeIn(EngineMember m) {
-    if (m.presence != Presence.joining) return;
+  /// [m] falls behind the group at [at] (default: the group's position
+  /// now), unless it already was.
+  void _markBehind(EngineMember m, [double? at]) {
+    if (media == null) return;
+    m.behind ??= at ?? positionAt();
+  }
+
+  /// [m] is with the group again (loading over): a rewind to where it fell
+  /// behind is offered to everyone when that is far enough back.
+  void _caughtUp(EngineMember m) {
     m
-      ..presence = Presence.watching
-      ..presenceSince = now
-      ..inSet = m.error.isEmpty && (m.ready || (transport != Transport.playing && m.inSet));
-    evaluate();
+      ..loading = false
+      ..skipped = false;
+    final b = m.behind;
+    m.behind = null;
+    if (b == null || positionAt() - b < RelayConstants.rewindBehindSecs) return;
+    _rewinds
+      ..removeWhere((r) => r.id == m.id)
+      ..add(_Rewind(m.id, b, now.add(const Duration(seconds: RelayConstants.rewindSecs))));
   }
 
   /// Name and/or picture change ([ProfileIntent]); null leaves it, an
@@ -607,10 +697,13 @@ class SyncEngine {
         };
 
   /// [token]'s member leaves for good: `bye` ([reason] `bye`), or its
-  /// grace ran out (`grace`). Feed `leave`. Returns its id.
+  /// grace ran out (`grace`). Feed `leave`. The last BRB member leaving
+  /// leaves a plain pause: it never plays by itself. Returns its id.
   String? applyLeave(String token, {String reason = ''}) {
     final removed = members.remove(token);
     if (removed == null) return null;
+    if (removed.presence == Presence.brb && brbs.isEmpty) wantsPlay = false;
+    _rewinds.removeWhere((r) => r.id == removed.id);
     feed.add(_line('leave', actor: removed, reason: reason));
     evaluate();
     onLeft?.call(removed);
@@ -624,80 +717,139 @@ class SyncEngine {
     return null;
   }
 
-  /// `presence` from [actorToken] on [targetId] (empty: itself). `away`:
-  /// anyone may set anyone (the host too); `in`: only itself, through
-  /// `joining` while media is up (D2). Returns [ErrCode.forbidden] when
-  /// someone else is set `in`, else null (no-ops and unknown targets
-  /// included).
+  /// Held now at the current position (the clock stops), when playing.
+  void _holdNow() {
+    if (transport != Transport.playing) return;
+    position = positionAt();
+    serverTime = now;
+    eventId++;
+    transport = Transport.held;
+  }
+
+  /// `play` / `pause` from [token]: the group's wish. A pause holds at
+  /// once and, during the countdown to Up next, stops it at the end; a
+  /// play starts when nobody is waited for.
+  void applyTransport(String token, bool play) {
+    final member = members[token];
+    if (member == null) return;
+    _seen(member);
+    if (wantsPlay == play) {
+      evaluate();
+      return;
+    }
+    wantsPlay = play;
+    feed.add(_line(play ? 'play' : 'pause', actor: member));
+    if (!play) {
+      if (advance != null && transport != Transport.finished) cancelAdvance();
+      _holdNow();
+    }
+    evaluate(quiet: true);
+  }
+
+  /// `presence` from [actorToken] on [targetId] (empty: itself):
+  /// - `brb` on anyone ("Wait for Bob"): the group waits for them (held at
+  ///   once). [resume] from the first BRB: the group was playing when the
+  ///   press began, so it wants to play once the last one is back.
+  /// - `out` on anyone ("Don't wait for Bob"): not waited for, not
+  ///   watching; its player stays at its spot.
+  /// - `afk`, only oneself: an automatic out, never while playing nor on a
+  ///   BRB member.
+  /// - `in`, only oneself: back from BRB (feed `back`), or from AFK or out
+  ///   (feed `in`, loading at the current moment).
+  /// Returns [ErrCode.forbidden] for `in` or `afk` on someone else, else
+  /// null (no-ops and unknown targets included).
   ErrCode? applyPresence(String actorToken, String targetId, Presence state,
-      {PresenceReason reason = PresenceReason.manual}) {
+      {PresenceReason reason = PresenceReason.manual, bool resume = false}) {
     final actor = members[actorToken];
     if (actor == null) return null;
     _seen(actor);
     final target = targetId.isEmpty ? actor : byId(targetId);
     if (target == null) return null;
     final self = identical(actor, target);
-    final why = reason == PresenceReason.manual ? '' : reason.name;
-    if (state == Presence.away) {
-      if (target.presence == Presence.gone) {
-        if (target.awayBeforeGone) return null;
-        target.awayBeforeGone = true;
-      } else {
-        if (target.presence == Presence.away) return null;
-        target
-          ..presence = Presence.away
-          ..presenceSince = now;
-      }
-      feed.add(_line('away', actor: actor, target: self ? null : target, reason: why));
-      evaluate();
-      return null;
+    if ((state == Presence.watching || state == Presence.afk) && !self) return ErrCode.forbidden;
+    final was = target.presence;
+    if (was == state) return null;
+    switch (state) {
+      case Presence.brb:
+        final first = brbs.isEmpty;
+        _set(target, Presence.brb);
+        if (was.isOut) target.loading = media != null;
+        if (self && resume && first) wantsPlay = true;
+        _holdNow();
+        feed.add(_line('brb', actor: actor, target: self ? null : target));
+      case Presence.out:
+        // Left behind where it is (a BRB member: where the group held).
+        if (was == Presence.watching || was == Presence.brb) {
+          _markBehind(target, target.loading ? target.spot : null);
+        }
+        _set(target, Presence.out);
+        feed.add(_line('out', actor: actor, target: self ? null : target, reason: _why(reason)));
+      case Presence.afk:
+        if (was != Presence.watching || transport == Transport.playing) return null;
+        _markBehind(target, target.loading ? target.spot : null);
+        _set(target, Presence.afk);
+        feed.add(_line('afk', actor: actor));
+      case Presence.watching:
+        _set(target, Presence.watching);
+        if (was.isOut) {
+          target.loading = media != null;
+          feed.add(_line('in', actor: actor));
+        } else {
+          feed.add(_line('back', actor: actor));
+        }
     }
-    if (state != Presence.watching) return null;
-    if (!self) return ErrCode.forbidden;
-    if (target.presence != Presence.away) return null;
-    target
-      ..presence = _arriving
-      ..presenceSince = now
-      ..inSet = target.error.isEmpty && (target.ready || transport != Transport.playing);
-    feed.add(_line('in', actor: actor, reason: why));
     evaluate();
     return null;
   }
 
-  void applyReady(String token, bool ready, {String source = 'manual'}) {
-    final member = members[token];
-    if (member == null) return;
-    _seen(member);
-    if (member.ready == ready && (member.inSet || member.error.isNotEmpty)) {
-      evaluate();
-      return;
-    }
-    member.ready = ready;
-    if (ready && member.error.isEmpty) member.inSet = true;
-    feed.add(_line(ready ? 'ready' : 'unready', actor: member, reason: source));
-    evaluate();
+  String _why(PresenceReason r) => r == PresenceReason.manual ? '' : r.wire;
+
+  void _set(EngineMember m, Presence p) {
+    m
+      ..presence = p
+      ..since = now;
   }
 
-  /// Ready (or unready) [target] (a member id) or `all`. Members `away`
-  /// are left alone.
-  void applyForce(String actorToken, String target, bool ready) {
+  /// `continue` from [actorToken]: without [targetId] (a member id), or,
+  /// when empty, without everyone the group waits for, and then it plays.
+  /// A BRB member becomes `out` (reason `continue`); someone whose video
+  /// holds the group stays `in` and catches up ([EngineMember.skipped]).
+  /// Continuing without everyone also brings the actor back from its own
+  /// BRB.
+  void applyContinue(String actorToken, {String targetId = ''}) {
     final actor = members[actorToken];
-    if (target == 'all') {
-      for (final member in members.values) {
-        if (member.presence == Presence.away) continue;
-        member.ready = ready;
-        if (ready && member.error.isEmpty) member.inSet = true;
+    if (actor == null) return;
+    _seen(actor);
+    final need = requiredBufferSecs();
+    bool videoWaited(EngineMember m) => videoCounts(m) && (m.loading || m.buffered < need);
+    void without(EngineMember m) {
+      if (m.presence == Presence.brb) {
+        if (identical(m, actor) && targetId.isEmpty) {
+          _set(m, Presence.watching);
+          return;
+        }
+        _markBehind(m);
+        _set(m, Presence.out);
+      } else if (videoWaited(m)) {
+        _markBehind(m, m.spot);
+        m
+          ..skipped = true
+          ..loading = true;
       }
-    } else {
-      final member = byId(target);
-      if (member == null || member.presence == Presence.away) return;
-      member.ready = ready;
-      if (ready && member.error.isEmpty) member.inSet = true;
-      feed.add(_line(ready ? 'force-ready' : 'force-unready', actor: actor, target: member));
-      evaluate();
-      return;
     }
-    feed.add(_line(ready ? 'force-play' : 'force-hold', actor: actor));
+
+    if (targetId.isNotEmpty) {
+      final target = byId(targetId);
+      if (target == null) return;
+      without(target);
+      feed.add(_line('continue', actor: actor, target: target));
+    } else {
+      for (final m in members.values) {
+        without(m);
+      }
+      wantsPlay = true;
+      feed.add(_line('continue', actor: actor));
+    }
     evaluate();
   }
 
@@ -712,10 +864,14 @@ class SyncEngine {
     _seekBy = member.id;
     _seekSeq = seq;
     _seekEventId = eventId;
+    _rewinds.clear();
+    for (final m in members.values) {
+      m.behind = null;
+    }
     feed.add(_line('seek', actor: member));
     // A seek stops the countdown to Up next.
     advance = null;
-    // Seeking back from the end: held, and resumes once the gate passes.
+    // Seeking back from the end: held, and plays again when it wants to.
     if (transport == Transport.finished) {
       transport = Transport.held;
       evaluate();
@@ -727,7 +883,8 @@ class SyncEngine {
   /// (any other swap drops the continuation item, [EngineQueue.auto]).
   /// [restore]: what played before a restart, put back where it was (the
   /// server takes it only while nothing is up; see `swap.restore`): held
-  /// at its position (the gate starts it again), or finished.
+  /// at its position, wanting to play when it played, or finished.
+  /// Everyone keeps their standing and the group its wish.
   bool applySwap(String actorToken, HelloMedia next, {String? queueId, SwapRestore? restore}) {
     if (!next.duration.isFinite || next.size < 0) return false;
     final actor = members[actorToken];
@@ -743,12 +900,14 @@ class SyncEngine {
     serverTime = now;
     eventId++;
     transport = Transport.held;
-    // Ready flags stay; everyone here now waits for everyone else here now
-    // (who counts is up to presence: `away` and `gone` never do).
+    _rewinds.clear();
     for (final member in members.values) {
-      member.error = '';
-      member.inSet = true;
-      member.buffered = 0;
+      member
+        ..error = ''
+        ..buffered = 0
+        ..skipped = false
+        ..spot = null
+        ..behind = null;
     }
     if (restore != null) {
       final d = next.duration;
@@ -757,8 +916,10 @@ class SyncEngine {
         position = d;
         transport = Transport.finished;
       }
+      if (restore.transport == 'playing') wantsPlay = true;
     }
     feed.add(_line('swap', actor: actor, reason: restore == null ? '' : 'restore'));
+    evaluate();
     return true;
   }
 
@@ -774,46 +935,48 @@ class SyncEngine {
     // client) says nothing about this one's buffer.
     final earlier = mediaId != 0 && mediaId != this.mediaId;
     member.buffered = earlier || !buffered.isFinite || buffered < 0 ? 0 : buffered;
+    if (!earlier && reportEventId >= eventId) member.spot = reportPosition;
     final m = media;
     // First report of the length wins; only for the media the client has open.
     if (m != null && m.duration <= 0 && mediaId == this.mediaId &&
         duration.isFinite && duration > 0) {
       media = m.copyWith(duration: duration);
     }
-    if (member.presence == Presence.joining) {
-      // Joining ends when it cannot open the media (it stays out of the
-      // gate by its error), or once it holds the media at the server's
+    if (member.loading && !member.presence.isOut) {
+      // Loading ends when it cannot open the media (it is not waited for
+      // by its error), or once it holds the media at the server's
       // position with the buffer the gate needs: it comes in in sync.
       final t = now;
       if (member.error.isNotEmpty) {
-        _becomeIn(member);
+        member
+          ..loading = false
+          ..skipped = false
+          ..behind = null;
       } else if (!earlier &&
           reportEventId >= eventId &&
           (reportPosition - positionAt(t)).abs() <= RelayConstants.driftSeekThresholdSecs &&
           member.buffered >= requiredBufferSecs(t)) {
-        _becomeIn(member);
+        _caughtUp(member);
       }
     }
     if (reportEventId < eventId) return;
     evaluate();
   }
 
-  /// An error takes the member out of the set (the gate stops waiting for
-  /// it); clearing it puts it back like a join: in the set unless playing,
-  /// then only if it is ready (the others hold for its buffer).
+  /// An error means the group stops waiting for its video; clearing it
+  /// waits for its video again.
   void _setError(EngineMember member, String error) {
     if (member.error == error) return;
     member.error = error;
-    if (error.isNotEmpty) {
-      member.inSet = false;
-    } else {
-      member.inSet = member.ready || transport != Transport.playing;
-    }
-    // Leaving the set may let the others start.
     evaluate();
   }
 
-  void evaluate() {
+  /// The gate: while playing, the end of the media finishes it and a
+  /// watched video short of the buffer holds it (feed `pause` by the
+  /// server); while held, it plays when it wants to, nobody is BRB, and
+  /// every watched video has the buffer (feed `resume` by the server,
+  /// unless [quiet]: a member's `play` said it already).
+  void evaluate({bool quiet = false}) {
     final t = now;
     if (transport == Transport.finished) return;
     final need = requiredBufferSecs(t);
@@ -824,53 +987,46 @@ class SyncEngine {
         serverTime = t;
         eventId++;
         transport = Transport.finished;
+        // A countdown that ran to the end: what comes next goes up now.
+        final a = advance;
+        if (a != null) advance = QueueAdvance(id: a.id, at: t.subtract(Duration(seconds: a.secs)), secs: a.secs);
         feed.add(_line('finished'));
         whatsNext();
         return;
       }
-      final blocked =
-          members.values.where((m) => countsForGate(m, t)).any((m) => !m.ready || m.buffered < need);
+      final blocked = brbs.isNotEmpty || members.values.any((m) => videoCounts(m) && m.buffered < need);
       if (blocked) {
-        position = positionAt(t);
-        serverTime = t;
-        eventId++;
-        transport = Transport.held;
+        _holdNow();
         feed.add(_line('pause'));
       }
       return;
     }
-    final inSet = members.values.where((m) => countsForGate(m, t)).toList();
-    if (inSet.isEmpty) return;
-    if (inSet.every((m) => m.ready && m.buffered >= need)) {
+    if (!wantsPlay || brbs.isNotEmpty) return;
+    final watched = members.values.where(videoCounts).toList();
+    if (watched.isEmpty) return;
+    if (watched.every((m) => m.buffered >= need)) {
       serverTime = t;
       eventId++;
       transport = Transport.playing;
-      feed.add(_line('resume'));
+      if (!quiet) feed.add(_line('resume'));
     }
   }
 
-  /// `state.hold` while HELD with media up: who the gate waits for and why
-  /// ([HoldReason]). [sourceGone]: the current media's relay source is
-  /// `gone` (a short buffer then reads [HoldReason.source]).
+  /// `state.hold` while HELD with media up: who the group waits for
+  /// ([HoldInfo]); null when nobody is. [sourceGone]: the current media's
+  /// relay source is `gone` (the short buffers are its doing).
   HoldInfo? holdInfo({bool sourceGone = false}) {
     if (transport != Transport.held || media == null) return null;
-    final t = now;
-    final need = requiredBufferSecs(t);
-    final gate = members.values.where((m) => countsForGate(m, t)).toList();
-    if (gate.isEmpty) return const HoldInfo(reason: HoldReason.start);
-    final joining = gate.where((m) => m.presence == Presence.joining && (!m.ready || m.buffered < need)).toList();
-    if (joining.isNotEmpty) {
-      final until = joining.map((m) => m.presenceSince.add(liveness.joinerHold)).reduce((a, b) => a.isBefore(b) ? a : b);
-      return HoldInfo(reason: HoldReason.joining, members: [for (final m in joining) m.id], until: until);
-    }
-    final unready = gate.where((m) => !m.ready).toList();
-    if (unready.isNotEmpty) return HoldInfo(reason: HoldReason.ready, members: [for (final m in unready) m.id]);
-    final short = gate.where((m) => m.buffered < need).toList();
-    if (short.isNotEmpty) {
-      return HoldInfo(
-          reason: sourceGone ? HoldReason.source : HoldReason.buffer, members: [for (final m in short) m.id]);
-    }
-    return null;
+    final need = requiredBufferSecs();
+    final brb = [for (final m in brbs) m.id];
+    final video = !wantsPlay
+        ? const <String>[]
+        : [
+            for (final m in members.values)
+              if (videoCounts(m) && (m.loading || m.buffered < need)) m.id,
+          ];
+    final h = HoldInfo(brb: brb, video: video, source: sourceGone && video.isNotEmpty);
+    return h.isEmpty ? null : h;
   }
 
   /// [relay]: whether the server can relay the current Jellyfin media; the
@@ -883,7 +1039,6 @@ class SyncEngine {
       ({String id, MediaRelay relay})? warm,
       bool sourceGone = false}) {
     final bySeek = _seekEventId == eventId;
-    final t = now;
     return StateBroadcast(
       eventId: eventId,
       transport: transport.name,
@@ -897,7 +1052,7 @@ class SyncEngine {
               if (members[swapBy]?.id case final id?) 'swapBy': id,
               if (artJson != null) 'art': artJson,
             },
-      members: [for (final m in members.values) m.view(inGate: countsForGate(m, t))],
+      members: [for (final m in members.values) m.view()],
       seekBy: bySeek ? _seekBy : null,
       seekSeq: bySeek ? _seekSeq : null,
       relay: relay,
@@ -909,6 +1064,9 @@ class SyncEngine {
       queuePlay: queue.play,
       hold: holdInfo(sourceGone: sourceGone),
       advance: advance,
+      wantsPlay: wantsPlay,
+      rewind: [for (final r in _rewinds) RewindOffer(id: r.id, position: r.position)],
+      queuePass: queuePass,
     );
   }
 }

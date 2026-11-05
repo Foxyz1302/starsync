@@ -134,10 +134,10 @@ void main() {
     await a.ws.close();
     // Gone: still a member, so whoever would put the item up waits for it
     // instead of skipping it.
-    final whileGone = await b.state((s) => s.members.any((m) => m.id == aliceId && m.presence == Presence.gone));
+    final whileGone = await b.state((s) => s.members.any((m) => m.id == aliceId && m.gone));
     expect(whileGone.queue.single.by, aliceId);
     final again = await _Peer.join(server.boundPort, 'alice', client: install, seq: 2);
-    final back = await again.state((s) => s.members.any((m) => m.id == aliceId && m.presence != Presence.gone));
+    final back = await again.state((s) => s.members.any((m) => m.id == aliceId && !m.gone));
     expect(back.queue.single.by, aliceId, reason: 'the same member: its items are its own again');
     expect(back.members.where((m) => m.name == 'alice'), hasLength(1));
   });
@@ -190,8 +190,8 @@ void main() {
       a.send(const SwapIntent(media: HelloMedia(name: 'Ep01', size: 0, duration: 20, url: 'https://example.com/1.mp4'))
           .toJson());
       final up = await b.state((s) => s.media != null);
+      a.send(const TransportIntent(play: true).toJson());
       for (final p in [a, b]) {
-        p.send(const ReadyIntent(ready: true).toJson());
         p.send(ReportMessage(position: 0, buffered: 100, eventId: up.eventId + 1, mediaId: up.mediaId).toJson());
       }
       await b.state((s) => s.transport == 'playing');

@@ -26,12 +26,10 @@ final _graph = testGraph();
 final _png = base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
 
 MemberView member(String id, String name,
-        {bool ready = false, bool host = false, String app = '', Presence presence = Presence.watching, String error = ''}) =>
+        {bool host = false, String app = '', Presence presence = Presence.watching, String error = ''}) =>
     MemberView(
         id: id,
         name: name,
-        ready: ready,
-        inSet: ready,
         buffered: 30,
         host: host,
         app: app,
@@ -41,7 +39,7 @@ MemberView member(String id, String name,
 void main() {
   final coord = _graph.coordinator;
 
-  /// Alex hosts and passes the video on; Bob is not ready; Cleo sits out.
+  /// Alex hosts and passes the video on; Bob is BRB; Cleo is out.
   void party({bool relay = true}) => coord.serverState.value = StateBroadcast(
         eventId: 1,
         transport: 'held',
@@ -55,9 +53,9 @@ void main() {
           if (relay) 'relay': {'source': 'a', 'live': true, 'rate': 4100000, 'need': 2300000},
         },
         members: [
-          member('a', 'Alex', ready: true, host: true, app: '1.4.0'),
-          member('b', 'Bob', app: '1.3.0'),
-          member('c', 'Cleo', presence: Presence.away),
+          member('a', 'Alex', host: true, app: '1.4.0'),
+          member('b', 'Bob', app: '1.3.0', presence: Presence.brb),
+          member('c', 'Cleo', presence: Presence.out),
         ],
       );
 
@@ -87,30 +85,35 @@ void main() {
   group('what it says', () {
     test('member actions: the members card\'s, by state', () {
       List<MemberAction> of(AvatarInfo i) => [for (final a in memberActions(i)) a.action];
-      expect(of(const AvatarInfo(name: 'B', color: Colors.teal)),
-          [MemberAction.forceReady, MemberAction.nudge, MemberAction.sitOut]);
-      expect(of(const AvatarInfo(name: 'B', color: Colors.teal, ready: true)),
-          [MemberAction.forceUnready, MemberAction.nudge, MemberAction.sitOut]);
-      expect(of(const AvatarInfo(name: 'B', color: Colors.teal, presence: Presence.away)), [MemberAction.nudge]);
-      expect(of(const AvatarInfo(name: 'Me', color: Colors.teal, self: true, presence: Presence.away)),
-          [MemberAction.joinBack]);
-      expect(of(const AvatarInfo(name: 'Me', color: Colors.teal, self: true)),
-          [MemberAction.forceReady, MemberAction.sitOut]);
+      List<String> labels(AvatarInfo i) => [for (final a in memberActions(i)) a.label];
+      expect(of(const AvatarInfo(name: 'Bob Smith', color: Colors.teal)),
+          [MemberAction.waitFor, MemberAction.nudge, MemberAction.out]);
+      expect(labels(const AvatarInfo(name: 'Bob Smith', color: Colors.teal)), ['Wait for Bob', 'Nudge', 'Out']);
+      expect(labels(const AvatarInfo(name: 'Bob', color: Colors.teal, presence: Presence.brb)),
+          ["Don't wait for Bob", 'Nudge', 'Out']);
+      expect(of(const AvatarInfo(name: 'B', color: Colors.teal, activity: AvatarActivity.loading)),
+          [MemberAction.dontWaitFor, MemberAction.nudge, MemberAction.out], reason: 'the group waits for their video');
+      expect(of(const AvatarInfo(name: 'B', color: Colors.teal, presence: Presence.out)), [MemberAction.nudge]);
+      expect(of(const AvatarInfo(name: 'Me', color: Colors.teal, self: true, presence: Presence.afk)),
+          [MemberAction.join]);
+      expect(of(const AvatarInfo(name: 'Me', color: Colors.teal, self: true)), [MemberAction.out]);
     });
 
-    test('presence and ready in words', () {
-      AvatarInfo at(Presence p, {DateTime? since}) =>
-          AvatarInfo(name: 'B', color: Colors.teal, presence: p, goneSince: since);
-      expect(presenceText(at(Presence.watching)).$1, 'Watching');
-      expect(presenceText(at(Presence.away)).$1, 'Away · sitting out');
-      expect(presenceText(at(Presence.joining)).$1, 'Joining…');
+    test('the standing in words', () {
+      AvatarInfo at(Presence p, {DateTime? since, AvatarActivity activity = AvatarActivity.none}) =>
+          AvatarInfo(name: 'B', color: Colors.teal, presence: p, since: since, goneSince: since, activity: activity);
       final since = DateTime.utc(2026, 1, 1, 12);
-      expect(presenceText(at(Presence.gone, since: since), now: since.add(const Duration(minutes: 2))).$1,
-          'Gone · reconnecting (2 min)');
-      expect(readyText(const AvatarInfo(name: 'B', color: Colors.teal, ready: true)).$1, 'Ready');
-      expect(readyText(const AvatarInfo(name: 'B', color: Colors.teal)).$1, 'Not ready');
-      expect(readyText(const AvatarInfo(name: 'B', color: Colors.teal, error: 'no codec')).$1,
-          "Can't play this: no codec");
+      final later = since.add(const Duration(minutes: 4));
+      expect(presenceText(at(Presence.watching)).$1, 'Watching');
+      expect(presenceText(at(Presence.watching, activity: AvatarActivity.loading)).$1, 'Loading…');
+      expect(presenceText(at(Presence.brb, since: since), now: later).$1, 'BRB · 4 min');
+      expect(presenceText(at(Presence.afk, since: since), now: later).$1, 'AFK · 4 min');
+      expect(presenceText(at(Presence.out)).$1, 'Out');
+      expect(
+          presenceText(at(Presence.brb, since: since, activity: AvatarActivity.reconnecting),
+                  now: since.add(const Duration(minutes: 2)))
+              .$1,
+          'Reconnecting (2 min) · BRB');
     });
   });
 
@@ -133,16 +136,15 @@ void main() {
     expect(card, findsNothing, reason: 'not on a passing mouse');
     await tester.pump(const Duration(milliseconds: 400));
     expect(card, findsOneWidget);
-    // Name, presence, ready, what Alex passes on, the version, host.
+    // Name, standing, what Alex passes on, the version, host.
     expect(inCard(find.text('Alex')), findsOneWidget);
     expect(inCard(find.text('Watching')), findsOneWidget);
-    expect(inCard(find.text('Ready')), findsOneWidget);
     expect(inCard(find.text('host')), findsOneWidget);
     expect(inCard(find.text('passing the video on')), findsOneWidget);
     expect(inCard(find.textContaining('Passing on Frieren')), findsOneWidget);
     expect(inCard(find.textContaining('4.1 MB/s')), findsOneWidget);
     expect(inCard(find.text('1.4.0')), findsOneWidget);
-    expect(inCard(find.byKey(const ValueKey('person-action-forceUnready'))), findsOneWidget);
+    expect(inCard(find.byKey(const ValueKey('person-action-waitFor'))), findsOneWidget);
     expect(inCard(find.byKey(const ValueKey('person-action-nudge'))), findsOneWidget);
     // The card sits under the strip's avatar.
     expect(tester.getTopLeft(card).dy, greaterThan(tester.getBottomLeft(alex).dy));
@@ -164,8 +166,9 @@ void main() {
     await g.moveTo(const Offset(20, 700));
     await tester.pump(const Duration(seconds: 1));
     expect(card, findsOneWidget);
-    expect(inCard(find.text('Not ready')), findsOneWidget);
+    expect(inCard(find.text('BRB')), findsOneWidget);
     expect(inCard(find.text('1.3.0')), findsOneWidget);
+    expect(inCard(find.byKey(const ValueKey('person-action-dontWaitFor'))), findsOneWidget);
     expect(inCard(find.textContaining('Passing on')), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
@@ -229,7 +232,7 @@ void main() {
     await tester.tap(find.text('Bob'));
     await tester.pumpAndSettle();
     expect(inCard(find.text('Bob')), findsOneWidget);
-    expect(inCard(find.text('Not ready')), findsOneWidget);
+    expect(inCard(find.text('BRB')), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     final g = await mouse(tester);
@@ -296,7 +299,7 @@ void main() {
     // The row's ⋮ has the card's actions, same names.
     await tester.tap(find.descendant(of: bobRow, matching: find.byTooltip('More')));
     await tester.pumpAndSettle();
-    for (final label in ['Force ready', 'Nudge', 'Sit out']) {
+    for (final label in ["Don't wait for Bob", 'Nudge', 'Out']) {
       expect(find.text(label), findsOneWidget);
     }
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);

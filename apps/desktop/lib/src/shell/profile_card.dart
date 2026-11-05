@@ -74,8 +74,8 @@ class _ProfileCardState extends State<ProfileCard> {
           final hosting = online && graph.navigation.home.value;
           final color = _p.color.value;
           final png = _p.picture.value;
-          final out = self?.presence == Presence.away;
-          final me = selfAvatarInfo(ready: self?.ready ?? false, host: hosting, presence: self?.presence ?? Presence.watching);
+          final out = self?.isOut ?? false;
+          final me = selfAvatarInfo(host: hosting, presence: self?.presence ?? Presence.watching);
           return Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -124,9 +124,12 @@ class _ProfileCardState extends State<ProfileCard> {
                               if (hosting) const Pill('host', Colors.amber),
                               Pill(online ? 'with others' : 'just you',
                                   online ? Colors.greenAccent : Colors.grey),
-                              if (online)
-                                Pill(out ? 'sitting out' : (self?.ready ?? false) ? 'ready' : 'not ready',
-                                    Colors.lightBlueAccent),
+                              if (online && self != null && self.presence != Presence.watching)
+                                Pill(switch (self.presence) {
+                                  Presence.brb => 'BRB',
+                                  Presence.afk => 'AFK',
+                                  _ => 'out',
+                                }, Colors.lightBlueAccent),
                             ],
                           ),
                         ],
@@ -169,11 +172,11 @@ class _ProfileCardState extends State<ProfileCard> {
                 child: Column(children: [
                   if (self != null)
                     _link(
-                      out ? Icons.login_rounded : Icons.event_seat_outlined,
-                      out ? 'Join back' : 'Sit out',
-                      trailing: Text(out ? 'Space' : 'stay in the server', style: small),
+                      out ? Icons.login_rounded : Icons.visibility_off_rounded,
+                      out ? 'Join' : 'Out',
+                      trailing: Text(out ? 'Space' : 'nobody waits for you', style: small),
                       onTap: () {
-                        out ? coord.joinBack() : coord.sitOut();
+                        out ? coord.join() : coord.goOut();
                         Navigator.of(context).maybePop();
                       },
                     ),
@@ -258,15 +261,15 @@ class _ProfilePictureState extends State<ProfilePicture> {
             height: 88,
             child: Stack(
               children: [
-                StatusAvatar(info: widget.info, size: 88, badges: false, ring: widget.ring),
+                StatusAvatar(info: widget.info, size: 88, badges: false, marks: widget.ring),
                 Positioned.fill(
                   child: AnimatedOpacity(
                     duration: easeTime,
                     curve: ease,
                     opacity: _hover ? 1 : 0,
                     child: Container(
-                      margin: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.black54),
+                      decoration:
+                          BoxDecoration(borderRadius: AvatarShape.of(context).radius(88), color: Colors.black54),
                       child: const Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [

@@ -13,7 +13,7 @@ import 'test_graph.dart';
 final _graph = testGraph();
 
 MemberView _m(String id, String name, {double buffered = 30, bool host = false, int rate = 0}) =>
-    MemberView(id: id, name: name, ready: true, inSet: true, buffered: buffered, host: host, rate: rate);
+    MemberView(id: id, name: name, buffered: buffered, host: host, rate: rate);
 
 StateBroadcast _state(Map<String, Object?>? media, List<MemberView> members, {String transport = 'playing'}) =>
     StateBroadcast(
@@ -75,7 +75,7 @@ void main() {
 
   test("the source's connection dropped: what the server has, for how long, no rates", () {
     final since = DateTime.utc(2026, 1, 1, 12);
-    final gone = MemberView(id: 'm1', name: 'Foxyz', ready: true, inSet: false, buffered: 30, presence: Presence.gone);
+    final gone = MemberView(id: 'm1', name: 'Foxyz', buffered: 30, gone: true);
     final r = _state(
         _relayed(MediaRelay(source: 'm1', live: true, rate: 4100000, need: 2300000, sourceGone: true, sourceGoneSince: since)),
         [gone, bob, ann]);
@@ -107,7 +107,7 @@ void main() {
   test('Jellyfin: own accounts direct, the rest via server', () {
     const ref = {'serverId': 'srv', 'itemId': '0123456789abcdef0123456789abcdef', 'title': 'Pilot'};
     MemberView jf(String id, String name, bool own) =>
-        MemberView(id: id, name: name, ready: true, inSet: true, buffered: 30, jf: {'srv': own});
+        MemberView(id: id, name: name, buffered: 30, jf: {'srv': own});
     final all = [jf('m1', 'Foxyz', true), jf('m2', 'Bob', true)];
     final media = {'name': 'Pilot', 'jellyfin': ref, 'relay': const MediaRelay(source: 'm1', live: true).toJson()};
     final d = deliveryOf(_state(media, all), selfId: 'm2')!;

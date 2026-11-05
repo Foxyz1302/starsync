@@ -269,12 +269,15 @@ class SyncClient {
     } catch (_) {}
   }
 
-  void sendReady(bool ready, {String source = 'manual'}) {
-    _send(ReadyIntent(ready: ready, source: source).toJson());
+  /// The group's wish: play or pause.
+  void sendTransport(bool play) {
+    _send(TransportIntent(play: play).toJson());
   }
 
-  void sendForce(String target, bool ready) {
-    _send(ForceIntent(target: target, ready: ready).toJson());
+  /// Continue without [target] (a member id), or without everyone the
+  /// group waits for (empty).
+  void sendContinue({String target = ''}) {
+    _send(ContinueIntent(target: target).toJson());
   }
 
   void sendSeek(double position, {int seq = 0}) {

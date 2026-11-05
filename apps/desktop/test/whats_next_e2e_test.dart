@@ -112,13 +112,11 @@ void main() {
     expect(next.sub, contains('skips 2'));
     expect(bob.queue.items.peek(), isEmpty, reason: 'it is not an Up next item of its own');
 
-    // Both ready: it plays to its end; the countdown is on both screens.
+    // One Play: it plays; over its last 10 s the countdown is on both
+    // screens, and the next episode comes up the moment it ends.
     await _poll(() => [alice, bob].every((x) => x.playback.durationSecs > 5), 'both opened episode 1');
     final first = alice.serverState.peek()!.mediaId;
-    for (final x in [alice, bob]) {
-      x.toggleReady();
-    }
-    await _poll(() => alice.serverState.peek()?.transport == 'finished', 'episode 1 ended');
+    alice.play();
     await _poll(() => [alice, bob].every((x) => (x.queue.countdown.peek()?.secondsLeft ?? 0) > 0), 'the countdown');
     expect(bob.queue.countdown.peek()!.item.id, next.id);
     await _poll(() => (bob.serverState.peek()?.mediaId ?? 0) > first, 'episode 3 up', timeout: const Duration(seconds: 20));
@@ -130,7 +128,8 @@ void main() {
     await _poll(() => alice.watch.history.entry(WatchKey.file(ep1))?.played ?? false, "alice's history");
     await _poll(() => bob.watch.history.entries.any((e) => e.$2.played), "bob's history");
 
-    // Episode 3 continues with 4; at its end bob cancels: for everyone.
+    // Episode 3 continues with 4; during its countdown bob cancels: for
+    // everyone, and it stops at the end.
     await _poll(() => alice.queue.continues.peek()?.media.name == 'Show - 04.mp4', 'episode 4 next');
     await _poll(() => [alice, bob].every((x) => x.playback.durationSecs > 5 && x.playback.player.state.playing),
         'both play episode 3', timeout: const Duration(seconds: 20));

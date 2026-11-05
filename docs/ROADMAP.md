@@ -11,10 +11,10 @@ architecture. The next release is the restructure (1.3.0, or 2.0.0).
 Problems are numbered; delete a line when its fix ships.
 
 **Decisions** (agreed):
-- D1 Presence: In (watching, full), Away (sat out: still in the server,
-  chat and chosen notifications, system notifications in the background,
-  not counted for the gate, ready counter or watched tracking), Gone
-  (disconnected, held in a grace period).
+- D1 Presence: Watching, BRB (on purpose; the group waits), AFK and Out
+  (still in the server, chat and chosen notifications, system
+  notifications in the background, not waited for nor counted for
+  watched tracking), Reconnecting (disconnected, held in a grace period).
 - D2 A joiner during playback does not pause it: they load in the
   background and join already in sync (a pause also works, no pause is
   cleaner).
@@ -212,7 +212,14 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
 
 ## Backlog
 
-Next: **Playback and presence** (epic, below; protocol 17).
+Next, before 1.5.0 is cut (playback and presence is in; protocol 17):
+- **Pick the waiting design** after real evenings with friends: A, the
+  pill (the default), or the centre card (C), or the card stepping aside
+  with the controls (D), tried with `STARSYNC_WAIT_DESIGN` in dev builds;
+  then remove the switch and the designs not picked
+  (`shell/wait_design.dart`, DEVELOPMENT "Dev tools").
+- **The name "Out"**: fits next to BRB and AFK, but may not be clear
+  enough; settle it from the same evenings.
 
 0. **Move to the owner's media_kit fork** (for 1.5.0):
    `Foxyz1302/media-kit`, branch `integration` (a local checkout sits
@@ -410,73 +417,6 @@ Next: **Playback and presence** (epic, below; protocol 17).
    - Up next follow-ups (see ARCHITECTURE "Up next"): a whole season or
      a pick list at once ("Add the rest of the season").
    - Sidecar subtitles.
-
-## Epic: Playback and presence
-
-Replaces the ready system, every timeout that can start playback, and D1's
-presence. The app waits only for what it can measure (someone's video) and
-for what people say on purpose (BRB); nothing starts because time passed.
-Protocol 17: everyone updates together. The gestures are tried first in a
-test page.
-
-**People** (one state each; Loading and Reconnecting are only labels):
-- **Watching**: no badge. The group waits only for their video.
-- **BRB**: set on purpose; the group waits until they are back or someone
-  continues without them. Never runs out. Kept across a dropped connection
-  (while the seat is kept), an app restart, a new video and a server
-  restart (the app reports it again). A BRB member who leaves for good
-  leaves a plain pause; it never plays by itself.
-- **AFK**: Out, set automatically: no input for about 10 minutes while
-  nothing plays (plain pause, end card, nothing on). Never set during
-  playback or on a BRB member. Only the badge differs, so others see why.
-  Any input brings them back, joining at the current moment.
-- **Out** (name not final): left out by "continue without", chosen in the
-  radial, player closed, or the window minimised 10 minutes while it plays.
-  Not waited for, not counted as watched; the player stays at their spot;
-  Space or Join puts them at the current moment. Never stops them passing
-  the video on.
-
-**The group** is playing, paused, or "Waiting for …" (someone's BRB, or
-someone's video loading or running dry). Play and pause are anyone's. A
-BRB only holds the group back: when the last one is back it plays if it
-was playing when the first BRB began, otherwise it stays paused. A pause lasts
-until someone plays. Putting something up keeps play or pause, so the
-start of an evening waits for one Play and nobody has to hold it.
-
-**Keys and clicks:**
-- Space tap: play or pause. Hold about 0.6 s: BRB (the pause happens on
-  key-down; key repeat ignored).
-- While anyone is BRB, a tap toggles your own BRB (back, or BRB too); a
-  hold of about 2 s continues without them and plays. The pill's hint
-  line says so ("Space: BRB too · Hold: continue without").
-- A hold fills the pill itself, fading in so a tap barely shows, and the
-  pill says what keeping on does ("Keep holding: BRB").
-- Continue without a BRB member makes them Out; continue without
-  someone's video leaves them Watching to catch up.
-- Right-click hold on the video: a radial (BRB or I'm back, Out, Next
-  episode during the ending). A plain right-click leaves it open for a
-  click.
-
-**Drops and catching up:** a dropped connection never pauses (as now).
-Anyone who comes back behind the group (a stalled stream, an app crash,
-being left out) gives everyone "Rewind for Alice (1:42)" for about 30 s.
-
-**End of an episode:** a "Next episode" button through the ending (the ED
-chapter, or the last 90 s). Up next counts down over the last 10 s and the
-next item starts the moment this one ends; the next item starts loading
-when the countdown appears. Videos under a minute show only "Up next".
-Pause or Cancel stops it at the end. The silent stop when the performer
-does not act on a play request asks again (another member if needed).
-
-**Also:** "Wait for Bob" on a person card: a friend sets someone's BRB
-when they ran off without it; their own tap clears it.
-
-**Undecided:** the name "Out" (fits next to BRB and AFK, but may not be
-clear enough).
-
-**Goes away:** ready and unready and the ready counter, Mark everyone ready,
-Force ready (becomes "Don't wait for Alice"), Space as ready, the 15 s
-joiner bound, the 60 s joining flip, the 5-minute idle sit-out.
 
 ## Epic: Jellyfin
 

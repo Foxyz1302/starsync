@@ -253,15 +253,15 @@ SoundSpec _wood(SfxKind kind, int i) => switch (kind) {
 
 /// Shown in Settings → Notifications & sounds: name and when it plays.
 const soundInfo = {
-  SfxKind.ready: ('Ready', 'Someone presses Space; climbs with each ready person'),
-  SfxKind.unready: ('Not ready', 'Someone takes their ready back'),
-  SfxKind.forceReady: ('Everyone ready', 'Someone marks everyone ready'),
+  SfxKind.ready: ("I'm back", 'Someone is back from BRB'),
+  SfxKind.unready: ('BRB', 'Someone is BRB: everyone waits'),
+  SfxKind.forceReady: ('Continue without', 'Someone goes on without the ones everyone waited for'),
   SfxKind.join: ('Joined', 'Someone joins the server'),
   SfxKind.leave: ('Left', 'Someone leaves'),
-  SfxKind.kick: ('Sat out', 'Someone sits you out'),
+  SfxKind.kick: ('About you', 'Someone sets you out or BRB, or goes on without you'),
   SfxKind.swap: ('New video', 'A different video or episode is put up'),
   SfxKind.chat: ('Message', 'A chat message from someone else'),
-  SfxKind.warn: ('Auto sit-out', 'You were idle or minimised and now sit out'),
+  SfxKind.warn: ('AFK', 'You were idle or minimised and are now AFK or out'),
   SfxKind.lost: ('Connection lost', 'The server stopped answering; reconnecting'),
   SfxKind.back: ('Reconnected', 'Back in the server after a drop'),
   SfxKind.nudge: ('Nudge', 'Someone nudges you; always plays (volume still applies)'),

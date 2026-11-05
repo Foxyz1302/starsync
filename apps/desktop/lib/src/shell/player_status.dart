@@ -1,14 +1,18 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../session/session_coordinator.dart';
+import '../session/space_gesture.dart' show HoldKind, HoldView;
 import '../app/app_graph.dart';
-import '../widgets/app_menu.dart' show AppGlass;
+import '../widgets/app_menu.dart' show AppGlass, AppMenuStyle;
 import 'avatar.dart';
 import 'motion.dart';
+import 'wait_design.dart';
 
-export '../session/status.dart' show StatusAction, StatusKind, StatusLevel, StatusLine, nameList;
+export '../session/status.dart' show KeyHint, StatusAction, StatusKind, StatusLevel, StatusLine, nameList;
 
 /// The pill's line from the session's [SessionCoordinator.status]
 /// (tracked: call inside a builder); "Connecting…" only once it has taken
@@ -19,12 +23,17 @@ StatusLine? playerStatusNow(SessionCoordinator coord, {bool slowConnect = false}
   return line;
 }
 
-/// The player's one status pill (bottom centre): frosted dark glass with
-/// one short line, the members it is about and at most one button. Fades
-/// in and out; a different kind of status fades through, the pill resizing
-/// around it.
+/// The player's one status pill (bottom centre, design A): a rounded
+/// rectangle of the app's glass with the people it is about (36 px, side
+/// by side, at most three then "+N"), one line, and under it the keys
+/// that act now or a muted detail; at most one button. A Space hold fills
+/// it from the left, fading in with an ease-in so a tap barely shows, and
+/// from 150 ms on its words say what keeping on and letting go do. Fades in
+/// and out; a different kind of status fades through, the pill resizing
+/// around it. [onSize]: its size after each layout (the subtitle lift).
 class PlayerStatus extends StatefulWidget {
-  const PlayerStatus({super.key});
+  final ValueChanged<Size>? onSize;
+  const PlayerStatus({super.key, this.onSize});
 
   static const connectGrace = Duration(seconds: 2);
 
@@ -36,6 +45,20 @@ class _PlayerStatusState extends State<PlayerStatus> {
   Timer? _connectTimer;
   bool _slow = false;
   StatusLine? _last;
+  // The pill's laid-out size, whether it shows, and what [PlayerStatus.onSize]
+  // last heard (zero while hidden).
+  Size _measured = Size.zero;
+  bool _visible = false;
+  Size? _reported;
+
+  void _report() {
+    final s = _visible ? _measured : Size.zero;
+    if (s == _reported || widget.onSize == null) return;
+    _reported = s;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onSize?.call(s);
+    });
+  }
 
   @override
   void dispose() {
@@ -65,59 +88,98 @@ class _PlayerStatusState extends State<PlayerStatus> {
         coord.retry();
       case StatusAction.reload:
         unawaited(coord.reloadVideo());
-      case StatusAction.ready:
-        coord.toggleReady();
+      case StatusAction.join:
+        coord.join();
+      case StatusAction.back:
+        coord.back();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return PartyWatch(builder: (context) {
-      final coord = AppScope.of(context).coordinator;
-      _trackConnecting(coord.status.value.line);
-      final view = playerStatusNow(coord, slowConnect: _slow);
-      if (view != null) _last = view;
-      final shown = _last;
-      final ready = view?.action == StatusAction.ready;
-      return AnimatedOpacity(
-        duration: easeTime,
-        curve: ease,
-        opacity: view == null ? 0 : 1,
-        child: IgnorePointer(
-          ignoring: view == null,
-          child: shown == null
-              ? const SizedBox.shrink()
-              : MouseRegion(
-                  cursor: ready ? SystemMouseCursors.click : MouseCursor.defer,
-                  child: GestureDetector(
-                    key: const ValueKey('player-status'),
-                    onTap: ready ? coord.toggleReady : null,
-                    child: PlayerGlass(
-                      child: AnimatedSize(
-                        duration: easeTime,
-                        curve: ease,
-                        child: fadeThrough(
-                          _StatusLine(
-                            key: ValueKey(shown.kind),
-                            view: shown,
-                            coord: coord,
-                            onAction: (a) => _act(coord, a),
+    final coord = AppScope.of(context).coordinator;
+    return ValueListenableBuilder<StatusLine?>(
+      valueListenable: coord.space.holdLine,
+      builder: (context, holdLine, _) => PartyWatch(builder: (context) {
+        _trackConnecting(coord.status.value.line);
+        var view = holdLine ?? playerStatusNow(coord, slowConnect: _slow);
+        // The dev-only centre card shows the waiting itself.
+        if (holdLine == null && view != null && waitDesign != WaitDesign.a && isWaitLine(view)) view = null;
+        if (view != null) _last = view;
+        _visible = view != null;
+        _report();
+        final shown = _last;
+        final tap = view != null && view.tappable;
+        final pill = shown == null
+            ? const SizedBox.shrink()
+            : MouseRegion(
+                cursor: tap ? SystemMouseCursors.click : MouseCursor.defer,
+                child: GestureDetector(
+                  key: const ValueKey('player-status'),
+                  onTap: tap ? () => _act(coord, view!.action!) : null,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 600),
+                    child: AppGlass(
+                      radius: StatusPill.radius,
+                      color: AppMenuStyle.pillGlass,
+                      shadow: false,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(child: HoldFill(hold: coord.space.hold)),
+                          AnimatedSize(
+                            duration: holdLine != null ? const Duration(milliseconds: 160) : easeTime,
+                            curve: ease,
+                            child: holdLine != null
+                                ? AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 140),
+                                    layoutBuilder: (current, previous) =>
+                                        Stack(alignment: Alignment.center, children: [...previous, ?current]),
+                                    child: StatusPill(
+                                        key: ValueKey('hold-${shown.text}'),
+                                        view: shown,
+                                        coord: coord,
+                                        onAction: (a) => _act(coord, a)),
+                                  )
+                                : fadeThrough(
+                                    StatusPill(
+                                      key: ValueKey(shown.kind),
+                                      view: shown,
+                                      coord: coord,
+                                      onAction: (a) => _act(coord, a),
+                                    ),
+                                    expand: false,
+                                    alignment: Alignment.center,
+                                  ),
                           ),
-                          expand: false,
-                          alignment: Alignment.center,
-                        ),
+                        ],
                       ),
                     ),
                   ),
                 ),
-        ),
-      );
-    });
+              );
+        return AnimatedOpacity(
+          duration: easeTime,
+          curve: ease,
+          opacity: view == null ? 0 : 1,
+          child: IgnorePointer(
+            ignoring: view == null,
+            child: widget.onSize == null
+                ? pill
+                : SizeReport(
+                    onSize: (s) {
+                      _measured = s;
+                      _report();
+                    },
+                    child: pill),
+          ),
+        );
+      }),
+    );
   }
 }
 
-/// The player's pill surface (the status pill, the action pills, the
-/// unread chip): the app's glass as a stadium ([AppGlass.pill]).
+/// The player's pill surface (the action pills, the unread chip): the
+/// app's glass as a stadium ([AppGlass.pill]).
 class PlayerGlass extends StatelessWidget {
   final Widget child;
   const PlayerGlass({super.key, required this.child});
@@ -129,79 +191,135 @@ class PlayerGlass extends StatelessWidget {
       );
 }
 
-class _StatusLine extends StatelessWidget {
+/// A Space hold's fill: the pill's background from the left edge to the
+/// progress, its strength an ease-in of the progress (amber for BRB, white
+/// for continuing without). Repaints from the gesture without rebuilding
+/// the pill; the glass clips it to its shape.
+class HoldFill extends StatelessWidget {
+  final ValueListenable<HoldView?> hold;
+  const HoldFill({super.key, required this.hold});
+
+  @override
+  Widget build(BuildContext context) =>
+      RepaintBoundary(child: CustomPaint(painter: _FillPainter(hold, Curves.easeIn)));
+}
+
+class _FillPainter extends CustomPainter {
+  final ValueListenable<HoldView?> hold;
+  final Curve curve;
+  _FillPainter(this.hold, this.curve) : super(repaint: hold);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final h = hold.value;
+    if (h == null || h.progress <= 0) return;
+    final strength = curve.transform(h.progress.clamp(0.0, 1.0));
+    if (strength <= 0.002) return;
+    final brb = h.kind == HoldKind.brb;
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width * h.progress, size.height),
+        Paint()..color = (brb ? Colors.amber : Colors.white).withValues(alpha: (brb ? 0.55 : 0.32) * strength));
+  }
+
+  @override
+  bool shouldRepaint(_FillPainter old) => old.hold != hold || old.curve != curve;
+}
+
+/// Tells [onSize] its child's size after each layout that changes it.
+class SizeReport extends SingleChildRenderObjectWidget {
+  final ValueChanged<Size> onSize;
+  const SizeReport({super.key, required this.onSize, super.child});
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => RenderSizeReport(onSize);
+
+  @override
+  void updateRenderObject(BuildContext context, RenderSizeReport renderObject) => renderObject.onSize = onSize;
+}
+
+class RenderSizeReport extends RenderProxyBox {
+  ValueChanged<Size> onSize;
+  Size? _last;
+  RenderSizeReport(this.onSize);
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    if (size == _last) return;
+    _last = size;
+    final s = size;
+    WidgetsBinding.instance.addPostFrameCallback((_) => onSize(s));
+  }
+}
+
+/// The pill's content: the people, the line, the keys or the detail, a
+/// button.
+class StatusPill extends StatelessWidget {
   final StatusLine view;
   final SessionCoordinator coord;
   final ValueChanged<StatusAction> onAction;
-  const _StatusLine({super.key, required this.view, required this.coord, required this.onAction});
+  const StatusPill({super.key, required this.view, required this.coord, required this.onAction});
 
-  static const _avatar = 34.0;
+  static const radius = 14.0;
 
-  Widget? _lead() {
-    final v = view;
-    switch (v.kind) {
-      case StatusKind.problem:
-        final error = v.level == StatusLevel.error;
-        return Icon(error ? Icons.error_outline_rounded : Icons.warning_amber_rounded,
-            size: 20, color: error ? Colors.redAccent.shade100 : Colors.amber);
-      case StatusKind.reconnecting:
-        return const _Spinner(color: Colors.amber);
-      case StatusKind.connecting:
-      case StatusKind.fetching:
-        return const _Spinner(color: Colors.white70);
-      case StatusKind.finished:
-        return null;
-      case StatusKind.loading:
-      case StatusKind.you:
-      case StatusKind.cannotPlay:
-      case StatusKind.waiting:
-        final r = coord.serverState.value;
-        final infos = [
-          for (final m in v.who)
-            v.self ? selfAvatarInfo(ready: m.ready, host: m.host) : memberAvatarInfo(m, r, coord),
-        ];
-        if (infos.isEmpty) return null;
-        final avatar = infos.length == 1
-            ? StatusAvatar(info: infos.first, size: _avatar, badges: false)
-            : AvatarStack(members: infos, shown: 4, size: _avatar, people: false);
-        if (v.progress == null) return avatar;
-        // Loading: the progress runs round the avatar.
-        return Stack(
-          alignment: Alignment.center,
-          children: [
-            avatar,
-            SizedBox.square(
-              dimension: _avatar + 6,
-              child: CircularProgressIndicator(
-                value: v.progress,
-                strokeWidth: 2.5,
-                color: Colors.white,
-                backgroundColor: Colors.white24,
-              ),
-            ),
-          ],
-        );
-    }
-  }
+  /// As tall as the two lines of text beside them.
+  static const avatar = 36.0;
+  static const _gap = 4.0;
+  static const _most = 3;
+
+  Widget? _lead() => switch (view.kind) {
+        StatusKind.problem => Icon(
+            view.level == StatusLevel.error ? Icons.error_outline_rounded : Icons.warning_amber_rounded,
+            size: 20,
+            color: view.level == StatusLevel.error ? Colors.redAccent.shade100 : Colors.amber),
+        StatusKind.reconnecting => const _Spinner(color: Colors.amber),
+        StatusKind.connecting || StatusKind.fetching => const _Spinner(color: Colors.white70),
+        StatusKind.out || StatusKind.afk || StatusKind.paused => null,
+        _ => null,
+      };
 
   @override
   Widget build(BuildContext context) {
     final v = view;
-    final lead = _lead();
-    final avatars = v.who.isNotEmpty;
-    final action = v.action == StatusAction.ready ? null : v.action;
+    final r = coord.serverState.value;
+    final who = v.who.take(_most).toList();
+    final more = v.who.length - who.length;
+    final shape = AvatarShape.of(context);
+    final lead = who.isEmpty ? _lead() : null;
+    final action = v.action == StatusAction.cancel || v.action == StatusAction.retry || v.action == StatusAction.reload
+        ? v.action
+        : null;
+    final second = v.keys.isNotEmpty
+        ? KeyHints(v.keys)
+        : v.detail != null
+            ? Text(v.detail!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white60, fontSize: 11.5, fontWeight: FontWeight.w500, height: 1.3))
+            : null;
     return Padding(
-      padding: EdgeInsets.fromLTRB(lead == null ? 18 : (avatars ? 5 : 14), 5, action == null ? 18 : 6, 5),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (lead != null) ...[
-            SizedBox(height: _avatar + 6, child: Center(child: lead)),
-            SizedBox(width: avatars ? 10 : 8),
+          for (final m in who) ...[
+            StatusAvatar(info: memberAvatarInfo(m, r, coord), size: avatar, badges: false),
+            const SizedBox(width: _gap),
           ],
+          if (more > 0) ...[
+            Container(
+              width: avatar,
+              height: avatar,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.12), borderRadius: shape.radius(avatar)),
+              child: Text('+$more', style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w700)),
+            ),
+            const SizedBox(width: _gap),
+          ],
+          if (who.isNotEmpty) const SizedBox(width: 10 - _gap),
+          if (lead != null) ...[lead, const SizedBox(width: 10)],
           Flexible(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: _avatar),
+              constraints: BoxConstraints(minHeight: who.isEmpty ? 0 : avatar),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -214,13 +332,7 @@ class _StatusLine extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600, height: 1.2),
                   ),
-                  if (v.detail != null)
-                    Text(
-                      v.detail!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white60, fontSize: 12, fontWeight: FontWeight.w500, height: 1.2),
-                    ),
+                  if (second != null) ...[const SizedBox(height: 3), second],
                 ],
               ),
             ),
@@ -234,6 +346,40 @@ class _StatusLine extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// The hint line: `[Space] BRB too  [Hold Space] continue without`: small
+/// keycaps a little lighter than the glass, the actions muted.
+class KeyHints extends StatelessWidget {
+  final List<KeyHint> keys;
+  const KeyHints(this.keys, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    const action = TextStyle(color: Colors.white60, fontSize: 11.5, fontWeight: FontWeight.w500, height: 1.2);
+    return Row(
+      key: const ValueKey('player-status-keys'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < keys.length; i++) ...[
+          if (i > 0) const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.13),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.16), width: 0.5),
+            ),
+            child: Text(keys[i].$1,
+                style: const TextStyle(
+                    color: Colors.white70, fontSize: 10.5, fontWeight: FontWeight.w600, height: 1.25, letterSpacing: 0.2)),
+          ),
+          const SizedBox(width: 5),
+          Flexible(child: Text(keys[i].$2, maxLines: 1, overflow: TextOverflow.ellipsis, style: action)),
+        ],
+      ],
     );
   }
 }

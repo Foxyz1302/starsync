@@ -58,7 +58,7 @@ void main() {
       MaterialApp(
         theme: ThemeData.dark(),
         home: AppKeys(
-          onToggleReady: () => readyToggles++,
+          onSpace: () => readyToggles++,
           child: Scaffold(
             body: SessionPlayer(
               mode: PlayerMode.full,

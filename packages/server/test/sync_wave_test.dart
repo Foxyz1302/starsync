@@ -114,8 +114,8 @@ void main() {
     expect(welcome.instance, server.hub.instance);
     expect(welcome.proto, RelayConstants.protoMax);
     expect(welcome.grace, RelayConstants.graceSecs);
-    first.send(const ReadyIntent(ready: true).toJson());
-    await _until(() => server.hub.engine.members[welcome.token]?.ready == true, 'ready');
+    first.send(const PresenceIntent(state: Presence.brb).toJson());
+    await _until(() => server.hub.engine.members[welcome.token]?.presence == Presence.brb, 'brb');
     proxy.frozen = true; // unclean drop: the server's socket stays open
 
     final (second, again) = await _Client.join(server.boundPort, 'alice', client: alice, seq: 2);
@@ -123,11 +123,11 @@ void main() {
     expect(again.memberId, welcome.memberId);
     expect(again.token, welcome.token, reason: 'same token keeps the media URL valid');
     expect(server.hub.engine.members.length, 2, reason: 'alice once (taken over) plus other, no ghost');
-    expect(server.hub.engine.members[welcome.token]!.ready, isTrue, reason: 'ready survives the takeover');
+    expect(server.hub.engine.members[welcome.token]!.presence, Presence.brb, reason: 'BRB survives the takeover');
     // The frozen old socket closing later must not touch the member.
     await proxy.close();
     await Future.delayed(const Duration(seconds: 2));
-    expect(server.hub.engine.members[welcome.token]!.presence, isNot(Presence.gone));
+    expect(server.hub.engine.members[welcome.token]!.gone, isFalse);
     expect(server.hub.sockets.containsKey(welcome.token), isTrue);
     second.send(const ChatMessage(text: 'still here').toJson());
     await _until(() => other.frames.any((f) => f['t'] == 'chat' && f['text'] == 'still here'),

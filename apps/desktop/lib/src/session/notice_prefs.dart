@@ -19,7 +19,7 @@ enum ChatPopups {
 }
 
 /// What the user picked: chat pop-ups, and whether joins and leaves also
-/// reach them while they sit out or the window is in the background
+/// reach them while they are out or the window is in the background
 /// ([people]; off by default: then only chat, nudges, "starting now" and
 /// Up next do).
 class NotifyPrefs {

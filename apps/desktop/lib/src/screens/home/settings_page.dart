@@ -14,7 +14,9 @@ import 'update_indicator.dart';
 /// (`AppKeys`), the rest by the session player's key handler while it
 /// fills the window.
 const playerShortcuts = [
-  ('Space', 'Toggle ready (anywhere in a server)'),
+  ('Space', 'Play / pause for everyone; hold: BRB (anywhere in a server)'),
+  ('Hold Space', 'While someone is BRB: continue without them (a tap: BRB too, or back)'),
+  ('Right button', 'On the video: the menu (BRB, skip ahead, Out); Esc closes it'),
   ('← / →', 'Seek back / forward 10 s'),
   ('↑ / ↓, wheel', 'Volume up / down (up to 150 %)'),
   ('M', 'Mute / unmute'),

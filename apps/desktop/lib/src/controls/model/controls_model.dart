@@ -73,11 +73,10 @@ class PlayerControlsModel {
   /// Play / pause as the session sees it ([PlayState]).
   late final Computed<PlayState> play = computed(() {
     final r = coord.serverState.value;
-    final self = coord.selfMember.value;
     return switch (r?.transport) {
       'playing' => PlayState.playing,
       'finished' => PlayState.finished,
-      _ => (self?.ready ?? false) && (self?.inSet ?? false) ? PlayState.waiting : PlayState.paused,
+      _ => (r?.wantsPlay ?? false) ? PlayState.waiting : PlayState.paused,
     };
   });
 
@@ -129,8 +128,8 @@ class PlayerControlsModel {
 
   // -------------------------------------------------------------- actions
 
-  /// Space: ready / not ready (being ready is "play" in a server).
-  void togglePlay() => coord.toggleReady();
+  /// The play button: the group's play or pause (out: join).
+  void togglePlay() => coord.togglePlay();
 
   /// A seek bar's press or drag; through `player.seek`, the user-seek
   /// path, so everyone follows.
@@ -221,8 +220,6 @@ class PlayerControlsModel {
     coord.markInput();
     coord.reloadVideo();
   }
-
-  void markAllReady() => coord.forcePlayAll();
 
   String? link() => coord.currentLink();
 }

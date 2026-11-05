@@ -313,14 +313,17 @@ class EngineQueue {
     _clearPlay();
   }
 
-  /// A play request nobody acted on ends after
-  /// [RelayConstants.queuePlayTimeoutSecs]. Returns whether it changed.
-  bool tick(DateTime now) {
+  /// The play request has waited [RelayConstants.queuePlayTimeoutSecs]
+  /// without a swap: the engine asks again ([reask]) or skips the item.
+  bool overdue(DateTime now) {
     final at = _playAt;
     if (play == null || at == null) return false;
-    if (now.difference(at).inSeconds < RelayConstants.queuePlayTimeoutSecs) return false;
-    _clearPlay();
-    return true;
+    return now.difference(at).inSeconds >= RelayConstants.queuePlayTimeoutSecs;
+  }
+
+  /// The same play request, asked again from [now].
+  void reask(DateTime now) {
+    if (play != null) _playAt = now;
   }
 
   void _clearPlay() {
@@ -349,7 +352,7 @@ extension EngineQueueOps on SyncEngine {
   /// [item] is already cleaned by the server (see `cleanQueueAdd`). An
   /// [QueueItem.auto] item must continue the current media
   /// ([QueueItem.forMedia] = [SyncEngine.mediaId]) and come from who put
-  /// it up or, when that member is not `in`, from the first member who is
+  /// it up or, when that member is not present, from the first member who is
   /// ([mayAddContinuation]); it adds no feed line (it is no news).
   QueueRefusal? applyQueueAdd(String token, QueueItem item,
       {bool next = false, String? privateUrl, Uint8List? thumb}) {
@@ -359,7 +362,7 @@ extension EngineQueueOps on SyncEngine {
       if (media == null || item.forMedia != mediaId) {
         return (code: ErrCode.bad, message: 'bad message: an auto item must name the current media');
       }
-      final views = [for (final m in members.values) m.view(inGate: false)];
+      final views = [for (final m in members.values) m.view()];
       if (!mayAddContinuation(member.id, members[swapBy]?.id, views)) {
         return (code: ErrCode.forbidden, message: 'only who put this media up adds what continues it');
       }

@@ -41,7 +41,6 @@ class _Row {
   final String? toast;
   final String? actor;
   final SfxKind? sound;
-  final int readyIndex;
   final bool attention;
   /// Whether the event's own feed line goes into the activity log.
   final bool logged;
@@ -52,7 +51,6 @@ class _Row {
       this.toast,
       this.actor,
       this.sound,
-      this.readyIndex = 0,
       this.attention = false,
       this.logged = false,
       this.system});
@@ -60,11 +58,11 @@ class _Row {
 
 // The contexts.
 const _in = NoticeContext(self: Presence.watching);
-const _away = NoticeContext(self: Presence.away);
-const _awayPeople = NoticeContext(self: Presence.away, prefs: NotifyPrefs(people: true));
+const _away = NoticeContext(self: Presence.out);
+const _awayPeople = NoticeContext(self: Presence.afk, prefs: NotifyPrefs(people: true));
 const _alone = NoticeContext(self: Presence.watching, alone: true);
 const _background = NoticeContext(self: Presence.watching, window: WindowActivity.unfocused);
-const _minimisedAway = NoticeContext(self: Presence.away, window: WindowActivity.minimised);
+const _minimisedAway = NoticeContext(self: Presence.out, window: WindowActivity.minimised);
 const _playing = NoticeContext(self: Presence.watching, playing: true);
 const _chatOpen = NoticeContext(self: Presence.watching, chatOpen: true);
 const _chatOpenBackground = NoticeContext(self: Presence.watching, chatOpen: true, window: WindowActivity.unfocused);
@@ -73,7 +71,7 @@ const _chatOff = NoticeContext(self: Presence.watching, window: WindowActivity.u
 
 /// The feed as the coordinator turns it into events: this member is m9
 /// ('Me'), two members ready in the latest state.
-FeedEvent _of(FeedMessage f) => FeedEvent.of(f, selfId: 'm9', readyCount: 2);
+FeedEvent _of(FeedMessage f) => FeedEvent.of(f, selfId: 'm9');
 
 final _rows = <_Row>[
   // ---- the feed (FeedEvent.of, then noticeFor); every line is logged
@@ -86,28 +84,30 @@ final _rows = <_Row>[
   _Row('gone (after the delayed notice)', _of(_feed('gone')), MemberGone,
       toast: 'Ann lost connection', actor: 'Ann', logged: true),
   _Row('return', _of(_feed('return')), MemberReturned, toast: 'Ann is back', actor: 'Ann', logged: true),
-  _Row('away, someone sat themselves out', _of(_feed('away')), MemberSatOut, logged: true),
-  _Row('away, someone else auto sat out', _of(_feed('away', reason: 'idle')), MemberSatOut, logged: true),
-  _Row('away, someone sat someone else out', _of(_feed('away', target: 'Bob')), MemberSatOut, logged: true),
-  _Row('away, you sat yourself out', _of(_feed('away', actor: 'Me')), MemberSatOut, logged: true),
-  _Row('away, someone sat you out', _of(_feed('away', target: 'Me')), MemberSatOut,
-      toast: 'Ann sat you out', actor: 'Ann', sound: SfxKind.kick, logged: true),
-  _Row('away, auto sit-out (idle)', _of(_feed('away', actor: 'Me', reason: 'idle')), MemberSatOut,
-      toast: 'You sit out (idle); you are back as soon as you return', sound: SfxKind.warn, logged: true),
-  _Row('away, auto sit-out (minimised)', _of(_feed('away', actor: 'Me', reason: 'minimised')), MemberSatOut,
-      toast: 'You sit out (minimised); you are back as soon as you return', sound: SfxKind.warn, logged: true),
-  _Row('in (back from away)', _of(_feed('in')), MemberBack, logged: true),
+  _Row('out, someone went out', _of(_feed('out')), MemberOut, logged: true),
+  _Row('afk, someone else went AFK', _of(_feed('afk')), MemberOut, logged: true),
+  _Row('out, someone set someone else out', _of(_feed('out', target: 'Bob')), MemberOut, logged: true),
+  _Row('out, you went out', _of(_feed('out', actor: 'Me')), MemberOut, logged: true),
+  _Row('out, someone set you out', _of(_feed('out', target: 'Me')), MemberOut,
+      toast: 'Ann set you out', actor: 'Ann', sound: SfxKind.kick, logged: true),
+  _Row('afk, this app set you AFK', _of(_feed('afk', actor: 'Me')), MemberOut,
+      toast: "You're AFK; any key or the mouse brings you back", sound: SfxKind.warn, logged: true),
+  _Row('out, minimised while it played', _of(_feed('out', actor: 'Me', reason: 'minimised')), MemberOut,
+      toast: "You're out (minimised); Space brings you back", sound: SfxKind.warn, logged: true),
+  _Row('in (back from out)', _of(_feed('in')), MemberIn, logged: true),
   _Row('a replayed join: logged only', _of(_feed('join', replayed: true)), MemberJoined, logged: true),
   _Row('a replayed chat: logged only', _of(_feed('chat', reason: 'hi', replayed: true)), ChatPosted, logged: true),
   _Row('someone with your name is not you', _of(FeedMessage(
-      actor: 'Me', actorId: 'm4', action: 'away', target: 'Me', targetId: 'm9', at: _at)), MemberSatOut,
-      toast: 'Me sat you out', actor: 'Me', sound: SfxKind.kick, logged: true),
-  _Row('ready', _of(_feed('ready')), ReadyChanged, sound: SfxKind.ready, readyIndex: 2, logged: true),
-  _Row('unready', _of(_feed('unready')), ReadyChanged, sound: SfxKind.unready, logged: true),
-  _Row('force-ready', _of(_feed('force-ready')), ForcedReady, sound: SfxKind.forceReady, logged: true),
-  _Row('force-unready', _of(_feed('force-unready')), ForcedReady, logged: true),
-  _Row('force-play', _of(_feed('force-play')), ForcedTransport, logged: true),
-  _Row('force-hold', _of(_feed('force-hold')), ForcedTransport, logged: true),
+      actor: 'Me', actorId: 'm4', action: 'out', target: 'Me', targetId: 'm9', at: _at)), MemberOut,
+      toast: 'Me set you out', actor: 'Me', sound: SfxKind.kick, logged: true),
+  _Row('brb', _of(_feed('brb')), MemberBrb, sound: SfxKind.unready, logged: true),
+  _Row('brb, someone waits for you', _of(_feed('brb', target: 'Me')), MemberBrb,
+      toast: "Ann is waiting for you; Space when you're back", actor: 'Ann', sound: SfxKind.kick, logged: true),
+  _Row('back from BRB', _of(_feed('back')), MemberBackFromBrb, sound: SfxKind.ready, logged: true),
+  _Row('continue without', _of(_feed('continue')), ContinuedWithout, sound: SfxKind.forceReady, logged: true),
+  _Row('continue without you', _of(_feed('continue', target: 'Me')), ContinuedWithout,
+      toast: 'Ann went on without you', actor: 'Ann', sound: SfxKind.kick, logged: true),
+  _Row('play', _of(_feed('play')), Played, logged: true),
   _Row('swap', _of(_feed('swap')), MediaSwapped,
       toast: 'Ann changed media', actor: 'Ann', sound: SfxKind.swap, logged: true),
   _Row('own swap: logged only', _of(_feed('swap', actor: 'Me')), MediaSwapped, logged: true),
@@ -191,7 +191,7 @@ final _contextRows = <_Row>[
       context: _away, toast: 'Ann changed media', actor: 'Ann', sound: SfxKind.swap, logged: true),
   _Row('away: a join is logged only', _of(_feed('join')), MemberJoined, context: _away, logged: true),
   _Row('away: a leave is logged only', _of(_feed('leave', reason: 'bye')), MemberLeft, context: _away, logged: true),
-  _Row('away: ready makes no sound', _of(_feed('ready')), ReadyChanged, context: _away, logged: true),
+  _Row('away: a BRB makes no sound', _of(_feed('brb')), MemberBrb, context: _away, logged: true),
   _Row("away: someone can't play: nothing", const MemberCantPlay('Ann', 'no codec'), MemberCantPlay, context: _away),
   _Row('away, joins chosen: a join pops up', _of(_feed('join')), MemberJoined,
       context: _awayPeople, toast: 'Ann joined', actor: 'Ann', sound: SfxKind.join, logged: true),
@@ -199,7 +199,7 @@ final _contextRows = <_Row>[
       context: _away, toast: 'Cannot pass the video on: closed'),
   _Row('away: app notices still show', const Copied('Link copied'), Copied, context: _away, toast: 'Link copied'),
   // ---- alone (D9): no social sounds or pop-ups, app notices show
-  _Row('alone: ready makes no sound', _of(_feed('ready')), ReadyChanged, context: _alone, logged: true),
+  _Row('alone: a BRB makes no sound', _of(_feed('brb')), MemberBrb, context: _alone, logged: true),
   _Row('alone: a join is quiet', _of(_feed('join')), MemberJoined, context: _alone, logged: true),
   _Row('alone: own chat is quiet', _of(_feed('chat', actor: 'Me', reason: 'hi')), ChatPosted,
       context: _alone, logged: true),
@@ -253,7 +253,6 @@ void _check(_Row r) {
   expect(n.toast, r.toast, reason: 'toast');
   expect(n.actor, r.actor, reason: 'actor');
   expect(n.sound?.kind, r.sound, reason: 'sound');
-  if (r.sound != null) expect(n.sound!.readyIndex, r.readyIndex, reason: 'ready pitch');
   expect(n.attention, r.attention, reason: 'attention');
   expect(n.system == null ? null : (n.system!.title, n.system!.body), r.system, reason: 'system notification');
   final e = r.event;
@@ -382,11 +381,11 @@ void main() {
       var alone = false;
       n.session = () => (self: self, alone: alone, playing: false);
       n.notify(_of(_feed('join')));
-      self = Presence.away;
+      self = Presence.out;
       n.notify(_of(_feed('join', actor: 'Bob')));
       self = Presence.watching;
       alone = true;
-      n.notify(_of(_feed('ready')));
+      n.notify(_of(_feed('brb')));
       expect(n.toasts.peek().map((t) => t.text), ['Ann joined']);
       expect(sounds, [SfxKind.join]);
       expect(n.feedLog.peek(), hasLength(3), reason: 'everything is logged');

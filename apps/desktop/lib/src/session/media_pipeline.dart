@@ -34,7 +34,7 @@ final _log = createLogger('session');
 // - open: a player through the [PlayerHost]: the prepared one (Up next's
 //   preload) promoted, else a fresh one per media; the same media again
 //   keeps its player.
-// - ready: the buffer the gate needs is reported at once (the
+// - ready: the buffer the group needs is reported at once (the
 //   coordinator's report).
 //
 // Being a relay source ([RelayFeeder]) and the viewer's side of a source
@@ -553,7 +553,7 @@ class MediaPipeline {
     }
   }
 
-  /// Sitting out: nothing open, nothing pulled. A relay this member serves
+  /// Out with a new media: nothing open, nothing pulled. A relay this member serves
   /// goes on (it does not use the player).
   Future<void> unload() async {
     _awaitLiveFor = -1;

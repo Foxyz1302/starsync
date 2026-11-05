@@ -5,8 +5,8 @@ abstract class RelayConstants {
   /// The range of wire versions this build accepts (`hello.protoMin` ..
   /// `hello.proto` on a client, `/health.protoMin` .. `protoMax` on a
   /// server). Additions within a version family raise [protoMax] only.
-  static const int protoMin = 16;
-  static const int protoMax = 16;
+  static const int protoMin = 17;
+  static const int protoMax = 17;
 
   // Relay (`/r/...`): a member's bytes through the server's buffer.
   static const int relaySliceBytes = 256 * 1024;
@@ -67,13 +67,15 @@ abstract class RelayConstants {
   /// socket without a frame for [silenceSecs] is closed and its member is
   /// `gone`; a `gone` member is kept [graceSecs] (`welcome.grace`), then
   /// it leaves; the feed says `gone` only after [goneNoticeSecs] (a quick
-  /// return says nothing). A joiner holds a HELD gate at most
-  /// [joinerHoldSecs] (D2) and stays `joining` at most [joiningTimeoutSecs].
+  /// return says nothing).
   static const int silenceSecs = 15;
   static const int graceSecs = 600;
   static const int goneNoticeSecs = 10;
-  static const int joinerHoldSecs = 15;
-  static const int joiningTimeoutSecs = 60;
+  /// Someone back with the group from further behind than
+  /// [rewindBehindSecs] (out, a crash, a stalled stream) gives everyone a
+  /// rewind to where they were (`state.rewind`) for [rewindSecs].
+  static const int rewindBehindSecs = 10;
+  static const int rewindSecs = 30;
   /// Feed lines the server keeps for `hello.feedAfter` (the replay in
   /// `welcome.feed`).
   static const int feedReplayLines = 50;
@@ -104,8 +106,9 @@ abstract class RelayConstants {
   /// Up next (`queue`): at most this many items; a title or second line
   /// is cut to [maxQueueTextLength] characters; an item's picture is
   /// capped like a poster ([maxPosterBytes]). A play request nobody acts on
-  /// ends after [queuePlayTimeoutSecs]. The countdown to the first item at
-  /// the end of the media (`state.advance`) runs [advanceSecs].
+  /// is asked again after [queuePlayTimeoutSecs]. The countdown to the
+  /// first item (`state.advance`) runs over the media's last [advanceSecs]
+  /// (or [advanceSecs] from an item coming first once it finished).
   static const int maxQueueItems = 100;
   static const int maxQueueTextLength = 200;
   static const int queuePlayTimeoutSecs = 30;

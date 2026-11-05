@@ -1199,7 +1199,7 @@ class _MetaLine extends StatelessWidget {
         children: [
           if (dur.isNotEmpty) ...[Text(dur, style: style), dot],
           Text('added by ', style: style),
-          StatusAvatar(info: _adderAvatar(context, item, members), size: fontSize + 3, badges: false, ring: false),
+          StatusAvatar(info: _adderAvatar(context, item, members), size: fontSize + 3, badges: false, marks: false),
           const SizedBox(width: 4),
           Text(name, style: style),
           dot,
@@ -1215,7 +1215,7 @@ class _MetaLine extends StatelessWidget {
       children: [
         if (dur.isNotEmpty) ...[Text(dur, style: style), dot],
         Text('added by ', style: style),
-        StatusAvatar(info: _adderAvatar(context, item, members), size: fontSize + 3, badges: false, ring: false),
+        StatusAvatar(info: _adderAvatar(context, item, members), size: fontSize + 3, badges: false, marks: false),
         const SizedBox(width: 4),
         // Capped rather than flexible: two flexibles split the room in
         // half and would cut the end off even when it fits.
@@ -1587,9 +1587,11 @@ class _ContinuationRowState extends State<_ContinuationRow> {
 
 // -------------------------------------------------------------- end card
 
-/// When the media ended with something next (Up next's first item, else
-/// the continuation): its picture, title and who added it, the server's
-/// countdown with Cancel (for everyone), and Play now.
+/// Over the media's last 10 s and once it ended, with something next (Up
+/// next's first item, else the continuation): its picture, title and who
+/// added it, the server's countdown with Cancel (for everyone; a pause
+/// stops it too), and Play now. Media under a minute: "Up next" without
+/// the seconds.
 class UpNextCard extends StatelessWidget {
   final QueueController queue;
   final UpNextCountdown countdown;
@@ -1599,13 +1601,13 @@ class UpNextCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = countdown;
     final item = c.item;
-    final left = c.secondsLeft;
+    final left = c.short ? null : c.secondsLeft;
     final r = queue.coord.serverState.value;
     final selfId = queue.coord.connection.memberId;
     final waitingFor = c.waitingFor;
     final waiting = waitingFor != null
         ? 'Waiting for $waitingFor'
-        : left == null || left == 0
+        : (left == null || left == 0) && c.ended
             ? performerNote(queue, item, r)
             : null;
     final what = item.auto ? 'Next' : 'Up next';
@@ -1672,7 +1674,7 @@ class UpNextCard extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  if (left != null)
+                  if (c.secondsLeft != null)
                     TextButton(
                         key: const ValueKey('up-next-cancel'),
                         onPressed: queue.cancelCountdown,

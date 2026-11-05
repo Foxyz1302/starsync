@@ -95,25 +95,25 @@ void main() {
     return c;
   }
 
-  test('a blackholed client goes gone with its ready flag, queue item and relay; it comes back as itself', () async {
+  test('a blackholed client goes gone with its BRB, queue item and relay; it comes back as itself', () async {
     final c = dial();
     await until(() => c.welcome != null, 'welcome');
     c.startReports();
     final engine = server.hub.engine;
     EngineMember? member() => engine.members[c.token];
-    c.send(const ReadyIntent(ready: true).toJson());
+    c.send(const PresenceIntent(state: Presence.brb).toJson());
     c.send(const QueueIntent.add(QueueItem(
             media: HelloMedia(name: 'f.mkv', size: 10, duration: 0), how: QueueHow.file, title: 'f', key: 'key-of-f-1'))
         .toJson());
     c.send(const SwapIntent(media: HelloMedia(name: 'mine.mkv', size: 100, duration: 0, relay: MediaRelay())).toJson());
-    await until(() => engine.queue.length == 1 && server.hub.relay != null && member()!.ready, 'ready, queued, relayed');
+    await until(() => engine.queue.length == 1 && server.hub.relay != null && member()!.presence == Presence.brb, 'BRB, queued, relayed');
     await Future<void>.delayed(const Duration(milliseconds: 2000));
-    expect(member()!.presence, isNot(Presence.gone), reason: 'reports through the proxy keep it present');
+    expect(member()!.gone, isFalse, reason: 'reports through the proxy keep it present');
 
     proxy.last!.blackhole();
     final seen = c.frames.length;
-    await until(() => member()?.presence == Presence.gone, 'gone');
-    expect(member()!.ready, isTrue);
+    await until(() => member()?.gone ?? false, 'gone');
+    expect(member()!.presence, Presence.brb);
     expect(engine.queue.items.single.by, c.memberId);
     expect(server.hub.relay, isNotNull, reason: 'the relay lives through the grace (D6)');
     expect(engine.media!.relay!.sourceGone, isTrue);
@@ -130,8 +130,8 @@ void main() {
     expect(again.welcome!['resumed'], isTrue);
     expect([again.memberId, again.token], [c.memberId, c.token]);
     expect(engine.members, hasLength(1));
-    expect(member()!.presence, Presence.joining, reason: 'media is up: it loads, then comes in (D2)');
-    expect(member()!.ready, isTrue);
+    expect(member()!.loading, isTrue, reason: 'media is up: it loads, then comes in (D2)');
+    expect(member()!.presence, Presence.brb, reason: 'BRB survives the drop');
     expect(engine.media!.relay!.sourceGone, isFalse);
     final actions = [for (final f in again.frames) if (f['t'] == 'feed') f['action']];
     expect(actions, isNot(contains('join')), reason: 'a return, not a join');
@@ -142,7 +142,7 @@ void main() {
     await until(() => c.welcome != null, 'welcome');
     proxy.last!.reset();
     await until(() => c.ended, 'client sees the reset');
-    await until(() => server.hub.engine.members[c.token]?.presence == Presence.gone, 'server sees it gone');
+    await until(() => server.hub.engine.members[c.token]?.gone ?? false, 'server sees it gone');
 
     final again = dial(seq: 2);
     await until(() => again.welcome != null, 'welcome after redial');

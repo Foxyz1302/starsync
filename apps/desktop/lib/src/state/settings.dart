@@ -25,6 +25,7 @@ const _keyHwdecCustom = 'hwdecCustom';
 const _keyShaderPreset = 'shaderPreset';
 const _keyShaderQuality = 'shaderQuality';
 const _keyCustomShaders = 'customShaders';
+const _keyAvatarShape = 'avatarShape';
 const _keyAutoAdvance = 'autoAdvance';
 /// Legacy: true was the uosc design (now [ControlsSkin.minimal]); read
 /// once when [_keyControlsSkin] is missing.
@@ -40,7 +41,6 @@ const _keySoundsOff = 'soundsOff';
 const _keySoundPreset = 'soundPreset';
 const _keyWelcomeDismissed = 'welcomeDismissed';
 const _keySoundPresetFor = 'soundPresetFor';
-const keyAutoSitOut = 'autoSitOut';
 const _keyChatPopups = 'chatPopups';
 const _keyNotifyPeople = 'notifyPeople';
 const _keyShareDiagnostics = 'shareDiagnostics';
@@ -106,9 +106,9 @@ class AppSettings {
   /// continued by the next one (Up next's `auto` item, the server's
   /// countdown at its end).
   final autoAdvance = signal(true);
-  /// Session: auto sit-out (idle while nothing plays, or minimised for a
-  /// while, sets you away; coming back sets you in).
-  final autoSitOut = signal(true);
+  /// People's pictures as circles instead of rounded squares (Settings →
+  /// Party → More: "Avatar shape").
+  final avatarCircle = signal(false);
   /// The player controls' skin (`controls/`). Applies live.
   final controlsSkin = signal(ControlsSkin.standard);
   /// The bar's clock: elapsed / total or the time left (a click on the
@@ -215,8 +215,7 @@ class AppSettings {
       await _loadUpdateChannel(box);
       final advance = box.get(_keyAutoAdvance);
       if (advance is bool) autoAdvance.value = advance;
-      final autoOut = box.get(keyAutoSitOut);
-      if (autoOut is bool) autoSitOut.value = autoOut;
+      avatarCircle.value = box.get(_keyAvatarShape) == 'circle';
       controlsSkin.value =
           ControlsSkin.fromStored(box.get(_keyControlsSkin), legacyMpvControls: box.get(_keyMpvControls));
       final time = box.get(_keyTimeDisplay);
@@ -324,9 +323,9 @@ class AppSettings {
     _put(_keyAutoAdvance, on);
   }
 
-  void setAutoSitOut(bool on) {
-    autoSitOut.value = on;
-    _put(keyAutoSitOut, on);
+  void setAvatarCircle(bool on) {
+    avatarCircle.value = on;
+    _put(_keyAvatarShape, on ? 'circle' : 'rounded');
   }
 
   void setControlsSkin(ControlsSkin skin) {

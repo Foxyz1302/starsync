@@ -330,13 +330,16 @@ Future<({EpisodeLink? previous, EpisodeLink? next})> findAdjacentEpisodes(OwnPla
 
 /// Where the "Next episode" pill's window starts: at [endingStart] (the
 /// ED: Jellyfin Outro segment or ED-titled chapter, see `endingRange`)
-/// when one is known inside [runtime], else the last two minutes of
-/// [runtime] (all of it for shorter media). The pill shows only while the
+/// when one is known inside [runtime], else the last 90 s of [runtime]
+/// (all of it for shorter media). The pill shows only while the
 /// controls are up (`PillGate`), so a guessed window costs nothing.
+/// Without a known ending, "Next episode" shows over this last stretch.
+const nextPromptLead = Duration(seconds: 90);
+
 Duration nextPromptStart(JellyfinItem? item, Duration runtime, {Duration? endingStart}) {
   if (endingStart != null && endingStart > Duration.zero && endingStart < runtime) {
     return endingStart;
   }
-  const lead = Duration(minutes: 2);
+  const lead = nextPromptLead;
   return runtime > lead ? runtime - lead : Duration.zero;
 }

@@ -18,16 +18,37 @@ import 'party.dart';
 /// [error] red.
 enum StatusLevel { ok, info, warn, error }
 
-/// What the player's status pill says, most pressing first.
-enum StatusKind { reconnecting, problem, connecting, fetching, finished, loading, you, cannotPlay, waiting }
+/// What the player's status pill says, most pressing first. [you]: you
+/// are BRB (the group waits for you); [out] / [afk]: you are out;
+/// [waiting]: the group waits for someone's BRB or video; [paused]: a
+/// plain pause.
+enum StatusKind {
+  reconnecting,
+  problem,
+  connecting,
+  fetching,
+  out,
+  afk,
+  finished,
+  loading,
+  you,
+  cannotPlay,
+  waiting,
+  paused,
+}
 
 /// The pill's button: stop reconnecting, retry (reconnect), reload the
-/// video (your player could not open it), or mark yourself ready (the
-/// whole pill).
-enum StatusAction { cancel, retry, reload, ready }
+/// video (your player could not open it); or the whole pill: join (you
+/// are out), back (you are BRB or AFK).
+enum StatusAction { cancel, retry, reload, join, back }
 
-/// One status line: [text], a muted [detail], its [level], the members it
-/// is about ([who]; [self] for you) and a loading [progress] (0..1).
+/// A key and what it does now, for the pill's hint line (`[Space] BRB
+/// too`).
+typedef KeyHint = (String key, String action);
+
+/// One status line: [text], a muted [detail] or the [keys] that act now,
+/// its [level], the members it is about ([who]; [self] for you) and a
+/// loading [progress] (0..1).
 class StatusLine {
   final StatusKind kind;
   final String text;
@@ -37,6 +58,7 @@ class StatusLine {
   final bool self;
   final double? progress;
   final StatusAction? action;
+  final List<KeyHint> keys;
   /// The mini player's shorter line.
   final String short;
   const StatusLine(
@@ -48,8 +70,12 @@ class StatusLine {
     this.self = false,
     this.progress,
     this.action,
+    this.keys = const [],
     String? short,
   }) : short = short ?? text;
+
+  /// The whole pill acts ([StatusAction.join] / [StatusAction.back]).
+  bool get tappable => action == StatusAction.join || action == StatusAction.back;
 
   /// Coloured: a problem.
   bool get problem => level == StatusLevel.warn || level == StatusLevel.error;
@@ -75,6 +101,9 @@ class StatusFacts {
   final MemberNames? names;
   /// A reconnect found the server restarted this many times.
   final int restarts;
+  /// Who paused, for a plain pause ("Paused by Bob"): the member id of the
+  /// last `pause` line; null when unknown.
+  final String? pausedBy;
   final DateTime now;
   const StatusFacts({
     this.conn = const ConnClosed(),
@@ -86,6 +115,7 @@ class StatusFacts {
     this.fetchFailedFor = -1,
     this.names,
     this.restarts = 0,
+    this.pausedBy,
     required this.now,
   });
 }
@@ -106,7 +136,7 @@ class Status {
   /// connected, everyone ready).
   final StatusLine? line;
   /// The party strip's line under the server name: "connecting…",
-  /// "reconnecting…", "ready 2/3".
+  /// "reconnecting…", "3 watching · 1 BRB".
   final String party;
   /// Where the current media comes from (the members card's source line);
   /// null with nothing up or nobody else there.
@@ -127,11 +157,11 @@ class Status {
   });
 }
 
-/// "Bob", "Bob and Mika", "Bob, Mika and Cleo", "Bob, Mika and 3 others".
+/// "Bob", "Bob and Mika", "Bob, Mika and Cleo", "Bob, Mika and 3 more".
 String nameList(List<String> names) {
   if (names.length <= 1) return names.join();
   if (names.length <= 3) return '${names.sublist(0, names.length - 1).join(', ')} and ${names.last}';
-  return '${names[0]}, ${names[1]} and ${names.length - 2} others';
+  return '${names[0]}, ${names[1]} and ${names.length - 2} more';
 }
 
 String _sentence(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
@@ -153,7 +183,7 @@ SourceTrouble? sourceTroubleOf(StateBroadcast r, String selfId, MemberNames? nam
   final m = r.members.where((m) => m.id == relay.source).firstOrNull;
   final name = m?.name ?? names?[relay.source] ?? 'The member passing it on';
   if (m == null) return SourceTrouble(mediaId: r.mediaId, sourceId: relay.source, name: name);
-  if (!relay.sourceGone && m.presence != Presence.gone) return null;
+  if (!relay.sourceGone && !m.gone) return null;
   return SourceTrouble(
       mediaId: r.mediaId,
       sourceId: relay.source,
@@ -165,12 +195,11 @@ SourceTrouble? sourceTroubleOf(StateBroadcast r, String selfId, MemberNames? nam
 Status statusOf(StatusFacts f) {
   final r = f.state;
   final stale = r != null && (f.conn.retrying || f.conn is ConnReplaced || f.conn is ConnRefused);
-  final counted = (r?.members ?? const <MemberView>[]).where(countsForReady).toList();
   final party = r == null
       ? 'connecting…'
       : stale
           ? 'reconnecting…'
-          : 'ready ${counted.where((m) => m.ready).length}/${counted.length}';
+          : partyLine(r.members);
   final self = r == null || f.selfId.isEmpty ? null : r.members.where((m) => m.id == f.selfId).firstOrNull;
   final source = r == null || f.ownPlan ? null : sourceTroubleOf(r, f.selfId, f.names);
   return Status(
@@ -183,6 +212,22 @@ Status statusOf(StatusFacts f) {
     restarts: f.restarts,
   );
 }
+
+/// "3 watching · 1 BRB · 1 out": who is connected, by standing.
+String partyLine(List<MemberView> members) {
+  final here = [for (final m in members) if (!m.gone) m];
+  final watching = here.where((m) => m.presence == Presence.watching).length;
+  final brb = here.where((m) => m.brb).length;
+  final out = here.where((m) => m.isOut).length;
+  return [
+    '$watching watching',
+    if (brb > 0) '$brb BRB',
+    if (out > 0) '$out out',
+  ].join(' · ');
+}
+
+/// The keys while someone else is BRB.
+const _brbKeys = <KeyHint>[('Space', 'BRB too'), ('Hold Space', 'continue without')];
 
 StatusLine? _line(StatusFacts f, StateBroadcast? r, MemberView? self, SourceTrouble? source) {
   switch (f.conn) {
@@ -198,10 +243,16 @@ StatusLine? _line(StatusFacts f, StateBroadcast? r, MemberView? self, SourceTrou
     case ConnOnline() || ConnClosed():
       break;
   }
-  final away = self?.presence == Presence.away;
   if (r == null || r.media == null) return null;
-  // Sitting out: the join-back card says it; nobody waits for you.
-  if (away) return null;
+  // Out: nobody waits for you, your player stays at your spot.
+  if (self != null && self.presence == Presence.out) {
+    return const StatusLine(StatusKind.out, "You're out",
+        keys: [('Space', 'Join')], action: StatusAction.join, who: [], short: "You're out · Space: Join");
+  }
+  if (self != null && self.presence == Presence.afk) {
+    return const StatusLine(StatusKind.afk, "You're AFK",
+        keys: [('Any key', 'back')], action: StatusAction.back, short: "You're AFK");
+  }
   if (f.playerFault.isNotEmpty) {
     return StatusLine(StatusKind.problem, _sentence(f.playerFault),
         level: StatusLevel.error, action: StatusAction.reload, short: "Can't play this");
@@ -212,7 +263,7 @@ StatusLine? _line(StatusFacts f, StateBroadcast? r, MemberView? self, SourceTrou
   }
   // The server holds everyone for the relay's source (D6): a viewer's
   // buffer ran dry while it is gone.
-  if (r.transport == 'held' && r.hold?.reason == HoldReason.source) {
+  if (r.transport == 'held' && (r.hold?.source ?? false)) {
     final relayed = stateMediaRelay(r);
     final id = relayed?.source ?? '';
     final name = source?.name ??
@@ -247,47 +298,64 @@ StatusLine? _line(StatusFacts f, StateBroadcast? r, MemberView? self, SourceTrou
   if (r.transport == 'finished') {
     return const StatusLine(StatusKind.finished, 'Finished · seek back or pick the next video', short: 'Finished');
   }
-  // Members whose player cannot open it: the server does not wait for
-  // them; say why instead of "waiting for".
+  MemberView? byId(String id) => r.members.where((m) => m.id == id).firstOrNull;
+  final hold = r.hold;
+  final wants = r.wantsPlay;
+  // BRB: the group waits until they are back ("Waiting for Bob"), or it
+  // stays paused then ("Paused · waiting for Bob").
+  final brb = [for (final id in hold?.brb ?? const <String>[]) ?byId(id)];
+  if (brb.isNotEmpty) {
+    final selfBrb = self != null && brb.any((m) => m.id == self.id);
+    final others = [for (final m in brb) if (self == null || m.id != self.id) m];
+    final names = nameList([if (selfBrb) 'you', for (final m in others) m.name]);
+    final text = wants ? 'Waiting for $names' : 'Paused · waiting for $names';
+    if (selfBrb) {
+      return StatusLine(StatusKind.you, text,
+          who: [self, ...others],
+          self: true,
+          keys: [("Space", "I'm back"), if (others.isNotEmpty) ('Hold Space', 'continue without')],
+          action: StatusAction.back,
+          short: wants ? 'Waiting for you' : 'Paused · BRB');
+    }
+    return StatusLine(StatusKind.waiting, text, who: others, keys: _brbKeys, short: text);
+  }
+  // Members whose player cannot open it: nobody waits for them; say why
+  // instead of "waiting for".
   final failed = [
     for (final m in r.members)
       if (m.error.isNotEmpty && isPresent(m) && (self == null || m.id != self.id)) m,
   ];
-  // As the server holds playback: someone in the ready set short of the
-  // minimum buffer.
+  // The group wants to play and waits for a video: loading or running dry.
   final need = r.bufferNeed;
-  for (final m in r.members) {
-    if (m.inSet && m.buffered < need) {
-      final you = self != null && m.id == self.id;
-      final p = (m.buffered / need).clamp(0.0, 1.0);
-      return StatusLine(StatusKind.loading, you ? 'Loading the video…' : '${m.name} is loading…',
-          who: [m], self: you, progress: p, detail: '${(p * 100).round()}%');
+  final video = [for (final id in hold?.video ?? const <String>[]) ?byId(id)];
+  if (wants && video.isNotEmpty) {
+    final you = self != null && video.any((m) => m.id == self.id);
+    final first = you ? self : video.first;
+    final p = need <= 0 ? 1.0 : (first.buffered / need).clamp(0.0, 1.0);
+    if (you) {
+      return StatusLine(StatusKind.loading, 'Loading the video…',
+          who: [self], self: true, progress: p, detail: '${(p * 100).round()}%');
     }
+    final names = nameList([for (final m in video) m.name]);
+    return StatusLine(StatusKind.waiting, 'Waiting for $names',
+        who: video, progress: video.length == 1 ? p : null, detail: video.length == 1 ? 'Loading · ${(p * 100).round()}%' : 'Loading', short: 'Waiting for $names');
   }
   if (failed.isNotEmpty) {
     final first = failed.first;
     final who = nameList([for (final m in failed) m.name]);
-    final unready = self != null && !self.ready;
     return StatusLine(StatusKind.cannotPlay, "$who can't play this: ${first.error}",
-        who: failed,
-        short: "$who can't play this",
-        detail: unready ? "Press Space when you're ready" : null,
-        action: unready ? StatusAction.ready : null);
+        who: failed, short: "$who can't play this");
   }
-  if (self != null && !self.ready) {
-    return StatusLine(StatusKind.you, "Press Space when you're ready",
-        who: [self], self: true, action: StatusAction.ready, detail: 'or click here', short: 'Press Space when ready');
+  if (!wants) {
+    final by = f.pausedBy;
+    final name = by == null
+        ? null
+        : by == f.selfId
+            ? 'you'
+            : byId(by)?.name ?? f.names?[by];
+    return StatusLine(StatusKind.paused, name == null ? 'Paused' : 'Paused by $name', short: 'Paused');
   }
-  // Members sitting out or gone are never waited for nor counted.
-  final active = [for (final m in r.members) if (countsForReady(m)) m];
-  final others = [
-    for (final m in active)
-      if ((self == null || m.id != self.id) && !(m.inSet && m.ready)) m,
-  ];
-  if (others.isEmpty) return null;
-  final ready = active.where((m) => m.ready).length;
-  return StatusLine(StatusKind.waiting, 'Waiting for ${nameList([for (final m in others) m.name])}',
-      who: others, detail: '$ready/${active.length} ready');
+  return null;
 }
 
 /// How long the relay's source must be gone before it is worth a notice

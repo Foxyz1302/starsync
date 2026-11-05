@@ -13,7 +13,7 @@ import 'controls_prefs.dart';
 /// What playback does as this viewer sees it. In a server "play" is being
 /// ready: the video plays once everyone is.
 enum PlayState {
-  /// The video plays (the button pauses: you go unready).
+  /// The video plays (the button pauses it for everyone).
   playing,
 
   /// You are ready; the others are not yet (the button unreadies you).
@@ -59,7 +59,6 @@ enum ControlAction {
   subtitles('Subtitles…', null),
   audio('Audio…', null),
   chat('Chat & activity', 'Tab'),
-  markAllReady('Mark everyone ready', null),
   markProblem('Mark a problem', 'Ctrl+Shift+B'),
   leave('Leave server', null);
 
@@ -171,7 +170,6 @@ List<ControlAction> menuActions(ControlsSnapshot s, Set<OptionalControl> hidden)
       ControlAction.skipForward => s.hasDuration,
       ControlAction.chat => hidden.contains(OptionalControl.chat),
       ControlAction.copyLink => s.hasLink,
-      ControlAction.markAllReady => !s.alone,
       _ => true,
     })
       a,
@@ -211,9 +209,9 @@ IconData controlIcon(BarControl c, ControlsSnapshot s) => switch (c) {
 String controlTooltip(BarControl c, ControlsSnapshot s) => switch (c) {
   BarControl.playPause => switch (s.play) {
     PlayState.playing => 'Pause for everyone (Space)',
-    PlayState.waiting => 'Ready, waiting for the others (Space: not ready)',
-    PlayState.paused => s.alone ? 'Play (Space)' : 'Ready: play when everyone is (Space)',
-    PlayState.finished => 'Ready (Space)',
+    PlayState.waiting => 'Waiting for the others; pause for everyone (Space)',
+    PlayState.paused => s.alone ? 'Play (Space)' : 'Play for everyone (Space)',
+    PlayState.finished => 'Play (Space)',
   },
   BarControl.previous => 'Previous: ${s.previousLabel ?? ''}  (< or Shift+P)',
   BarControl.next => '${s.nextIsUpNext ? 'Up next' : 'Next'}: ${s.nextLabel ?? ''}  (> or Shift+N)',

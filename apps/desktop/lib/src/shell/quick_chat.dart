@@ -252,7 +252,7 @@ class _QuickChatBoxState extends State<QuickChatBox> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        StatusAvatar(info: me, size: 22, badges: false, ring: false),
+                        StatusAvatar(info: me, size: 22, badges: false, marks: false),
                         const SizedBox(width: 12),
                         Expanded(child: field),
                         const SizedBox(width: 8),

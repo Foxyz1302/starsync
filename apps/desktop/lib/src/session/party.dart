@@ -4,20 +4,20 @@ import 'package:sync_relay_core/core.dart';
 // list and wait in the UI goes through these, on top of core's
 // [PresencePolicy] and [isAlone].
 
-/// What each presence counts for (the one table, shared with the server).
+/// What each standing counts for (the one table, shared with the server).
 const presencePolicy = PresencePolicy();
 
-/// Counted in "2/3 ready" and waited for by name: its presence counts for
-/// the ready counter and its player can open the media.
-bool countsForReady(MemberView m) => m.error.isEmpty && presencePolicy.countsFor(m.presence, Purpose.readyCounter);
+/// Watching with the group: connected, not out (AFK or Out) and its
+/// player can open the media. Whose buffer the members card shows.
+bool watchingNow(MemberView m) => !m.gone && !m.isOut && m.error.isEmpty;
 
-/// Connected and watching (`in` or `joining`): can do things for the
-/// party now (put up an Up next item; core's [isPresentMember]).
+/// Connected and not out (`in` or `brb`): can do things for the party now
+/// (put up an Up next item; core's [isPresentMember]).
 bool isPresent(MemberView m) => isPresentMember(m);
 
 /// Nobody but [selfId] is connected in [members] (D9, core's [isAlone]).
 bool aloneIn(List<MemberView> members, String selfId) =>
-    isAlone([for (final m in members) if (m.id != selfId) m.presence]);
+    isAlone([for (final m in members) if (m.id != selfId) m.gone]);
 
 /// "3 min" / "40 s": how long since [since] (a `goneSince`), at [now].
 String sinceText(DateTime since, DateTime now) {

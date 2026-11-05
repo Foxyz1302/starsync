@@ -22,44 +22,56 @@ import 'party_strip.dart' show VersionText, showMembersCard;
 // danmaku lines). Resting the mouse on them shows it ([PersonHover]), a
 // click pins it ([showPersonCard]) until a click outside or Esc. It reads
 // the person live from the state: a larger picture (a click shows it full
-// size), name, presence, ready, app version, what they pass on, the host
-// crown, and their actions (the same as the members card's ⋮).
+// size), name, standing, app version, what they pass on, the host crown,
+// and their actions (the same as the members card's ⋮).
 
 /// What can be done to a member (the members card's ⋮ and the people
 /// card).
-enum MemberAction { forceReady, forceUnready, nudge, sitOut, joinBack }
+enum MemberAction { dontWaitFor, waitFor, nudge, out, join }
 
 /// One member action as menus and buttons show it.
 typedef MemberActionView = ({MemberAction action, String label, IconData icon});
 
-/// What [info]'s member offers: force ready / unready (not while sitting
-/// out), nudge (someone else), sit out, or for yourself sitting out, join
-/// back.
-List<MemberActionView> memberActions(AvatarInfo info) => [
-      if (!info.away)
-        info.ready
-            ? (action: MemberAction.forceUnready, label: 'Force unready', icon: Icons.unpublished_outlined)
-            : (action: MemberAction.forceReady, label: 'Force ready', icon: Icons.check_circle_outline_rounded),
-      if (!info.self) (action: MemberAction.nudge, label: 'Nudge', icon: Icons.notifications_active_outlined),
-      if (info.self && info.away)
-        (action: MemberAction.joinBack, label: 'Join back', icon: Icons.login_rounded)
-      else if (!info.away)
-        (action: MemberAction.sitOut, label: 'Sit out', icon: Icons.bedtime_outlined),
-    ];
+/// The first word of [name] for an action's label ("Wait for Bob").
+String _short(String name) {
+  final first = name.trim().split(RegExp(r'\s+')).first;
+  return first.isEmpty ? 'them' : first;
+}
+
+/// What [info]'s member offers. Someone else: "Don't wait for Bob" while
+/// the group waits for them (BRB, or their video), else "Wait for Bob"
+/// (sets their BRB: they ran off without it; their own Space clears it)
+/// while they watch; Nudge; Out while they are not. Yourself: Out, or
+/// Join while out.
+List<MemberActionView> memberActions(AvatarInfo info) {
+  final name = _short(info.name);
+  final waited = info.brb || info.activity == AvatarActivity.loading;
+  return [
+    if (!info.self && waited)
+      (action: MemberAction.dontWaitFor, label: "Don't wait for $name", icon: Icons.fast_forward_rounded)
+    else if (!info.self && !info.isOut && !info.gone)
+      (action: MemberAction.waitFor, label: 'Wait for $name', icon: Icons.coffee_rounded),
+    if (!info.self) (action: MemberAction.nudge, label: 'Nudge', icon: Icons.notifications_active_outlined),
+    if (info.self && info.isOut)
+      (action: MemberAction.join, label: 'Join', icon: Icons.login_rounded)
+    else if (!info.isOut)
+      (action: MemberAction.out, label: 'Out', icon: Icons.visibility_off_rounded),
+  ];
+}
 
 /// Runs [action] on member [id].
 void runMemberAction(SessionCoordinator coord, String id, MemberAction action) {
   switch (action) {
-    case MemberAction.forceReady:
-      coord.forceTarget(id, true);
-    case MemberAction.forceUnready:
-      coord.forceTarget(id, false);
+    case MemberAction.dontWaitFor:
+      coord.dontWaitFor(id);
+    case MemberAction.waitFor:
+      coord.waitFor(id);
     case MemberAction.nudge:
       coord.nudgeMember(id);
-    case MemberAction.sitOut:
-      coord.sitOut(id);
-    case MemberAction.joinBack:
-      coord.joinBack();
+    case MemberAction.out:
+      coord.goOut(id == coord.connection.memberId ? null : id);
+    case MemberAction.join:
+      coord.join();
   }
 }
 
@@ -84,26 +96,23 @@ MemberView? memberOf(PersonRef p, StateBroadcast? r) {
   return null;
 }
 
-/// Presence in words: "Watching", "Away · sitting out", "Gone ·
-/// reconnecting (2 min)", "Joining…"; with its dot colour.
-(String, Color) presenceText(AvatarInfo i, {DateTime? now}) => switch (i.presence) {
-      Presence.watching => ('Watching', Colors.greenAccent.shade400),
-      Presence.away => ('Away · sitting out', Colors.blueGrey.shade200),
-      Presence.gone => (
-          'Gone · reconnecting${i.goneSince == null ? '' : ' (${sinceText(i.goneSince!, now ?? DateTime.now().toUtc())})'}',
-          Colors.grey.shade500
-        ),
-      Presence.joining => ('Joining…', Colors.amber),
-    };
-
-/// Ready in words, with its icon and colour.
-(String, IconData, Color) readyText(AvatarInfo i) => i.error.isNotEmpty
-    ? ("Can't play this: ${i.error}", Icons.error_outline_rounded, Colors.redAccent.shade100)
-    : i.buffering
-        ? ('Ready, buffering', Icons.hourglass_top_rounded, Colors.amber)
-        : i.ready
-            ? ('Ready', Icons.check_circle_rounded, Colors.greenAccent.shade400)
-            : ('Not ready', Icons.radio_button_unchecked_rounded, Colors.grey);
+/// The standing in words: "Watching", "Loading…", "BRB · 4 min", "AFK ·
+/// 12 min", "Out", "Reconnecting (2 min)"; with its dot colour.
+(String, Color) presenceText(AvatarInfo i, {DateTime? now}) {
+  final at = now ?? DateTime.now().toUtc();
+  String since(DateTime? s) => s == null || at.difference(s).inMinutes < 1 ? '' : ' · ${sinceText(s, at)}';
+  if (i.gone) {
+    final standing = i.presence == Presence.watching ? '' : ' · ${i.presence == Presence.brb ? 'BRB' : 'out'}';
+    return ('Reconnecting${i.goneSince == null ? '' : ' (${sinceText(i.goneSince!, at)})'}$standing', Colors.grey.shade500);
+  }
+  return switch (i.presence) {
+    Presence.watching when i.activity == AvatarActivity.loading => ('Loading…', Colors.amber),
+    Presence.watching => ('Watching', Colors.greenAccent.shade400),
+    Presence.brb => ('BRB${since(i.since)}', const Color(0xFFE8C77A)),
+    Presence.afk => ('AFK${since(i.since)}', Colors.blueGrey.shade200),
+    Presence.out => ('Out', Colors.grey.shade500),
+  };
+}
 
 /// The card: its content, live from the state.
 class PersonCard extends StatelessWidget {
@@ -177,7 +186,6 @@ class _CardBody extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final muted = scheme.onSurfaceVariant;
     final (presence, dot) = presenceText(info);
-    final (ready, readyIcon, readyColor) = readyText(info);
     final image = info.image;
     Widget fact(Key key, IconData icon, Color color, Widget text) => Padding(
           key: key,
@@ -210,7 +218,7 @@ class _CardBody extends StatelessWidget {
                       waitDuration: const Duration(milliseconds: 500),
                       child: InkWell(
                         key: const ValueKey('person-picture'),
-                        customBorder: const CircleBorder(),
+                        borderRadius: AvatarShape.of(context).radius(PersonCard.pictureSize),
                         onTap: () => showPictureView(context, image, info.name),
                         child: MouseRegion(cursor: SystemMouseCursors.zoomIn, child: picture),
                       ),
@@ -265,7 +273,9 @@ class _CardBody extends StatelessWidget {
                 const SizedBox(height: 10),
                 Divider(height: 1, thickness: 0.5, color: Colors.white.withValues(alpha: 0.08)),
                 const SizedBox(height: 2),
-                fact(const ValueKey('person-ready'), readyIcon, readyColor, Text(ready)),
+                if (info.error.isNotEmpty)
+                  fact(const ValueKey('person-error'), Icons.error_outline_rounded, Colors.redAccent.shade100,
+                      Text("Can't play this: ${info.error}")),
                 // How it reaches them (the source's line says it instead).
                 if (info.delivery.isNotEmpty && passing == null)
                   fact(const ValueKey('person-route'), Icons.alt_route_rounded, muted, Text(info.delivery)),

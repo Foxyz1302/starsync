@@ -1,107 +1,140 @@
-// Pure session logic: auto sit-out on a fake clock, link names.
+// Pure session logic: AFK and the Space gesture on a fake clock, link names.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:sync_relay_core/core.dart' show Presence, PresenceReason;
+import 'package:sync_relay_core/core.dart' show MemberView, Presence;
 import 'package:starsync/src/platform/ports/shell_port.dart' show WindowActivity;
-import 'package:starsync/src/session/auto_sit_out.dart';
+import 'package:starsync/src/session/afk_watch.dart';
 import 'package:starsync/src/session/session_coordinator.dart';
+import 'package:starsync/src/session/space_gesture.dart';
+import 'package:starsync/src/session/space_key.dart' show holdKeysFor, holdLineFor;
 
 void main() {
-  group('AutoSitOut', () {
+  group('AfkWatch', () {
     final t0 = DateTime.utc(2026, 1, 1, 12);
-    const idle = AutoSitOutTimes.idle;
-    const minimised = AutoSitOutTimes.minimised;
+    const idle = AfkTimes.idle;
+    const minimised = AfkTimes.minimised;
+    DateTime at(Duration d) => t0.add(d);
+    AfkStep tick(AfkWatch w, Duration d, {Presence? self = Presence.watching, bool playing = false, bool alone = false}) =>
+        w.tick(at(d), self: self, playing: playing, alone: alone);
 
-    /// Ticks once a second from [from] for [span]; the steps that were not
-    /// [AutoStay], at their second.
-    List<(int, String)> run(AutoSitOut a, DateTime from, Duration span,
-        {Presence self = Presence.watching, bool playing = false, bool alone = false, bool enabled = true}) {
-      final out = <(int, String)>[];
-      for (var s = 0; s <= span.inSeconds; s++) {
-        final step = a.tick(from.add(Duration(seconds: s)),
-            self: self, playing: playing, alone: alone, enabled: enabled);
-        switch (step) {
-          case AutoAway(:final reason):
-            out.add((s, 'away ${reason.name}'));
-          case AutoBack():
-            out.add((s, 'back'));
-          case AutoStay():
-            break;
-        }
+    test('no input for 10 min while nothing plays: AFK; never while it plays, never when alone', () {
+      final w = AfkWatch(t0);
+      expect(tick(w, idle - const Duration(seconds: 1)), AfkStep.stay);
+      expect(tick(w, idle), AfkStep.afk);
+      final playing = AfkWatch(t0);
+      expect(tick(playing, idle * 3, playing: true), AfkStep.stay, reason: 'watching is activity');
+      final alone = AfkWatch(t0);
+      expect(tick(alone, idle * 2, alone: true), AfkStep.stay);
+    });
+
+    test('never on a BRB member, nor someone already out', () {
+      final w = AfkWatch(t0);
+      expect(tick(w, idle * 2, self: Presence.brb), AfkStep.stay);
+      expect(tick(w, idle * 2, self: Presence.out), AfkStep.stay);
+      expect(tick(w, idle * 2, self: null), AfkStep.stay, reason: 'not in a state, or disconnected');
+    });
+
+    test('a pause after a long watch starts a fresh clock', () {
+      final w = AfkWatch(t0);
+      expect(tick(w, const Duration(minutes: 40), playing: true), AfkStep.stay);
+      expect(tick(w, const Duration(minutes: 40) + idle - const Duration(seconds: 1)), AfkStep.stay);
+      expect(tick(w, const Duration(minutes: 40) + idle), AfkStep.afk);
+    });
+
+    test('any input brings AFK back, but not within the first 1.2 s', () {
+      final w = AfkWatch(t0);
+      expect(tick(w, idle), AfkStep.afk);
+      expect(tick(w, idle + const Duration(seconds: 1), self: Presence.afk), AfkStep.stay);
+      // The input that happened to land with it.
+      w.input(at(idle + const Duration(seconds: 1, milliseconds: 500)));
+      expect(tick(w, idle + const Duration(seconds: 2), self: Presence.afk), AfkStep.stay);
+      w.input(at(idle + const Duration(seconds: 3)));
+      expect(tick(w, idle + const Duration(seconds: 4), self: Presence.afk), AfkStep.back);
+      w.window(WindowActivity.focused, at(idle + const Duration(seconds: 5)));
+      expect(tick(w, idle + const Duration(seconds: 6), self: Presence.afk), AfkStep.stay,
+          reason: 'one back sent, waiting for its echo');
+    });
+
+    test('minimised 10 min while it plays: out; the window coming back does not undo it', () {
+      final w = AfkWatch(t0);
+      w.window(WindowActivity.minimised, t0);
+      expect(tick(w, minimised - const Duration(seconds: 1), playing: true), AfkStep.stay);
+      expect(tick(w, minimised, playing: true), AfkStep.outMinimised);
+      w.window(WindowActivity.focused, at(minimised + const Duration(seconds: 20)));
+      expect(tick(w, minimised + const Duration(seconds: 21), self: Presence.out, playing: true), AfkStep.stay,
+          reason: 'Space or Join brings out back, not the window');
+      final paused = AfkWatch(t0);
+      paused.window(WindowActivity.hidden, t0);
+      expect(tick(paused, minimised, playing: false, self: Presence.watching), AfkStep.afk,
+          reason: 'not playing: idle is AFK');
+    });
+  });
+
+  group('SpaceGesture', () {
+    const t = SpaceTiming();
+    Duration ms(int n) => Duration(milliseconds: n);
+
+    test('a tap pauses on key-down while it plays, plays on key-up while paused', () {
+      final g = SpaceGesture();
+      expect(g.keyDown(self: Presence.watching, othersBrb: false, playing: true), [SpaceAction.pause]);
+      expect(g.keyUp(ms(90)), isEmpty, reason: 'paused already');
+      expect(g.keyDown(self: Presence.watching, othersBrb: false, playing: false), isEmpty);
+      expect(g.keyUp(ms(90)), [SpaceAction.play]);
+    });
+
+    test('a hold of 0.6 s is BRB, keeping the wish it had at key-down', () {
+      final g = SpaceGesture();
+      g.keyDown(self: Presence.watching, othersBrb: false, playing: true);
+      expect(g.tick(ms(599)), isEmpty);
+      expect(g.hold()!.kind, HoldKind.brb);
+      expect(g.tick(t.brbHold), [SpaceAction.brbKeepPlay]);
+      expect(g.keyUp(ms(900)), isEmpty, reason: 'done already');
+      g.keyDown(self: Presence.watching, othersBrb: false, playing: false);
+      expect(g.keyUp(ms(700)), [SpaceAction.brbKeepPause], reason: 'a key-up past the hold finishes it');
+    });
+
+    test('while someone else is BRB: a tap toggles your own BRB, a 2 s hold continues without', () {
+      final g = SpaceGesture();
+      expect(g.keyDown(self: Presence.watching, othersBrb: true, playing: true), isEmpty, reason: 'no pause');
+      expect(g.keyUp(ms(120)), [SpaceAction.brbToo]);
+      g.keyDown(self: Presence.brb, othersBrb: true, playing: true);
+      expect(g.keyUp(ms(120)), [SpaceAction.back]);
+      g.keyDown(self: Presence.watching, othersBrb: true, playing: true);
+      expect(g.hold()!.tapStill, isTrue);
+      g.tick(ms(500));
+      expect(g.hold()!.tapStill, isFalse);
+      expect(g.keyUp(ms(1500)), isEmpty, reason: 'let go before 2 s: keep waiting');
+      g.keyDown(self: Presence.watching, othersBrb: true, playing: true);
+      expect(g.tick(t.continueHold), [SpaceAction.continueWithout]);
+    });
+
+    test('BRB alone, AFK or out: back on key-down', () {
+      for (final p in [Presence.brb, Presence.afk, Presence.out]) {
+        final g = SpaceGesture();
+        expect(g.keyDown(self: p, othersBrb: false, playing: false), [SpaceAction.back]);
+        expect(g.keyUp(ms(800)), isEmpty);
       }
-      return out;
-    }
-
-    test('not playing: idle for the idle time sets you away (idle)', () {
-      final a = AutoSitOut(t0);
-      expect(run(a, t0, idle), [(idle.inSeconds, 'away idle')]);
     });
 
-    test('never when alone, never when switched off', () {
-      expect(run(AutoSitOut(t0), t0, const Duration(minutes: 30), alone: true), isEmpty);
-      expect(run(AutoSitOut(t0), t0, const Duration(minutes: 30), enabled: false), isEmpty);
-      final m = AutoSitOut(t0)..window(WindowActivity.minimised, t0);
-      expect(run(m, t0, const Duration(minutes: 30), alone: true, playing: true), isEmpty);
+    test('a second key-down without an up is ignored; a lost key-up drops the press', () {
+      final g = SpaceGesture();
+      g.keyDown(self: Presence.watching, othersBrb: false, playing: true);
+      expect(g.keyDown(self: Presence.watching, othersBrb: false, playing: false), isEmpty);
+      g.cancel();
+      expect(g.down, isFalse);
+      expect(g.tick(ms(2000)), isEmpty, reason: 'never BRB in the background');
+      expect(g.keyUp(ms(2000)), isEmpty);
     });
 
-    test('while playing idle input does not count, minimised for a while does', () {
-      final a = AutoSitOut(t0);
-      expect(run(a, t0, const Duration(minutes: 30), playing: true), isEmpty, reason: 'watching is activity');
-      final at = t0.add(const Duration(minutes: 30));
-      a.window(WindowActivity.minimised, at);
-      expect(run(a, at, minimised, playing: true), [(minimised.inSeconds, 'away minimised')]);
-    });
-
-    test('a pause after a long watch starts a fresh idle clock', () {
-      final a = AutoSitOut(t0);
-      run(a, t0, const Duration(minutes: 30), playing: true);
-      final paused = t0.add(const Duration(minutes: 30, seconds: 1));
-      expect(run(a, paused, idle - const Duration(seconds: 2)), isEmpty);
-    });
-
-    test('back on input or focus, only from an automatic away', () {
-      final a = AutoSitOut(t0);
-      expect(run(a, t0, idle), [(idle.inSeconds, 'away idle')]);
-      final at = t0.add(idle);
-      // The away shows in the next states; nothing until the user is back.
-      expect(run(a, at, const Duration(minutes: 5), self: Presence.away), isEmpty);
-      final later = at.add(const Duration(minutes: 5, seconds: 1));
-      a.input(later);
-      expect(run(a, later, const Duration(seconds: 1), self: Presence.away), [(0, 'back')]);
-
-      // Minimised away: restoring is not enough, the focus brings it back.
-      final b = AutoSitOut(t0)..window(WindowActivity.minimised, t0);
-      expect(run(b, t0, minimised, playing: true), [(minimised.inSeconds, 'away minimised')]);
-      final m = t0.add(minimised);
-      b.window(WindowActivity.unfocused, m);
-      expect(run(b, m, const Duration(seconds: 3), self: Presence.away), isEmpty);
-      b.window(WindowActivity.focused, m);
-      expect(run(b, m, const Duration(seconds: 1), self: Presence.away), [(0, 'back')]);
-    });
-
-    test('a manual away (own or someone else\'s) is never returned automatically', () {
-      // Someone else sat you out: activity does not bring you back.
-      final a = AutoSitOut(t0);
-      a.input(t0);
-      expect(run(a, t0, const Duration(minutes: 20), self: Presence.away), isEmpty);
-      // Auto away, then the user sits out by hand: it stays.
-      final b = AutoSitOut(t0);
-      expect(run(b, t0, idle), [(idle.inSeconds, 'away idle')]);
-      b.manual();
-      final at = t0.add(idle);
-      b.input(at);
-      expect(run(b, at, const Duration(minutes: 1), self: Presence.away), isEmpty);
-    });
-
-    test('an away not yet echoed is not sent again', () {
-      final a = AutoSitOut(t0);
-      // The state still says `in` for a few seconds after the away went out.
-      expect(run(a, t0, idle + const Duration(seconds: 8)), [(idle.inSeconds, 'away idle')]);
-      expect(a.autoAway, isTrue);
-    });
-
-    test('the reasons on the wire', () {
-      expect(PresenceReason.idle.name, 'idle');
-      expect(PresenceReason.minimised.name, 'minimised');
+    test("the pill's words during a hold", () {
+      const bob = MemberView(id: 'm2', name: 'Bob', presence: Presence.brb);
+      const brb = HoldView(HoldKind.brb, 0.3, Duration(milliseconds: 200), wasPlaying: true);
+      expect([holdLineFor(brb).text, holdLineFor(brb).detail], ['Keep holding: BRB', 'Let go: just pause']);
+      const tap = HoldView(HoldKind.continueWithout, 0.1, Duration(milliseconds: 200), tapStill: true);
+      expect([holdLineFor(tap, othersBrb: [bob]).text, holdLineFor(tap, othersBrb: [bob]).detail],
+          ['Keep holding: continuing without Bob', 'Let go now: BRB too']);
+      const long = HoldView(HoldKind.continueWithout, 0.5, Duration(seconds: 1));
+      expect(holdLineFor(long, othersBrb: [bob]).detail, 'Let go: keep waiting');
+      expect(holdKeysFor(long, [bob]).first, ('Keep holding', 'continue without Bob'));
     });
   });
 

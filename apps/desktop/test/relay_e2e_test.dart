@@ -119,7 +119,7 @@ class _BareSource {
             secret: 'pw', user: const HelloUser(name: 'bob'), client: _client, seq: ++_seq)
         .toJson()));
     token = (await welcome.future.timeout(const Duration(seconds: 5)))['token'] as String;
-    w.add(jsonEncode(const PresenceIntent(state: Presence.away).toJson()));
+    w.add(jsonEncode(const PresenceIntent(state: Presence.out).toJson()));
     // Not silent, like an app (a silent member goes gone).
     _alive?.cancel();
     _alive = Timer.periodic(const Duration(seconds: 1),
@@ -200,7 +200,7 @@ void main() {
   Future<void> playTogether(List<SessionCoordinator> xs) async {
     await _poll(() => xs.every((x) => x.playback.durationSecs > 19), 'all opened it');
     for (final x in xs) {
-      x.toggleReady();
+      x.play();
     }
     await _poll(() => xs.every((x) => x.playback.player.state.playing), 'all playing');
     await Future.delayed(const Duration(seconds: 3));
@@ -211,7 +211,7 @@ void main() {
       expect((p - pos.first).abs(), lessThan(1.0), reason: 'in sync: $pos');
     }
     for (final x in xs) {
-      x.toggleReady();
+      x.play();
     }
     await _poll(() => xs.every((x) => !x.playback.player.state.playing), 'held');
   }
@@ -403,7 +403,7 @@ void main() {
       await _poll(() => stateMediaRelay(alice.serverState.peek()!)?.source.isNotEmpty ?? false, 'relay state');
       await bob.feed(1200 * 1024);
       await _poll(() => alice.playback.durationSecs > 59, 'alice opened it');
-      alice.toggleReady();
+      alice.play();
       await _poll(() => alice.playback.playing && alice.playback.positionSecs > 2, 'playing');
       final took = <int>[];
       for (final to in [40.0, 52.0]) {
@@ -444,7 +444,7 @@ void main() {
         subs.add(x.playback.player.logs.listen((l) {
           if (l.text.contains('error running command')) errors.add(l.text);
         }));
-        x.toggleReady();
+        x.play();
       }
       await _poll(() => alice.playback.playing && alice.playback.positionSecs > 4, 'playing');
 
@@ -454,7 +454,7 @@ void main() {
       final seeks = [alice.playback.seeksSent, carol.playback.seeksSent];
       // Carol skips to where the source never got to.
       carol.seekTo(50);
-      await _poll(() => alice.serverState.peek()!.hold?.reason == HoldReason.source, 'held for the source',
+      await _poll(() => alice.serverState.peek()!.hold?.source ?? false, 'held for the source',
           timeout: const Duration(seconds: 60));
       expect(alice.status.peek().line?.text, 'Waiting for bob');
       expect(carol.status.peek().line?.text, 'Waiting for bob');
@@ -470,7 +470,7 @@ void main() {
         if (l.text.contains('error running command')) errors.add(l.text);
       }));
       await _poll(() => dave.status.peek().line?.text == 'Waiting for bob', 'dave waits for bob');
-      dave.toggleReady();
+      dave.play();
 
       await bob.back(4 * 1024 * 1024);
       await _poll(() {

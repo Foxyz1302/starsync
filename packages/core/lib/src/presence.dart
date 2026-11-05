@@ -1,30 +1,32 @@
-import 'constants.dart';
+// Presence (PROTOCOL.md "Presence"): where a member stands, and one table
+// of what each standing counts for. Pure, so the server's engine and the
+// app read the same rules.
 
-// Presence (D1, PROTOCOL.md "Presence"): where a member stands, and one
-// table of what each standing counts for. Pure, so the server's engine and
-// the app read the same rules.
-
-/// A member's presence, `members[].presence` on the wire ([wire]).
+/// A member's standing, `members[].presence` on the wire ([wire]). One
+/// each; Loading (`members[].loading`) and Reconnecting
+/// (`members[].goneSince`) are only labels on top of it.
 enum Presence {
-  /// New, back from `gone`, or back from `away`: loading the current media
-  /// in the background until its reports hold it with `bufferNeed`, then
-  /// [watching]. Wire `joining`.
-  joining,
-
-  /// Watching, in full (D1 "In"). Wire `in` (a Dart keyword, hence the name).
+  /// Watching. The group waits only for their video. Wire `in` (a Dart
+  /// keyword, hence the name).
   watching,
 
-  /// Sat out (by itself or by someone else): still in the server (chat,
-  /// feed, chosen notifications), never counted for the gate, the ready
-  /// counter or watched tracking. Wire `away`.
-  away,
+  /// Be right back, set on purpose: the group waits until they are back
+  /// or someone continues without them. Never runs out; kept across a
+  /// drop, an app restart (the app reports it again) and new media.
+  brb,
 
-  /// Disconnected and kept for the grace period (`welcome.grace`) with
-  /// everything it had (ready flag, queue items, relay, picture). Wire
-  /// `gone`.
-  gone;
+  /// Out, set automatically (no input for a while with nothing playing).
+  /// Counts exactly like [out]; only the badge differs.
+  afk,
+
+  /// Out: not waited for, not counted as watched; the player stays at
+  /// its spot. Never stops a member passing the video on.
+  out;
 
   String get wire => this == watching ? 'in' : name;
+
+  /// Not watching and not waited for ([afk] or [out]).
+  bool get isOut => this == afk || this == out;
 
   /// Null for anything else.
   static Presence? parse(Object? v) {
@@ -36,16 +38,20 @@ enum Presence {
   }
 }
 
-/// Why a member set itself (or someone) `away` or `in`
-/// (`presence.reason`): by hand, idle, its window minimised, or the app
-/// closing (`bye`, reserved for the app's own record).
+/// Why a member went [Presence.out] (`presence.reason`, the feed line's
+/// `reason`): by hand, its window minimised while it played, its player
+/// closed, or left out by someone continuing without it.
 enum PresenceReason {
   manual,
-  idle,
   minimised,
-  bye;
+  closed,
+  continued;
+
+  /// The wire name (`continue` for [continued], a Dart keyword).
+  String get wire => this == continued ? 'continue' : name;
 
   static PresenceReason parse(Object? v) {
+    if (v == 'continue') return continued;
     for (final r in values) {
       if (r.name == v) return r;
     }
@@ -53,14 +59,8 @@ enum PresenceReason {
   }
 }
 
-/// What a presence is asked about ([PresencePolicy.countsFor]).
+/// What a standing is asked about ([PresencePolicy.countsFor]).
 enum Purpose {
-  /// The ready gate: who the server waits for before it plays.
-  gate,
-
-  /// "2/3 ready": who the ready counter counts.
-  readyCounter,
-
   /// Watched tracking (Jellyfin played, history): who is watching.
   tracking,
 
@@ -71,54 +71,33 @@ enum Purpose {
   notifySocial,
 }
 
-/// The one table of what a presence counts for (D1, D2):
+/// The one table of what a standing counts for (who the group waits for
+/// is the gate's own rule, `SyncEngine.waitsFor`):
 ///
-/// | purpose        | joining | in  | away | gone |
-/// |----------------|---------|-----|------|------|
-/// | gate           | D2 *    | yes | no   | no   |
-/// | readyCounter   | yes     | yes | no   | no   |
-/// | tracking       | no      | yes | no   | no   |
-/// | preload        | yes     | yes | no   | no   |
-/// | notifySocial   | yes     | yes | no   | no   |
+/// | purpose        | in  | brb | afk | out | gone (any) |
+/// |----------------|-----|-----|-----|-----|------------|
+/// | tracking       | yes | yes | no  | no  | no         |
+/// | preload        | yes | yes | no  | no  | no         |
+/// | notifySocial   | yes | yes | no  | no  | no         |
 ///
-/// \* A `joining` member never holds a PLAYING gate (it loads in the
-/// background and comes in already in sync); while HELD it holds at most
-/// [joinerHold] from the moment it started joining, then the others go on
-/// without it.
+/// A member still loading (`loading`) counts like `in` for preload and
+/// notifications, not for tracking.
 class PresencePolicy {
-  /// How long a joiner may hold a HELD gate (D2).
-  final Duration joinerHold;
-  const PresencePolicy({this.joinerHold = const Duration(seconds: RelayConstants.joinerHoldSecs)});
+  const PresencePolicy();
 
-  /// Whether a member with [presence] counts for [purpose]. For
-  /// [Purpose.gate] a `joining` member needs the gate's context: [playing]
-  /// (the transport is `playing`) and [joiningFor] (how long it has been
-  /// joining, on the server's clock).
-  bool countsFor(Presence presence, Purpose purpose,
-      {bool playing = false, Duration joiningFor = Duration.zero}) {
-    switch (presence) {
-      case Presence.watching:
-        return true;
-      case Presence.away:
-      case Presence.gone:
-        return false;
-      case Presence.joining:
-        switch (purpose) {
-          case Purpose.gate:
-            return !playing && joiningFor < joinerHold;
-          case Purpose.tracking:
-            return false;
-          case Purpose.readyCounter:
-          case Purpose.preload:
-          case Purpose.notifySocial:
-            return true;
-        }
-    }
+  /// Whether a member with [presence] counts for [purpose]; [gone]: it is
+  /// disconnected (in its grace), [loading]: its player is not with the
+  /// group yet.
+  bool countsFor(Presence presence, Purpose purpose, {bool gone = false, bool loading = false}) {
+    if (gone || presence.isOut) return false;
+    return switch (purpose) {
+      Purpose.tracking => !loading,
+      Purpose.preload || Purpose.notifySocial => true,
+    };
   }
 }
 
-/// D9 "alone": no other member is connected. [others] are the presences
-/// of everyone but oneself; `in`, `joining` and `away` are company, `gone`
-/// is not. Auto sit-out (never when alone) and the social notifications
-/// read this one definition.
-bool isAlone(Iterable<Presence> others) => others.every((p) => p == Presence.gone);
+/// D9 "alone": no other member is connected. [othersGone] says, for
+/// everyone but oneself, whether they are disconnected; anyone connected
+/// (whatever their standing) is company.
+bool isAlone(Iterable<bool> othersGone) => othersGone.every((g) => g);

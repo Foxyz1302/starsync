@@ -145,7 +145,8 @@ attach and detach the network listener (below).
   closing), your server stops (`stop`, then killed after 3 s).
 
 `SyncServer` runs a 1 s heartbeat (`ServerHub.heartbeat`): closed-socket
-sweep, the engine's sweep (silence, joining, gone notices, grace),
+sweep, the engine's sweep (silence, gone notices, grace, rewinds, a play
+request asked again),
 relay source state, warm relay, rates, state + feed broadcast. There is
 one session, id `default`.
 
@@ -159,7 +160,7 @@ matches is the host (`members[].host`: the crown, art rights) and needs no
 password. The address a connection comes from plays no part (so a reverse
 proxy or tunnel on the same machine does not make everyone the host). The
 dedicated server has no key, so it has no host. Nobody removes anyone:
-members set each other away ("Presence" below), the host included, since
+members set each other out ("Presence" below), the host included, since
 your server and its `/m/` file serving do not need the host's player;
 only stopping sharing sends guests out.
 
@@ -186,7 +187,9 @@ fails when one gains a use or a new one appears.
 
 ## Sync model
 
-Loosely modeled on Syncplay, with a different readiness design.
+Loosely modeled on Syncplay, with a different design for waiting: the
+group waits only for what it can measure (someone's video) and for what
+people say on purpose (BRB); nothing starts because time passed.
 
 - **Transport** is `playing`, `held` or `finished`. The server owns the clock:
   `positionAt(now) = position + (playing ? now - serverTime : 0)`.
@@ -209,87 +212,102 @@ Loosely modeled on Syncplay, with a different readiness design.
   server counts a report naming an earlier `mediaId` as 0, so the old
   media's buffer never passes the gate for the new one.
   Besides the 1 s tick, a report goes out right after a new media is
-  open and, while HELD, the moment the buffer reaches `need`, so the gate
+  open and, while HELD, the moment the buffer reaches `need`, so the group
   does not wait for the next tick.
-- **Ready gate** (HELD to PLAYING): the members that count for the gate
-  (`SyncEngine.countsForGate`: in the set, no player error, and their
-  presence counts, see "Presence") are not empty and every one is ready
-  and has `buffered >= need`. `need` is 4 s
-  (`minBufferSecs`), or near the end what is left minus 2 s
-  (`endSlackSecs`, floor 0), since mpv cannot buffer past the end. So a
-  lone viewer plays alone; with others present everyone must ready.
-  While HELD, `state.hold` says why (`HoldReason`: a joiner within its
-  bound, someone unready, a short buffer, the same with the relay's
-  source gone, or nobody to start).
-- **In-set** (`EngineMember.inSet`, who the gate may wait for): a member
-  joins it on joining, or on coming back from `gone` or `away`, while not
-  PLAYING (any media, the one the server started with included); joining
-  while PLAYING it stays out (`ready=false`) until it readies. A swap puts
-  every member in the set and keeps everyone's ready flag, so the next
-  video starts once everyone ready has buffered (the client never
-  unreadies itself on a swap; a reconnect restores a ready across one).
-  A player error removes from the set; presence decides whether a member
-  in the set counts.
+- **The group** (`SyncEngine.evaluate`): its wish (`wantsPlay`,
+  `state.wish`) is play or pause, anyone's (`play` / `pause`); a fresh
+  server's is pause and a swap keeps it, so the start of an evening waits
+  for one Play and putting something up keeps play or pause. HELD to
+  PLAYING when it wants to play, nobody is BRB, and every watched video
+  (`SyncEngine.videoCounts`: `in`, connected, no player error, not
+  continued without, and not loading while PLAYING) has `buffered >=
+  need`. `need` is 4 s (`minBufferSecs`), or near the end what is left
+  minus 2 s (`endSlackSecs`, floor 0), since mpv cannot buffer past the
+  end. A lone viewer plays alone; nobody watching (everyone out) plays
+  nothing. While HELD, `state.hold` says who it waits for (BRB members,
+  whatever the wish; videos, while it wants to play; the relay's source
+  gone). A pause holds at once where it is and lasts until someone plays;
+  during the countdown to Up next it also stops it at the end.
+- **BRB** (`presence` `brb`): set on purpose by oneself (the Space hold,
+  the radial) or by someone else ("Wait for Bob" on a person card); holds
+  a playing group at once. When the last one is back it plays if the
+  group wanted to when the first BRB began: the wish is untouched by BRB,
+  and the client's Space hold, which paused on key-down, sends `resume`
+  so the wish goes back to play. A pause during it lasts. Never runs
+  out; kept while disconnected (still waited for), across a takeover, a
+  swap and (the app reports it again) a server restart. The last BRB
+  member leaving for good leaves a plain pause (the wish becomes pause).
+  `continue` goes on without them: BRB members become `out` (reason
+  `continue`), whoever's video holds the group stays `in` and catches up
+  (`skipped`: not waited for until its loading ends), the sender is back
+  from its own BRB, and the wish becomes play; `continue` with a target
+  ("Don't wait for Bob") does it for that one and leaves the wish.
+- **Rewind** (`state.rewind`): a member who fell behind (went out or
+  AFK, dropped, was continued without) records where (`behind`: its last
+  reported spot, else the group's position then); coming back with the
+  group (its loading over) from more than 10 s back
+  (`rewindBehindSecs`) offers everyone a rewind there for 30 s
+  (`rewindSecs`). Any seek and any swap end the offers.
 - **Identity**: an install sends a random client id (`hello.client`,
   private: never broadcast, never logged) and a `seq` that rises with
   every connection. The server maps the client id to one member for its
   life: the same id and token on every reconnect (`welcome.resumed`),
-  so the member keeps its ready flag, presence, queue items (`by`), the
-  relay it serves and its picture. A hello takes the member over when its
+  so the member keeps its standing, queue items (`by`), the relay it
+  serves and its picture. A hello takes the member over when its
   `seq` is not older than the member's; the older socket gets `replaced`
   and closes, an older hello gets `stale` (so two windows of one install
   cannot fight: the newest wins, the client stops on `replaced`).
   `welcome.instance` changes per server boot, so a client tells "the
   server restarted" from "my grace ran out" (both: `resumed` false).
-- **Presence** (`Presence`, `members[].presence`; D1, D2):
-  `joining` -> `in`, `away`, `gone`. What each counts for is one table,
-  `PresencePolicy.countsFor(presence, Purpose)` in core
-  (`presence.dart`), shared by the server and the app: `in` counts for
-  the gate, the ready counter, watched tracking, preloads and social
-  notifications; `joining` for all but tracking, and for the gate only
-  while HELD and for at most `joinerHold` (15 s) after it started
-  joining, never while PLAYING; `away` and `gone` for none.
-  - `joining`: a new member, one back from `gone`, or one back `in` from
-    `away`, while media is up (with nothing up it is `in` at once). It
-    loads in the background; a report that holds the current media at
-    the server position (within the 5 s seek threshold) with `need`
-    buffered makes it `in`, already in sync, so a joiner during playback
-    never pauses anyone (D2). A report error or `joiningTimeout` (60 s)
-    ends joining too. Coming `in` while PLAYING it stays out of the set
-    until it is ready (its own auto-ready follows its buffer); while
-    HELD it keeps its place in the set. While HELD a joiner holds the
-    start at most 15 s (bounded hold), then the others go on without it.
-  - `away` (sat out): anyone sets anyone away (`presence` `away`, the
-    host included); only the member itself comes back (`in`, through
-    `joining`). Its ready flag and reports are kept but never count;
-    `force` leaves it alone; a swap leaves it away. Away survives a drop
-    (back from `gone` it is `away` again).
-  - `gone`: its socket closed or fell silent. Kept for the grace
+- **Presence** (`Presence`, `members[].presence`): one standing each,
+  `in`, `brb`, `afk` or `out`; Loading (`loading`) and Reconnecting
+  (disconnected, `goneSince`) are only labels on top. What each counts
+  for besides the group's waiting is one table,
+  `PresencePolicy.countsFor(presence, Purpose, gone:, loading:)` in core
+  (`presence.dart`), shared by the server and the app: watched tracking
+  counts `in` (not loading) and `brb`; preloads and social notifications
+  `in` and `brb`; `afk`, `out` and a disconnected member none.
+  - `loading`: with media up, a new member, one back from a drop, one back
+    `in` from AFK or out, one someone continued without. It loads in the
+    background; a report that holds the current media at the server
+    position (within the 5 s seek threshold) with `need` buffered ends it,
+    already in sync, so a joiner during playback never pauses anyone
+    (D2). A report error ends it too. While HELD and wanting to play the
+    group waits for its video, with no time limit (Space held or "Don't
+    wait for Bob" goes on without it).
+  - `afk`: out, set by the member's own app (`AfkWatch`, below); ignored
+    while playing and on a BRB member. Only the badge differs from out.
+  - `out`: anyone sets anyone out (the host included); only the member
+    itself comes back (`in`, through loading at the current moment). Not
+    waited for, not counted as watched; the app keeps its player at its
+    spot (its reports say where, for the rewind). Never stops it passing
+    the video on. Kept across a drop and a swap.
+  - Disconnected: its socket closed or fell silent. Kept for the grace
     (`Liveness.grace`, 10 min) with everything it had, its token working
-    (`/m` `/r` `/j` URLs, the relay channel); out of the gate. The feed
-    says `gone` only after `goneNotice` (10 s), so a quick reconnect is
-    silent; back after that line it says `return`. After the grace it
-    leaves (feed `leave`, reason `grace`); `bye` leaves at once (reason
-    `bye`). Only a hello brings it back; frames of a socket that no longer
-    holds the member are ignored.
+    (`/m` `/r` `/j` URLs, the relay channel); its video is never waited
+    for (a drop never pauses), a BRB still is. The feed says `gone` only
+    after `goneNotice` (10 s), so a quick reconnect is silent; back after
+    that line it says `return`. After the grace it leaves (feed `leave`,
+    reason `grace`); `bye` leaves at once (reason `bye`). Only a hello
+    brings it back; frames of a socket that no longer holds the member
+    are ignored.
 - **Player error** (`EngineMember.error`, `report.error`,
   `state.members[].error`): a member whose player cannot open the current
-  media says why in its reports; the server takes it out of the set at
-  once (like away, but automatic: `ready`/`force` do not put it
-  back, its ready flag is kept), so the others start without it; it also
-  ends a `joining`. A report without it (the media opened, after a reload
-  too) or a swap clears it: back in the set like a join while not
-  PLAYING; while PLAYING at once if it is ready (the others then hold for
-  its buffer), else from its `ready`.
-- **Pause**: while PLAYING, any member counting for the gate who becomes
-  not ready or under `need` buffered flips the server to HELD (feed action `pause` by
-  `server`). Recovery resumes by itself when the gate passes.
+  media says why in its reports; the group stops waiting for its video at
+  once, so the others start without it; it also ends a loading. A report
+  without it (the media opened, after a reload too) or a swap clears it:
+  its video is waited for again.
+- **Pause**: while PLAYING, a watched video under `need` buffered flips
+  the server to HELD (feed action `pause` by `server`); it resumes by
+  itself once the video has it (`resume`). A member's `pause` is the
+  group's wish (feed `pause` by the member).
 - **End**: while PLAYING with a known duration, reaching it sets FINISHED
   (feed `finished` by `server`, position = duration). Clients pause where they
   are, except one within 3 s of the end (`finishSlackSecs`), which plays
   out to mpv's own stop; at the end the position shows the full duration.
-  FINISHED never auto-resumes. A seek turns it into HELD at the new
-  position (resuming at once if the gate passes); a swap resets to HELD.
+  FINISHED never starts again by itself. A seek turns it into HELD at the
+  new position (playing at once when the group wants to); a swap resets
+  to HELD.
 - **Seek**: allowed from any member in any transport; the server writes the
   position, bumps `eventId` and records who sent it (`seekBy`, `seekSeq` in
   `state` for that event); flags are untouched. Clients diff each `state`
@@ -314,11 +332,10 @@ Loosely modeled on Syncplay, with a different readiness design.
   user is not seeking and the relay it reads has its source ("Viewer
   recovery" under "Media pipeline").
 - **Liveness**: WS ping every 5 s; a socket without any frame for 15 s
-  (`silence`) is closed (4015) and its member goes `gone`; the grace, the
-  `gone` notice, the joiner bound and the joining timeout follow. The
-  durations are a `Liveness` (core, `sync_engine.dart`; defaults
-  `RelayConstants.silenceSecs` / `graceSecs` / `goneNoticeSecs` /
-  `joinerHoldSecs` / `joiningTimeoutSecs` / `pingIntervalSecs`) given to
+  (`silence`) is closed (4015) and its member goes `gone`; the grace and
+  the `gone` notice follow. The durations are a `Liveness` (core,
+  `sync_engine.dart`; defaults `RelayConstants.silenceSecs` / `graceSecs`
+  / `goneNoticeSecs` / `pingIntervalSecs`) given to
   `SyncEngine(liveness:)` and `SyncServer(liveness:)`; all but the ping
   are measured on the engine's clock (`SyncEngine.clock`,
   `SyncServer(clock:)`) by the 1 s heartbeat sweep, so a test with a
@@ -335,7 +352,7 @@ Loosely modeled on Syncplay, with a different readiness design.
   member (see "Connection" below). No frame for 3 s is "connection
   unstable", 9 s is lost (well under the server's 15 s). A welcome that
   resumed needs nothing re-sent; a new member (grace over, server
-  restarted) gets the app's ready and sitting out again, and the media
+  restarted) reports its standing again (BRB, AFK, out), and the media
   opens again only when it changed (or its URL named the old token). A
   restarted server that has no media while this app had some gets it
   back ("Server restart" below). The
@@ -365,20 +382,18 @@ Loosely modeled on Syncplay, with a different readiness design.
   items, every app its own links passed on and files; a server-fetched
   link is lost with the old server. Nobody offering within 30 s: the
   app lets go of it.
-- **Auto sit-out** (`AutoSitOut`, `session/auto_sit_out.dart`; Settings
-  "Auto sit-out", `AppSettings.autoSitOut`, default on): not playing and
-  no input for 5 min sets this member `away` (reason `idle`); minimised
-  or hidden for 10 min does, playing or not (`minimised`): while playing
-  idle input does not count, and watching is activity, so a pause after
-  a long watch starts a fresh clock. Input (any key or pointer use in the
-  window, `markInput`, from `AppShell` and the controls) or the window's
-  focus brings
-  it back `in` (without touching the ready flag), but only from an away
-  it set itself: a manual one (own or someone else's) stays. Never when
-  alone (`isAlone` in core: no other member connected, `in`, `joining` or
-  `away`). The window changes come from
-  `ShellPort.watchActivity` (focused, unfocused, minimised, hidden); the
-  timings are `AutoSitOutTimes`.
+- **AFK** (`AfkWatch`, `session/afk_watch.dart`; no setting): no input
+  for 10 min while nothing plays (a plain pause, the end, nothing on)
+  sets this member AFK; watching counts as input, so a pause after a long
+  watch starts a fresh clock. Never while it plays, never on a BRB
+  member, never when alone (`isAlone` in core: nobody else connected).
+  Any input (any key or pointer use in the window, `markInput`, from
+  `AppKeys`, `AppShell` and the controls, or the window's focus) brings it
+  back `in`, ignored for the first 1.2 s so the input that happened to
+  land with it does not undo it. Minimised or hidden for 10 min while it
+  plays sets it out (reason `minimised`); Space or Join brings that back,
+  not the window. The window changes come from `ShellPort.watchActivity`
+  (focused, unfocused, minimised, hidden); the timings are `AfkTimes`.
 - **Nudge**: `nudge` names a member; the server passes it to that member
   only (no feed), at most 3 per second and 20 per minute per sender
   (`nudgesPerSec`, `nudgesPerMin`; the rest is dropped silently). The
@@ -388,8 +403,9 @@ Loosely modeled on Syncplay, with a different readiness design.
   channel (`attention`), the urgency hint on Linux (GTK, cleared on focus)
   and `FlashWindowEx` until foreground on Windows.
 - **Deviations from Syncplay**: clock never follows the slowest watcher; no
-  pause-on-leave; anyone can force ready/unready (all or one); presence gate;
-  the clock is server time (clients correct for their offset to it).
+  pause-on-leave; no ready flags (play and pause are anyone's, BRB holds
+  everyone, anyone continues without anyone); the clock is server time
+  (clients correct for their offset to it).
 
 Additive wire changes only; bump `proto` and PROTOCOL.md in the same commit.
 
@@ -453,7 +469,7 @@ per drop, through the Notifier): a quick flap makes no sound.
 The session's part of a welcome is the coordinator's `onWelcome`
 handler (`_onWelcome`), called before the welcome's state goes out: the
 first welcome and a resumed one need nothing; a new member after a drop
-gets the app's intent again (`ready`, `presence` `away`) and the media is
+reports its standing again (`presence` `brb`, `afk` or `out`) and the media is
 forgotten (opened again from the state) only when it changed. The
 incoming streams (`states`, `feeds`, `nudges`, `errors`), the send
 methods, the `token`, `memberId` and `serverNow()` are read through it.
@@ -746,10 +762,12 @@ ready.
   (`queue_switch_e2e_test` with `WT_SWITCH_PRELOAD=0`), against a cold
   switch of about 1.6 s.
 - Ready: the coordinator reports at once after an open (`onOpened`) and
-  when the buffer reaches the gate's need while held, not on the next
+  when the buffer reaches the group's need while held, not on the next
   tick.
 - Commands: play/pause/seek/rate come only from `StateDiff` actions, the
-  play gate (`localPlayAllowed`: self in-set and ready) or the user's
+  play gate (`localPlayAllowed`: self not out; an out member's player
+  stays at its spot, paused, until it joins, then a fresh diff puts it at
+  the group's moment; a new media while out leaves nothing open) or the user's
   own seeks (see Sync model); a server seek within 0.5 s of the current
   position is skipped. They go through `PlaybackController.apply`: while
   a switch is under way (no player, or its media has no duration yet)
@@ -1408,7 +1426,7 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
 - **Progress** (`JellyfinProgressReporter`, `OwnPlay` only): Playing once the
   file is open and mpv has picked its tracks; Progress every 10 s and at
   once on pause, resume, a seek (position more than 3 s from where playback
-  should be) or a track change; Stopped on swap, leave, sitting out, window close
+  should be) or a track change; Stopped on swap, leave, window close
   (bounded to 1.5 s inside the graceful leave) and at `finished`; seeking
   back from the end sends Playing again. Reports carry `PositionTicks`
   (see "Watched on Jellyfin"), `IsPaused` and mpv's `aid`/`sid` as Jellyfin
@@ -1444,8 +1462,9 @@ Client side (`lib/src/jellyfin/session_media.dart`, `progress.dart`,
   previous and next episode. The controls show previous / next buttons
   (also `<` `>`, Shift+P / Shift+N; next is Up next's first item when
   there is one); from `nextPromptStart` (the ending's
-  start when one is known, see "Skip rules", else the last 2 min of the
-  runtime) a floating "Next episode" pill shows while the controls are up
+  start when one is known, see "Skip rules", else the last 90 s of the
+  runtime, `nextPromptLead`) a floating "Next episode" pill shows while
+  the controls are up
   (see "Player controls"). Any of them puts that episode up with the
   clicker's account (through Up next when it is the continuation there).
   At the end, the next episode continues the item by itself (see "What's
@@ -1487,12 +1506,17 @@ item ready ("Getting ready" under "Up next").
   adder's file), with a picture, and adds no feed line. A `cancel`
   (Clear, or Cancel on the end card) drops it for everyone, and no app
   adds it again for that media (the feed's `advance-cancel`).
-- **When**: with nothing up, the first item is asked for at once. When
-  the media finishes with an item first, the server's countdown starts
-  (`state.advance`, 10 s, the same on every screen); a new first item
-  takes it over with the same end; a seek, `cancel` (shared) or a swap
-  ends it. At its end the server sets `queuePlay` and the app that puts
-  the item up (`queuePerformer`) swaps it in. It holds while that member
+- **When**: with nothing up, the first item is asked for at once. Over
+  the media's last 10 s, while the group wants to play, with an item
+  first, the server's countdown runs (`state.advance`, the same on every
+  screen) and ends at the media's end: the moment it finishes the server
+  sets `queuePlay` and the app that puts the item up (`queuePerformer`)
+  swaps it in; the group's wish carries over, so it plays on. An item
+  coming first once the media finished starts a 10 s countdown of its
+  own. A new first item takes it over with the same end; a seek,
+  `cancel` (shared), a pause during it (it stops at the end) or a swap
+  ends it. The next item is already loading by then (see "Getting
+  ready"). It holds while the member who puts it up
   is `gone` (in its grace) or nobody is around, or while the item's warm
   relay waits for a `gone` source, and asks once they are back. An item
   asked for that nobody here can put up (its adder left, nobody has its
@@ -1528,15 +1552,19 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   own account, else the lowest present member id that does (`jf`, which
   lists every working account; nobody: skipped); a link everyone opens
   or the server fetches, its adder when present, else the lowest present
-  member id (present: `in` or `joining`, `isPresentMember`). An item asked
+  member id (present: connected and `in` or `brb`, `isPresentMember`). An
+  item the member asked does not put up within 30 s is asked of the next
+  who can (`state.queuePass`), else again, then skipped. An item asked
   for that nobody can put up is skipped by the server (see "What's
   next"); an item whose swap fails is taken off by the app that tried,
   with the reason; the feed's `queue-skip` toasts on every screen.
-- **Advancing**: at `finished` with something next, every screen shows
-  `UpNextCard` (picture, title, who added it and how; the server's
-  countdown with Cancel while `state.advance` runs, "Waiting for Bob"
-  when it ran out without the one who puts it up, else Play now only;
-  see "What's next"). The app that puts the item up does when the server
+- **Advancing**: over the media's last 10 s while the countdown runs, and
+  at `finished` with something next, every screen shows `UpNextCard`
+  (picture, title, who added it and how; the server's countdown with
+  Cancel while `state.advance` runs, only "Up next" without the seconds
+  for media under a minute (`shortMediaSecs`), "Waiting for Bob" when it
+  ran out without the one who puts it up, else Play now only; see
+  "What's next"). The app that puts the item up does when the server
   asks (`state.queuePlay`), with a swap naming it (`swap.queueId`), so
   the server takes it off in the same step and a second swap of it is
   ignored. "Play now" anywhere (a row, the card, the Up next button's ⏭,
@@ -1547,13 +1575,15 @@ every `state` and feed), the pure rules in `queue_logic.dart`, the UI in
   `swapQueued`, without the URL, its picture as the art), so relays, art
   and refusals work as for any swap; when it fails the item is skipped
   with the reason. A swap without `queueId` (a manual one) leaves the
-  queue alone. A member who puts its own link or file up while sitting
-  out comes back first; any other queued swap leaves the swapper out.
+  queue alone. A member who puts its own link or file up while out comes
+  back first; any other queued swap leaves the swapper out. A play
+  request this app did not act on (a swap slower than 25 s) is tried
+  again when the server asks again.
 - **Getting ready** (`QueueController._warm`): every app keeps the one
   item that plays next ready all the time, its own copy, so a skip, Play
   now or the end of the media starts it at once. That is the queue's
   first item (Up next's, else the continuation, which is in the queue
-  for everyone); while sitting out only the probe
+  for everyone); while out only the probe
   of a link this app puts up (its swap reads it). Per
   kind: a Jellyfin item is resolved with this app's account
   (`resolveJellyfinRef`: PlaybackInfo and the item) into
@@ -1752,7 +1782,8 @@ its played state and resume point (reported now), AniList its list
   whether the media plays here (the server's transport is playing and
   this player plays it) and whether this viewer is In (its presence in
   `state`). The basis is time In: wall time it played while this viewer
-  was `in`. Time sat out (Away), joining, gone, paused or held never
+  was watching (`PresencePolicy`, `Purpose.tracking`: `in` and not
+  loading, or BRB). Time out or AFK, loading, gone, paused or held never
   counts, nor does a jump (skipping around adds only what was played);
   samples more than 10 s apart add nothing. A resume carries the earlier
   watch: when what played starts within 60 s of the resume point, the
@@ -1791,25 +1822,32 @@ its played state and resume point (reported now), AniList its list
 **Status.** What the session is like right now is one computed value,
 `SessionCoordinator.status` (`session/status.dart`, `statusOf` over
 `StatusFacts`; nothing sets it): the connection's `ConnState`, the
-server's state (members and self presence, `state.hold` through who is
-in the set and their buffers, the relay's `live`, `fetch`, `sourceGone` /
+server's state (members and self presence, the wish, `state.hold`
+(BRB, videos, the source), the relay's `live`, `fetch`, `sourceGone` /
 `sourceGoneSince`), this player's facts (`playerError`: it cannot open the
 media; `playerFault`: a "Reload video" failed; `jellyfinPlan`: it plays a
 Jellyfin item with its own account, so the relay is not its concern),
 `fetchFailedFor` (the server's `fetch-fail` for the current media),
-`restarts` (reconnects that found another `welcome.instance`) and a clock
-that moves by the minute. `Status.line` is the player's pill (most
-pressing first: reconnecting with Cancel, unstable, refused or replaced
-with Retry, connecting, your player's fault or error with Reload, the
-server getting the video, everyone held for the relay's source
-("Waiting for <name>": `state.hold.reason` `source`, a viewer's buffer
-ran dry while it is gone; for everyone, own-account viewers too), the
-relay's source dropped / left / not passing it on yet, finished, someone loading, someone who cannot play
-it, you not ready, who everyone waits for; nothing while it plays and
-everyone is fine, and only connection lines while you sit out), each
-with a `StatusLevel` (ok and info never colour anything, warn amber,
-error red). `Status.party` is the strip's line ("connecting…",
-"reconnecting…", "ready 2/3"), `Status.delivery` the members card's
+`restarts` (reconnects that found another `welcome.instance`), who paused
+last (`pausedBy`, from the feed) and a clock that moves by the minute.
+`Status.line` is the player's pill (most pressing first: reconnecting
+with Cancel, unstable, refused or replaced with Retry, connecting, you
+out ("You're out", `[Space] Join`, the pill joins) or AFK ("You're AFK",
+`[Any key] back`), your player's fault or error with Reload, the server
+getting the video, everyone held for the relay's source ("Waiting for
+<name>": `state.hold.source`, a viewer's buffer ran dry while it is gone;
+for everyone, own-account viewers too), the relay's source dropped /
+left / not passing it on yet, finished, BRB ("Waiting for Bob and Chiyo"
+when the group plays once they are back, "Paused · waiting for …" when
+not; you BRB: "Waiting for you", `[Space] I'm back`, the pill brings you
+back; else `[Space] BRB too  [Hold Space] continue without`), a video
+the group waits for (loading, with its share), someone who cannot play
+it, a plain pause ("Paused by Bob"); nothing while it plays), each with
+its `keys` (`KeyHint`s) or a detail and a `StatusLevel` (ok and info
+never colour anything, warn amber, error red). Names past three read
+"Bob, Chiyo and 2 more". `Status.party` is the strip's line
+("connecting…", "reconnecting…", "3 watching · 1 BRB · 1 out"),
+`Status.delivery` the members card's
 source line ("Relay", Stats). `StatusWatch` turns the transitions worth a
 notice into events (Status → Notifier, never back): the relay's source
 gone for 5 s or left, another window took over (`Replaced`), the server
@@ -1821,9 +1859,10 @@ second.
 attention request, a system notification or an activity-log line is an
 `AppEvent` (`session/app_events.dart`, a sealed type, pure Dart): the
 server feed as typed `FeedEvent`s (`FeedEvent.of`, one per feed action:
-joins, leaves (`bye` or `grace`), gone (lost signal), return, sat out
-(`away`: by oneself, by someone else, or by this app's auto sit-out), back
-(`in`), ready/unready, force ready/play/hold, swap, seek, pause, resume,
+joins, leaves (`bye` or `grace`), gone (lost signal), return, BRB (by
+oneself or someone else: "Wait for Bob"), back from BRB, out or AFK (by
+oneself, by someone else, or by this app: AFK, minimised), in (back from
+out), continue without, play, swap, seek, pause, resume,
 finished, chat, rename, avatar, queue add (with the item's picture from
 the state that came first)/remove/skip, fetch failed; `own` when this
 member is the actor; people are matched by `actorId` / `targetId`, never
@@ -1841,8 +1880,9 @@ sends system notifications (Settings' sound preview aside).
 policy, one `Notice` per event: its `NoticeCategory` (chat, nudge, start,
 upNext, people, party, problem, self, app), the toast text, its actor and
 picture, the `SfxCue`, attention, the system notification, the feed line
-for the activity log. The context: self presence (in, away, gone), alone
-(core's `isAlone` over the others' presence), the window
+for the activity log. The context: self presence (in, BRB, AFK, out;
+"away" is AFK or out), alone (core's `isAlone` over the others'
+connections), the window
 (`WindowActivity` from `ShellPort.watchActivity`, wired in `main`),
 playing, the user's choices (`NotifyPrefs`: chat pop-ups All / Only when
 paused / Off, and `notifyPeople`, joins and leaves while away or in the
@@ -1852,26 +1892,28 @@ background, default off). The coordinator gives the session's part
   reconnect replayed (`replayed`) are only logged.
 - Toasts (D4): joins, leaves, lost connection (after the server's
   delayed `gone` line) and returns, swaps, Up next adds (title, the
-  item's picture, who) and skips, chat, being sat out by someone else or
-  by auto sit-out, nudges, problems (someone can't play it, the source
+  item's picture, who) and skips, chat, being set out or BRB ("Bob is
+  waiting for you") or gone on without by someone else, set AFK or out
+  by this app, nudges, problems (someone can't play it, the source
   dropped, a slow or failed relay of yours, a server refusal, the server
-  restarted, replaced) and the app's notices; the rest (ready, seeks,
-  pauses) only in the activity log. Your own joins, swaps and Up next
+  restarted, replaced) and the app's notices; the rest (BRB, back,
+  continue, play, seeks, pauses) only in the activity log, BRB, back and
+  continue with their sounds. Your own joins, swaps and Up next
   adds pop up nothing (the app already said so); your own chat pops up
   without a sound.
-- Sitting out (D1): only chat, nudges, "starting now", Up next, your own
+- Out or AFK (D1): only chat, nudges, "starting now", Up next, your own
   and the app's notices, plus joins and leaves when chosen; the rest is
   logged without a sound.
-- Alone (D9): no social toasts or sounds (people, chat, ready and the
+- Alone (D9): no social toasts or sounds (people, chat, BRB and the
   like, "starting now"); the app's notices, problems and your own show.
-- "Starting now" pops up only while you sit out or the window is in the
+- "Starting now" pops up only while you are out or the window is in the
   background.
 - Chat pop-ups follow the setting (it is in the chat either way), and
   none show while the chat panel is open in a focused window
   (`Notifier.chatOpen`, set by the shell); the chat sound has its own
   switch and still plays.
 - The window in the background (unfocused, minimised, hidden): what
-  reaches a member who sits out (chat, nudges, "starting now", Up next,
+  reaches a member who is out (chat, nudges, "starting now", Up next,
   joins and leaves when chosen) also goes out as a system notification
   (title the person, body the rest; silent, the app plays its sound). A
   click brings the window up (`ShellPort.focus`) and, for chat, opens the
@@ -1899,7 +1941,7 @@ handed on from there (the coordinator gets its `Notifier`, `Connection` and
 `LinkResolver` as constructor arguments):
 - `ShellPort` (`DesktopShell`): window start (remembered bounds, the
   close request routed to `shutDownApp`), fullscreen, minimize/maximize
-  and their changes, the window's activity for auto sit-out
+  and their changes, the window's activity for AFK
   (`watchActivity`: focused, unfocused, minimised, hidden; window_manager's
   focus, blur, minimise and restore, and the shell's own `hide`, wired to
   `SessionCoordinator.windowActivity` and `Notifier.window` in `main`),
@@ -1993,7 +2035,8 @@ new one fading and scaling in from 0.985), `showPopover` (cards that fade
 and scale in from where they open; they scroll when the window is short)
 and `HScroll` (horizontal rows: mouse drag or Shift+wheel; the plain wheel
 always scrolls the page). Space never presses a focused button
-(`appShortcuts`): it is the ready key. Menus are one widget
+(`appShortcuts`): it is play / pause and BRB (see "Space and the
+radial"). Menus are one widget
 (`widgets/app_menu.dart`): `showAppMenu` is a popup route anchored under
 the button (over it when the room below is short), frosted dark glass
 with a check on the current row, fading and scaling in; arrows move,
@@ -2020,36 +2063,37 @@ server's web UI, no credentials; see "Jellyfin item actions") and chat
 messages (Copy message, and a link in it). Menu rows can carry the
 action's own icon (`AppMenuItem.icon`, the same as its button's).
 
-- **Party strip** (`party_strip.dart`, 60 px): your avatar (profile card; 42 px like the party's),
+- **Party strip** (`party_strip.dart`, 60 px): your avatar (profile card; 48 px like the party's),
   the Library / Schedule / Settings tabs with a growing underline (an
   `HScroll` when narrow; the version in the Settings tab's tooltip, at
   the bottom of every Settings page and in About), then the party. Alone
   on your server (D9, `SessionCoordinator.alone`: nobody else connected)
-  it is a plain player's: no ring on your avatar, no avatars or chat, Join
+  it is a plain player's: no badge on your avatar, no avatars or chat, Join
   a friend (the Join card; "Join" under 1100 px) and Invite (disabled until
   your server runs), plus a "Sharing · port 8080" chip while it is shared
   (it opens the members card). With others there, or in a friend's server:
-  `AvatarStack` (host first, then ready; spreads on hover; 5 shown, 3
+  `AvatarStack` (host first, then watching, BRB, out, gone; 5 shown, 3
   under 1100 px; each avatar its person's card, see "People cards"), the
   server name ("Your server", else the joined one's
-  `/health` name, else its address) and `Status.party` ("ready n/m": who
-  the ready counter counts, `countsForReady` in `session/party.dart`, on
-  `PresencePolicy`, so not away, gone or errored; "connecting…",
-  "reconnecting…"; hidden under 1100 px), chat with an unread badge, then
+  `/health` name, else its address) and `Status.party` ("3 watching · 1
+  BRB · 1 out", connected members only; "connecting…", "reconnecting…";
+  hidden under 1100 px), chat with an unread badge, then
   Invite on yours or Leave on a friend's (asks first, then you are home).
   Invite (`inviteFriends`, `shell/your_invite.dart`) shares your server if
   it is not yet and copies the invite link ("Invite link copied"); a port
   it cannot open
-  is a notice pointing at Settings. The server name and "ready n/m" (a
+  is a notice pointing at Settings. The server name and its line (a
   click; a ▾ after the name, a hover tint and an "Everyone in the server"
   tooltip say so), "+N" and a people card's "Everyone in the server" open the
   members card (the server's version under its title: yours is
   this app's, a joined one's from `/health.version`; the source
   line, then per member status, route and buffer dot (see "Relay",
   Stats), their Starsync version (`members[].app`, amber when it is not
-  this app's; also on their people card), host / relay pills; "joining…", "sitting out", or for a `gone` member
-  "reconnecting… (2 min)" with how long; per member force ready, Nudge and Sit
-  out (anyone, the host too), your own row Sit out / Join back; at the
+  this app's; also on their people card), host / relay pills; "watching",
+  "loading", "BRB", "AFK", "out", or for a `gone` member "reconnecting… (2
+  min)" with how long; per member the people card's actions (Wait for /
+  Don't wait for, Nudge, Out: anyone, the host too), your own row Out /
+  Join; at the
   bottom, on yours: not shared, "Only you can reach it" and Invite;
   shared (`YourInvite`), Copy invite link (filled; the address the app
   picks, `InviteReach.best`, in its tooltip) and Stop sharing; one line
@@ -2063,13 +2107,26 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   too))).
   Empty strip space is the window
   drag area; the window buttons sit at its end.
-- **Avatars** (`avatar.dart`): `StatusAvatar` draws a ring outside the
-  picture with a gap in the background colour (both scale with the size):
-  green ready, amber buffering (with a spinner), grey not ready, a little
-  faded joining, dimmed with a dark ring `gone` (reconnecting, last in
-  the stack), dimmed with a moon ("away") sitting out; a crown for the host (`members[].host` in the state; your own
-  app also knows before the first state) and a tower for the member
-  passing the video on. `memberAvatarImage` is the one picture lookup: yours from the
+- **Avatars** (`avatar.dart`): `StatusAvatar`'s picture fills its shape
+  (no ring): a rounded square (22 % corner) or, with Settings → Party →
+  More "Avatar shape: Circle" (`AppSettings.avatarCircle`, the one
+  setting of the redesign), a circle (`AvatarShape`). The standing is a
+  badge (`StateBadge`): a small dark tile with a thin dark outline a third
+  over the bottom-right corner, a muted glyph in its colour: a cup for
+  BRB, "Zz" for AFK, an eye with a line through it for Out; AFK and Out
+  are darkened (a black layer, not transparency, so an overlapping
+  neighbour never shows through). What happens to their player runs
+  along the shape's edge only while it lasts (`AvatarEdge`, an arc on a
+  circle, a stretch of outline on a rounded square, over a thin dark
+  line): Loading a white run growing round from the top (joining,
+  catching up, or the group waits for its video), Reconnecting an amber
+  stretch going round (disconnected; last in the stack); still under
+  `flutter test` (a loop never settles). A crown for the host
+  (`members[].host` in the state; your own app also knows before the
+  first state), a tower at the bottom-left for the member passing the
+  video on, a red "!" when their player cannot open the media. In a row
+  (`AvatarStack`) rounded squares sit side by side, circles overlap with
+  an outline in the background colour and spread apart on hover. `memberAvatarImage` is the one picture lookup: yours from the
   profile, anyone else's from `coordinator.avatars` by `avatarHash`.
   Colours are local: yours is picked in the profile, others' come from
   their name. A toast's or danmaku line's avatar (`LineAvatar`) is
@@ -2093,14 +2150,17 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   (`AppGlass`, 312 px) read live from the state by member id (else by
   name; the place's own `AvatarInfo` once they left: "Not in the
   server"): a 64 px `StatusAvatar` (with a picture, a click shows it full
-  size, `showPictureView`), name ("you"), presence (Watching, Away ·
-  sitting out, Gone · reconnecting (2 min), Joining…), host / passing
-  the video on pills, ready (or can't play, buffering), their route and
+  size, `showPictureView`), name ("you"), standing (Watching, Loading…,
+  BRB · 4 min, AFK · 12 min, Out, Reconnecting (2 min)), host / passing
+  the video on pills, can't play (why), their route and
   buffer, what they pass on ("Passing on <now playing>", or "Hosts" the
   file, with the source line's numbers), their Starsync version
-  (`VersionText`), their actions (`memberActions`: Force ready /
-  unready, Nudge, Sit out, Join back; the members card's ⋮ shows the
-  same list) and "Everyone in the server". In fullscreen an open card
+  (`VersionText`), their actions (`memberActions`: for someone else
+  "Don't wait for Bob" while the group waits for them (BRB: out; their
+  video: they catch up) else "Wait for Bob" (sets their BRB: they ran off
+  without it; their own Space clears it), Nudge, Out; for you Out, or
+  Join while out; the members card's ⋮ shows the same list) and
+  "Everyone in the server". In fullscreen an open card
   holds the controls up. The status pill's avatars keep a plain name
   tooltip (a click there is the pill's).
 - **Join card** (`connect_cards.dart`): recent servers as one-click rows
@@ -2246,9 +2306,10 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
     player's ⚙ opens these while watching.
   - **Party**: You (picture, name and colour edited in place with the
     profile card's `ProfilePicture` / `ProfileColors`; the profile card's
-    Settings link opens this page), Away (auto sit-out), Your server
-    (port and password, used the next time it is shared, in the connect
-    form), Recent servers (Forget, as on the Join card).
+    Settings link opens this page; More: Avatar shape, Rounded square or
+    Circle), Your server (port and password, used the next time it is
+    shared, in the connect form), Recent servers (Forget, as on the Join
+    card).
   - **Notifications & sounds**: Over the video (Notifications: toasts or
     danmaku, Chat pop-ups, Joins and leaves too; More: the danmaku look
     with its preview strip and what pops up when), Sounds (App sounds,
@@ -2262,7 +2323,7 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
     Keyboard shortcuts (the player's; folded: anywhere and the library),
     About, Developer (dev builds).
   No row for what has a fixed default or a place in context: the
-  controls hide after 3 s, a swap never unreadies, update checks always
+  controls hide after 3 s, AFK and its timings, update checks always
   run (D8), the clock's click switches elapsed / remaining, the Latest
   row's ⋮ hides re-releases (stored values: "Settings schema").
 - **Drop and paste** (`handoff.dart`, `fox_utils`): the shell is one
@@ -2289,14 +2350,16 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   at the bottom of the window says what ("Opening youtube.com…", "Adding
   Ep 01.mkv to Up next…", `handoffName`). Images are ignored.
   Nothing happens while a dialog or popover is over the shell.
-- **Sounds** (`sfx/`): the `Notifier` plays an `SfxCue` for ready,
-  unready, force-ready, join, leave, swap and others' chat (feed
-  events), being sat out by someone (the `kick` sound), a nudge (always,
-  whatever its switch), auto sit-out setting you away (`warn`), and
-  connection lost / back (once per drop that lasted a few seconds).
-  Nothing for what the video already says (play, pause, seeks, the end),
-  nothing about the party while watching alone, and while sitting out
-  only for what still reaches you (see "Notifier policy").
+- **Sounds** (`sfx/`): the `Notifier` plays an `SfxCue` for back from
+  BRB (`ready`), BRB (`unready`), continue without (`forceReady`), join,
+  leave, swap and others' chat (feed events), being set out or BRB or
+  gone on without by someone (the `kick` sound), a nudge (always,
+  whatever its switch), this app setting you AFK or out (`warn`), and
+  connection lost / back (once per drop that lasted a few seconds). The
+  sounds keep their old keys (`SfxKind` names) so per-sound switches
+  carry over. Nothing for what the video already says (play, pause,
+  seeks, the end), nothing about the party while watching alone, and
+  while out only for what still reaches you (see "Notifier policy").
   The sounds are synthesized, not sampled: `synth.dart` renders voices
   (plucked strings with bends, glass and star bells, a singing bowl,
   hollow knocks, wooden clacks, filtered-noise air and stardust, a long
@@ -2328,17 +2391,18 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   controls builder (never null: media_kit keeps the last controls on
   null, which left the full player's bars under the mini). Hovered it
   shows the title with expand and ×, the status line, the full player's
-  play button (`controlIcon`/`togglePlay`: ready in a server) with the
-  time, and a 4 px bar (track, cached, played) that seeks; otherwise a
-  3 px played line along the bottom edge. A tab sends the full player to mini; × on the mini sits
-  out (the player unloads and shows the join-back card, `SitOutCard`, over
-  the still mounted `Video`); × on that card closes the player, the strip
-  brings it back, and joining back with it closed shows the mini. Fullscreen
+  play button (`controlIcon`/`togglePlay`: the group's play or pause, Join
+  while out) with the time, and a 4 px bar (track, cached, played) that
+  seeks; otherwise a 3 px played line along the bottom edge. A tab sends
+  the full player to mini; × on the mini sets you out (reason `closed`:
+  nobody waits for you, your player keeps its spot) and closes the
+  player; the strip brings it back, and joining with it closed shows the
+  mini. Fullscreen
   is `windowManager.setFullScreen` with the strip hidden (party avatars in
   a corner while paused); F, Esc and double-click on the picture toggle it.
   The player keys (Settings → Help & about → Keyboard shortcuts) work while the player is
-  full and nothing is in front of it; ↑ / ↓ step the volume, M mutes. Space (ready)
-  and Tab (chat) are app-wide: `AppKeys` (`widgets/app_keys.dart`, around
+  full and nothing is in front of it; ↑ / ↓ step the volume, M mutes. Space
+  (see "Space and the radial") and Tab (chat) are app-wide: `AppKeys` (`widgets/app_keys.dart`, around
   the shell) takes them first while in a server, unless a text field (or
   a `KeyboardClaim`, see "Up next") has focus or a dialog or menu is in
   front. Tab reaches the shell's chat
@@ -2350,7 +2414,7 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   Enter never presses them. While the full player has the keys it keeps
   the arrows, PgUp / PgDn, Enter and every key it acted on from the focus
   system until they are let go (`FocusManager` early handler), acted on
-  or not (a debounced press, no chapter to go to, sitting out): no focus
+  or not (a debounced press, no chapter to go to, out): no focus
   moves, no focused button is pressed, nothing behind it scrolls. Something coming up while the player
   is closed opens it: full right after joining or after putting it up
   here, else mini. Both control skins show `NowPlayingTitle` top left
@@ -2362,23 +2426,64 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   the banner (else a blur of the cover, else dark), darkened, with cover,
   big title and episode; it fades out on play and stays gone for that
   media; under 320 px tall (the mini) it drops the cover and shrinks the
-  title. One status pill (`player_status.dart`) sits centred in the
-  action area (see "Player overlay"): it shows `Status.line` (see "App
-  events and platform ports"), connecting only after 2 s: reconnecting
-  (Cancel), refused or replaced (Retry), your player's problem (Reload),
-  the relay, finished, someone loading (below
-  `StateBroadcast.bufferNeed`, the gate's own need at the current
-  position: less near the end, none at finished; their avatar with the progress round it), you not
-  ready (a click marks you ready) and who everyone waits for (avatars,
-  "2/3 ready"); nothing otherwise, info never. Your own `playerError`
-  comes right after reconnecting ("Can't play this: ...", Retry reloads
-  the video); members with `members[].error` show as "Bob can't play
-  this: ..." (before your ready prompt, which then rides in the detail
-  line) and are never in "waiting for". A member's new error also toasts
-  once (the pill is hidden while playing); avatars carry a red error mark
-  and the members card says "can't play this: ...". 34 px avatars, a main line
-  and a muted detail line. The pill glass, colour only for problems; it fades through
-  between kinds. The mini shows its short line in its hover bar. ⚙ in
+  title. One status pill (`player_status.dart`, design A) sits centred in
+  the action area (see "Player overlay"): a rounded rectangle (radius 14)
+  of the pill glass with the people it is about (36 px, side by side, at
+  most three then "+N"), one line, and under it the keys that act now as
+  keycaps (`KeyHints`: `[Space] BRB too  [Hold Space] continue
+  without`) or a muted detail. It shows `Status.line` (see "App events
+  and platform ports"), connecting only after 2 s: reconnecting (Cancel),
+  refused or replaced (Retry), out or AFK (a click joins or brings you
+  back), your player's problem (Reload), the relay, finished, BRB ("Waiting
+  for Bob and Chiyo", "Paused · waiting for …", "Waiting for you": a click
+  brings you back), a video the group waits for (below
+  `StateBroadcast.bufferNeed`, the group's own need at the current
+  position: less near the end, none at finished), someone who cannot play
+  it, a plain pause ("Paused by Bob"); nothing while it plays. Your own
+  `playerError` comes right after reconnecting ("Can't play this: ...",
+  Retry reloads the video); members with `members[].error` show as "Bob
+  can't play this: ..." and are never waited for. A member's new error
+  also toasts once (the pill is hidden while playing); avatars carry a
+  red error mark and the members card says "can't play this: ...". A
+  Space hold fills it from the left (`HoldFill`: amber for BRB, white for
+  continuing without), its strength an ease-in of the progress so a tap
+  barely shows, and from 150 ms its words say what keeping on and letting
+  go do ("Keep holding: BRB" / "Let go: just pause"; "Keep holding:
+  continuing without Bob" / "Let go now: BRB too", then "Let go: keep
+  waiting"). Its height lifts bottom subtitles over it, with the player's
+  existing lift (`SubtitleLift`), whatever "Subtitles above the controls"
+  says. The pill glass, colour only for problems; it fades through
+  between kinds. The mini shows its short line in its hover bar. Dev
+  builds only (removed before release, no setting): `STARSYNC_WAIT_DESIGN`
+  `c` shows the BRB waiting as a card in the middle of the paused picture
+  instead (`WaitCard`: 64 px avatars with name and "BRB · 4 min", the
+  keys, the hold's fill), `d` the same card fading with the controls (a
+  hold always shows it); see DEVELOPMENT.md "Dev tools".
+- **Space and the radial**: Space is the session's `SpaceKey`
+  (`session/space_key.dart` over the pure `SpaceGesture`,
+  `session/space_gesture.dart`), fed by `AppKeys` with key-down, a
+  `Ticker` every frame while held, and key-up (key repeats ignored; a
+  second down without an up ignored; a press under way ends with its own
+  key-up wherever focus went, and is dropped when the app's lifecycle
+  leaves `resumed`, so a held key never turns into BRB in the
+  background). A tap plays or pauses the group: the pause on key-down,
+  a play on key-up (a play on key-down would play before a hold paused
+  again). A hold of 0.6 s is BRB, sent with `resume` when the group
+  wanted to play at key-down (it plays once everyone is back). While
+  anyone else is BRB a tap (under 0.3 s) toggles your own BRB (BRB too,
+  or I'm back) and a hold of 2 s continues without them (`continue`); in
+  between letting go does nothing. BRB with nobody else, AFK or out: back
+  on key-down. Any key down is input for AFK. The right button on the
+  video (`player_radial.dart`, a raw `Listener` so left clicks and the
+  double-click are untouched; the full player only) opens the radial
+  (`radial_menu.dart`): a dark disc (no blur) of four fixed places, ↑
+  BRB / I'm back (greyed "you're out" while out), → skip ahead (Skip OP
+  in the opening, Next episode through the ending: the ED, else the last
+  90 s, greyed without anything next; else Skip 1:30), ↓ Out / Join, ←
+  empty (a darker quarter, so the slots never move). Press, drag and let
+  go picks; a plain right-click leaves it open for a click; Esc, the
+  centre or a click outside cancels; it scales with the video's shorter
+  side (up to 1.6×) and holds the controls up while open. ⚙ in
   the bar (both skins, "Player settings") toggles the player panel
   (`controls/player_panel.dart`, `PlayerControlsModel.panelOpen`): a
   312 px `AppGlass` column docked at the right of the full player,
@@ -2418,7 +2523,7 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   controls"), back-to-library or exit fullscreen,
   then the window buttons in fullscreen, all in that skin's button
   look. Under it at the right, in fullscreen (the strip is hidden), the
-  party's `AvatarStack`: it comes and goes with the controls (fades with
+  party's `AvatarStack` (48 px, as the strip's): it comes and goes with the controls (fades with
   `controlsShown`, takes no clicks while hidden), moves left of the
   player panel while that is open, and works as the strip's (people
   cards, "+N" or a card's link for the members card; the mouse on it and
@@ -2429,15 +2534,17 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   16 px from the bottom while they are hidden (`AnimatedPositioned`,
   the shell's `ease` / `easeTime`); in it the status pill centred
   (moved left only as far as it must to clear the right end, never
-  overlapping it) and at the right end the end card (`UpNextCard`, which
-  stays up) or the action pills (Skip OP / ED /
-  1:30 over Next episode, `PillGate`). The Jellyfin blocked card sits in
+  overlapping it) and at the right end the end card (`UpNextCard`, over
+  the last 10 s and once it ended) or the action pills ("Rewind for
+  Alice (1:42)" while `state.rewind` offers one, a seek there for
+  everyone; Skip OP / ED / 1:30 over Next episode, `PillGate`). The
+  radial (`RadialLayer`) is over all of it. The Jellyfin blocked card sits in
   the middle. Two surfaces: cards and popovers use `AppGlass`
   (`widgets/app_menu.dart`, the menus' recipe: blur, dark tint, hairline
   border, 12 px radius, shadow); pills use `PlayerGlass`
-  (`AppGlass.pill`: a stadium, lighter tint, no shadow): the status
-  pill, the unread chip and `FloatingPill` (the action pills, 44 px
-  tall like the status pill without avatars). The mouse on any
+  (`AppGlass.pill`: a stadium, lighter tint, no shadow): the unread chip
+  and `FloatingPill` (the action pills, 44 px tall); the status pill is
+  the same glass as a rounded rectangle. The mouse on any
   floating element counts as the mouse on the controls: a
   `ControlsHold` (`controls/controls_probe.dart`) held by
   `ControlsHoldRegion`s (and by the open Up next popover or its preview) keeps the
@@ -2473,7 +2580,7 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   (`PartyToasts.skip`).
 - **Quick chat** (`shell/quick_chat.dart`): Enter in the full player
   (not the mini: it is a corner thumbnail while you are elsewhere in the
-  app, where Enter belongs to that page; nor while sitting out) opens a
+  app, where Enter belongs to that page; nor while out) opens a
   small box at the bottom centre, 16 px up, in the control bar's place,
   without opening the chat panel. Enter is a `HardwareKeyboard` handler
   of the player, so it works whatever plays and whatever button kept
@@ -2525,7 +2632,7 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
 - **Danmaku notifications** (`danmaku/`): Settings → Notifications &
   sounds → Over the video → Notifications: Toasts (default) or Danmaku
   (`AppSettings.notifyStyle`, live; also in the player panel). With
-  Danmaku and the full player up (not sitting out), what
+  Danmaku and the full player up (not out), what
   `fliesAsDanmaku` picks (chat, joins, leaves, lost connection and back,
   "starting now", Up next news someone caused) flies right to left
   across the picture (`DanmakuNotices` under the controls feeds new
@@ -2610,7 +2717,8 @@ replaces the idle switch; 3: the video volume is kept (`playerVolume`,
 `unreadyOnSwap` and `autoCheckUpdates` (`droppedSettingKeys`: their
 defaults hold; an older build reading the box finds them missing and
 uses the same defaults), while `timeDisplay` and `hideReReleases` stay
-(the clock's click, the Latest row's menu). A box from a newer build is
+(the clock's click, the Latest row's menu); 5: AFK replaces auto sit-out,
+`autoSitOut` goes. A box from a newer build is
 left alone. Link media names are a web page's title (see "yt-dlp"), else
 derived from the URL path, never containing a query string.
 
@@ -2696,16 +2804,17 @@ Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
 Player controls (`lib/src/controls/`): one controls model, two skins.
 - **Model** (`model/`): `PlayerControlsModel` (built by `SessionPlayer`,
   wired to the coordinator once) holds what the controls show, as
-  signals (`play`: `PlayState` playing / waiting (you are ready, the
-  others not) / paused / finished, from `state.transport` and your ready
-  flag; position, duration, buffered, chapters, current chapter, tracks,
-  volume, skip offer, render mode; the shell's fullscreen, chat open and
-  unread count) and what they do (`togglePlay` = ready, as Space;
+  signals (`play`: `PlayState` playing / waiting (the group wants to
+  play and waits for someone) / paused / finished, from `state.transport`
+  and `state.wish`; position, duration, buffered, chapters, current
+  chapter, tracks, volume, skip offer, render mode; the shell's
+  fullscreen, chat open and unread count) and what they do (`togglePlay`
+  = the group's play or pause, Join while out;
   `seek` through `player.seek`, the user path; `nudge`, `skipForward`,
   `skip`, `stepChapter`, `pickChapter`; `next` = the queue's first item
   (Up next's, else the continuation), else the next episode, `previous`; volume set / step (flashes) / mute;
   `pickTrack`, `pickShader`; the clock's click (elapsed / remaining); fullscreen, chat, change
-  video, collapse, leave, reload, mark everyone ready, link). The
+  video, collapse, leave, reload, link). The
   player keys call the same actions. `ControlsSnapshot` (computed) is
   what the layout depends on.
 - **Layout spec** (`model/controls_layout.dart`, pure): `ControlsLayout`
@@ -2719,8 +2828,7 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   bar's ⋯ menu ("Video and session"; `ControlAction`, fixed order):
   change video, copy link (when `currentLink` has one), reload, Skip
   1:30 (with a duration), chapters (with chapters), the hidden track
-  lists and chat, mark everyone ready (not alone), mark a problem,
-  leave. Icons, tooltips (with keys) and the clock text (`clockText`)
+  lists and chat, mark a problem, leave. Icons, tooltips (with keys) and the clock text (`clockText`)
   are defined there too, once.
 - **Shared pieces**: `ControlsFrame` (`frame.dart`): when the controls
   are up (real mouse movement shows them, see "Quick chat"; `suppress`
@@ -3127,8 +3235,9 @@ leaves full).
 - No transcoding: bandwidth is plentiful and the Jellyfin box should not be loaded.
 - No roles, friends trust model: simplest thing that fits the use.
 - Blank password = open server: the owner chooses between open and private.
-- Sit out instead of kick: friends never need to throw someone out, only to
-  stop waiting for them; the person stays in chat and can be nudged back.
+- Out instead of kick: friends never need to throw someone out, only to
+  stop waiting for them ("Don't wait for Bob"); the person stays in chat
+  and can be nudged back.
 - Server runs inside the app on an isolate, and ships as a separate compiled
   server: a Flutter binary cannot run headless, so a dedicated server needs
   its own build of `packages/server`. An isolate keeps the UI responsive and
@@ -3136,8 +3245,11 @@ leaves full).
 - Host by key, not by address: loopback detection broke behind a
   same-machine reverse proxy or tunnel.
 - Server owns the clock; reports never move it: avoids ping-pong between clients.
-- Presence gate: a lone viewer must be able to watch; everyone present
-  while the video is stopped must ready before it starts.
+- No ready flags: the group waits only for what it can measure (someone's
+  video) and for what people say on purpose (BRB); nothing starts because
+  time passed, and play and pause are anyone's. Ready flags made one-time
+  joiners learn a key before anything played and let a forgotten Space
+  hold everyone.
 - Relic for the server, `web_socket_channel` for the client; packages are
   chosen on merit, not locked.
 - Plain `ws://`, no TLS: friends use LAN, VPN or a forwarded port; TLS

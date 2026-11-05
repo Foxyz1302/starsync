@@ -67,7 +67,7 @@ enum NoticeCategory {
   /// it, the source dropped, the server could not fetch it).
   problem,
 
-  /// About this member itself (sat out, auto sit-out, the relay it
+  /// About this member itself (set out or waited for, AFK, the relay it
   /// serves, its connection, another window took over).
   self,
 
@@ -75,7 +75,7 @@ enum NoticeCategory {
   /// filtered.
   app;
 
-  /// What reaches you while you sit out or the window is in the
+  /// What reaches you while you are out or the window is in the
   /// background (D1): chat, nudges, "starting now" and Up next, plus joins
   /// and leaves when [NotifyPrefs.people] is on.
   bool reachesAway(NotifyPrefs prefs) => switch (this) {
@@ -116,7 +116,8 @@ class NoticeContext {
     this.chatOpen = false,
   });
 
-  bool get away => self == Presence.away;
+  /// Out or AFK: only what reaches someone away shows.
+  bool get away => self?.isOut ?? false;
 }
 
 /// A notification outside the window ([SystemNotifications]).
@@ -294,22 +295,33 @@ Notice _plain(AppEvent e) => switch (e) {
           actor: feed.actor,
           chat: true,
           sound: const SfxCue(SfxKind.chat)),
-      MemberSatOut(:final feed, atYou: true) => Notice(
+      MemberOut(:final feed, atYou: true) => Notice(
           category: NoticeCategory.self,
           log: feed,
-          toast: '${feed.actor} sat you out',
+          toast: '${feed.actor} set you out',
           actor: feed.actor,
           sound: const SfxCue(SfxKind.kick)),
-      MemberSatOut(:final feed, autoSelf: true) => Notice(
+      MemberOut(:final feed, autoSelf: true, :final afk) => Notice(
           category: NoticeCategory.self,
           log: feed,
-          toast: 'You sit out (${feed.reason == 'minimised' ? 'minimised' : 'idle'}); you are back as soon as you return',
+          toast: afk ? "You're AFK; any key or the mouse brings you back" : "You're out (minimised); Space brings you back",
           sound: const SfxCue(SfxKind.warn)),
-      ReadyChanged(:final feed, ready: true, :final readyIndex) =>
-        Notice(category: NoticeCategory.party, log: feed, sound: SfxCue(SfxKind.ready, readyIndex: readyIndex)),
-      ReadyChanged(:final feed, ready: false) =>
-        Notice(category: NoticeCategory.party, log: feed, sound: const SfxCue(SfxKind.unready)),
-      ForcedReady(:final feed, ready: true) =>
+      MemberBrb(:final feed, atYou: true) => Notice(
+          category: NoticeCategory.self,
+          log: feed,
+          toast: "${feed.actor} is waiting for you; Space when you're back",
+          actor: feed.actor,
+          sound: const SfxCue(SfxKind.kick)),
+      ContinuedWithout(:final feed, atYou: true) => Notice(
+          category: NoticeCategory.self,
+          log: feed,
+          toast: '${feed.actor} went on without you',
+          actor: feed.actor,
+          sound: const SfxCue(SfxKind.kick)),
+      MemberBrb(:final feed) => Notice(category: NoticeCategory.party, log: feed, sound: const SfxCue(SfxKind.unready)),
+      MemberBackFromBrb(:final feed) =>
+        Notice(category: NoticeCategory.party, log: feed, sound: const SfxCue(SfxKind.ready)),
+      ContinuedWithout(:final feed) =>
         Notice(category: NoticeCategory.party, log: feed, sound: const SfxCue(SfxKind.forceReady)),
       FetchFailed(:final feed) => Notice(category: NoticeCategory.problem, log: feed),
       FeedEvent(:final feed) => Notice(category: NoticeCategory.party, log: feed),

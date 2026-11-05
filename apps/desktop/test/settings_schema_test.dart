@@ -27,15 +27,23 @@ void main() {
       for (final old in [true, false]) {
         final box = await Hive.openBox('settings');
         await box.put('idleSitsOut', old);
-        await migrateSettings(box);
+        await migrateSettings(box, current: 4);
         expect(box.containsKey('idleSitsOut'), isFalse);
         expect(box.get('autoSitOut'), isTrue);
         await box.deleteFromDisk();
       }
       final kept = await Hive.openBox('settings');
       await kept.putAll({'idleSitsOut': true, 'autoSitOut': false});
-      await migrateSettings(kept);
+      await migrateSettings(kept, current: 4);
       expect(kept.get('autoSitOut'), isFalse, reason: 'a choice already made stays');
+    });
+
+    test('5: AFK replaces auto sit-out: the switch goes', () async {
+      final box = await Hive.openBox('settings');
+      await box.putAll({settingsSchemaKey: 4, 'autoSitOut': false, 'playerVolume': 40});
+      await migrateSettings(box);
+      expect(box.containsKey('autoSitOut'), isFalse);
+      expect(box.get('playerVolume'), 40);
     });
 
     test('3: the video volume is kept; a stored value that is not a number goes', () async {
@@ -58,7 +66,7 @@ void main() {
         'timeDisplay': 'remaining',
         'hideReReleases': false,
       });
-      expect(await migrateSettings(box), hasLength(1));
+      expect(await migrateSettings(box, current: 4), hasLength(1));
       for (final k in droppedSettingKeys) {
         expect(box.containsKey(k), isFalse, reason: k);
       }

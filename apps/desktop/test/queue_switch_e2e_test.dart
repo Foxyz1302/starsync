@@ -315,7 +315,7 @@ void main() {
         expect(await a.queue.add(LinkMedia(linkUrl, relay: LinkRelay.direct)), isNull);
         await _poll(() => (a.serverState.peek()?.queue.length ?? 0) == 2, 'two queued');
         for (final x in all.values) {
-          x.toggleReady();
+          x.play();
         }
         await _poll(() => all.values.every((x) => x.playback.player.state.playing), 'all playing episode 1');
 
