@@ -36,6 +36,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ### Changed
 
+- Updates and the Schedule now come from example.org; saved addresses on the old example.org move by themselves
 - Linux: animations, scrolling and dragging follow your monitor's refresh rate (for example 75 Hz) instead of a fixed 60, and dragging rows with a fast mouse no longer stutters
 - Play and pause are everyone's: one press of Space or the play button plays or pauses for the whole group, and nobody presses "ready" any more (the ready count, Force ready and Mark everyone ready are gone). A new video waits for one Play, and putting something up keeps it playing or paused
 - Nothing starts by itself because time passed: the group waits for a video that is still loading until it is there or someone goes on without it

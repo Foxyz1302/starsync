@@ -53,8 +53,8 @@ class UpdateController {
   static final instance = UpdateController();
 
   final String currentVersion;
-  final String manifestUrl;
-  final String devUrl;
+  final List<String> manifestUrls;
+  final List<String> devUrls;
   final String? executablePath;
   final Directory? installRoot;
   final RestartFn restart;
@@ -68,8 +68,8 @@ class UpdateController {
 
   UpdateController(
       {this.currentVersion = appVersion,
-      this.manifestUrl = updateManifestUrl,
-      this.devUrl = devManifestUrl,
+      this.manifestUrls = updateManifestUrls,
+      this.devUrls = devManifestUrls,
       this.executablePath,
       this.installRoot,
       this.restart = _closeAndRestart,
@@ -126,7 +126,7 @@ class UpdateController {
     try {
       final ch = channel;
       final m = await fetchLatestManifest(
-          currentVersion: currentVersion, channel: ch, url: manifestUrl, devUrl: devUrl);
+          currentVersion: currentVersion, channel: ch, urls: manifestUrls, devUrls: devUrls);
       latest.value = m;
       stableBehind.value = ch == UpdateChannel.stable && isStableBehind(currentVersion, m) ? m : null;
       if (stableBehind.value != null) {
@@ -159,7 +159,7 @@ class UpdateController {
   /// check failed.
   Future<UpdateManifest?> stableToGoBackTo() async {
     try {
-      final m = await fetchManifest(url: manifestUrl);
+      final m = await fetchManifest(urls: manifestUrls);
       return isStableBehind(currentVersion, m) ? m : null;
     } catch (e) {
       _log.warning('stable manifest: $e');

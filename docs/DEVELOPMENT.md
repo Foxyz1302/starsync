@@ -385,6 +385,17 @@ Tokens come from the environment (`RELEASE_TOKEN`, or Actions-provided
 updater skips the check when absent. Workflows live in `.gitea/workflows`
 (the forge reads `.gitea` before `.github`).
 
+The repo and its releases live on pol's Gitea,
+`https://git.example.org/Foxyz/sync_replay_project` (a GitHub mirror
+feeds the website's downloads). Apps read their manifests there
+(`updateManifestUrls` / `devManifestUrls` in `updater.dart`,
+[Updater](ARCHITECTURE.md#updater)); `tool/dev_release.sh`'s `BASE_URL`
+names it too, and `tool/release.sh` / `tool/release_publish.dart` take
+the server from `origin`. Apps up to 1.4.x read the manifest at
+`git.example.org`, the server's old name, which is gone: they cannot
+update by themselves, so 1.5.0 is a manual install for everyone (from
+the website, its downloads from the GitHub mirror).
+
 ### Changelog
 
 `CHANGELOG.md` is what people read: the update band, the What's new card

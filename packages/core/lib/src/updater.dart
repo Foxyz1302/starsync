@@ -25,13 +25,21 @@ import 'logging.dart';
 
 final _log = createLogger('update');
 
-const updateManifestUrl =
-    'https://git.example.org/Foxyz/sync_replay_project/raw/branch/main/updates/manifest.json';
+/// Where the releases' manifest lives, tried in order ([fetchManifest]):
+/// when the server moves, its new address goes first and the old one
+/// stays as long as it works, so installs keep updating across the move.
+/// Never an address that no longer belongs to the project: whoever owns
+/// it next could serve a manifest.
+const updateManifestUrls = [
+  'https://git.example.org/Foxyz/sync_replay_project/raw/branch/main/updates/manifest.json',
+];
 
 /// Test builds (`tool/dev_release.sh`): one Gitea prerelease, tag `dev`,
-/// whose assets each run replaces. Only dev builds read it.
-const devManifestUrl =
-    'https://git.example.org/Foxyz/sync_replay_project/releases/download/dev/manifest.json';
+/// whose assets each run replaces. Only dev builds read it. Tried in
+/// order, like [updateManifestUrls].
+const devManifestUrls = [
+  'https://git.example.org/Foxyz/sync_replay_project/releases/download/dev/manifest.json',
+];
 
 const appVersion = String.fromEnvironment('APP_VERSION',
     defaultValue: '0.0.0-dev');
@@ -226,8 +234,26 @@ int compareVersions(String a, String b) {
 bool isNewerVersion(String current, String latest) =>
     compareVersions(latest, current) > 0;
 
+/// The manifest from the first of [urls] that serves a valid one; when
+/// none does, the first address's error.
 Future<UpdateManifest> fetchManifest(
-    {HttpClient? http, String url = updateManifestUrl}) async {
+    {HttpClient? http, List<String> urls = updateManifestUrls}) async {
+  if (urls.isEmpty) throw ArgumentError.value(urls, 'urls', 'no manifest address');
+  Object? first;
+  StackTrace? firstStack;
+  for (final url in urls) {
+    try {
+      return await _fetchManifestFrom(url, http);
+    } catch (e, st) {
+      if (urls.length > 1) _log.warning('manifest $url: $e');
+      first ??= e;
+      firstStack ??= st;
+    }
+  }
+  Error.throwWithStackTrace(first!, firstStack!);
+}
+
+Future<UpdateManifest> _fetchManifestFrom(String url, HttpClient? http) async {
   final client = http ?? HttpClient();
   try {
     final req = await client
@@ -252,7 +278,7 @@ Future<UpdateManifest> fetchManifest(
 bool isDevBuild(String version) => version.contains('-dev.');
 
 /// Where an install takes its updates from. [stable]: releases only.
-/// [dev]: test builds as well (`devManifestUrl`), whichever of the two is
+/// [dev]: test builds as well ([devManifestUrls]), whichever of the two is
 /// newer, so a release newer than the running test build is installed and
 /// the next test line after it still is.
 enum UpdateChannel {
@@ -297,14 +323,14 @@ Future<UpdateManifest> fetchLatestManifest(
     {HttpClient? http,
     String currentVersion = appVersion,
     UpdateChannel? channel,
-    String url = updateManifestUrl,
-    String devUrl = devManifestUrl}) async {
-  final stable = fetchManifest(http: http, url: url);
+    List<String> urls = updateManifestUrls,
+    List<String> devUrls = devManifestUrls}) async {
+  final stable = fetchManifest(http: http, urls: urls);
   if ((channel ?? defaultUpdateChannel(currentVersion)) == UpdateChannel.stable) {
     return stable;
   }
   stable.ignore(); // awaited below; don't let an early failure go uncaught
-  final dev = await fetchManifest(http: http, url: devUrl)
+  final dev = await fetchManifest(http: http, urls: devUrls)
       .then<UpdateManifest?>((m) => m, onError: (Object e) {
     _log.warning('dev manifest: $e');
     return null;
@@ -727,7 +753,7 @@ String requiredUpdateNote(UpdateManifest m) =>
 // [checkOnly] reports what is available and changes nothing.
 Future<int> runUpgrade(
     {String currentVersion = appVersion,
-    String manifestUrl = updateManifestUrl,
+    List<String> manifestUrls = updateManifestUrls,
     HttpClient? http,
     String? executablePath,
     Directory? installRoot,
@@ -738,7 +764,7 @@ Future<int> runUpgrade(
   late final UpdateManifest manifest;
   try {
     manifest = await fetchLatestManifest(
-        http: http, currentVersion: currentVersion, url: manifestUrl);
+        http: http, currentVersion: currentVersion, urls: manifestUrls);
   } catch (e) {
     stdout.writeln('update check failed: $e');
     return 1;

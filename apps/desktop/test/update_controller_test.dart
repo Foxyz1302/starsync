@@ -137,7 +137,7 @@ void main() {
       launchArgs = const ['--some-flag'];
       final c = UpdateController(
           currentVersion: '0.1.0',
-          manifestUrl: server.manifestUrl,
+          manifestUrls: [server.manifestUrl],
           executablePath: '${root.path}/starsync',
           restart: (exe, args) async => restarts.add((exe, args)));
       await c.checkOnce();
@@ -165,7 +165,7 @@ void main() {
       final restarts = <String>[];
       final c = UpdateController(
           currentVersion: '0.1.0',
-          manifestUrl: server.manifestUrl,
+          manifestUrls: [server.manifestUrl],
           executablePath: '${root.path}/watch_together',
           restart: (exe, _) async => restarts.add(exe));
       await c.checkOnce();
@@ -180,7 +180,7 @@ void main() {
       server.manifestExtra = {'protocol': RelayConstants.protoVersion + 1};
       final c = UpdateController(
           currentVersion: '0.1.0',
-          manifestUrl: server.manifestUrl,
+          manifestUrls: [server.manifestUrl],
           executablePath: '${work.path}/stray-binary',
           restart: (_, _) async {});
       await c.checkOnce();
@@ -194,7 +194,7 @@ void main() {
       server.brokenManifest = true;
       final c = UpdateController(
           currentVersion: '0.1.0',
-          manifestUrl: server.manifestUrl,
+          manifestUrls: [server.manifestUrl],
           executablePath: '${work.path}/stray-binary',
           restart: (_, _) async {});
       await c.checkOnce();
@@ -202,7 +202,7 @@ void main() {
       server.brokenManifest = false;
       final dev = UpdateController(
           currentVersion: '0.0.0-dev',
-          manifestUrl: server.manifestUrl,
+          manifestUrls: [server.manifestUrl],
           executablePath: '${work.path}/stray-binary',
           restart: (_, _) async {});
       await dev.checkOnce();
@@ -213,7 +213,7 @@ void main() {
         () async {
       final c = UpdateController(
           currentVersion: '0.1.0',
-          manifestUrl: server.manifestUrl,
+          manifestUrls: [server.manifestUrl],
           executablePath: '${work.path}/stray-binary',
           restart: (_, _) async {});
       await c.checkOnce();
@@ -236,7 +236,7 @@ void main() {
       var restarted = false;
       final c = UpdateController(
           currentVersion: '0.1.0',
-          manifestUrl: server.manifestUrl,
+          manifestUrls: [server.manifestUrl],
           executablePath: '${root.path}/watch_together',
           restart: (_, _) async => restarted = true);
       await c.checkOnce();
@@ -255,8 +255,8 @@ void main() {
       // The dev manifest is missing (404): only the stable 0.2.0 is read.
       final c = UpdateController(
           currentVersion: '0.2.0-dev.3',
-          manifestUrl: server.manifestUrl,
-          devUrl: '${server.base}/dev.json',
+          manifestUrls: [server.manifestUrl],
+          devUrls: ['${server.base}/dev.json'],
           executablePath: '${root.path}/watch_together',
           restart: (exe, _) async => restarts.add(exe))
         ..channelOf = () => channel;
@@ -267,8 +267,8 @@ void main() {
 
       final behind = UpdateController(
           currentVersion: '0.3.0-dev.1',
-          manifestUrl: server.manifestUrl,
-          devUrl: '${server.base}/dev.json',
+          manifestUrls: [server.manifestUrl],
+          devUrls: ['${server.base}/dev.json'],
           executablePath: '${root.path}/watch_together',
           restart: (exe, _) async => restarts.add(exe))
         ..channelOf = () => channel;

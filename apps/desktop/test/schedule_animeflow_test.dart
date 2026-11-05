@@ -322,6 +322,12 @@ void main() {
     expect(AnimeFlowClient.tokenFor(accounts, animeFlowDefaultBase), 'tok-b');
     expect(AnimeFlowClient.tokenFor([acc('c', 'https://example.org')], animeFlowDefaultBase), 'tok-c');
     expect(AnimeFlowClient.tokenFor([acc('d', 'https://notexample.org')], animeFlowDefaultBase), isNull);
+    // The old name of the same server (saved before the move) still matches,
+    // both ways.
+    expect(AnimeFlowClient.tokenFor([acc('e', 'https://media.example.org:8920')], animeFlowDefaultBase), 'tok-e');
+    expect(AnimeFlowClient.tokenFor([acc('f', 'https://media.example.org')], 'https://anime.example.org/api/app/v1'),
+        'tok-f');
+    expect(AnimeFlowClient.tokenFor([acc('g', 'https://notexample.org')], animeFlowDefaultBase), isNull);
     expect(AnimeFlowClient.tokenFor(accounts, 'https://anime.example.net/api'), isNull);
   });
 }

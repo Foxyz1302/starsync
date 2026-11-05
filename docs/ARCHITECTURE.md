@@ -2277,8 +2277,10 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   it. Schedule (`schedule/`) is a week of day columns built
   from AniList's airing schedule (`anilist.dart`: pages cached 10 min in
   memory and 1 h on disk, stale data shown on 429 or failure) matched
-  against AnimeFlow (`animeflow.dart`, app API with the Jellyfin token;
-  `/library` marks shows on Jellyfin it doesn't track, through every AniList
+  against AnimeFlow (`animeflow.dart`, app API at
+  `anime.example.org/api/app/v1` with the token of the Jellyfin account
+  on the same parent domain, `tokenFor`, the old `example.org` counting
+  as the same; `/library` marks shows on Jellyfin it doesn't track, through every AniList
   entry of a season (`anilist_map`: a season AniList splits has several)) into a status per
   episode (`schedule_model.dart`). AnimeFlow's `missing` (aired,
   monitored, no release grabbed yet; AnimeFlow grabs it by itself once
@@ -2802,7 +2804,12 @@ Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
   on start (`/Users/Me`, each known address in turn): online, offline, or
   expired (kept, shown as Reconnect; never dropped silently). A 401 while
   browsing also marks it expired. `clientFor(serverId)` gives the shared
-  signed-in client; `cached()` memoises browse calls for 3 min.
+  signed-in client; `cached()` memoises browse calls for 3 min. On load,
+  addresses on a domain that moved (`moved_hosts.dart`, `movedDomains`:
+  `example.org` -> `example.org`) take the new name, the same name
+  under it with scheme, port and path kept, in the accounts and the last
+  pick; saved at once and logged, so it happens once. The token stays
+  (Jellyfin keys it by device, not address).
 - `sign_in.dart` + `sign_in_panel.dart`: address -> `/System/Info/Public`
   -> Quick Connect (code, poll, cancel) or password; reconnect must hit the
   same ServerId. `accounts_panel.dart` is the Jellyfin card of Settings →
@@ -3236,7 +3243,7 @@ One implementation, `packages/core/lib/src/updater.dart` (pure Dart, tested
 in `packages/core/test/updater_test.dart`), with two front ends: the app and
 the dedicated server. Both binaries ship in the same archive, so either one
 updates the whole install folder. Reads a manifest (`version`, `protocol`, `url`, optional `sha256`, `notes`,
-optional `changes` and `highlights`) from `updateManifestUrl`, compares versions, downloads the tarball, checks
+optional `changes` and `highlights`) from `updateManifestUrls` (`git.example.org`, the repo's Gitea), compares versions, downloads the tarball, checks
 sha256 when present, then extracts into a staging dir inside the install
 folder (same filesystem, so moves are renames; the folder must be
 user-writable). Each top-level entry is moved aside and the new one moved in,
@@ -3292,11 +3299,16 @@ update has no Later. Nothing downloads before the click. The app checks at
 start and every 4 hours while running (`updateCheckEvery`), always (D8:
 nothing installs without asking); a re-check never touches an install
 under way. Settings → Updates has Check now. The manifest is `updates/manifest.json` in
-this repo, written by `tool/release.sh`.
+this repo, written by `tool/release.sh`. Each manifest address is a list
+tried in order (`fetchManifest`): when the Gitea server moves, its new
+address goes first and the old one stays only while it still belongs to
+the project (a lapsed domain's next owner could serve a manifest). Apps
+older than a move whose old address is gone cannot update by themselves
+([Releasing](DEVELOPMENT.md#releasing)).
 
 **Update channel.** `UpdateChannel` stable or dev, the setting
 `updateChannel` (Settings → Updates → More, "Update channel", which also says
-the channel and version running). Dev also reads `devManifestUrl`, the
+the channel and version running). Dev also reads `devManifestUrls`, the
 `manifest.json` of the `dev` prerelease (`tool/dev_release.sh`), and takes
 the newer of the two by semver (`pickManifest`, `fetchLatestManifest`): a
 release 1.4.0 is offered over 1.4.0-dev.3, and after it 1.4.1-dev.1 is,

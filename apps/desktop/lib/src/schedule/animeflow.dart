@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:sync_relay_core/core.dart';
 
 import '../jellyfin/accounts.dart';
+import '../jellyfin/moved_hosts.dart';
 
 // AnimeFlow app API: what the media server tracks, has, downloads and was
 // asked for. Authenticated with the user's own Jellyfin access token
@@ -515,15 +516,16 @@ class AnimeFlowClient {
 
   /// The token of the linked Jellyfin account whose host shares
   /// [animeFlowBase]'s parent domain (anime.example.org -> example.org,
-  /// jellyfin.example.org, ...).
+  /// jellyfin.example.org, ...), or the domain it moved from or to
+  /// ([sameServerDomains]).
   static String? tokenFor(Iterable<JellyfinAccount> accounts, String animeFlowBase) {
     final host = Uri.tryParse(animeFlowBase)?.host.toLowerCase() ?? '';
     if (host.isEmpty) return null;
     final labels = host.split('.');
-    final parent = labels.length > 2 ? labels.skip(1).join('.') : host;
+    final parents = sameServerDomains(labels.length > 2 ? labels.skip(1).join('.') : host);
     bool matches(String url) {
       final h = Uri.tryParse(url)?.host.toLowerCase() ?? '';
-      return h.isNotEmpty && (h == parent || h.endsWith('.$parent'));
+      return h.isNotEmpty && parents.any((p) => h == p || h.endsWith('.$p'));
     }
 
     for (final a in accounts) {

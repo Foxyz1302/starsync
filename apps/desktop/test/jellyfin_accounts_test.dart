@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:starsync/src/jellyfin/accounts.dart';
 import 'package:starsync/src/jellyfin/format.dart';
+import 'package:starsync/src/jellyfin/moved_hosts.dart';
 import 'package:starsync/src/jellyfin/sign_in.dart';
 import 'package:starsync/src/screens/home/media_picker.dart';
 
@@ -224,6 +226,65 @@ void main() {
       expect(accounts.accounts.single.token, 'NEW');
       expect(accounts.accounts.single.urls, ['https://alt.invalid', 'https://example.invalid']);
       expect(fake.count('POST', '/Sessions/Logout'), 1);
+    });
+
+    test('movedAddress: a moved domain and names under it, the rest kept', () {
+      expect(movedAddress('https://media.example.org:8920'), 'https://media.example.org:8920');
+      expect(movedAddress('https://Media.example.org:8920/jf/web?x=1#a'), 'https://media.example.org:8920/jf/web?x=1#a');
+      expect(movedAddress('http://example.org'), 'http://example.org');
+      expect(movedAddress('https://u:p@a.b.example.org/'), 'https://u:p@a.b.example.org/');
+      for (final same in [
+        'https://media.example.org:8920',
+        'https://notexample.org',
+        'https://example.org.example.org',
+        'https://example.org/example.org',
+        'media.example.org',
+        '',
+      ]) {
+        expect(movedAddress(same), same);
+      }
+      expect(sameServerDomains('example.org'), {'example.org', 'example.org'});
+      expect(sameServerDomains('example.org'), {'example.org'});
+    });
+
+    test('saved addresses on the old example.org move to example.org once, token kept', () async {
+      final store = MemoryJellyfinStore({
+        'deviceId': 'd' * 32,
+        'accounts': jsonEncode([
+          const JellyfinAccount(
+            serverId: 'pol', serverName: 'Example', urls: ['https://media.example.org:8920', 'http://192.168.1.5:8096'],
+            userId: 'u', userName: 'friend', token: 'TOK').toJson(),
+          const JellyfinAccount(
+            serverId: 'other', serverName: 'Other', urls: ['https://example.invalid'],
+            userId: 'u2', userName: 'me', token: 'T2').toJson(),
+        ]),
+        'lastPick': jsonEncode(const JellyfinMedia(
+            serverId: 'pol', baseUrl: 'https://media.example.org:8920', itemId: 'ep', title: 'Ep').toJson()),
+      });
+      final log = <String?>[];
+      final savedPrint = debugPrint;
+      debugPrint = (m, {wrapWidth}) => log.add(m);
+      addTearDown(() => debugPrint = savedPrint);
+
+      final a = JellyfinAccounts(store: store);
+      await a.ensureLoaded(validate: false);
+      final pol = a.account('pol')!;
+      expect(pol.urls, ['https://media.example.org:8920', 'http://192.168.1.5:8096']);
+      expect(pol.token, 'TOK');
+      expect(pol.userId, 'u');
+      expect(a.account('other')!.urls, ['https://example.invalid']);
+      expect(a.lastPick?.baseUrl, 'https://media.example.org:8920');
+      expect(a.lastPick?.itemId, 'ep');
+      expect(log.where((l) => l!.contains('moved')), hasLength(1));
+      // Saved: the next start finds nothing to move and says nothing.
+      expect(store.data['accounts'], contains('media.example.org'));
+      expect(store.data['accounts'], isNot(contains('old-domain')));
+      expect(store.data['lastPick'], contains('media.example.org'));
+      log.clear();
+      final b = JellyfinAccounts(store: store);
+      await b.ensureLoaded(validate: false);
+      expect(b.account('pol')!.urls.first, 'https://media.example.org:8920');
+      expect(log, isEmpty);
     });
   });
 

@@ -277,7 +277,7 @@ void main() {
     });
     final base = 'http://127.0.0.1:${http.port}';
     Future<String> latest(String current, [UpdateChannel? channel]) async => (await fetchLatestManifest(
-            currentVersion: current, channel: channel, url: '$base/stable', devUrl: '$base/dev'))
+            currentVersion: current, channel: channel, urls: ['$base/stable'], devUrls: ['$base/dev']))
         .version;
     try {
       expect(await latest('1.1.2'), '1.1.2'); // stable builds never see dev
@@ -291,6 +291,40 @@ void main() {
       expect(await latest('1.1.4-dev.1', UpdateChannel.stable), '1.1.3');
       versions.remove('/stable');
       expect(await latest('1.1.3-dev.1'), '1.1.4-dev.1');
+    } finally {
+      await http.close(force: true);
+    }
+  });
+
+  test('the manifest comes from the first address that serves one', () async {
+    final http = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    http.listen((req) async {
+      if (req.uri.path == '/new' || req.uri.path == '/old') {
+        req.response.write(jsonEncode({
+          'version': req.uri.path == '/new' ? '1.5.0' : '1.4.0',
+          'protocol': 1,
+          'url': 'http://x/a.tar.gz'
+        }));
+      } else if (req.uri.path == '/junk') {
+        req.response.write('<html>moved</html>');
+      } else {
+        req.response.statusCode = 404;
+      }
+      await req.response.close();
+    });
+    final base = 'http://127.0.0.1:${http.port}';
+    // A port nothing listens on: the connection itself fails.
+    final dead = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final gone = 'http://127.0.0.1:${dead.port}/manifest.json';
+    await dead.close();
+    Future<String> from(List<String> urls) async =>
+        (await fetchManifest(urls: urls)).version;
+    try {
+      expect(await from(['$base/new', '$base/old']), '1.5.0');
+      expect(await from([gone, '$base/missing', '$base/junk', '$base/old']), '1.4.0');
+      // None serves one: the first address's error.
+      await expectLater(fetchManifest(urls: ['$base/missing', '$base/junk']),
+          throwsA(isA<HttpException>()));
     } finally {
       await http.close(force: true);
     }
@@ -337,7 +371,7 @@ void main() {
       final root = await _fakeRoot(work);
       final rc = await runUpgrade(
           currentVersion: '0.1.0',
-          manifestUrl: server.manifestUrl,
+          manifestUrls: [server.manifestUrl],
           installRoot: root);
       expect(rc, 0);
       expect(server.tarHits, 1);
@@ -363,7 +397,7 @@ void main() {
       final root = await _fakeRoot(work);
       final rc = await runUpgrade(
           currentVersion: '0.2.0',
-          manifestUrl: server.manifestUrl,
+          manifestUrls: [server.manifestUrl],
           installRoot: root);
       expect(rc, 0);
       expect(server.tarHits, 0);
@@ -376,7 +410,7 @@ void main() {
       final root = await _fakeRoot(work);
       final rc = await runUpgrade(
           currentVersion: '0.1.0',
-          manifestUrl: server.manifestUrl,
+          manifestUrls: [server.manifestUrl],
           installRoot: root);
       expect(rc, 1);
       expect(await File('${root.path}/watch_together').readAsString(),
@@ -389,7 +423,7 @@ void main() {
       final root = await _fakeRoot(work);
       final rc = await runUpgrade(
           currentVersion: '0.1.0',
-          manifestUrl: server.manifestUrl,
+          manifestUrls: [server.manifestUrl],
           installRoot: root);
       expect(rc, 0);
       expect(await File('${root.path}/starsync').readAsString(),
@@ -399,7 +433,7 @@ void main() {
     test('unknown layout asks for manual update', () async {
       final rc = await runUpgrade(
           currentVersion: '0.1.0',
-          manifestUrl: server.manifestUrl,
+          manifestUrls: [server.manifestUrl],
           executablePath: '${work.path}/stray-binary');
       expect(rc, 2);
     });
@@ -410,7 +444,7 @@ void main() {
       final root = await _fakeRoot(work);
       final rc = await runUpgrade(
           currentVersion: '0.1.0',
-          manifestUrl: server.manifestUrl,
+          manifestUrls: [server.manifestUrl],
           installRoot: root);
       expect(rc, 1);
       expect(await File('${root.path}/watch_together').readAsString(),
