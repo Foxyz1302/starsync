@@ -47,7 +47,7 @@ enum ControlsSize {
 
 /// Bar buttons the user may hide; hidden ones are in the top bar's ⋯ menu.
 enum OptionalControl {
-  chapters('Chapter buttons', 'Previous / next chapter (PgUp / PgDn)'),
+  chapters('Chapter buttons', 'Previous / next chapter (PgDn / PgUp)'),
   subtitles('Subtitles', 'The subtitle track list'),
   audio('Audio', 'The audio track list'),
   chat('Chat', 'Chat & activity (Tab)');

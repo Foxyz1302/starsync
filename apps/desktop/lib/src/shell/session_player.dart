@@ -122,7 +122,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
   // `Video` (it never swaps controllers in place).
   var _videoGen = -1;
   var _videoKey = GlobalKey<VideoState>();
-  final _noFocus = FocusNode(skipTraversal: true, canRequestFocus: false);
   DateTime? _lastKeyAt;
   late final void Function() _stopShaderWatch;
   late final void Function() _stopSubScale;
@@ -142,8 +141,10 @@ class _SessionPlayerState extends State<SessionPlayer> {
   double _boxHeight = QuickChatBox.height;
   // What covers the bottom, as bottom subtitles move above it.
   final _lift = SubtitleLift();
-  // The Enter that opened the box: kept from the focused widget.
-  KeyEvent? _swallow;
+  // The keys the player took, until they are let go: the focus system
+  // never sees them (nor their repeats), so an arrow never moves focus
+  // onto a button and Enter never presses one.
+  final _taken = <LogicalKeyboardKey>{};
   // The session's danmaku lines (and your own sent ones).
   final _lines = DanmakuController();
   final _danmakuOn = signal(false);
@@ -256,7 +257,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
     _controlsShown.removeListener(_retargetLift);
     _quick.close();
     _ownChat?.dispose();
-    _noFocus.dispose();
     _ownShown.dispose();
     _boxUp.dispose();
     _lift.dispose();
@@ -296,24 +296,39 @@ class _SessionPlayerState extends State<SessionPlayer> {
   /// chat toast or danmaku line, like everyone's.
   void _send(String text) => _coord.sendChat(text);
 
-  /// Swallows the Enter that opened the box before the focused widget
-  /// (a button keeps focus after a click) acts on it too.
+  /// Keeps what the player took ([_taken]) from the focused widget (a
+  /// button keeps focus after a click; the library's focus stays behind
+  /// the player), until the key is let go.
   KeyEventResult _earlyKey(KeyEvent event) {
-    final s = _swallow;
-    if (s == null || event.logicalKey != s.logicalKey) return KeyEventResult.ignored;
-    if (event is KeyDownEvent && !identical(event, s)) {
-      _swallow = null;
-      return KeyEventResult.ignored;
-    }
-    if (event is KeyUpEvent) _swallow = null;
+    final key = event.logicalKey;
+    if (!_taken.contains(key)) return KeyEventResult.ignored;
+    if (event is KeyUpEvent) _taken.remove(key);
     return KeyEventResult.handled;
   }
+
+  /// What the full player always keeps from the focus system while it has
+  /// the keys, acted on or not (a debounced press, no chapter to go to,
+  /// sitting out): the arrows would move focus (onto the strip's buttons),
+  /// Enter would press the focused button, PgUp / PgDn scroll the library
+  /// behind.
+  static final _playerOwns = {
+    LogicalKeyboardKey.arrowUp,
+    LogicalKeyboardKey.arrowDown,
+    LogicalKeyboardKey.arrowLeft,
+    LogicalKeyboardKey.arrowRight,
+    LogicalKeyboardKey.pageUp,
+    LogicalKeyboardKey.pageDown,
+    LogicalKeyboardKey.enter,
+    LogicalKeyboardKey.numpadEnter,
+  };
 
   /// The player keys, while the player fills the body and nothing (a
   /// dialog, a card, a text field) is in front of it. Space and Tab are
   /// app-wide ([AppKeys]).
   bool _globalKey(KeyEvent event) {
     if (event is! KeyDownEvent || !mounted) return false;
+    // A new press decides afresh whether the player takes it.
+    _taken.remove(event.logicalKey);
     if (!AppScope.of(context).navigation.online.peek()) return false;
     // Mini: Esc is the last step out (a friend's server: asking to leave
     // it; yours: the player closes).
@@ -333,11 +348,17 @@ class _SessionPlayerState extends State<SessionPlayer> {
       return false;
     }
     if (textInputFocused()) return false;
+    final handled = _playerKey(event);
+    if (handled || _playerOwns.contains(event.logicalKey)) _taken.add(event.logicalKey);
+    return handled;
+  }
+
+  /// The full player's keys, while it has them.
+  bool _playerKey(KeyEvent event) {
     final key = event.logicalKey;
     // Enter: the quick chat box (the chat panel's draft), whatever plays.
     if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
       if (_coord.selfAway.peek()) return false;
-      _swallow = event;
       _quick.show();
       return true;
     }
@@ -371,10 +392,10 @@ class _SessionPlayerState extends State<SessionPlayer> {
       _lastKeyAt = now;
       return true;
     }
-    // mpv's chapter keys.
-    if (key == LogicalKeyboardKey.pageDown || key == LogicalKeyboardKey.pageUp) {
+    // mpv's chapter keys: PgUp the next chapter, PgDn the previous.
+    if (key == LogicalKeyboardKey.pageUp || key == LogicalKeyboardKey.pageDown) {
       _lastKeyAt = now;
-      return model.stepChapter(key == LogicalKeyboardKey.pageDown ? 1 : -1);
+      return model.stepChapter(key == LogicalKeyboardKey.pageUp ? 1 : -1);
     }
     if (shift && key == LogicalKeyboardKey.arrowRight) {
       _lastKeyAt = now;
@@ -553,7 +574,6 @@ class _SessionPlayerState extends State<SessionPlayer> {
       child: IconTheme.merge(
         data: const IconThemeData(color: Colors.white),
         child: WindowButtons(
-          focusNode: _noFocus,
           fullscreen: true,
           onToggleFullscreen: widget.onToggleFullscreen,
         ),
@@ -834,22 +854,22 @@ class _SessionPlayerState extends State<SessionPlayer> {
             Positioned(
               top: 4,
               right: 4,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    focusNode: _noFocus,
-                    onPressed: _isFull ? widget.onCollapse : widget.onExpand,
-                    tooltip: _isFull ? 'Small player' : 'Expand',
-                    icon: Icon(_isFull ? Icons.close_fullscreen : Icons.open_in_full, color: Colors.white, size: 18),
-                  ),
-                  IconButton(
-                    focusNode: _noFocus,
-                    onPressed: widget.onClose,
-                    tooltip: 'Close the player',
-                    icon: const Icon(Icons.close, color: Colors.white, size: 18),
-                  ),
-                ],
+              child: ExcludeFocus(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      onPressed: _isFull ? widget.onCollapse : widget.onExpand,
+                      tooltip: _isFull ? 'Small player' : 'Expand',
+                      icon: Icon(_isFull ? Icons.close_fullscreen : Icons.open_in_full, color: Colors.white, size: 18),
+                    ),
+                    IconButton(
+                      onPressed: widget.onClose,
+                      tooltip: 'Close the player',
+                      icon: const Icon(Icons.close, color: Colors.white, size: 18),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],

@@ -31,7 +31,7 @@ import 'chat_panel.dart';
 import 'connect_cards.dart';
 import 'handoff.dart';
 import 'join_offer_card.dart';
-import 'library_link.dart' show LinkProber;
+import 'library_link.dart' show LinkProber, RecentLinks, rememberPutUpLink;
 import 'library_tab.dart';
 import 'motion.dart';
 import 'party_strip.dart';
@@ -73,6 +73,8 @@ class AppShell extends StatefulWidget {
   /// What the Library's Link page asks about a link (tests: a fake, so no
   /// network or yt-dlp runs).
   final LinkProber? linkProbe;
+  /// The Link page's Recent list; defaults to [RecentLinks.instance].
+  final RecentLinks? recentLinks;
   const AppShell({
     super.key,
     this.updates,
@@ -83,6 +85,7 @@ class AppShell extends StatefulWidget {
     this.jellyfin,
     this.videoBuilder,
     this.linkProbe,
+    this.recentLinks,
   });
 
   @override
@@ -137,6 +140,8 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       ConnectFlow(navigation: _graph.navigation, forms: _graph.forms, askName: (profile) => askYourName(context, profile));
   late final _join = JoinFields(_graph.forms.form);
   late final JellyfinAccounts _jellyfin = widget.jellyfin ?? JellyfinAccounts.instance;
+  late final RecentLinks _recentLinks = widget.recentLinks ?? RecentLinks.instance;
+  LinkProber get _linkProbe => widget.linkProbe ?? _graph.ports.links.probe;
   late MediaPickerController _picker = _newPicker();
   BrowseStart? _libraryStart;
   int _libraryGen = 0;
@@ -532,7 +537,14 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     final HandoffAction? action;
     try {
       action = await showPopover<HandoffAction>(context,
-          at: align, child: HandoffCard(item: item, alone: _alone.peek(), queue: _online.peek()));
+          at: align,
+          child: HandoffCard(
+            item: item,
+            alone: _alone.peek(),
+            queue: _online.peek(),
+            replaces: !_alone.peek() && _watching.peek(),
+            linkWay: _picker.linkRelay,
+          ));
     } finally {
       _handoffOpen = false;
     }
@@ -555,6 +567,16 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
             _graph.coordinator.notify(ActionFailed(error));
             break;
           }
+        }
+      case (HandoffLink(:final url), HandoffAction.putUp):
+        // At once, in the Link page's mode (alone: direct), refused like
+        // there; the Link page holds it too (Put it up anyway, other ways).
+        _picker.link.text = url;
+        final error = await _putUp(LinkMedia(url, relay: _picker.linkRelay));
+        if (error != null) {
+          _graph.coordinator.notify(ActionFailed(error));
+        } else {
+          unawaited(rememberPutUpLink(url, recents: _recentLinks, probe: _linkProbe));
         }
       case (HandoffLink(:final url), HandoffAction.queue || HandoffAction.playNext):
         // In the Link page's mode, probed and refused like there.
@@ -797,6 +819,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
           onAddToQueue: online ? coord.queue.add : null,
           onOpenAccounts: () => _openSettings(SettingsSection.library),
           probe: widget.linkProbe,
+          recentLinks: _recentLinks,
         ),
       ShellTab.schedule => SchedulePage(
           alone: alone,

@@ -82,8 +82,8 @@ class LibraryTab extends StatefulWidget {
   final AddToQueue? onAddToQueue;
   final VoidCallback? onPutUpDone;
   final VoidCallback? onOpenAccounts;
-  /// Defaults to [RecentLinks.instance].
-  final RecentLinks? recentLinks;
+  /// The Link page's Recent list (the shell's).
+  final RecentLinks recentLinks;
   /// What a link is; defaults to the app's.
   final LinkProber? probe;
   /// The Files source (tests inject one); defaults to [FilesPage].
@@ -104,7 +104,7 @@ class LibraryTab extends StatefulWidget {
     this.onPutUpDone,
     this.jellyfinStart,
     this.onOpenAccounts,
-    this.recentLinks,
+    required this.recentLinks,
     this.probe,
     this.filesBuilder,
     this.now = DateTime.now,
@@ -272,7 +272,7 @@ class _LibraryTabState extends State<LibraryTab> {
       MediaKind.link => LibraryLinkSource(
           controller: _c,
           alone: widget.alone,
-          recents: widget.recentLinks ?? RecentLinks.instance,
+          recents: widget.recentLinks,
           probe: widget.probe,
           onPutUp: _put,
           onAddToQueue: widget.onAddToQueue,

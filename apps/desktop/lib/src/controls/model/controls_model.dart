@@ -142,7 +142,7 @@ class PlayerControlsModel {
   /// A skip pill (Skip OP / ED / 1:30).
   void skip(SkipOffer offer) => coord.skip(offer);
 
-  /// PgDn (+1) / PgUp (-1). False when there is no chapter to go to.
+  /// PgUp (+1) / PgDn (-1), as mpv. False when there is no chapter to go to.
   bool stepChapter(int delta) => coord.stepChapter(delta);
 
   void pickChapter(MediaChapter c) => coord.seekTo(c.start.inMicroseconds / 1e6);

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../files/scanner.dart' show FileKind, kindOf;
 import '../files/ui/file_tiles.dart' show baseName;
+import '../screens/home/picked_media.dart' show LinkRelay;
 
 // Something handed to the app, by a drop or by Ctrl+V outside a text
 // field: what it is ([classifyHandoff], pure) and the small card that asks
@@ -99,11 +100,12 @@ Handoff classifyHandoff({
 
 /// What the card's buttons ask the shell to do.
 enum HandoffAction {
-  /// Put the (first) video up.
+  /// Put the (first) video up, or the link (in the Link page's mode).
   putUp,
   /// Add the video's folder (or the folder) to Files and open it.
   addFolder,
-  /// Open Library → Link with the URL filled.
+  /// Open Library → Link with the URL filled (to see it first, or pick
+  /// another way to pass it on).
   openLink,
   /// Add the videos (or the link, in the Link page's mode) to Up next.
   queue,
@@ -111,32 +113,69 @@ enum HandoffAction {
   playNext,
 }
 
+/// How a link goes up for the others, on the card ([LinkRelay] as the
+/// Link page names it).
+String handoffLinkWay(LinkRelay r) => switch (r) {
+      LinkRelay.me => 'Through you',
+      LinkRelay.direct => 'Everyone fetches it',
+      LinkRelay.server => 'The server fetches it',
+    };
+
 /// The card asking how to open a [Handoff] (videos, a folder or a link);
-/// pops the [HandoffAction] chosen.
+/// pops the [HandoffAction] chosen. Putting up is one click, like adding
+/// to Up next; while something plays for others ([replaces]) Up next is
+/// the main button and putting up says it is now.
 class HandoffCard extends StatelessWidget {
   final Handoff item;
   /// Nobody else is in the server: videos play, no relay talk.
   final bool alone;
   /// In a server: videos and links can go to Up next.
   final bool queue;
-  const HandoffCard({super.key, required this.item, required this.alone, this.queue = false});
+  /// Others are watching something: putting up replaces it for everyone.
+  final bool replaces;
+  /// How a link goes up for the others (the Link page's mode).
+  final LinkRelay linkWay;
+  const HandoffCard({
+    super.key,
+    required this.item,
+    required this.alone,
+    this.queue = false,
+    this.replaces = false,
+    this.linkWay = LinkRelay.me,
+  });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     void pick(HandoffAction a) => Navigator.of(context).pop(a);
-    Widget button(HandoffAction a, IconData icon, String label, {bool primary = false}) => primary
-        ? FilledButton.icon(
-            key: ValueKey('handoff-${a.name}'), onPressed: () => pick(a), icon: Icon(icon, size: 18), label: Text(label))
-        : OutlinedButton.icon(
-            key: ValueKey('handoff-${a.name}'), onPressed: () => pick(a), icon: Icon(icon, size: 18), label: Text(label));
+    Widget button(HandoffAction a, IconData icon, String label, {bool primary = false, String? tooltip}) {
+      final b = primary
+          ? FilledButton.icon(
+              key: ValueKey('handoff-${a.name}'), onPressed: () => pick(a), icon: Icon(icon, size: 18), label: Text(label))
+          : OutlinedButton.icon(
+              key: ValueKey('handoff-${a.name}'), onPressed: () => pick(a), icon: Icon(icon, size: 18), label: Text(label));
+      return tooltip == null ? b : Tooltip(message: tooltip, waitDuration: const Duration(milliseconds: 500), child: b);
+    }
+
     final many = switch (item) { HandoffVideos(:final paths) => paths.length > 1, _ => false };
+    // Replacing what others watch is the bigger step: Up next leads then,
+    // and putting up names it.
+    final queueFirst = queue && replaces && !alone;
+    final putUp = button(
+      HandoffAction.putUp,
+      Icons.play_arrow,
+      alone ? 'Play' : (queueFirst ? 'Put it up now' : 'Put it up'),
+      primary: !queueFirst,
+      tooltip: queueFirst ? 'Stops what is on and puts this up, for everyone' : null,
+    );
     final queueButtons = [
       if (queue) ...[
-        button(HandoffAction.queue, Icons.playlist_add_rounded, many ? 'Add all to queue' : 'Add to queue'),
+        button(HandoffAction.queue, Icons.playlist_add_rounded, many ? 'Add all to queue' : 'Add to queue',
+            primary: queueFirst),
         button(HandoffAction.playNext, Icons.queue_play_next_rounded, many ? 'Play all next' : 'Play next'),
       ],
     ];
+    final actions = queueFirst ? [...queueButtons, putUp] : [putUp, ...queueButtons];
 
     final (IconData icon, String title, String detail, List<Widget> buttons) = switch (item) {
       HandoffVideos(:final paths) => (
@@ -144,8 +183,7 @@ class HandoffCard extends StatelessWidget {
           baseName(paths.first),
           paths.length > 1 ? 'and ${paths.length - 1} more · the first one goes up' : 'A video on this computer',
           [
-            button(HandoffAction.putUp, Icons.play_arrow, alone ? 'Play' : 'Put it up', primary: true),
-            ...queueButtons,
+            ...actions,
             button(HandoffAction.addFolder, Icons.create_new_folder_outlined, 'Add its folder to Files'),
           ],
         ),
@@ -158,11 +196,10 @@ class HandoffCard extends StatelessWidget {
       HandoffLink(:final url) => (
           Icons.link,
           url,
-          alone ? 'Opens it on the Link page' : 'Pick how the others get it on the Link page',
+          alone ? 'Plays straight from the site' : '${handoffLinkWay(linkWay)} · other ways on the Link page',
           [
-            button(HandoffAction.openLink, Icons.link, alone ? 'Open in Link' : 'Put it up as a link…',
-                primary: true),
-            ...queueButtons,
+            ...actions,
+            button(HandoffAction.openLink, Icons.link, alone ? 'Open in Link' : 'Other ways…'),
           ],
         ),
       HandoffImage() || HandoffNothing() => (Icons.help_outline, '', '', const <Widget>[]),

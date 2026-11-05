@@ -36,9 +36,8 @@ dedicated server (with the Flutter SDK's `dart`) into the tarball as
 `starsync-server`, also with `--skip-build`. The app binary is `starsync`
 (`BINARY_NAME`; Linux application id `dev.foxyz.starsync`), the archive
 `dist/starsync-<version>-linux-x64.tar.gz` / `-windows-x64.zip` with one
-top folder `starsync-<version>/`; it also carries the names up to 1.2.x
-(`watch_together`, `watch-together-server`: launchers on Linux, copies on
-Windows; "Updater" in [ARCHITECTURE.md](ARCHITECTURE.md)). The Dart
+top folder `starsync-<version>/` (no names from before the rename:
+"Updater" in [ARCHITECTURE.md](ARCHITECTURE.md)). The Dart
 package of the app is `starsync` (`package:starsync/...`).
 
 ## Dev loop
@@ -310,6 +309,11 @@ Traps:
   is only logged. Start it in `runZonedGuarded` and fail on anything
   else (`queue_switch_e2e`, `relay_e2e`): a viewer's read can still be
   in flight at the `stop` in tearDown.
+- The window buttons, the strip's drag area and fullscreen need
+  window_manager: tests pass `windowControls: false`, or give the graph a
+  `FakeShell` (`testGraph(shell:)` in `test/test_graph.dart`: it records
+  what the window was asked and serves Ctrl+V's clipboard) and keep them
+  on (`app_keys_test`). `testGraph(links:)` stands in for yt-dlp.
 - The Link page probes a filled-in link (network, yt-dlp), which never
   answers on the widget-test clock: pass `AppShell(linkProbe:)` /
   `LibraryTab(probe:)` a fake, or `pumpAndSettle` never returns.

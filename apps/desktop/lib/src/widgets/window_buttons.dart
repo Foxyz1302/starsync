@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../app/app_graph.dart';
 
+/// Minimise, maximise / restore and close. They never take keyboard
+/// focus: the arrow keys never land on them and Enter or Space never
+/// presses them.
 class WindowButtons extends StatefulWidget {
-  final FocusNode? focusNode;
   final bool fullscreen;
   final VoidCallback? onToggleFullscreen;
   const WindowButtons({
     super.key,
-    this.focusNode,
     this.fullscreen = false,
     this.onToggleFullscreen,
   });
@@ -62,31 +63,29 @@ class _WindowButtonsState extends State<WindowButtons> {
 
   @override
   Widget build(BuildContext context) {
-    final focus = widget.focusNode;
     final restored = widget.fullscreen || _maximized;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _WinBtn(
-          icon: Icons.remove,
-          tooltip: 'Minimize',
-          focusNode: focus,
-          onPressed: () => _shell.minimize(),
-        ),
-        _WinBtn(
-          icon: restored ? Icons.filter_none : Icons.crop_square,
-          tooltip: restored ? 'Restore' : 'Maximize',
-          focusNode: focus,
-          onPressed: _toggleMaximize,
-        ),
-        _WinBtn(
-          icon: Icons.close,
-          tooltip: 'Close',
-          focusNode: focus,
-          hoverColor: Colors.red,
-          onPressed: _close,
-        ),
-      ],
+    return ExcludeFocus(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _WinBtn(
+            icon: Icons.remove,
+            tooltip: 'Minimize',
+            onPressed: () => _shell.minimize(),
+          ),
+          _WinBtn(
+            icon: restored ? Icons.filter_none : Icons.crop_square,
+            tooltip: restored ? 'Restore' : 'Maximize',
+            onPressed: _toggleMaximize,
+          ),
+          _WinBtn(
+            icon: Icons.close,
+            tooltip: 'Close',
+            hoverColor: Colors.red,
+            onPressed: _close,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -95,13 +94,11 @@ class _WinBtn extends StatelessWidget {
   final IconData icon;
   final String tooltip;
   final VoidCallback onPressed;
-  final FocusNode? focusNode;
   final Color? hoverColor;
   const _WinBtn({
     required this.icon,
     required this.tooltip,
     required this.onPressed,
-    this.focusNode,
     this.hoverColor,
   });
 
@@ -111,7 +108,6 @@ class _WinBtn extends StatelessWidget {
       width: 40,
       height: 32,
       child: IconButton(
-        focusNode: focusNode,
         tooltip: tooltip,
         padding: EdgeInsets.zero,
         constraints: const BoxConstraints.tightFor(width: 40, height: 32),

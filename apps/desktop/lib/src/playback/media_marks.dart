@@ -186,7 +186,7 @@ int? chapterIndexAt(List<MediaChapter> chapters, Duration position) {
 /// chapter's start goes to the chapter before it.
 const chapterBackThreshold = Duration(seconds: 5);
 
-/// Target of a chapter step ([delta] +1 = PgDn, -1 = PgUp), as mpv: back
+/// Target of a chapter step ([delta] +1 = PgUp, -1 = PgDn), as mpv: back
 /// goes to the current chapter's start, or the previous one within
 /// [chapterBackThreshold] of it; forward to the next chapter's start.
 /// Null when there is nowhere to go.

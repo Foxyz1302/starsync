@@ -19,7 +19,7 @@ const playerShortcuts = [
   ('↑ / ↓, wheel', 'Volume up / down (up to 150 %)'),
   ('M', 'Mute / unmute'),
   ('Shift+→', 'Skip 1:30 (for everyone)'),
-  ('PgUp / PgDn', 'Previous / next chapter'),
+  ('PgDn / PgUp', 'Previous / next chapter'),
   ('F', 'Toggle fullscreen'),
   ('Enter', 'Quick chat box (Enter sends, Esc closes)'),
   ('Tab', 'Open / close chat & activity (anywhere in a server)'),

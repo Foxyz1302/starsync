@@ -165,7 +165,7 @@ void main() {
     });
   });
 
-  group('chapter steps (PgUp / PgDn)', () {
+  group('chapter steps (PgDn / PgUp)', () {
     test('current chapter and forward steps', () {
       expect(chapterIndexAt(chapters, s(45)), 1);
       expect(chapterIndexAt(chapters, m(23)), 4);

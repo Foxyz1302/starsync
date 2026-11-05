@@ -41,7 +41,7 @@ Problems are numbered; delete a line when its fix ships.
   stay on and the EGL-surface error is gone.
 - P31 Software rendering on a friend's Linux. 1.2.1-dev.3 logs it
   (`mpv: render` lines); needs that friend's log, plus
-  `watch-together 2>&1 | grep VideoOutput` from a terminal if software.
+  `starsync 2>&1 | grep VideoOutput` from a terminal if software.
 - P32 The app freezes on exit, mostly reported on Windows. 1.2.1-dev.3:
   orderly close, Linux `_exit` (0 crashes in 41 closes vs 10/10 before),
   Windows normal close + TerminateProcess + watchdogs; the player host
@@ -66,14 +66,6 @@ Problems are numbered; delete a line when its fix ships.
   the budget ends the file. Options: a longer `reconnect_delay_max` for
   relay URLs only, or the end-of-file path reopening a relay viewer
   that stopped short while the server plays.
-- P38 Keyboard focus leaks onto the top bar: the arrow keys move focus to
-  its buttons, and Enter on a focused window × closed the app. Window
-  buttons must never take keyboard focus.
-- P39 PgUp / PgDn step chapters the wrong way round.
-- P40 Minimal skin: a click near the clock to seek toggles the time style
-  instead (the clock's hit area is too big at the timeline's end).
-- P41 Putting a video up takes two clicks, adding it to Up next one: the
-  common action should be the shorter one.
 - P42 Autoplay can time out, and the ready system as a whole is not
   thought through (see "Starting together" under Open decisions).
 
@@ -112,8 +104,7 @@ manifest and asset URLs (a new manifest URL needs a release that reads
 both first); the dedicated server's fallback folder
 `~/.cache/watch-together`, the release token file
 `~/.config/watch-together-release-token`, Jellyfin's client name "Watch
-Together" (devices are listed under it) and `WatchTogetherApp`; dropping
-the 1.2.x launchers from the archive once nobody updates from 1.2.x.
+Together" (devices are listed under it) and `WatchTogetherApp`.
 Left of step 1: Update and restart keeps the member `gone` for the
 restarted app, but the app starts on Home (it does not rejoin by itself)
 and does not remember what it was passing on, so a relay it served ends
@@ -301,11 +292,10 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
    uncleanly and comes back" a few times under the full suite (its
    predecessor failed about half the time there).
 
-5. **Windows: first real use.** Check the rename at 1.3.0: a 1.2.x
-   install updates and restarts (`watch_together.exe`, a copy of
-   `starsync.exe`), the data in `%APPDATA%\foxyz\Starsync` came over from
-   `%APPDATA%\com.example\watch_together` and Documents, the next update
-   restarts `starsync.exe`. CI builds and publishes
+5. **Windows: first real use.** Check the update away from 1.4.x: an
+   install started as `watch_together.exe` restarts `starsync.exe`, and
+   its first update check removes `watch_together.exe` and
+   `watch-together-server.exe`. CI builds and publishes
    `starsync-<ver>-windows-x64.zip` (libmpv bundled) and runs the
    updater tests on NTFS; a friend has joined from it. Still unchecked:
    fullscreen controls, hosting (firewall prompt), in-app update from one

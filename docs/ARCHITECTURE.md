@@ -818,9 +818,9 @@ Skip rules (pure, `media_marks.dart`):
   "Skip 1:30" during the first 6 min.
 - +1:30 (`skipForward`: the pill, ⋯ → Skip 1:30,
   Shift+Right) is a `nudge`, so repeated presses add up.
-- Chapter steps (PgUp / PgDn, `chapterStepTarget`): forward to the next
-  start; back to the current start, or the previous one within 5 s of it
-  (mpv's `chapter-seek-threshold`).
+- Chapter steps (`chapterStepTarget`; PgUp forward, PgDn back, mpv's
+  default keys): forward to the next start; back to the current start,
+  or the previous one within 5 s of it (mpv's `chapter-seek-threshold`).
 - Every skip and chapter jump is a user seek (debounced, everyone follows).
 
 Never unmount GPU-textured widgets (avatar images) on a transport-gated
@@ -2089,7 +2089,8 @@ panel) and chat messages (Copy message, and a link in it).
   the controller's default, as the main card; "Everyone fetches it" and
   "Server fetches it" under "Other ways", open while one of them is
   picked, closing it goes back to Through me), and the
-  last 12 links put up (`recentLinks` in the `connect_form` box: URL,
+  last 12 links put up, here or from the drop and paste card
+  (`recentLinks` in the `connect_form` box: URL,
   title, thumbnail, the preview's second line, when). A link seen before
   previews at once, without yt-dlp: `LinkPreviewStore` (`linkPreviews` in
   the same box) keeps what a probe found for up to 200 links that looked
@@ -2198,11 +2199,21 @@ panel) and chat messages (Copy message, and a link in it).
   files first, then text). `classifyHandoff` (pure) turns paths or text
   into videos (the Files extensions, `kindOf`), a folder, an http(s) link,
   an image or nothing; videos win over folders, folders over images.
-  `HandoffCard` opens as a popover at the pointer: a video goes up through
-  the shell's put-up (Play when alone) or adds
-  its folder to Files; a folder is added to Files and opened; a link fills
-  Library → Link (with others the relay mode is picked there). In a
-  server, videos and links also get Add to queue / Play next. Images are ignored.
+  `HandoffCard` opens as a popover at the pointer. Putting up is one
+  click, like Add to queue: a video or a link goes up through the shell's
+  put-up (Play when alone), a link in the Link page's relay mode (named on
+  the card; alone direct), probed and refused like there (a toast says
+  why; the link is left in Library → Link for "Put it up anyway"), and
+  then on the Link page's Recent (`rememberPutUpLink`). A video can add
+  its folder to Files instead; a link can open in Library → Link ("Open
+  in Link" alone, "Other ways…" with others, to see it first or pick
+  another mode); a folder is added to Files and opened. In a server,
+  videos and links also get Add to queue / Play next. While others are
+  watching something (`replaces`: not alone, a video on and not
+  finished) Add to queue is the filled first button and the put-up reads
+  "Put it up now" (its tooltip: it stops what is on for everyone), since
+  replacing what everyone watches is the bigger step; otherwise Put it up
+  leads. Images are ignored.
   Nothing happens while a dialog or popover is over the shell.
 - **Sounds** (`sfx/`): the `Notifier` plays an `SfxCue` for ready,
   unready, force-ready, join, leave, swap and others' chat (feed
@@ -2259,7 +2270,14 @@ panel) and chat messages (Copy message, and a link in it).
   front. Tab reaches the shell's chat
   toggle through `ChatKey` (the strip while shown, the player in
   fullscreen). The app's shortcuts map Tab / Shift+Tab to nothing, so focus
-  never lands on a button Space would press. Something coming up while the player
+  never lands on a button Space would press. The arrow keys never take
+  focus onto the strip (a `FocusTraversalGroup` that is not traversable)
+  and the window buttons never take focus at all (`ExcludeFocus`), so
+  Enter never presses them. While the full player has the keys it keeps
+  the arrows, PgUp / PgDn, Enter and every key it acted on from the focus
+  system until they are let go (`FocusManager` early handler), acted on
+  or not (a debounced press, no chapter to go to, sitting out): no focus
+  moves, no focused button is pressed, nothing behind it scrolls. Something coming up while the player
   is closed opens it: full right after joining or after putting it up
   here, else mini. Both control skins show `NowPlayingTitle` top left
   (`now_playing_title.dart`: 2:3 cover, title, episode line from
@@ -2636,7 +2654,8 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   that is behind, to the end) in thin stripes, chapter starts as dots on
   the top edge with a dark cut through the band (a press within reach of
   a dot jumps to it), elapsed time left and the total or the time left
-  right (the bar's clock lives here; a press on it switches), "12s" by
+  right (the bar's clock lives here; a press on its text switches, the
+  rest of the band, its end too, seeks), "12s" by
   the position while under a minute is buffered ahead (and the cache does
   not reach the end). Hover: a faint line and a glass tip with the time
   (the chapter title above it). A press seeks, every drag move seeks,
@@ -2680,7 +2699,8 @@ part not downloaded still reads; chapter cuts are a light dark line.
   its keys, double-click route and seek bar are out of the picture.
 
 Window chrome is frameless (`window_manager`, behind `ShellPort`): the party strip is the drag
-area and holds the min/max/close buttons (`widgets/window_buttons.dart`);
+area and holds the min/max/close buttons (`widgets/window_buttons.dart`,
+never focusable);
 fullscreen has no drag area and shows the buttons in the player's top bar.
 
 App close (`platform/app_shutdown.dart`, `shutDownApp`; the close button,
@@ -2902,21 +2922,23 @@ with rollback on failure (writing the running executable fails with ETXTBSY;
 rename works). A packaged install is detected by `data/` and `lib/` next to
 the binary (app or server, same folder; Windows: `data/` and
 `flutter_windows.dll`), whatever the binary is called; anything else exits
-with "update manually". The archive must contain the running binary's name;
-an old name (`watch_together`, `watch-together-server`, `.exe` on
-Windows) is also satisfied by the new one (`starsync`, `starsync-server`).
-**Names before the rename**: the archive (`starsync-<ver>-<platform>`,
-top folder `starsync-<ver>/`) also carries those old names, because a
-1.2.x updater checks that its own name is in the archive and then restarts
-it, and VPS units and old `update.sh` copies run `watch-together-server`.
-Linux: shell launchers (`lib/src/update/bundle/watch_together`,
-`watch-together-server`, `exec` the new binary next to the resolved
-script); Windows: copies of `starsync.exe` and `starsync-server.exe` (same
-version resource, so the same data folder). After an update the app
-restarts `relaunchExecutable(...)`: the running binary, or for an old name
-the new one next to it, so a copy started by 1.2.x moves to `starsync.exe`
-on its first own update. `update.sh` / `update.bat` run `starsync-server`,
-else the old name. A manifest whose
+with "update manually". The archive (`starsync-<ver>-<platform>`, top
+folder `starsync-<ver>/`) must contain the running binary's name; an old
+name (`watch_together`, `watch-together-server`, `.exe` on Windows: the
+names up to 1.2.x) is also satisfied by the new one (`starsync`,
+`starsync-server`). **Names before the rename**: archives up to 1.4.x
+also carried those names (Linux launchers, Windows copies); none does
+now. `removeOldNames` deletes each, with its `.old` copies, from the
+install when its new binary is next to it (a running one, an app
+started from an old shortcut on Windows, is renamed to `.old` instead,
+swept on a later start), and never fails the update. It runs after a
+successful apply and in `cleanupUpdateLeftovers` (each update check of
+the app, and before `--upgrade` applies): a 1.4.x updater swaps in only
+what the archive has, so the update away from 1.4.x leaves the old
+names for the new version's first check to remove. After an update the
+app restarts `relaunchExecutable(...)`: the running binary, or for an
+old name the new one next to it. `update.sh` / `update.bat` run
+`starsync-server`. A manifest whose
 protocol is newer than the local one is a required update. Windows apply
 renames in-use files to `*.old` (swept on next start); CI tests it against a
 running exe on NTFS. The manifest's `assets` maps `linux-x64` /

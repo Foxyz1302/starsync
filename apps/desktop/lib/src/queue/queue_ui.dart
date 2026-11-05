@@ -240,15 +240,18 @@ class _UpNextButtonState extends State<UpNextButton> {
       final VoidCallback? play = item == null ? null : _q.skip;
       final playButton = _minimal
           ? MinimalButton(key: const ValueKey('up-next-play'), icon: Icons.skip_next_rounded, tooltip: playTip, onPressed: play)
-          : Tooltip(
-              message: playTip,
-              waitDuration: const Duration(milliseconds: 500),
-              child: IconButton(
-                key: const ValueKey('up-next-play'),
-                iconSize: 28,
-                color: Colors.white,
-                onPressed: play,
-                icon: const Icon(Icons.skip_next_rounded),
+          // Like the Standard top bar's other buttons, never focused.
+          : ExcludeFocus(
+              child: Tooltip(
+                message: playTip,
+                waitDuration: const Duration(milliseconds: 500),
+                child: IconButton(
+                  key: const ValueKey('up-next-play'),
+                  iconSize: 28,
+                  color: Colors.white,
+                  onPressed: play,
+                  icon: const Icon(Icons.skip_next_rounded),
+                ),
               ),
             );
       // The popover and the preview hang under the whole control, right

@@ -1043,7 +1043,7 @@ class SessionCoordinator {
   /// fallback pill. Relative to a seek in flight, like the arrow keys.
   void skipForward() => nudge(fallbackSkip.inMicroseconds / 1e6);
 
-  /// PgDn (+1) / PgUp (-1): next / previous chapter as mpv steps them
+  /// PgUp (+1) / PgDn (-1): next / previous chapter as mpv steps them
   /// ([chapterStepTarget]). False when there is no chapter to go to.
   bool stepChapter(int delta) {
     final base = _seekGate.target;

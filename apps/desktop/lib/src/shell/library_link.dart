@@ -287,8 +287,8 @@ Future<LinkPreview?> previewLink(String url, {required LinkProber probe}) async 
 }
 
 /// [url]'s preview at once when it was kept before ([LinkPreviewStore]),
-/// else probed and kept (the Up next popover's paste; the Link page has
-/// its own refresh rules).
+/// else probed and kept (the Up next popover's paste, the drop and paste
+/// card; the Link page has its own refresh rules).
 Future<LinkPreview?> cachedLinkPreview(String url, {RecentLinks? recents, required LinkProber probe}) async {
   final store = (recents ?? RecentLinks.instance).previews;
   await store.ensureLoaded();
@@ -297,6 +297,23 @@ Future<LinkPreview?> cachedLinkPreview(String url, {RecentLinks? recents, requir
   final p = await previewLink(url, probe: probe);
   if (p != null && parseJellyfinLink(url) == null) unawaited(store.put(url, p));
   return p;
+}
+
+/// The Recent card of [url], put up just now, as its preview [p] shows it.
+RecentLink recentLinkFor(String url, LinkPreview? p) => RecentLink(
+      url: url,
+      title: p?.title ?? LinkMedia(url).label,
+      thumbnail: p?.thumbnail,
+      subtitle: p?.problem == null ? p?.subtitle : null,
+      at: DateTime.now(),
+    );
+
+/// A link put up outside the Link page (the drop and paste card) joins
+/// its Recent list like one put up there.
+Future<void> rememberPutUpLink(String url, {required RecentLinks recents, required LinkProber probe}) async {
+  final p = await cachedLinkPreview(url, recents: recents, probe: probe);
+  await recents.ensureLoaded();
+  await recents.add(recentLinkFor(url, p));
 }
 
 /// "today", "yesterday", "3 days ago", "last week", "5 weeks ago", ...
@@ -515,13 +532,7 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
         p = _previews[url] = await previewLink(url, probe: _probe);
         _keep(url, p);
       }
-      unawaited(widget.recents.add(RecentLink(
-        url: url,
-        title: p?.title ?? LinkMedia(url).label,
-        thumbnail: p?.thumbnail,
-        subtitle: p?.problem == null ? p?.subtitle : null,
-        at: DateTime.now(),
-      )));
+      unawaited(widget.recents.add(recentLinkFor(url, p)));
     }
     if (!mounted) return;
     setState(() {

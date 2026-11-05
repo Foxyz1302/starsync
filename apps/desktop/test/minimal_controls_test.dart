@@ -119,6 +119,43 @@ void main() {
       expect(seeks, isEmpty);
     });
 
+    // Regression (P40): a press near the clock at the band's end, meant
+    // as a seek, switched the time instead.
+    testWidgets('only the time\'s text switches it: beside, above or past it the band seeks', (tester) async {
+      final seeks = <Duration>[];
+      var toggled = 0;
+      await tester.pumpWidget(scoped(_graph, host(MinimalTimeline(
+          position: m(6), duration: m(24), onSeek: seeks.add, onToggleTime: () => toggled++))));
+      final bar = tester.getRect(find.byKey(const ValueKey('minimal-timeline')));
+      final p = painter(tester);
+      final textWidth = (TextPainter(text: TextSpan(text: p.right, style: p.timeStyle), textDirection: TextDirection.ltr)
+            ..layout())
+          .width;
+      final textRight = bar.right - MinimalTimelineSpec.inset;
+      final textLeft = textRight - textWidth;
+      Future<void> press(Offset at) async {
+        await tester.tapAt(at);
+        await tester.pump(const Duration(seconds: 3));
+      }
+
+      // Past the text, at the very end: the end of the video.
+      await press(Offset(bar.right - 3, bar.center.dy));
+      expect(toggled, 0);
+      expect(seeks, isNotEmpty);
+      expect(seeks.last, greaterThan(m(23, 50)));
+      // Just before the text, and over it near the band's top edge.
+      seeks.clear();
+      await press(Offset(textLeft - 6, bar.center.dy));
+      await press(Offset((textLeft + textRight) / 2, bar.top + 2));
+      expect(toggled, 0);
+      expect(seeks, hasLength(2));
+      // On the text itself.
+      seeks.clear();
+      await press(Offset((textLeft + textRight) / 2, bar.center.dy));
+      expect(toggled, 1);
+      expect(seeks, isEmpty);
+    });
+
     testWidgets('a mark at each chapter start', (tester) async {
       await tester.pumpWidget(scoped(_graph, host(MinimalTimeline(position: m(1), duration: m(24), chapters: chapters, onSeek: (_) {}))));
       expect(painter(tester).chapters, [for (final c in chapters) c.start.inSeconds / m(24).inSeconds]);

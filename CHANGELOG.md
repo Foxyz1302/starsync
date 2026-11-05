@@ -28,6 +28,8 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - Joining without a name no longer stops with an error: the app asks "Wait, what do we call you?" right there (your computer's user name to start with, plus picture and colour), and OK carries on with the join
 - In fullscreen the party's avatars come up with the controls, also while the video plays, and work like the ones in the strip: hover for names, click for who is in the server
 - A message sent from the quick chat box now shows as your own chat bubble with everyone else's, instead of a separate echo where the box was
+- A pasted or dropped link goes up with one click on its card, like adding it to Up next (it used to open the Link page first). While the others are watching something, Add to queue comes first on the card and putting up says "Put it up now"
+- The old program names from before Starsync (`watch_together`, `watch-together-server`, `.exe` on Windows) are gone from the folder: if you start Starsync from an old shortcut, make a new one to `starsync` / `starsync.exe`
 
 ### Fixed
 
@@ -38,6 +40,9 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - The player panel's hardware decoding offered Custom with nowhere to type the value; it has the field now, as in Settings
 - A chat message that arrived before the sender's picture showed only their initial; the picture now appears as soon as it is there
 - After a server is updated, the members card shows its new version (it kept the old one until you rejoined)
+- The arrow keys could move to the window buttons at the top, and Enter then closed the app; the window buttons never take the keys now, and in the player the arrows and Enter only do player things
+- PgUp and PgDn went the wrong way through chapters: PgUp is the next chapter and PgDn the previous one, as in mpv
+- Minimal player design: a click near the time at the end of the timeline switched the time display instead of seeking; only a click on the time itself switches it now
 
 ## 1.4.0
 

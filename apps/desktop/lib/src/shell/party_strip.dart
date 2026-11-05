@@ -43,7 +43,7 @@ const stripCompactBelow = 1100.0;
 /// friend and Invite (a "Sharing" chip while your server is open to
 /// friends); with others there the avatars (members card), server and
 /// readiness, chat, and Invite (yours) or Leave (a friend's). Empty space
-/// drags the window.
+/// drags the window. The arrow keys never move focus onto it.
 class PartyStrip extends StatelessWidget {
   final ShellTab tab;
   final ValueChanged<ShellTab> onTab;
@@ -242,7 +242,9 @@ class PartyStrip extends StatelessWidget {
               const Positioned.fill(
                 child: WindowDragArea(child: SizedBox.expand()),
               ),
-            Positioned.fill(child: row),
+            // The arrow keys never move focus onto the strip (from the
+            // library, or the player's keys): Enter would press it.
+            Positioned.fill(child: FocusTraversalGroup(descendantsAreTraversable: false, child: row)),
           ],
         ),
       ),

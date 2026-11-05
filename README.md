@@ -32,11 +32,6 @@ From the Releases page of this repo:
   `starsync.exe`. mpv is bundled. New and not yet tried on a real
   Windows desktop; reports welcome.
 
-The folder also holds `watch_together(.exe)` and
-`watch-together-server(.exe)`, the names up to 1.2.x: they start the new
-programs, so an update from 1.2.x restarts fine and old shortcuts and
-service files keep working.
-
 Your data (settings, sign-ins, folders, logs, yt-dlp and its cookies) lives
 in `~/.local/share/dev.foxyz.starsync` on Linux and
 `%APPDATA%\foxyz\Starsync` on Windows. The first start after 1.2.x copies
@@ -221,8 +216,11 @@ and leaving theirs brings you back to it as you left it.
 
 What to watch, from three sources (the switch at the top). Drop a video,
 a folder or a link anywhere on the window, or press Ctrl+V outside a
-text field, and a small card asks how to open it (put it up, add it to
-Up next, add the folder to Files, or fill Link).
+text field, and a small card asks how to open it: put it up (one click;
+a link goes the way picked on the Link page), add it to Up next, add the
+folder to Files, or open a link on the Link page first. While the others
+are watching something, Add to queue comes first and putting up says
+"Put it up now", since it replaces the video for everyone.
 
 - **Jellyfin**: your linked servers (see below); with none linked it
   points to Files and Link and offers Jellyfin as optional. Library chips beside the
@@ -357,8 +355,9 @@ Ctrl+C or SIGTERM. A dedicated server has no host.
 To run it as a service, unpack the tarball to `/opt/starsync` and use
 [deploy/starsync.service](deploy/starsync.service) (copy it to
 `/etc/systemd/system/`, edit the flags, `systemctl enable --now starsync`).
-A service set up before the rename (`/opt/watch-together`, running
-`watch-together-server`) keeps working as it is.
+A service set up before the rename (`/opt/watch-together`) must run
+`starsync-server` in its `ExecStart`: updates remove the old name
+`watch-together-server`.
 
 Something not playing? Settings → Help & about → **Copy diagnostics** puts the
 app's recent log (passwords, tokens and cookies left out) on the
@@ -458,7 +457,7 @@ Anywhere in a server (unless you are typing): Space = ready / unready,
 Tab = chat & activity (Tab never moves between buttons). Anywhere:
 Ctrl+Shift+B = mark a problem in the session log. Keys while the
 player fills the window: Left/Right = seek 10 s, Up/Down = volume, M = mute, Shift+Right = skip 1:30,
-PgUp/PgDn = previous / next chapter (as in mpv), F = fullscreen, Enter =
+PgDn/PgUp = previous / next chapter (as in mpv), F = fullscreen, Enter =
 quick chat, Esc = close the player panel, then
 the chat, then fullscreen, then shrink the player to mini; from the
 mini it asks to leave, Ctrl+R = reload video,

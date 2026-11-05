@@ -85,7 +85,7 @@ double minimalBandSize(double visibility, double scale) =>
 /// The Minimal timeline. [expanded] false (the controls hidden) shrinks it,
 /// animated, to the progress line. Seeks ([onSeek]) on press, on every drag
 /// move and on release; a press on a hovered chapter dot jumps to that
-/// chapter, one on the right-hand time switches it ([onToggleTime]).
+/// chapter, one on the right-hand time's text switches it ([onToggleTime]).
 class MinimalTimeline extends StatefulWidget {
   final Duration position;
   final Duration duration;
@@ -215,14 +215,19 @@ class _MinimalTimelineState extends State<MinimalTimeline> {
     fontFeatures: const [FontFeature.tabularFigures()],
   );
 
-  /// Where the right-hand time sits (a press there switches it).
-  bool _onRightTime(Offset at, double width, String? text) {
+  /// Whether [at] is on the right-hand time's text as the painter draws
+  /// it (a press there switches it; anywhere else on the band seeks, the
+  /// band's end too).
+  bool _onRightTime(Offset at, double width, double height, String? text) {
     if (text == null || widget.onToggleTime == null) return false;
     final tp = TextPainter(
       text: TextSpan(text: text, style: _timeStyle),
       textDirection: TextDirection.ltr,
     )..layout();
-    return at.dx >= width - MinimalTimelineSpec.inset * _scale - tp.width - 6;
+    final fs = _timeStyle.fontSize ?? MinimalTimelineSpec.fontSize;
+    final rect = Rect.fromLTWH(
+        width - MinimalTimelineSpec.inset * _scale - tp.width, height / 2 - fs / 2, tp.width, tp.height);
+    return rect.inflate(2).contains(at);
   }
 
   @override
@@ -318,7 +323,7 @@ class _MinimalTimelineState extends State<MinimalTimeline> {
         onPointerDown: (e) {
           if (width <= 0) return;
           final at = clampTo(e.localPosition);
-          if (_onRightTime(at, width, right)) {
+          if (_onRightTime(at, width, size, right)) {
             widget.onToggleTime?.call();
             return;
           }

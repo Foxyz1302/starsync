@@ -57,7 +57,7 @@ Future<void> _poll(
 
 void main() {
   test(
-    'chapters and tracks from mpv; Skip OP and PgDn go through the server',
+    'chapters and tracks from mpv; Skip OP and PgUp go through the server',
     timeout: const Timeout(Duration(minutes: 5)),
     () async {
       MediaKit.ensureInitialized();
@@ -135,7 +135,7 @@ void main() {
         expect(seeks(b), seeksBefore + 1, reason: 'Skip OP is one seek');
         await _poll(() => a.skipOffer.peek() == null, 'pill gone after the OP');
 
-        // PgDn: next chapter (ED at 20:00), for everyone.
+        // PgUp: next chapter (ED at 20:00), for everyone.
         expect(a.stepChapter(1), isTrue);
         await _poll(() => b.playback.positionSecs >= 1199.5 && b.playback.positionSecs < 1206, 'b at the ED');
         await _poll(() => a.skipOffer.peek()?.kind == SkipKind.ending, 'Skip ED offered');
