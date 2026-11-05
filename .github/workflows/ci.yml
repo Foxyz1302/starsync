@@ -1,0 +1,94 @@
+name: ci
+on:
+  # Branches only: a release tag points at a commit CI already checked on
+  # main, and release.yml builds it.
+  push:
+    branches: ['**']
+  pull_request:
+
+env:
+  # The Flutter the Windows job builds with: a branch of
+  # github.com/flutter/flutter (stable, beta) or a release tag
+  # (3.48.0-0.5.pre). stable is what Gitea CI has always used; the owner
+  # picks. Keep release.yml on the same value.
+  FLUTTER_REF: stable
+
+# A newer push to the same branch supersedes a running check.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+        working-directory: packages/core
+      - run: dart analyze
+        working-directory: packages/core
+      - run: dart test
+        working-directory: packages/core
+
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+        working-directory: packages/server
+      - run: dart analyze
+        working-directory: packages/server
+      - run: dart test
+        working-directory: packages/server
+      # Compiling the dedicated server proves it stays Flutter-free.
+      - run: mkdir -p build && dart compile exe bin/server.dart -o build/starsync-server
+        working-directory: packages/server
+      - run: build/starsync-server --help
+        working-directory: packages/server
+
+  # The updater's Windows apply path (running exe parked as .old) only
+  # means something on real NTFS, and the close smoke run needs the real
+  # build.
+  updater-windows:
+    # Not for a "Release v…" commit: release.yml builds the same commit
+    # (Windows minutes count double on a private repo).
+    if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-flutter
+        with:
+          ref: ${{ env.FLUTTER_REF }}
+      - name: Updater tests
+        shell: powershell
+        working-directory: packages/core
+        run: |
+          dart pub get
+          if ($LASTEXITCODE) { exit 1 }
+          dart test test/updater_test.dart
+      # The release build, without publishing: a broken Windows build shows
+      # here, not only on a tag.
+      - name: Windows build
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tool/package_windows.ps1
+      # The close smoke run on that build (P32): start, open a short clip in
+      # a player with a video output, close; it must exit within 45 s and
+      # leave no process. GitHub's Windows runner has no GPU and no sound
+      # device; a runner that cannot show a window or a video output skips
+      # with a warning.
+      - name: Smoke (start, open, close)
+        shell: powershell
+        timeout-minutes: 3
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tool/smoke_windows.ps1 -Limit 45

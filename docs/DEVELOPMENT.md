@@ -295,7 +295,7 @@ behaviour that step of the restructure ([ROADMAP.md](ROADMAP.md)) changes;
 the comment names the tests. Rewrite or delete them in that step, not
 before.
 
-CI (`.gitea/workflows/ci.yml`): analyze + test for core and server, plus
+CI (`ci.yml`, on Gitea and [on GitHub](#ci-on-github)): analyze + test for core and server, plus
 `dart compile exe` of the dedicated server (fails if Flutter creeps into
 `packages/server`). Desktop tests are not in CI. The Windows job runs the
 updater tests, the release build and the close smoke run on that build
@@ -403,8 +403,9 @@ process, copies the new files over it and writes the `update-channel`
 file that sets Dev).
 
 Tokens come from the environment (`RELEASE_TOKEN`, or Actions-provided
-`GITHUB_TOKEN`/`GITEA_TOKEN`). Workflows live in `.gitea/workflows`
-(the forge reads `.gitea` before `.github`).
+`GITHUB_TOKEN`/`GITEA_TOKEN`). Gitea runs `.gitea/workflows` (it reads
+`.gitea` before `.github`, so it ignores the other); GitHub runs
+`.github/workflows` ([CI on GitHub](#ci-on-github)).
 
 The repo and its releases live on pol's Gitea,
 `https://git.example.org/Foxyz/sync_replay_project` (a GitHub mirror
@@ -460,6 +461,51 @@ on the app installs nothing else.
 - **A fork** changes only `distribution.dart`: its own `trustedKeys`
   (from its own `tool/keygen.dart`) and its config and manifest
   addresses; then its own `updates/starsync-config.json`, signed.
+
+### CI on GitHub
+
+`.github/workflows` is CI for `Foxyz1302/starsync` on GitHub-hosted
+runners (`ubuntu-latest`, `windows-latest`), next to the Gitea set until
+the switch:
+
+- `ci.yml`: as on Gitea (core, server, `updater-windows` with the build
+  and the smoke run); a newer push to a branch cancels its running check.
+- `release.yml`: on a `v*` tag, `linux` and `windows` build the archives
+  and keep them as run artifacts, then `publish`, only once both built,
+  runs `dart tool/publish_github.dart vX.Y.Z <tarball> <zip>
+  updates/manifest.json`. **Test builds**: Actions → release → Run
+  workflow (any branch) builds both and publishes nothing; the archives
+  are the run's artifacts `starsync-linux-x64` and
+  `starsync-windows-x64` (kept 14 days; GitHub hands each out zipped),
+  named with the pubspec's version.
+- `.github/actions/setup-flutter`: Flutter at `FLUTTER_REF` on PATH, the
+  SDK cached per commit of that ref, the pub cache per lockfiles. On
+  Windows it runs `tool/setup_flutter_windows.ps1 -Ref … -Dir …`, whose
+  ATL step does nothing there (GitHub's image has the component).
+- `FLUTTER_REF`, at the top of both workflows (keep them equal): a
+  Flutter branch (`stable`, `beta`) or release tag (`3.48.0-0.5.pre`).
+  `stable`, as on Gitea, until the owner picks.
+
+`tool/publish_github.dart` is `release_publish.dart` for GitHub, with the
+same arguments (`vX.Y.Z <file>...`, `dev <file>... <manifest.json>`): it
+creates the release or refreshes its text, replaces each file and a
+`<file>.sig` beside it, `.json` files last, and for `dev` deletes the
+prerelease's other assets. `--dry-run` prints the plan without a token or
+network; `--repo owner/name` outside Actions; token `GITHUB_TOKEN` or
+`GH_TOKEN`, else `gh auth token`. It warns when a manifest's asset URLs
+are not that release's downloads.
+
+Secrets: `GITHUB_TOKEN` (built in; `publish` asks for `contents: write`)
+and, optionally, `DISCORD_WEBHOOK_URL` (set, `tool/package_linux.sh` also
+posts a release's tarball to Discord; Gitea's CI never did). No other.
+
+Left to switch: Actions on for the repo (if Gitea push-mirrors to it, the
+workflows run from the next mirrored push: `ci.yml` on every push,
+publishing on the next tag); `tool/release.sh` and `tool/dev_release.sh`
+pointed at GitHub (manifest URLs, `publish_github.dart`); the updater
+reading GitHub (ROADMAP "GitHub as the public home"); `fox_utils` and
+`leaf_widgets`, git dependencies on pol's Gitea, mirrored there; then
+`.gitea/workflows` removed.
 
 ### Changelog
 

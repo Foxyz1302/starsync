@@ -1,0 +1,68 @@
+name: Setup Flutter
+description: >-
+  Flutter at a git ref of github.com/flutter/flutter on PATH, the SDK cached
+  by the commit the ref points at and the pub cache by the lockfiles.
+  Windows goes through tool/setup_flutter_windows.ps1 (Gitea's runner uses
+  it too), which also checks Visual Studio's C++ ATL component.
+inputs:
+  ref:
+    description: A Flutter branch (stable, beta) or release tag (3.48.0-0.5.pre).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Resolve the Flutter ref
+      id: sdk
+      shell: bash
+      env:
+        REF: ${{ inputs.ref }}
+        DIR: ${{ runner.tool_cache }}/flutter-ci
+      run: |
+        sha="$(git ls-remote https://github.com/flutter/flutter.git "refs/heads/$REF" "refs/tags/$REF" | head -n1 | cut -f1)"
+        if [ -z "$sha" ]; then echo "::error::Flutter has no branch or tag named '$REF'"; exit 1; fi
+        echo "Flutter $REF: $sha"
+        echo "sha=$sha" >> "$GITHUB_OUTPUT"
+        echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+
+    # The SDK with what its first run downloads (Dart, engine artifacts).
+    # A new commit on the branch is a new key: no stale SDK.
+    - name: Cache the Flutter SDK
+      uses: actions/cache@v6
+      with:
+        path: ${{ steps.sdk.outputs.dir }}
+        key: flutter-sdk-${{ runner.os }}-${{ steps.sdk.outputs.sha }}
+
+    # Hosted packages and git dependencies; tool/package_windows.ps1 still
+    # refetches fox_utils every build.
+    - name: Cache pub packages
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.pub-cache
+          ~/AppData/Local/Pub/Cache
+        key: pub-${{ runner.os }}-${{ hashFiles('**/pubspec.lock') }}
+        restore-keys: pub-${{ runner.os }}-
+
+    - name: Install Flutter (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        REF: ${{ inputs.ref }}
+        DIR: ${{ steps.sdk.outputs.dir }}
+      run: |
+        if [ ! -x "$DIR/bin/flutter" ]; then
+          git clone -q https://github.com/flutter/flutter.git -b "$REF" --depth 1 "$DIR"
+        fi
+        echo "$DIR/bin" >> "$GITHUB_PATH"
+        "$DIR/bin/flutter" config --no-analytics >/dev/null
+        "$DIR/bin/flutter" --version
+
+    - name: Install Flutter (Windows)
+      if: runner.os == 'Windows'
+      shell: powershell
+      env:
+        REF: ${{ inputs.ref }}
+        DIR: ${{ steps.sdk.outputs.dir }}
+      run: |
+        powershell -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\tool\setup_flutter_windows.ps1" -Ref $env:REF -Dir $env:DIR
+        if ($LASTEXITCODE) { exit 1 }
