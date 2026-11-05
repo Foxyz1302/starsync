@@ -3311,7 +3311,11 @@ are base64 of their 32 bytes. Apps up to 1.4.x never fetch the `.sig`.
   (the owner's public key) and the built-in addresses: the config's
   (`builtInConfigUrls`: GitHub's raw `Foxyz1302/starsync`, then pol's
   Gitea as `git.example.org` and `git.example.org`) and the
-  manifests' (`builtInStableManifestUrls`, `builtInDevManifestUrls`).
+  manifests' (`builtInStableManifestUrls`, `builtInDevManifestUrls`),
+  each GitHub first (`Foxyz1302/starsync`: `updates/` on `main` for the
+  config and the stable manifest, the `dev` release for dev builds), then
+  pol's Gitea under both names. An address that does not answer yet is
+  skipped.
 - **Manifests** (`fetchManifest`): `X` and `X.sig` are fetched
   (`fetchSigned`); a manifest without a `.sig`, with a signature by no
   trusted key, or without a well-formed `assetSha256` for this platform
