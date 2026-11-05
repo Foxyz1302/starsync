@@ -405,12 +405,10 @@ test page.
   (while the seat is kept), an app restart, a new video and a server
   restart (the app reports it again). A BRB member who leaves for good
   leaves a plain pause; it never plays by itself.
-- **AFK**: no input for about 10 minutes while nothing plays (plain pause,
-  end card, nothing on). Never set during playback or on a BRB member.
-  The group stops waiting for their video, new videos stop loading for
-  them (an already loaded one plays along), and an episode that ends while
-  they are AFK is not counted as watched. Any input brings them back,
-  joining at the current moment.
+- **AFK**: Out, set automatically: no input for about 10 minutes while
+  nothing plays (plain pause, end card, nothing on). Never set during
+  playback or on a BRB member. Only the badge differs, so others see why.
+  Any input brings them back, joining at the current moment.
 - **Out** (name not final): left out by "continue without", chosen in the
   radial, player closed, or the window minimised 10 minutes while it plays.
   Not waited for, not counted as watched; the player stays at their spot;
@@ -418,19 +416,20 @@ test page.
   the video on.
 
 **The group** is playing, paused, or "Waiting for …" (someone's BRB, or
-someone's video loading or running dry). Play and pause are anyone's. The
-group keeps an intent (play or pause) and a BRB only holds it back: when
-the last one is back it does what was intended. Pill: "Waiting for Alice"
-(it wants to play) or "Paused · Alice is BRB" (nobody asked). A pause lasts
+someone's video loading or running dry). Play and pause are anyone's. A
+BRB only holds the group back: when the last one is back it plays if it
+was playing when the first BRB began, otherwise it stays paused. A pause lasts
 until someone plays. Putting something up keeps play or pause, so the
 start of an evening waits for one Play and nobody has to hold it.
 
 **Keys and clicks:**
-- Space tap: play or pause. Hold about 0.4 s: BRB (the pause happens on
-  key-down, a ring fills while held; key repeat ignored).
-- While someone is BRB: your own tap means "I'm back"; anyone else's tap
-  toggles the intent; a hold of 2 to 3 s fills "Continuing without Alice"
-  and plays.
+- Space tap: play or pause. Hold about 0.6 s: BRB (the pause happens on
+  key-down; key repeat ignored).
+- While anyone is BRB, a tap toggles your own BRB (back, or BRB too); a
+  hold of about 2 s continues without them and plays. The pill's hint
+  line says so ("Space: BRB too · Hold: continue without").
+- A hold fills the pill itself, fading in so a tap barely shows, and the
+  pill says what keeping on does ("Keep holding: BRB").
 - Continue without a BRB member makes them Out; continue without
   someone's video leaves them Watching to catch up.
 - Right-click hold on the video: a radial (BRB or I'm back, Out, Next
