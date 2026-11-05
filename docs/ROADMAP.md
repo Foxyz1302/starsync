@@ -220,6 +220,35 @@ Next, before 1.5.0 is cut (playback and presence is in; protocol 17):
   (`shell/wait_design.dart`, DEVELOPMENT "Dev tools").
 - **The name "Out"**: fits next to BRB and AFK, but may not be clear
   enough; settle it from the same evenings.
+- **Signed updates and a signed config.** A key pair: the private key
+  only on the owner's machine (backed up), the public key in the app.
+  The release and dev-build scripts sign every manifest; the app refuses
+  a manifest without a valid signature and a download whose checksum
+  does not match. A signed `starsync-config.json` lists the update
+  sources, defaults (AnimeFlow's address) and its own addresses; the app
+  takes the first valid, newer copy from its list, keeps the last good
+  one on disk and falls back to built-in values, so any address can move
+  without a reinstall. It can carry the next public key, signed by the
+  current one (key handover). Settings → Updates → More: a config
+  address for a mirror (the signature must still be the owner's; the key
+  is never set from the app). A fork changes its key and first address
+  in one file (`distribution.dart`). 1.4.x apps update to 1.5.0 the old
+  way (pol's Gitea, `git.example.org` kept as an alias until everyone
+  has updated).
+- **GitHub as the public home** (needs the owner's go): CI publishes each
+  release, the signed manifests and the config to `Foxyz1302/starsync`
+  (the website's downloads already come from there); the updater reads
+  GitHub first and pol's Gitea second. Mirror `fox_utils` and
+  `leaf_widgets` there so builds do not depend on pol's server.
+
+**Open source** (decided, after 1.5.0; as portfolio, foxyz-presence
+DECISIONS.md): a secrets audit of the whole git history (scrub or
+rotate anything ever committed); the license, likely GPL-3.0, after
+checking which libmpv and FFmpeg builds ship and what they require;
+pol's OK for his server names in the history; a README for strangers and
+a short "how to build". Then publish the source on GitHub; public repos
+get free GitHub Actions with Windows runners, so CI can leave pol's
+machines and his Gitea becomes optional.
 
 0. **After the move to the owner's media_kit fork** (for 1.5.0; the app
    is on it, DEVELOPMENT "Build"):
