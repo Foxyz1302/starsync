@@ -10,6 +10,7 @@ import 'src/app/app_graph.dart';
 import 'src/files/thumbnails.dart' show thumbnailPlayers;
 import 'src/platform/app_log.dart';
 import 'src/platform/app_shutdown.dart' show closeAppWith;
+import 'src/platform/crash_watch.dart';
 import 'src/platform/desktop/attention.dart' show exitNow, windowLaunchToken;
 import 'src/platform/desktop/desktop_app_dirs.dart';
 import 'src/platform/desktop/windows_api.dart' show allowSetForegroundWindow;
@@ -64,6 +65,10 @@ Future<void> main(List<String> args) async {
   );
   if (instance == null) await exitNow();
   await startAppLogging(dirs);
+  // The last run's unclean end (and its Windows crash records), and UI
+  // stalls (ARCHITECTURE "Logging").
+  startCrashWatch(Directory(dirs.logs).parent.path, version: displayVersion());
+  startStallWatch();
   Hive.init(dirs.hive);
   await AppSettings.instance.ensureLoaded();
   // The composition root: every system, made once.

@@ -2781,6 +2781,29 @@ dedicated server (`package:logging` loggers named by area: `relay`,
   source (media opened and how long it took, channel up and down,
   reconnects, upstream refusals with the header names sent, re-resolves
   of expired format URLs).
+- **Crash and freeze evidence** (`platform/crash_watch.dart`, the
+  players' lines in `media_kit_host.dart`): a native crash (mpv, the
+  video output) ends the process without a Dart line, so the app leaves
+  its own trail. Each session or preload player logs `player #N <role>:
+  created | setup done | promoted | open | first frame WxH | dispose
+  start | dispose end (<age> ms, live <n>)` (logger `player`; no media
+  name) and has the waiting diagnostics sent at once
+  (`DiagUploader.flushAllSoon`, at most one post per 2 s, the rest at the
+  end of that gap), as does the start of the close. `running.json` next to
+  the logs folder (`<app support>`, or the profile's) is written at start (version, time, pid), gets
+  `closing` when the close starts and goes once the close is done; a
+  start that finds it logs `previous run ended without a clean close[,
+  while closing]: <version>, started <time>, pid <pid>` (logger
+  `crash`). On Windows that start also reads the Application event log
+  (`wevtutil qe Application ... /f:xml`, events 1000/1001/1002 of the
+  last 3 days, 5 s at most, in the background) and logs the app's
+  records as `windows crash record: crash (1000) at <time>
+  version=... module=... exception=... offset=...` (the event data, not
+  the localized description; no paths). Lines logged out of a session
+  this way (`DiagUploader.carry`) wait for the next session's first
+  batch. A 1 s timer logs `event loop stalled: the 1 s timer fired N s
+  late` past 3 s (the UI isolate was blocked, or the machine slept) and
+  sends at once: a freeze, not the network.
 - **Never logged**: chat text (the server relays it without a log line,
   the app does not log it), and no user-typed free text other than a
   problem mark's note. Names, media titles and links (query cut) are.

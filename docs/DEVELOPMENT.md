@@ -432,11 +432,16 @@ a member of that server can read it: `GET /l/<sid>/<token>?hours=N`
 (gzip text; `sid` is `default` on a dedicated server; "Copy
 diagnostics" does this through `DiagShare.fetchSessionLog`).
 
-Crashes and freezes: the session log misses a crashed app's last
-seconds (uploads every 10 s) and everything after a freeze; read that
-machine's own `app-*.log` (written at once, its own clock). A native
-crash ends the log without a Dart error: on Linux `coredumpctl info
-starsync` (with systemd-coredump), on Windows Event Viewer → Application
+Crashes and freezes: the session log can miss a crashed app's last
+seconds and everything after a freeze; read that machine's own
+`app-*.log` (written at once, its own clock). A native crash ends the
+log without a Dart error; the next start logs `crash: previous run ended
+without a clean close` (on Windows followed by `crash: windows crash
+record: ...` with the faulting module and exception code), and the
+`player: player #N ...` lines before it show which step the player was
+at. `crash: event loop stalled` tells a frozen app from a network drop
+(ARCHITECTURE "Logging"). More: on Linux `coredumpctl info starsync`
+(with systemd-coredump), on Windows Event Viewer → Application
 (1000/1001/1026) or `tool/windows_report.cmd`.
 
 Start with the session log when there is one: `session-YYYY-MM-DD.log`
