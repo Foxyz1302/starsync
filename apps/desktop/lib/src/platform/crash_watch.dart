@@ -27,6 +27,15 @@ void startCrashWatch(String folder, {required String version}) {
         final j = jsonDecode(f.readAsStringSync());
         if (j is Map) last = Map<String, Object?>.from(j);
       } catch (_) {}
+      final quit = last['quit'];
+      if (quit is String) {
+        // The close finished and the window was asked to go: only the
+        // engine's teardown was left. A crash there (P32) shows only in
+        // the system's records, after [quit].
+        if (Platform.isWindows) unawaited(_windowsCrashes(since: DateTime.tryParse(quit), atQuit: true));
+        _write(f, {'version': version, 'started': DateTime.now().toUtc().toIso8601String(), 'pid': pid});
+        return;
+      }
       final when = last['started'] ?? '?';
       final closing = last['closing'] != null ? ', while closing' : '';
       DiagUploader.carry(_logger,
@@ -50,12 +59,18 @@ void crashWatchClosing() {
   } catch (_) {}
 }
 
-/// A clean close: the marker goes.
+/// The close finished; only the window and the engine are left to go.
+/// The marker stays, marked `quit`: the next start checks the system's
+/// crash records after this moment (a crash in the teardown) instead of
+/// calling the run unclean.
 void crashWatchClean() {
-  try {
-    _marker?.deleteSync();
-  } catch (_) {}
+  final f = _marker;
   _marker = null;
+  if (f == null) return;
+  try {
+    final j = jsonDecode(f.readAsStringSync());
+    if (j is Map) _write(f, {...j, 'quit': DateTime.now().toUtc().toIso8601String()});
+  } catch (_) {}
 }
 
 void _write(File f, Map<Object?, Object?> j) {
@@ -73,7 +88,7 @@ void _write(File f, Map<Object?, Object?> j) {
 String windowsCrashQuery({int days = 3}) =>
     '*[System[(EventID=1000 or EventID=1001 or EventID=1002) and TimeCreated[timediff(@SystemTime) <= ${days * 86400000}]]]';
 
-Future<void> _windowsCrashes() async {
+Future<void> _windowsCrashes({DateTime? since, bool atQuit = false}) async {
   try {
     final r = await Process.run('wevtutil', ['qe', 'Application', '/q:${windowsCrashQuery()}', '/c:30', '/rd:true', '/f:xml'],
             stdoutEncoding: const SystemEncoding())
@@ -82,9 +97,22 @@ Future<void> _windowsCrashes() async {
       DiagUploader.carry(_logger, 'windows crash records: wevtutil exit ${r.exitCode}');
       return;
     }
-    final found = parseWindowsCrashes('${r.stdout}');
+    var found = parseWindowsCrashes('${r.stdout}');
+    if (since != null) {
+      found = [
+        for (final c in found)
+          if ((DateTime.tryParse(c.time) ?? DateTime(0)).isAfter(since)) c
+      ];
+    }
+    if (atQuit) {
+      // A clean close: say something only when the teardown crashed.
+      for (final c in found.take(5)) {
+        DiagUploader.carry(_logger, 'windows crash record while quitting: $c', warning: true);
+      }
+      return;
+    }
     if (found.isEmpty) {
-      DiagUploader.carry(_logger, 'windows crash records: none for $appExe in the last 3 days');
+      DiagUploader.carry(_logger, 'windows crash records: none for ${appExes.join(' or ')} in the last 3 days');
     }
     for (final c in found.take(5)) {
       DiagUploader.carry(_logger, 'windows crash record: $c', warning: true);
@@ -94,6 +122,9 @@ Future<void> _windowsCrashes() async {
   }
 }
 
+/// The app's executables: `watch_together.exe` is the 1.2.x name, a copy
+/// of `starsync.exe` that installs updated from 1.2.x still start.
+const appExes = {'starsync.exe', 'watch_together.exe'};
 const appExe = 'starsync.exe';
 
 /// One crash or hang record of the app from the Windows event log.
@@ -136,7 +167,7 @@ List<WindowsCrash> parseWindowsCrashes(String xml) {
     final Map<String, String> fields;
     switch (id) {
       case 1000:
-        if (at(0).toLowerCase() != appExe) continue;
+        if (!appExes.contains(at(0).toLowerCase())) continue;
         fields = {
           'version': at(1),
           'module': at(3),
@@ -147,14 +178,14 @@ List<WindowsCrash> parseWindowsCrashes(String xml) {
       case 1001:
         // Windows Error Reporting: bucket, type, event name, response, cab
         // id, then P1 (the app) to P10.
-        if (at(5).toLowerCase() != appExe) continue;
+        if (!appExes.contains(at(5).toLowerCase())) continue;
         fields = {
           'event': at(2),
           'version': at(6),
           if (at(2) == 'APPCRASH') ...{'module': at(8), 'exception': at(11), 'offset': at(12)} else 'p4': at(8),
         };
       case 1002:
-        if (at(0).toLowerCase() != appExe) continue;
+        if (!appExes.contains(at(0).toLowerCase())) continue;
         fields = {'version': at(1), 'hangType': at(9)};
       default:
         continue;

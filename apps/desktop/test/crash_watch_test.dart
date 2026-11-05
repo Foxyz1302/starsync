@@ -52,6 +52,15 @@ void main() {
     crashWatchClosing();
     expect(jsonDecode(f.readAsStringSync())['closing'], isNotNull);
     crashWatchClean();
-    expect(f.existsSync(), isFalse);
+    expect(jsonDecode(f.readAsStringSync())['quit'], isNotNull, reason: 'kept: a teardown crash shows after it');
+    // The next start after a finished close does not call it unclean.
+    startCrashWatch(dir.path, version: '1.4.2');
+    final j = jsonDecode(f.readAsStringSync());
+    expect([j['version'], j['quit'], j['closing']], ['1.4.2', null, null]);
+  });
+
+  test('the 1.2.x name counts as the app', () {
+    final got = parseWindowsCrashes(_sample.replaceAll('starsync.exe', 'watch_together.exe'));
+    expect(got.length, 3);
   });
 }

@@ -2791,13 +2791,17 @@ dedicated server (`package:logging` loggers named by area: `relay`,
   (`DiagUploader.flushAllSoon`, at most one post per 2 s, the rest at the
   end of that gap), as does the start of the close. `running.json` next to
   the logs folder (`<app support>`, or the profile's) is written at start (version, time, pid), gets
-  `closing` when the close starts and goes once the close is done; a
-  start that finds it logs `previous run ended without a clean close[,
-  while closing]: <version>, started <time>, pid <pid>` (logger
+  `closing` when the close starts and `quit` once the close is done
+  (only the window and the engine's teardown are left); a start that
+  finds it without `quit` logs `previous run ended without a clean
+  close[, while closing]: <version>, started <time>, pid <pid>` (logger
   `crash`). On Windows that start also reads the Application event log
   (`wevtutil qe Application ... /f:xml`, events 1000/1001/1002 of the
-  last 3 days, 5 s at most, in the background) and logs the app's
-  records as `windows crash record: crash (1000) at <time>
+  last 3 days, 5 s at most, in the background; `starsync.exe` and the
+  1.2.x name `watch_together.exe`) and logs the app's records; after a
+  run with `quit` it logs only records newer than that (`windows crash
+  record while quitting: ...`, a crash in the teardown). Records read
+  `windows crash record: crash (1000) at <time>
   version=... module=... exception=... offset=...` (the event data, not
   the localized description; no paths). Lines logged out of a session
   this way (`DiagUploader.carry`) wait for the next session's first
