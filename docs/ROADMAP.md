@@ -52,9 +52,6 @@ Problems are numbered; delete a line when its fix ships.
   the `close:` log lines.
 - P33 No volume readout on wheel: likely fixed by the controls rework
   (1.2.1-dev.1; a test covers both skins); confirm in real use.
-- P35 System notifications in a burst hit KDE Plasma's limit
-  (`ExcessNotificationGeneration`, 3 refused within 3 s after a swap while
-  the window was in the background): throttle or merge them app side.
 - P36 After a reconnect the app re-dials the warm relay of an Up next
   item that was already played ("relay channel refused: not the source of
   Up next item q8"): harmless, the feeder should end with its item.

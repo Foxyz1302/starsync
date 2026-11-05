@@ -126,9 +126,72 @@ class SystemNote {
   final String tag;
   /// [payloadChat]: a click opens the chat.
   final String payload;
-  const SystemNote({required this.title, required this.body, this.tag = '', this.payload = ''});
+  /// The whole notice in one line (the toast's text: "Ann: hi"), for a
+  /// note merged with others; [body] when empty.
+  final String line;
+  const SystemNote({required this.title, required this.body, this.tag = '', this.payload = '', this.line = ''});
 
   static const payloadChat = 'chat';
+
+  /// At most this many lines in a merged note (the last says how many more).
+  static const mergedLines = 5;
+
+  /// [notes] as one: a single note as it is; several under their shared
+  /// title (else "Starsync"), a line each, the oldest first; a click opens
+  /// the chat when any of them is chat.
+  static SystemNote merge(List<SystemNote> notes) {
+    if (notes.length == 1) return notes.single;
+    final titles = {for (final n in notes) n.title};
+    final title = titles.length == 1 ? titles.single : null;
+    final lines = [
+      for (final n in notes) title != null || n.line.isEmpty ? n.body : n.line,
+    ];
+    final shown = lines.length <= mergedLines
+        ? lines
+        : [...lines.take(mergedLines - 1), '+${lines.length - mergedLines + 1} more'];
+    return SystemNote(
+      title: title ?? 'Starsync',
+      body: shown.join('\n'),
+      payload: notes.any((n) => n.payload == payloadChat) ? payloadChat : '',
+    );
+  }
+}
+
+/// Paces system notifications: desktops refuse an app that sends several
+/// within a few seconds (KDE Plasma: `ExcessNotificationGeneration`). The
+/// first after a quiet spell goes out at once; what comes within [gap]
+/// after it waits and goes out as one when the gap ends
+/// ([SystemNote.merge]; a later note with the same tag replaces a waiting
+/// one), which starts the next gap. A burst so becomes one notification,
+/// or a few spaced ones.
+class SystemNotePacer {
+  SystemNotePacer(this._send, {this.gap = const Duration(seconds: 4)});
+
+  final void Function(SystemNote note) _send;
+  final Duration gap;
+  final _waiting = <SystemNote>[];
+  Timer? _timer;
+
+  void add(SystemNote note) {
+    if (_timer == null) return _out(note);
+    if (note.tag.isNotEmpty) _waiting.removeWhere((w) => w.tag == note.tag);
+    _waiting.add(note);
+  }
+
+  void _out(SystemNote note) {
+    _send(note);
+    _timer = Timer(gap, () {
+      _timer = null;
+      if (_waiting.isEmpty) return;
+      final notes = [..._waiting];
+      _waiting.clear();
+      _out(SystemNote.merge(notes));
+    });
+  }
+
+  /// Drops what waits (the window came back: its toasts show it); the gap
+  /// still runs.
+  void drop() => _waiting.clear();
 }
 
 /// What one [AppEvent] does: a toast ([toast], about [actor]), a sound,
@@ -343,6 +406,7 @@ Notice noticeFor(AppEvent e, [NoticeContext c = const NoticeContext()]) {
       body: actor == null ? text : body,
       tag: cat == NoticeCategory.chat ? '' : cat.name,
       payload: cat == NoticeCategory.chat ? SystemNote.payloadChat : '',
+      line: text,
     );
   }
   return n._with(toast: toast, sound: sound, system: system, own: own);
@@ -364,8 +428,22 @@ class Notifier {
   /// The session's part of the context; set by the coordinator.
   NoticeSession Function() session = () => (self: null, alone: false, playing: false);
   NotifyPrefs Function() prefs;
+
   /// The window's activity ([ShellPort.watchActivity], wired in `main`).
-  WindowActivity window = WindowActivity.focused;
+  /// Back in front, system notifications still waiting are dropped.
+  WindowActivity get window => _window;
+  set window(WindowActivity a) {
+    _window = a;
+    if (!a.background) _pacer.drop();
+  }
+
+  WindowActivity _window = WindowActivity.focused;
+
+  /// The least time between two system notifications ([SystemNotePacer]).
+  final Duration systemGap;
+  late final _pacer = SystemNotePacer(
+      (n) => unawaited(system.show(title: n.title, body: n.body, tag: n.tag, payload: n.payload)),
+      gap: systemGap);
 
   /// The chat panel is open (set by the shell).
   bool chatOpen = false;
@@ -376,6 +454,7 @@ class Notifier {
     this.system = const NoSystemNotifications(),
     Future<void> Function()? focusWindow,
     this.toastLife = const Duration(seconds: 5),
+    this.systemGap = const Duration(seconds: 4),
     NotifyPrefs Function()? prefs,
   })  : attention = attention ?? _nothing,
         focusWindow = focusWindow ?? _nothing,
@@ -430,10 +509,7 @@ class Notifier {
     final sound = n.sound;
     if (sound != null) unawaited(sfx.play(sound));
     if (n.attention) unawaited(attention());
-    final note = n.system;
-    if (note != null) {
-      unawaited(system.show(title: note.title, body: note.body, tag: note.tag, payload: note.payload));
-    }
+    if (n.system case final note?) _pacer.add(note);
   }
 
   void _clicked(String payload) {
@@ -454,6 +530,7 @@ class Notifier {
       t.cancel();
     }
     _timers.clear();
+    _pacer.drop();
     feedLog.value = [];
     toasts.value = [];
   }

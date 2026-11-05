@@ -1847,7 +1847,15 @@ background, default off). The coordinator gives the session's part
   joins and leaves when chosen) also goes out as a system notification
   (title the person, body the rest; silent, the app plays its sound). A
   click brings the window up (`ShellPort.focus`) and, for chat, opens the
-  chat (`Notifier.chatRequests`, read by the shell).
+  chat (`Notifier.chatRequests`, read by the shell). They are paced
+  (`SystemNotePacer`), since desktops refuse an app that sends several
+  within seconds (KDE Plasma: `ExcessNotificationGeneration`): the first
+  after a quiet spell goes out at once, what comes in the next 4 s
+  (`systemGap`) waits and then goes out as one (`SystemNote.merge`: the
+  shared title, else "Starsync", a line each, at most 5; a later one with
+  the same tag replaces a waiting one; a click opens the chat when any is
+  chat), which starts the next gap. What still waits when the window
+  comes back to the front is dropped (its toasts show it).
 - A nudge also asks for attention; an available update makes no notice
   (the update band shows it, off the full player while a video is on).
 - The unread badge counts chat in the log (never on the picture while it

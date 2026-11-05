@@ -295,7 +295,7 @@ void main() {
     test('in the background: a system notification; a click focuses the window and opens the chat', () async {
       final system = _FakeSystem();
       var focused = 0;
-      final n = Notifier(system: system, focusWindow: () async => focused++);
+      final n = Notifier(system: system, focusWindow: () async => focused++, systemGap: Duration.zero);
       n.session = () => (self: Presence.watching, alone: false, playing: false);
       n.window = WindowActivity.minimised;
       n.notify(_of(_feed('chat', reason: 'hi')));
@@ -304,6 +304,7 @@ void main() {
       system.click(SystemNote.payloadChat);
       expect(focused, 1);
       expect(n.chatRequests.peek(), 1);
+      await Future<void>.delayed(Duration.zero);
       // A click on any other one only brings the window up.
       n.notify(const PlaybackStarted('Frieren'));
       expect(system.shown.last, ('Starsync', 'Starting now: Frieren', ''));
@@ -315,6 +316,50 @@ void main() {
       n.notify(_of(_feed('chat', reason: 'again')));
       expect(system.shown, hasLength(2));
       n.clear();
+    });
+
+    test('a burst of system notifications goes out as one, then spaced (KDE refuses many at once)', () async {
+      final system = _FakeSystem();
+      final n = Notifier(system: system, systemGap: const Duration(milliseconds: 200));
+      n.session = () => (self: Presence.watching, alone: false, playing: false);
+      n.window = WindowActivity.unfocused;
+      // A swap in the background: starting now, Up next adds, chat.
+      n.notify(const PlaybackStarted('Frieren'));
+      n.notify(_of(_feed('queue-add', target: 'Ep 6')));
+      n.notify(_of(_feed('queue-add', actor: 'Bob', target: 'Ep 7')));
+      n.notify(_of(_feed('chat', reason: 'hi')));
+      expect(system.shown, [('Starsync', 'Starting now: Frieren', '')], reason: 'the first goes out at once');
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(system.shown, hasLength(1), reason: 'the rest waits for the gap');
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      // Bob's add replaced Ann's (same tag, as in the notification center).
+      expect(system.shown, [
+        ('Starsync', 'Starting now: Frieren', ''),
+        ('Starsync', 'Bob added Ep 7 to Up next\nAnn: hi', SystemNote.payloadChat),
+      ]);
+      // One more within the next gap waits alone and goes out as it is.
+      n.notify(_of(_feed('chat', actor: 'Bob', reason: 'yo')));
+      expect(system.shown, hasLength(2));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      expect(system.shown.last, ('Bob', 'yo', SystemNote.payloadChat));
+      // Back in front: what waits is dropped.
+      n.notify(_of(_feed('chat', reason: 'a')));
+      n.window = WindowActivity.focused;
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      expect(system.shown, hasLength(3));
+      n.clear();
+    });
+
+    test('a merged system notification keeps one title and caps its lines', () {
+      final same = SystemNote.merge([
+        for (final t in ['a', 'b']) SystemNote(title: 'Ann', body: t, line: 'Ann: $t'),
+      ]);
+      expect((same.title, same.body), ('Ann', 'a\nb'));
+      final many = SystemNote.merge([
+        for (var i = 0; i < 8; i++) SystemNote(title: 'P$i', body: 'x', line: 'P$i: x'),
+      ]);
+      expect(many.title, 'Starsync');
+      expect(many.body.split('\n'), ['P0: x', 'P1: x', 'P2: x', 'P3: x', '+4 more']);
     });
 
     test('owns the toast timer: a toast goes after its time, a dismissed one at once', () async {
