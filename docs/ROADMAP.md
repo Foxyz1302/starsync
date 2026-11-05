@@ -228,7 +228,38 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
 
 Next: **Playback and presence** (epic, below; protocol 17).
 
-0. **media_kit fork evaluation** (after the restructure): upstream
+0. **Move to the owner's media_kit fork** (after 1.4.1):
+   `Foxyz1302/media-kit`, branch `integration` (a local checkout sits
+   beside this repo as `../media-kit`). Replacing the
+   vendored `third_party/media_kit_video` brings:
+   - the non-blocking Linux render (`BLOCK_FOR_TARGET_TIME=0`, also in
+     the software path) with `video-timing-offset` 0.02 unless the app
+     set one. Measured at 75 Hz: late UI frames over a video drop from
+     2764/2947 to 1/3681; audio-pts against time-pos goes from −23 ms to
+     +2 ms;
+   - the Linux teardown fixes (a per-texture lock, deferred unref, the
+     SEGV);
+   - the texture-name-context and VideoController first-frame fixes,
+     which make our `starsync/` patches for them unnecessary;
+   - render at widget size (`renderAtWidgetSize`, `setViewSize`), which
+     can replace Sharp video's own sizing;
+   - the Windows plugin rendering on its own thread, publish-under-lock,
+     the normalizeURI fix and the teardown ordering. Windows crashes about
+     once per 5–6 opens or switches in the shared logs (bundled libmpv 0.36,
+     ANGLE/D3D11, d3d11va-copy), with "Failed to create EGL surface" at
+     every player creation.
+
+   Check when switching:
+   - which `starsync/*.patch` are already in the fork;
+   - our hwdec and cache option pinning;
+   - the glsl-shaders read-back compared as a list;
+   - the newer Windows libmpv only needs `tls-verify=no`.
+
+   Also bisect the 44–46 dropped video frames in a 60 s Starsync run,
+   which the fork's player alone does not show (1 drop). Suspects:
+   shaders, Sharp video's resizes, Up next preload, the relay stream.
+
+   The rest of this entry is the earlier evaluation of other forks. Upstream
    media-kit releases stalled at media_kit_video 2.0.1 (Dec 2025) though
    main still gets fixes; `Predidit/media-kit` is active (138 ahead, 146
    behind upstream) with native D3D11 on Windows (no ANGLE: may fix P30
@@ -347,12 +378,13 @@ Next: **Playback and presence** (epic, below; protocol 17).
    - Linux frames are capped at 60 Hz whatever the monitor runs at: the
      GTK embedder gives the engine no vsync source (a fixed 1/60 s
      fallback, flutter/flutter#191245) and GTK3's GL window gets no
-     presentation feedback on Wayland. With a video open, mpv also waits
-     inside Flutter's frame for the video frame's time, so a quarter of
-     UI frames come late. A runner prototype paces frames to the
-     compositor through private Flutter and GTK structures, and mpv
-     renders without waiting; undecided. Mouse drags may still feel
+     presentation feedback on Wayland. A runner prototype paces frames to
+     the compositor through private Flutter and GTK structures;
+     undecided. (mpv waiting inside Flutter's frame is the fork move,
+     backlog 0.) Mouse drags may still feel
      sampled at 60 Hz with it (being researched).
+   - One open made two session players (#1 and #2) in a diagnostics
+     test run: find out why.
    - The video freeze after GPU idle: next suspect is media_kit's context
      switching on the raster thread with NVIDIA.
    - Timelines: draw mpv's real cached ranges (`demuxer-cache-state`
