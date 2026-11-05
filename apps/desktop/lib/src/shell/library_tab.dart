@@ -262,6 +262,7 @@ class _LibraryTabState extends State<LibraryTab> {
             onOpenAccounts: widget.onOpenAccounts,
             start: widget.jellyfinStart,
             libraryStrip: false,
+            alone: widget.alone,
             empty: (context) => NoJellyfinPanel(
               accounts: widget.accounts,
               onFiles: () => _c.source = MediaKind.file,

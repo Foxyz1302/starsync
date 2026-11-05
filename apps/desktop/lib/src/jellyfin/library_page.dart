@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:sync_relay_core/core.dart';
@@ -70,7 +71,49 @@ class _JellyfinLibraryPageState extends State<JellyfinLibraryPage> {
     final first = _scope == null;
     final changedServer = _scope != null && _scope!.client != scope.client;
     _scope = scope;
-    if (first || changedServer) _reload();
+    if (first || changedServer) {
+      _version = scope.controller.version;
+      _reload();
+    }
+  }
+
+  /// The browser's data version the items were loaded at.
+  int _version = 0;
+
+  @override
+  void didUpdateWidget(JellyfinLibraryPage old) {
+    super.didUpdateWidget(old);
+    // Watched state changed (a mark, a playback): the loaded items again,
+    // in place.
+    final scope = _scope;
+    if (scope != null && scope.controller.version != _version) {
+      _version = scope.controller.version;
+      _refresh();
+    }
+  }
+
+  /// Loads the items shown so far again and swaps them in when they come
+  /// (the grid keeps its place meanwhile).
+  Future<void> _refresh() async {
+    final scope = _scope;
+    if (scope == null || _items.isEmpty || _loading) return;
+    final gen = ++_gen;
+    // No page loads meanwhile: they would land on the old list.
+    _loading = true;
+    try {
+      final page = await scope.client.items(_query.page(0, math.max(_items.length, libraryPageSize)));
+      if (gen != _gen || !mounted) return;
+      setState(() {
+        _items
+          ..clear()
+          ..addAll(page.items);
+        _total = page.items.isEmpty ? 0 : page.totalRecordCount;
+        _loading = false;
+      });
+    } catch (_) {
+      // The grid stays as it was.
+      if (gen == _gen && mounted) setState(() => _loading = false);
+    }
   }
 
   @override

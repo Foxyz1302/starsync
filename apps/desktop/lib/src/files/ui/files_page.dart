@@ -291,34 +291,37 @@ class _FilesPageState extends State<FilesPage> {
 
   VoidCallback _tapOf(String path) => () => _play(path);
 
-  /// Right-click on a video ([context]: its tile): Put it up, Add to
-  /// queue, Play next.
-  Future<void> _menu(BuildContext context, String path) async {
+  /// Right-click on a video ([context]: its tile): Put it up (Play when
+  /// alone; [what]: which episode, on a show's card), Add to queue, Play
+  /// next (in a server), and [extra] rows after them.
+  Future<void> _menu(BuildContext context, String path,
+      {String? what, List<(String, IconData, VoidCallback)> extra = const []}) async {
     final add = widget.onAddToQueue;
-    if (add == null) return;
+    final verb = widget.alone ? 'Play' : 'Put it up';
     final pick = await showAppMenu<int>(context, items: [
-      AppMenuItem(value: 0, label: widget.alone ? 'Play' : 'Put it up'),
-      const AppMenuItem(value: 1, label: 'Add to queue'),
-      const AppMenuItem(value: 2, label: 'Play next'),
+      AppMenuItem(value: 0, label: what == null ? verb : '$verb · $what', icon: Icons.play_arrow_rounded),
+      if (add != null) ...const [
+        AppMenuItem(value: 1, label: 'Add to queue', icon: Icons.playlist_add_rounded),
+        AppMenuItem(value: 2, label: 'Play next', icon: Icons.queue_play_next_rounded),
+      ],
+      for (final (i, (label, icon, _)) in extra.indexed) AppMenuItem(value: 3 + i, label: label, icon: icon),
     ]);
     if (pick == null || !mounted) return;
     if (pick == 0) return _play(path);
+    if (pick >= 3) return extra[pick - 3].$3();
     String? error;
     try {
-      error = await add(path, next: pick == 2);
+      error = await add!(path, next: pick == 2);
     } catch (e) {
       error = '$e';
     }
     if (error != null) _showError(error);
   }
 
-  /// [child] with the right-click menu (when there is a server).
-  Widget _menuable(String path, Widget child) => widget.onAddToQueue == null
-      ? child
-      : KeyedSubtree(
-          key: ValueKey('menu:$path'),
-          child: Builder(
-              builder: (context) => GestureDetector(onSecondaryTap: () => _menu(context, path), child: child)));
+  /// [child] with the right-click menu.
+  Widget _menuable(String path, Widget child) => KeyedSubtree(
+      key: ValueKey('menu:$path'),
+      child: Builder(builder: (context) => GestureDetector(onSecondaryTap: () => _menu(context, path), child: child)));
 
   late final _actions = FilesActions(
     play: (p) => unawaited(_play(p)),
@@ -813,16 +816,18 @@ class _FilesPageState extends State<FilesPage> {
   Widget _showCard(String place, _Library lib, LocalShow show) {
     final m = _matcher.showMatch(show);
     final last = _lastPlayed(lib, show);
+    // What the show page's next-episode button plays.
+    final next = show.nextAfter(last);
     final String subtitle;
     if (last == null) {
       final n = show.episodeCount;
       subtitle = '$n ${n == 1 ? 'episode' : 'episodes'}';
     } else {
-      final next = show.nextAfter(last);
       subtitle = next == null ? 'Watched to the end' : 'Next: ${episodeNumber(next.episode)}';
     }
     final playing = widget.nowPlayingPath != null && show.files.any((e) => e.path == widget.nowPlayingPath);
-    return PosterCard(
+    void open() => setState(() => _openShows[place] = show.key);
+    final card = PosterCard(
       key: ValueKey('showcard:${show.key}'),
       title: m?.entry.title ?? show.title,
       subtitle: subtitle,
@@ -831,7 +836,25 @@ class _FilesPageState extends State<FilesPage> {
       thumbs: _thumbs,
       playing: playing,
       onShown: () => _matcher.want(show),
-      onTap: () => setState(() => _openShows[place] = show.key),
+      onTap: open,
+    );
+    // Right-click: the show page's next episode (put it up, queue), and
+    // the page itself.
+    return Builder(
+      builder: (context) => GestureDetector(
+        onSecondaryTap: () {
+          const page = ('Open the show page', Icons.live_tv_outlined);
+          if (next == null) {
+            showAppMenu<int>(context, items: [AppMenuItem(value: 0, label: page.$1, icon: page.$2)])
+                .then((v) => v == 0 && mounted ? open() : null);
+            return;
+          }
+          final e = next.episode;
+          _menu(context, e.path,
+              what: e.season == null ? 'Episode ${e.episode}' : episodeNumber(e), extra: [(page.$1, page.$2, open)]);
+        },
+        child: card,
+      ),
     );
   }
 

@@ -105,12 +105,14 @@ class AppGlass extends StatelessWidget {
 }
 
 /// One row: [label], a dim [hint] at the right, [checked] = the current
-/// one (null: the menu has no checks for this row).
+/// one (null: the menu has no checks for this row), [icon] before the
+/// label (an action's own icon, the same as its button's).
 class AppMenuItem<T> {
   final T value;
   final String label;
   final String? hint;
   final bool? checked;
+  final IconData? icon;
   final bool enabled;
   final Key? key;
   const AppMenuItem({
@@ -118,10 +120,14 @@ class AppMenuItem<T> {
     required this.label,
     this.hint,
     this.checked,
+    this.icon,
     this.enabled = true,
     this.key,
   });
 }
+
+/// The rows have a leading column: checks or icons.
+bool _leads(List<AppMenuItem<Object?>> items) => items.any((i) => i.checked != null || i.icon != null);
 
 /// Opens the menu at [context]'s box (the button). Resolves to the picked
 /// value, or null when dismissed. [minWidth]: at least this wide (a picker
@@ -151,7 +157,7 @@ Future<int?> _openMenu(BuildContext context, List<AppMenuItem<Object?>> items, d
   );
   // Lines the rows' text up with the button's label: panel padding (4)
   // plus the row's text inset, against [textAt].
-  final shift = textAt == null ? 0.0 : textAt - 4 - _MenuRow.textInset(items.any((i) => i.checked != null));
+  final shift = textAt == null ? 0.0 : textAt - 4 - _MenuRow.textInset(_leads(items));
   Future<int?> open() => navigator.push<int>(_AppMenuRoute(
         anchor: anchor.translate(shift, 0),
         items: items,
@@ -278,7 +284,7 @@ class _AppMenuPanelState extends State<_AppMenuPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final checks = widget.items.any((i) => i.checked != null);
+    final checks = _leads(widget.items);
     final panel = AppGlass(
       key: const ValueKey('app-menu'),
       child: IntrinsicWidth(
@@ -316,6 +322,7 @@ class _AppMenuPanelState extends State<_AppMenuPanel> {
 
 class _MenuRow extends StatelessWidget {
   final AppMenuItem<Object?> item;
+  /// The leading column (checks or icons).
   final bool checks;
   final bool autofocus;
   // Keyboard in use: the focused row shows (else focus stays invisible,
@@ -355,7 +362,14 @@ class _MenuRow extends StatelessWidget {
             if (checks)
               SizedBox(
                 width: 22,
-                child: on ? Icon(Icons.check_rounded, size: 16, color: scheme.primary) : null,
+                child: on
+                    ? Icon(Icons.check_rounded, size: 16, color: scheme.primary)
+                    : item.icon == null
+                        ? null
+                        : Align(
+                            alignment: Alignment.centerLeft,
+                            child: Icon(item.icon, size: 16, color: item.enabled ? scheme.onSurfaceVariant : color),
+                          ),
               ),
             Flexible(
               fit: FlexFit.tight,

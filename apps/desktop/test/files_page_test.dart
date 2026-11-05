@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/gestures.dart' show kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
@@ -268,6 +269,38 @@ void main() {
     // Recent names the show and episode.
     await openPlace(tester, 'Recent');
     expect(find.text('Bleach · E108'), findsOneWidget);
+  });
+
+  testWidgets("right-click: a show's card puts up its next episode or opens its page; a video works with no server",
+      (tester) async {
+    store.addFolder(anime);
+    final played = <String>[];
+    await pumpPage(tester, onPlay: (p) async {
+      played.add(p);
+      return null;
+    });
+    final bleachCard = find.widgetWithText(PosterCard, 'Bleach');
+    await reveal(tester, bleachCard);
+    await tester.tap(bleachCard, buttons: kSecondaryButton);
+    await frames(tester, 3);
+    // What the show page's button plays; no server: no Up next rows.
+    expect(find.text('Put it up · Episode 56'), findsOneWidget);
+    expect(find.text('Add to queue'), findsNothing);
+    await tester.tap(find.text('Put it up · Episode 56'));
+    await frames(tester);
+    expect(played, [bleach(56)]);
+    await tester.tap(bleachCard, buttons: kSecondaryButton);
+    await frames(tester, 3);
+    await tester.tap(find.text('Open the show page'));
+    await frames(tester);
+    expect(find.text('Wrong show?'), findsOneWidget);
+    // An episode row there: the same menu with no server.
+    await reveal(tester, find.text('Episode 57'));
+    await tester.tap(find.text('Episode 57'), buttons: kSecondaryButton);
+    await frames(tester, 3);
+    await tester.tap(find.text('Put it up'));
+    await frames(tester);
+    expect(played.last, bleach(57));
   });
 
   testWidgets('Wrong show? pins the right AniList entry and the names follow', (tester) async {

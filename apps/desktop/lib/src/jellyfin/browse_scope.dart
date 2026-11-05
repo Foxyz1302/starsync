@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -6,8 +7,8 @@ import 'package:sync_relay_core/core.dart';
 
 import 'accounts.dart';
 import 'format.dart';
-import '../widgets/app_menu.dart';
-import '../widgets/copy_open.dart';
+import 'home_rows.dart' show continueKey;
+import 'item_actions.dart';
 
 /// One level of the library browser's back stack.
 sealed class BrowseRoute {
@@ -244,13 +245,97 @@ class BrowseController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Watched state changed on the server: drop its cached lists and let
-  /// the rows reload.
-  void dataChanged() {
-    final id = serverId;
+  /// Watched state changed on [server] (default: the one shown): drop its
+  /// cached lists and let the rows reload.
+  void dataChanged([String? server]) {
+    final id = server ?? serverId;
     if (id != null) accounts.invalidate(id);
     _version++;
     notifyListeners();
+  }
+
+  /// Watched marks made here ('serverId|itemId'), shown at once while the
+  /// lists holding the item load again; the newest mark wins.
+  final _marks = <String, ({bool played, int seq, DateTime at})>{};
+  int _markSeq = 0;
+
+  /// How long a mark stands in for the server's answer: the lists have
+  /// loaded again long before.
+  static const markHold = Duration(seconds: 30);
+
+  /// [item] as the marks made here say: watched or unwatched when it, its
+  /// season or its show was marked lately (no resume point either way, as
+  /// Jellyfin does).
+  JellyfinItem marked(String server, JellyfinItem item) {
+    if (_marks.isEmpty) return item;
+    ({bool played, int seq, DateTime at})? best;
+    for (final id in [item.id, item.seasonId, item.seriesId]) {
+      if (id == null) continue;
+      final m = _marks['$server|$id'];
+      if (m == null || now().difference(m.at) >= markHold) continue;
+      if (best == null || m.seq > best.seq) best = m;
+    }
+    if (best == null) return item;
+    final u = item.userData;
+    final folder = item.kind == JellyfinItemKind.series || item.kind == JellyfinItemKind.season;
+    return item.withUserData(JellyfinUserData(
+      played: best.played,
+      playCount: best.played ? math.max(1, u.playCount) : 0,
+      isFavorite: u.isFavorite,
+      unplayedItemCount: !folder
+          ? u.unplayedItemCount
+          : best.played
+              ? 0
+              : (u.unplayedItemCount == 0 ? null : u.unplayedItemCount),
+      playedPercentage: best.played && folder ? 100 : null,
+      lastPlayedDate: u.lastPlayedDate,
+    ));
+  }
+
+  /// Marks [item] watched or unwatched on [server]: an episode or a movie,
+  /// a season or a whole show (Jellyfin marks every episode in it). Every
+  /// row showing it (and a season's or show's episodes) shows it at once;
+  /// the lists load again. Throws what Jellyfin answered.
+  Future<void> setPlayed(String server, JellyfinItem item, bool played) async {
+    final c = accounts.clientFor(server);
+    if (c == null) throw const JellyfinException('that Jellyfin server is not linked any more');
+    final key = '$server|${item.id}';
+    _marks[key] = (played: played, seq: ++_markSeq, at: now());
+    notifyListeners();
+    try {
+      played ? await c.markPlayed(item.id) : await c.markUnplayed(item.id);
+    } catch (e) {
+      _marks.remove(key);
+      if (e is JellyfinException && e.isUnauthorized) accounts.markExpired(server);
+      rethrow;
+    } finally {
+      if (!_disposed) dataChanged(server);
+    }
+  }
+
+  /// Takes [item] out of the Continue row on [server]: its resume points
+  /// go (its own, or for a show every one in it: what Jellyfin offers), and
+  /// the row leaves its show out until it is played again (a next-up show
+  /// Jellyfin cannot drop).
+  Future<void> removeFromContinue(String server, JellyfinItem item) async {
+    final c = accounts.clientFor(server);
+    if (c == null) throw const JellyfinException('that Jellyfin server is not linked any more');
+    final key = continueKey(item);
+    try {
+      await accounts.dismissContinue(server, key);
+      final resumable = item.userData.isResumable
+          ? [item]
+          : (await accounts.cached(server, 'resume', () => c.resume(limit: 40)))
+              .where((r) => continueKey(r) == key && r.userData.isResumable);
+      for (final r in resumable) {
+        await c.clearResumePosition(r.id);
+      }
+    } on JellyfinException catch (e) {
+      if (e.isUnauthorized) accounts.markExpired(server);
+      rethrow;
+    } finally {
+      if (!_disposed) dataChanged(server);
+    }
   }
 
   set continueKeys(Set<String> keys) {
@@ -293,8 +378,10 @@ class BrowseScope extends InheritedWidget {
   /// Double-click: put it up (a series: its next episode).
   final ValueChanged<JellyfinItem> onPutUp;
   /// Adds it to Up next (with next: right after what plays); null: no
-  /// server (the cards' menu then only copies and opens).
+  /// server (the menus then have no queue actions).
   final void Function(JellyfinItem item, {bool next})? onAddToQueue;
+  /// Nobody else in the server: put it up says Play.
+  final bool alone;
   /// Home shows the library chips itself (the Library tab has them in its
   /// header instead).
   final bool libraryStrip;
@@ -309,6 +396,7 @@ class BrowseScope extends InheritedWidget {
     required this.onSelect,
     required this.onPutUp,
     this.onAddToQueue,
+    this.alone = false,
     this.libraryStrip = true,
     required super.child,
   });
@@ -318,32 +406,33 @@ class BrowseScope extends InheritedWidget {
 
   void onOpen(BrowseRoute route) => controller.open(route);
 
-  /// Right-click on a card ([context]: the card): Put it up, Add to queue,
-  /// Play next (playable, in a server), Copy title, Open in Jellyfin.
-  Future<void> cardMenu(BuildContext context, JellyfinItem item) async {
-    final queue = isSelectable(item) ? onAddToQueue : null;
-    final pick = await showAppMenu<int>(context, items: [
-      if (queue != null) ...const [
-        AppMenuItem(value: 0, label: 'Put it up'),
-        AppMenuItem(value: 1, label: 'Add to queue'),
-        AppMenuItem(value: 2, label: 'Play next'),
-      ],
-      const AppMenuItem(value: 3, label: ReuseText.copyTitle),
-      const AppMenuItem(value: 4, label: ReuseText.openInJellyfin),
-    ]);
-    switch (pick) {
-      case 0:
+  /// The actions of this server's items (errors of put-up and queue go
+  /// out as the Library's toasts).
+  JellyfinItemActions get actions {
+    final queue = onAddToQueue;
+    return JellyfinItemActions(
+      controller: controller,
+      serverId: account.serverId,
+      alone: alone,
+      putUp: (item) async {
         onPutUp(item);
-      case 1:
-        queue!(item);
-      case 2:
-        queue!(item, next: true);
-      case 3:
-        if (context.mounted) await copyToClipboard(context, jellyfinCopyTitle(item), done: 'Title copied');
-      case 4:
-        if (context.mounted) await openLink(context, jellyfinWebUrl(client.baseUrl, item.id, serverId: account.serverId));
-    }
+        return null;
+      },
+      queue: queue == null
+          ? null
+          : (item, {next = false}) async {
+              queue(item, next: next);
+              return null;
+            },
+    );
   }
+
+  /// [item] with the watched marks made here.
+  JellyfinItem marked(JellyfinItem item) => controller.marked(account.serverId, item);
+
+  /// Right-click on a card, tile or row ([context]: it): what [item]
+  /// offers ([jellyfinActions]), the same as the details panel's.
+  Future<void> itemMenu(BuildContext context, JellyfinItem item) => actions.showMenu(context, item);
 
   /// Cached browse call on this server.
   Future<T> load<T>(String key, Future<T> Function(JellyfinClient c) fn) =>
@@ -383,6 +472,7 @@ class BrowseScope extends InheritedWidget {
       old.selectedItemId != selectedItemId ||
       old.account != account ||
       old.client != client ||
+      old.alone != alone ||
       old.libraryStrip != libraryStrip;
 }
 

@@ -1972,15 +1972,17 @@ Reusing what the app shows (`widgets/copy_open.dart`): one wording
 (`ReuseText`: Copy link, Copy title, Copy message, Open in browser, Open
 in Jellyfin) in every right-click menu that offers it, and a toast
 confirming a copy ("Link copied"); a browser that will not start copies
-the link instead. Offered on recent links and the Link preview (Copy
-link, Copy title, Open in browser), Up next rows (see "Up next"), the
+the link instead. Offered on recent links and the Link preview (one
+menu for both: Put it up, Add to queue, Play next, Copy link, Copy title,
+Open in browser), Up next rows (see "Up next"), the
 now-playing title (Copy title; with the link known here,
 `SessionCoordinator.currentLink`: one this app put up, or one in the
 state, Copy link and Open in browser; a Jellyfin item of a server linked
-here, Open in Jellyfin), Jellyfin cards and episodes (Copy title, an
-episode with its series; Open in Jellyfin: `jellyfinWebUrl`, the item's
-page on its server's web UI, no credentials; also a button in the details
-panel) and chat messages (Copy message, and a link in it).
+here, Open in Jellyfin), Jellyfin items (Copy title, an episode with its
+series; Open in Jellyfin: `jellyfinWebUrl`, the item's page on its
+server's web UI, no credentials; see "Jellyfin item actions") and chat
+messages (Copy message, and a link in it). Menu rows can carry the
+action's own icon (`AppMenuItem.icon`, the same as its button's).
 
 - **Party strip** (`party_strip.dart`, 60 px): your avatar (profile card; 42 px like the party's),
   the Library / Schedule / Settings tabs with a growing underline (an
@@ -2080,10 +2082,12 @@ panel) and chat messages (Copy message, and a link in it).
   with the last put-up selected. Jellyfin cards select on click and open
   `JellyfinDetailsPanel` (`jellyfin/details_panel.dart`, 400 px, slides
   in, docked from 1000 px library width, floating over it below; content
-  cross-fades between items): banner, meta, "Put it up · S1E3", mark
-  watched / unwatched, remove from Continue, overview, the episode list
-  (click picks the episode, double-click puts it up). A double-click on a
-  card puts it up (a series: `playableFor`, its next episode). Link
+  cross-fades between items): banner, meta, "Put it up · S1E3" and the
+  item's actions (see "Jellyfin item actions": a show's marks are the
+  whole show's, an episode's its own), overview, the episode list under
+  the season picker and the season's own actions (click picks the
+  episode, double-click puts it up, right-click its menu). A double-click
+  on a card puts it up (a series: `playableFor`, its next episode). Link
   (`library_link.dart`): paste field, a preview (a page's yt-dlp title,
   uploader, length and thumbnail, else the file name; see "yt-dlp"), the relay modes online ("Through me",
   the controller's default, as the main card; "Everyone fetches it" and
@@ -2109,8 +2113,9 @@ panel) and chat messages (Copy message, and a link in it).
   outside). A place is poster cards (2:3, like the Jellyfin browser's;
   the AniList cover, else a frame of the first episode) for its Shows and
   Movies, then the Other videos as 16:9 cards; a show card says how many
-  episodes, or the next one after the last played here. A click on a show
-  opens its page (`files/ui/library_view.dart`, kept open per place for
+  episodes, or the next one after the last played here (right-click: put
+  that one up or queue it, or open the page). A click on a show opens its
+  page (`files/ui/library_view.dart`, kept open per place for
   the app session, Back returns): a banner header (AniList banner, else a
   frame) with the proper name, what the files are (seasons, episodes,
   extras, group, folders), the match ("AniList: …", "files say …",
@@ -2118,7 +2123,8 @@ panel) and chat messages (Copy message, and a link in it).
   108?") above the next-episode button, Wrong show? and Episode
   numbers…; then season chips (more than one season), the season's
   episodes as rows ("12. Name" with AniList's episode title, else
-  "Episode 12"; one click plays, right-click queues) with the holes as
+  "Episode 12"; one click plays, right-click: put it up, and in a server
+  queue it) with the holes as
   muted rows, Extras and the show's Movies. With nobody else
   in the server (`alone` on the Library, Files and Schedule, D9) the
   buttons say Play, Link has no relay modes and a link goes up direct,
@@ -2556,10 +2562,14 @@ Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
   series) kept alive under `Visibility(maintainState)` so back keeps
   scroll and loaded pages; search (300 ms debounce) overlays them. Where
   it is (server, stack, a data version that moves after watched-state
-  changes so rows reload in place — a change from the details panel, or
-  `JellyfinAccounts.watched` once a playback's Stopped report went out —,
-  the Continue keys) is a
+  changes so rows, grids, search and the panel reload in place — a mark
+  or Remove from Continue, or `JellyfinAccounts.watched` once a
+  playback's Stopped report went out —, the Continue keys) is a
   `BrowseController` shared with the header chips and the details panel.
+  It also keeps the watched marks made here (`marked`: an item, or every
+  episode of a marked season or show, shows watched or unwatched with no
+  resume point at once, for 30 s, while the lists load again; the newest
+  mark wins).
   Cards (`cards.dart`) fill the width with whole columns (`fitColumns`);
   rows are `HScroll`s, rows and grids lazy builders; library grids page
   100 at a time with skeletons up to the total count. Images
@@ -2570,13 +2580,35 @@ Jellyfin on the desktop (`lib/src/jellyfin/`, over the core client):
   `mergeContinue` over Resume, NextUp and recently played: one card per
   series, ordered by when it was last played, the resume item if that was
   the last thing played in it, else next up; series untouched for 60 days
-  drop out unless nothing else is left; "Remove from Continue" clears a
-  resume point and hides the series (`dismissed:<serverId>` in the
-  `jellyfin` box) until it is played again. "Latest in X" loads single
+  drop out unless nothing else is left; "Remove from Continue" hides the
+  series (`dismissed:<serverId>` in the `jellyfin` box) until it is
+  played again and clears its resume points (the item's, or each of the
+  show's in Resume: Jellyfin has no hide-from-resume of its own). "Latest in X" loads single
   items (`groupItems=false`) and `latestCards` makes one series card per
   series (its poster, "S1E1" or "N new"); with `hideReReleases` (the
   row's ⋮ menu, default on) items added over 30 days after they aired are left
   out. "Show all" opens the library sorted by date added, newest first.
+- **Jellyfin item actions** (`item_actions.dart`): one list per item kind,
+  `jellyfinActions`, read by every place an item shows: the right-click
+  menu of cards (Continue, Latest, library grids, search), the show page's
+  episode tiles, the panel's episode rows and the show page's season
+  chips; the details panel's buttons (Put it up, the queue, the mark,
+  Remove from Continue, the show page; compact, one line) and its ⋮
+  beside Close (the whole list, so it is the right-click menu); the show
+  page's header and the season's buttons.
+  Episodes, movies and videos: Put it up (Play alone), Add to queue, Play
+  next (in a server), Mark watched or Mark unwatched (by its state),
+  Remove from Continue (its show is in the row, or it has a resume
+  point), Open the show page (episodes; not while that page is open),
+  Copy title, Open in Jellyfin. Shows: the same, with Put it up for its
+  next episode and Mark show watched / unwatched (every episode:
+  `UserPlayedItems` on the series; asks first, `confirmShowMark`).
+  Seasons: Mark season watched / unwatched (no question), the show page,
+  copy and open. Libraries and folders: copy and open. Each has its name
+  and icon in menus and on buttons. `JellyfinItemActions.run` does them:
+  put-up and queue through the Library's callbacks, marks and Continue
+  through the `BrowseController` (`setPlayed`, `removeFromContinue`),
+  errors under the panel's buttons or as a toast from a menu.
 - Picking an item gives a `JellyfinMedia` (serverId, baseUrl, itemId,
   mediaSourceId?, title, subtitle, runtime; no credentials). The library
   remembers the last pick in the `jellyfin` box and puts it up as a ref

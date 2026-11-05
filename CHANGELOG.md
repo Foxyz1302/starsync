@@ -12,6 +12,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - The video's volume is remembered: the next start begins where you left it
 - M mutes and unmutes the video
 - When Starsync crashes or freezes, it now notes it in the diagnostics it shares by itself (on Windows with the system's crash report from the next start), so a problem can be tracked down without you sending anything
+- Mark a whole Jellyfin show or season watched (or unwatched) from its page or its right-click menu; a whole show asks first
 
 ### Changed
 
@@ -30,6 +31,8 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - A message sent from the quick chat box now shows as your own chat bubble with everyone else's, instead of a separate echo where the box was
 - A pasted or dropped link goes up with one click on its card, like adding it to Up next (it used to open the Link page first). While the others are watching something, Add to queue comes first on the card and putting up says "Put it up now"
 - The old program names from before Starsync (`watch_together`, `watch-together-server`, `.exe` on Windows) are gone from the folder: if you start Starsync from an old shortcut, make a new one to `starsync` / `starsync.exe`
+- A Jellyfin item's right-click menu now has everything its details panel has, with the same names and icons: Mark watched or unwatched, Remove from Continue and Open the show page sit next to Put it up, the queue, Copy title and Open in Jellyfin, for episodes, movies, shows and seasons everywhere they show. A mark shows on every row at once
+- Right-click a show in Files to put up its next episode or open its page; a video's right-click works without a server too, and a link's preview has the same menu as a recent link
 
 ### Fixed
 

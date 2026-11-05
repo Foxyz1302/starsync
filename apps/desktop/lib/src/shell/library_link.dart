@@ -566,52 +566,41 @@ class _LibraryLinkSourceState extends State<LibraryLinkSource> {
     });
   }
 
-  /// Right-click on a recent link: put it up or queue it, copy or open it.
-  Future<void> _recentMenu(BuildContext context, RecentLink l) async {
+  /// Right-click on a link, a recent one or the preview (the same menu):
+  /// put it up or queue it, copy it ([title]: its title too) or open it.
+  Future<void> _linkMenu(BuildContext context, String url, String? title) async {
     final pick = await showAppMenu<String>(context, items: [
-      AppMenuItem(value: 'up', label: widget.alone ? 'Play' : 'Put it up'),
+      AppMenuItem(value: 'up', label: widget.alone ? 'Play' : 'Put it up', icon: Icons.play_arrow_rounded),
       if (widget.onAddToQueue != null) ...const [
-        AppMenuItem(value: 'queue', label: 'Add to queue'),
-        AppMenuItem(value: 'next', label: 'Play next'),
+        AppMenuItem(value: 'queue', label: 'Add to queue', icon: Icons.playlist_add_rounded),
+        AppMenuItem(value: 'next', label: 'Play next', icon: Icons.queue_play_next_rounded),
       ],
-      const AppMenuItem(value: 'copy', label: ReuseText.copyLink),
-      const AppMenuItem(value: 'title', label: ReuseText.copyTitle),
-      const AppMenuItem(value: 'open', label: ReuseText.openInBrowser),
+      const AppMenuItem(value: 'copy', label: ReuseText.copyLink, icon: Icons.link_rounded),
+      if (title != null && title.isNotEmpty)
+        const AppMenuItem(value: 'title', label: ReuseText.copyTitle, icon: Icons.copy_rounded),
+      const AppMenuItem(value: 'open', label: ReuseText.openInBrowser, icon: Icons.open_in_browser_rounded),
     ]);
     if (pick == null || !mounted || !context.mounted) return;
     switch (pick) {
       case 'copy':
-        return copyToClipboard(context, l.url, done: 'Link copied');
+        return copyToClipboard(context, url, done: 'Link copied');
       case 'title':
-        return copyToClipboard(context, l.title, done: 'Title copied');
+        return copyToClipboard(context, title!, done: 'Title copied');
       case 'open':
-        return openLink(context, l.url);
+        return openLink(context, url);
     }
-    _c.link.text = l.url;
+    if (_c.link.text.trim() != url) _c.link.text = url;
     switch (pick) {
       case 'up':
         await _go();
       case 'queue' || 'next':
-        await _queue(url: l.url, next: pick == 'next');
+        await _queue(url: url, next: pick == 'next');
     }
   }
 
-  /// Right-click on the preview: copy or open the link.
-  Future<void> _previewMenu(BuildContext context, String url, LinkPreview? p) async {
-    final pick = await showAppMenu<String>(context, items: [
-      const AppMenuItem(value: 'copy', label: ReuseText.copyLink),
-      if (p != null) const AppMenuItem(value: 'title', label: ReuseText.copyTitle),
-      const AppMenuItem(value: 'open', label: ReuseText.openInBrowser),
-    ]);
-    switch (pick) {
-      case 'copy':
-        if (context.mounted) await copyToClipboard(context, url, done: 'Link copied');
-      case 'title':
-        if (context.mounted) await copyToClipboard(context, p!.title, done: 'Title copied');
-      case 'open':
-        if (context.mounted) await openLink(context, url);
-    }
-  }
+  Future<void> _recentMenu(BuildContext context, RecentLink l) => _linkMenu(context, l.url, l.title);
+
+  Future<void> _previewMenu(BuildContext context, String url, LinkPreview? p) => _linkMenu(context, url, p?.title);
 
   Widget _modeCard((LinkRelay, IconData, String, String) m, {bool compact = false}) => _ModeCard(
         key: ValueKey('link-mode-${m.$1.name}'),

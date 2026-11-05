@@ -104,7 +104,10 @@ class _MediaCardState extends State<MediaCard> {
     final scope = BrowseScope.of(context);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final shown = widget.display ?? item;
+    // Watched marks made here show at once, before the row loads again.
+    final item = scope.marked(widget.item);
+    final display = widget.display;
+    final shown = display == null ? item : scope.marked(display);
     final selected = scope.selectedItemId == item.id;
     final played = item.userData.played;
     final progress = progressOf(item);
@@ -186,7 +189,7 @@ class _MediaCardState extends State<MediaCard> {
         focusColor: Colors.transparent,
         hoverColor: Colors.transparent,
         onTap: () => _tap(scope),
-        onSecondaryTap: () => scope.cardMenu(context, item),
+        onSecondaryTap: () => scope.itemMenu(context, item),
         onHover: (h) => setState(() => _hover = h),
         onFocusChange: (f) => setState(() => _focus = f),
         child: Column(

@@ -18,6 +18,8 @@ class JellyfinPickerSource extends StatefulWidget {
   final VoidCallback? onOpenAccounts;
   final BrowseStart? start;
   final bool libraryStrip;
+  /// Nobody else in the server: put it up says Play.
+  final bool alone;
   /// Shown while no server is linked.
   final WidgetBuilder? empty;
   const JellyfinPickerSource({
@@ -31,6 +33,7 @@ class JellyfinPickerSource extends StatefulWidget {
     this.selected,
     this.onOpenAccounts,
     this.libraryStrip = true,
+    this.alone = false,
     this.empty,
   });
 
@@ -67,6 +70,7 @@ class _JellyfinPickerSourceState extends State<JellyfinPickerSource> {
           onOpenAccounts: widget.onOpenAccounts,
           start: widget.start,
           libraryStrip: widget.libraryStrip,
+          alone: widget.alone,
         );
       },
     );

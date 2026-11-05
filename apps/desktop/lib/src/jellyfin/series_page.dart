@@ -5,10 +5,13 @@ import 'browse_scope.dart';
 import 'cards.dart' show doubleClickTime;
 import 'format.dart';
 import 'images.dart';
+import 'item_actions.dart';
 
-/// Series page: backdrop + logo header with overview and the smart "next
-/// unwatched" button, a season selector and the season's episodes as dense
-/// rows (several columns on wide windows).
+/// Series page: backdrop + logo header with overview, the smart "next
+/// unwatched" button and the show's actions (mark the whole show, ⋮ with
+/// the rest), a season selector (right-click a season: its menu; the
+/// selected one's mark beside it) and the season's episodes as dense rows
+/// (several columns on wide windows).
 class JellyfinSeriesPage extends StatefulWidget {
   final JellyfinItem series;
   final String? seasonId;
@@ -62,10 +65,18 @@ class _JellyfinSeriesPageState extends State<JellyfinSeriesPage> {
       key: ValueKey('series-${widget.series.id}-${scope.account.serverId}'),
       version: scope.controller.version,
       load: () => _load(scope),
-      builder: (context, d) {
+      builder: (context, loaded) {
+        // Watched marks made here show at once.
+        final d = (
+          series: scope.marked(loaded.series),
+          seasons: [for (final s in loaded.seasons) scope.marked(s)],
+          next: loaded.next,
+        );
         final seasonId = (_seasonId != null && d.seasons.any((s) => s.id == _seasonId))
             ? _seasonId
             : _defaultSeason(d);
+        final season = d.seasons.where((s) => s.id == seasonId).firstOrNull;
+        final actions = scope.actions;
         return CustomScrollView(
           key: PageStorageKey('series-${widget.series.id}'),
           slivers: [
@@ -76,20 +87,33 @@ class _JellyfinSeriesPageState extends State<JellyfinSeriesPage> {
                 child: Wrap(
                   spacing: 8,
                   runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     for (final s in d.seasons)
-                      ChoiceChip(
-                        key: ValueKey('season-${s.id}'),
-                        label: Text(s.name),
-                        avatar: s.userData.played
-                            ? const Icon(Icons.check, size: 16)
-                            : null,
-                        showCheckmark: false,
-                        selected: s.id == seasonId,
-                        onSelected: (_) => setState(() => _seasonId = s.id),
-                        tooltip: s.userData.unplayedItemCount != null
-                            ? '${s.userData.unplayedItemCount} unwatched'
-                            : null,
+                      // Its own context: the menu opens at the chip.
+                      Builder(
+                        builder: (context) => GestureDetector(
+                          onSecondaryTap: () => scope.itemMenu(context, s),
+                          child: ChoiceChip(
+                            key: ValueKey('season-${s.id}'),
+                            label: Text(s.name),
+                            avatar: s.userData.played ? const Icon(Icons.check, size: 16) : null,
+                            showCheckmark: false,
+                            selected: s.id == seasonId,
+                            onSelected: (_) => setState(() => _seasonId = s.id),
+                            tooltip: s.userData.unplayedItemCount != null
+                                ? '${s.userData.unplayedItemCount} unwatched'
+                                : null,
+                          ),
+                        ),
+                      ),
+                    if (season != null)
+                      JellyfinActionButtons(
+                        key: ValueKey('season-actions-${season.id}'),
+                        keyPrefix: 'season',
+                        views: actions.of(season),
+                        icons: const {JellyfinAction.markWatched, JellyfinAction.markUnwatched},
+                        onRun: (a) => actions.runOrToast(context, season, a),
                       ),
                   ],
                 ),
@@ -217,12 +241,25 @@ class _SeriesHeaderState extends State<_SeriesHeader> {
                             ),
                           ],
                           const SizedBox(height: 14),
-                          Wrap(spacing: 8, runSpacing: 8, children: [
+                          Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
                             FilledButton.icon(
                               key: const ValueKey('series-next'),
                               onPressed: next == null ? null : () => scope.onSelect(next),
                               icon: Icon(selectedNext ? Icons.check : Icons.play_arrow),
                               label: Text(nextLabel, overflow: TextOverflow.ellipsis),
+                            ),
+                            // The show's own: the whole show's mark and the
+                            // rest under ⋮ (the same as its card's menu).
+                            JellyfinActionButtons(
+                              keyPrefix: 'series',
+                              views: scope.actions.of(s),
+                              icons: const {
+                                JellyfinAction.addToQueue,
+                                JellyfinAction.markWatched,
+                                JellyfinAction.markUnwatched,
+                                JellyfinAction.removeFromContinue,
+                              },
+                              onRun: (a) => scope.actions.runOrToast(context, s, a),
                             ),
                           ]),
                         ],
@@ -347,7 +384,7 @@ class _EpisodeTileState extends State<EpisodeTile> {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final t = theme.textTheme;
-    final e = widget.episode;
+    final e = scope.marked(widget.episode);
     final selected = scope.selectedItemId == e.id;
     final played = e.userData.played;
     final progress = progressOf(e);
@@ -375,7 +412,7 @@ class _EpisodeTileState extends State<EpisodeTile> {
         key: ValueKey('episode-${e.id}'),
         focusColor: Colors.transparent,
         onTap: () => _tap(scope),
-        onSecondaryTap: () => scope.cardMenu(context, widget.episode),
+        onSecondaryTap: () => scope.itemMenu(context, e),
         onHover: (h) => setState(() => _hover = h),
         onFocusChange: (f) => setState(() => _focus = f),
         child: Padding(

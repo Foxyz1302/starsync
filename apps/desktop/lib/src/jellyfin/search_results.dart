@@ -15,6 +15,8 @@ class JellyfinSearchResults extends StatelessWidget {
     final scope = BrowseScope.of(context);
     return Loader<List<JellyfinItem>>(
       key: ValueKey('search-$term-${scope.account.serverId}'),
+      // Watched state changed: the results again (they keep showing).
+      version: scope.controller.version,
       load: () => scope.load('search:$term', (c) => c.search(term, limit: 80)),
       builder: (context, items) {
         if (items.isEmpty) {

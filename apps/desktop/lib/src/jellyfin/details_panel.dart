@@ -3,13 +3,12 @@ import 'package:sync_relay_core/core.dart';
 
 import '../shell/motion.dart';
 import '../widgets/app_menu.dart';
-import '../widgets/copy_open.dart';
 import 'accounts.dart';
 import 'browse_scope.dart';
 import 'cards.dart' show doubleClickTime, kindIcon;
 import 'format.dart';
-import 'home_rows.dart' show continueKey;
 import 'images.dart';
+import 'item_actions.dart';
 
 /// Width of the details panel (docked or floating).
 const detailsPanelWidth = 400.0;
@@ -35,9 +34,12 @@ typedef _Data = ({
 
 /// The selected card's details, at the right of the library: banner,
 /// title, meta, "Put it up · S1E3" ("Play · S1E3" when watching
-/// [alone]), mark watched / unwatched, remove from Continue, overview and,
-/// for a series or an episode, the episode list (click picks which
-/// episode goes up, double-click puts it up). Reloads when the
+/// [alone]) and the item's actions ([jellyfinActions]: the common ones as
+/// buttons, all of them under ⋮, the same list as its right-click menu;
+/// a series' marks are the whole show's, an episode's its own), overview
+/// and, for a series or an episode, the episode list (click picks which
+/// episode goes up, double-click puts it up, right-click its menu) under
+/// the season picker and the season's actions. Reloads when the
 /// [controller]'s data version moves.
 class JellyfinDetailsPanel extends StatefulWidget {
   final BrowseController controller;
@@ -109,106 +111,48 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
   Future<List<JellyfinItem>> _episodes(String seriesId, String seasonId) =>
       _cached('episodes:$seriesId:$seasonId', (c) => c.episodes(seriesId, seasonId: seasonId));
 
-  Future<void> _putUp(JellyfinItem target) async {
-    if (_busy) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    String? error;
-    try {
-      error = await widget.onPutUp(JellyfinSelection(_serverId, target.id, target));
-    } catch (e) {
-      error = '$e';
-    }
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _error = error;
-    });
-  }
-
-  Future<void> _queue(JellyfinItem target, {bool next = false}) async {
+  /// The actions of this server's items, put-up and queue through the
+  /// Library (their errors show here).
+  JellyfinItemActions get _actions {
     final add = widget.onAddToQueue;
-    if (add == null || _busy) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    String? error;
-    try {
-      error = await add(JellyfinSelection(_serverId, target.id, target), next: next);
-    } catch (e) {
-      error = '$e';
-    }
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _error = error;
-    });
+    return JellyfinItemActions(
+      controller: _c,
+      serverId: _serverId,
+      alone: widget.alone,
+      putUp: (item) => widget.onPutUp(JellyfinSelection(_serverId, item.id, item)),
+      queue: add == null ? null : (item, {next = false}) => add(JellyfinSelection(_serverId, item.id, item), next: next),
+    );
   }
 
-  /// Right-click on an episode ([context]: its row): Put it up, Add to
-  /// queue, Play next (in a server), Copy title, Open in Jellyfin.
-  Future<void> _episodeMenu(BuildContext context, JellyfinItem e) async {
-    final queue = widget.onAddToQueue != null;
-    if (queue) setState(() => _targetId = e.id);
-    final client = _client;
-    final pick = await showAppMenu<int>(context, items: [
-      if (queue) ...[
-        AppMenuItem(value: 0, label: widget.alone ? 'Play' : 'Put it up'),
-        const AppMenuItem(value: 1, label: 'Add to queue'),
-        const AppMenuItem(value: 2, label: 'Play next'),
-      ],
-      const AppMenuItem(value: 3, label: ReuseText.copyTitle),
-      if (client != null) const AppMenuItem(value: 4, label: ReuseText.openInJellyfin),
-    ]);
-    switch (pick) {
-      case 0:
-        await _putUp(e);
-      case 1:
-        await _queue(e);
-      case 2:
-        await _queue(e, next: true);
-      case 3:
-        if (context.mounted) await copyToClipboard(context, jellyfinCopyTitle(e), done: 'Title copied');
-      case 4:
-        if (context.mounted) await openLink(context, jellyfinWebUrl(client!.baseUrl, e.id, serverId: _serverId));
-    }
-  }
-
-  /// Runs a watched-state change, then lets every row reload.
-  Future<void> _change(Future<void> Function(JellyfinClient c) action) async {
-    final c = _client;
-    if (c == null || _busy) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    String? error;
-    try {
-      await action(c);
-    } on JellyfinException catch (e) {
-      if (e.isUnauthorized) _accounts.markExpired(_serverId);
-      error = e.isUnauthorized ? 'Jellyfin sign-in expired' : e.message;
-    } catch (e) {
-      error = '$e';
-    }
-    _c.dataChanged();
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _error = error;
-    });
-  }
-
-  void _toggleWatched(JellyfinItem t) =>
-      _change((c) => t.userData.played ? c.markUnplayed(t.id) : c.markPlayed(t.id));
-
-  void _removeFromContinue(JellyfinItem t) => _change((c) async {
-        if (t.userData.isResumable) await c.clearResumePosition(t.id);
-        await _accounts.dismissContinue(_serverId, continueKey(t));
+  /// Runs [action] on [item]; the panel waits for what goes to a server and
+  /// shows its error under the buttons.
+  Future<void> _run(JellyfinItem item, JellyfinAction action) async {
+    if (_busy) return;
+    final waits = switch (action) {
+      JellyfinAction.copyTitle || JellyfinAction.openInJellyfin || JellyfinAction.openShow => false,
+      _ => true,
+    };
+    if (waits) {
+      setState(() {
+        _busy = true;
+        _error = null;
       });
+    }
+    final error = await _actions.run(context, item, action);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _error = error;
+    });
+  }
+
+  /// Right-click on an episode ([context]: its row): its menu; it becomes
+  /// the panel's episode.
+  Future<void> _episodeMenu(BuildContext context, JellyfinItem e) async {
+    setState(() => _targetId = e.id);
+    final pick = await showAppMenu<JellyfinAction>(context, items: jellyfinMenuItems(_actions.of(e)));
+    if (pick != null && mounted) await _run(e, pick);
+  }
 
   void _tapEpisode(JellyfinItem e) {
     final now = DateTime.now();
@@ -216,7 +160,7 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
     _lastTap = again ? null : now;
     _lastTapId = e.id;
     setState(() => _targetId = e.id);
-    if (again) _putUp(e);
+    if (again) _run(e, JellyfinAction.putUp);
   }
 
   @override
@@ -251,7 +195,16 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
         icon: const Icon(Icons.close),
       );
 
-  Widget _body(BuildContext context, _Data d) {
+  /// [i] with the watched marks made here (they show before the reload).
+  JellyfinItem _m(JellyfinItem i) => _c.marked(_serverId, i);
+
+  Widget _body(BuildContext context, _Data loaded) {
+    final d = (
+      item: _m(loaded.item),
+      series: loaded.series == null ? null : _m(loaded.series!),
+      seasons: [for (final s in loaded.seasons) _m(s)],
+      next: loaded.next == null ? null : _m(loaded.next!),
+    );
     final series = d.series;
     if (series == null) return _view(context, d, null, null);
     final preferred = d.item.kind == JellyfinItemKind.episode ? d.item : null;
@@ -268,7 +221,8 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
       version: _c.version,
       load: () => _episodes(series.id, seasonId),
       loading: _view(context, d, baseTarget, null),
-      builder: (context, eps) {
+      builder: (context, loadedEps) {
+        final eps = [for (final e in loadedEps) _m(e)];
         final chosen = _targetId == null
             ? null
             : eps.where((e) => e.id == _targetId).firstOrNull ??
@@ -308,11 +262,25 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
       if (shown.communityRating != null) '★ ${shown.communityRating!.toStringAsFixed(1)}',
       if (!isSeries && shown.userData.played) 'Watched',
     ].join(' · ');
-    final verb = widget.alone ? 'Play' : 'Put it up';
+    final verb = JellyfinActionText.putUp(alone: widget.alone);
     final label = playable != null && isSeries ? '$verb · ${playable.episodeLabel ?? playable.name}' : verb;
-    final inContinue = playable != null &&
-        (playable.userData.isResumable || _c.continueKeys.contains(continueKey(playable)));
     final left = playable == null ? null : timeLeft(playable);
+    // Whose actions the buttons are: a show's (its marks are the whole
+    // show's), else the episode picked in the list (or the item).
+    final subject = d.item.kind == JellyfinItemKind.series
+        ? shown
+        : d.item.kind == JellyfinItemKind.episode
+            ? (target ?? d.item)
+            : d.item;
+    // A show's put-up and queue go to the episode picked in the list.
+    final to = playable ?? subject;
+    final views = _actions.of(subject);
+    void run(JellyfinAction a) => _run(
+        switch (a) {
+          JellyfinAction.putUp || JellyfinAction.addToQueue || JellyfinAction.playNext => to,
+          _ => subject,
+        },
+        a);
 
     return ListView(
       key: const ValueKey('details-list'),
@@ -337,7 +305,15 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
                   ),
                 ),
               ),
-              Positioned(right: 4, top: 4, child: _closeButton()),
+              // ⋮: every action of the item, its right-click menu.
+              Positioned(
+                right: 4,
+                top: 4,
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  JellyfinMoreButton(key: const ValueKey('details-more'), views: views, onRun: run),
+                  _closeButton(),
+                ]),
+              ),
             ],
           ),
         ),
@@ -349,58 +325,15 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
               SelectableText(shown.name, style: t.titleLarge),
               if (meta.isNotEmpty) Text(meta, style: t.bodyMedium?.copyWith(color: Colors.grey)),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 4,
-                runSpacing: 4,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  FilledButton.icon(
-                    key: const ValueKey('details-put-up'),
-                    onPressed: playable == null || _busy ? null : () => _putUp(playable),
-                    icon: _busy
-                        ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.play_arrow),
-                    label: Text(label, overflow: TextOverflow.ellipsis),
-                  ),
-                  if (playable != null && widget.onAddToQueue != null)
-                    GestureDetector(
-                      onSecondaryTap: _busy ? null : () => _queue(playable, next: true),
-                      child: IconButton(
-                        key: const ValueKey('details-add-queue'),
-                        onPressed: _busy ? null : () => _queue(playable),
-                        tooltip: 'Add to queue (right-click: play next)',
-                        icon: const Icon(Icons.playlist_add_rounded),
-                      ),
-                    ),
-                  if (playable != null)
-                    IconButton(
-                      key: const ValueKey('details-watched'),
-                      onPressed: _busy ? null : () => _toggleWatched(playable),
-                      tooltip: playable.userData.played ? 'Mark unwatched' : 'Mark watched',
-                      icon: Icon(playable.userData.played ? Icons.check_circle : Icons.check_circle_outline),
-                    ),
-                  if (inContinue)
-                    IconButton(
-                      key: const ValueKey('details-remove-continue'),
-                      onPressed: _busy ? null : () => _removeFromContinue(playable),
-                      tooltip: 'Remove from Continue',
-                      icon: const Icon(Icons.remove_circle_outline),
-                    ),
-                  if (isSeries)
-                    IconButton(
-                      key: const ValueKey('details-open-series'),
-                      tooltip: 'Open the series page',
-                      onPressed: () => _c.open(SeriesRoute(d.series!, seasonId: seasonId)),
-                      icon: const Icon(Icons.open_in_new),
-                    ),
-                  if (client != null)
-                    IconButton(
-                      key: const ValueKey('details-open-jellyfin'),
-                      tooltip: ReuseText.openInJellyfin,
-                      onPressed: () => openLink(context, jellyfinWebUrl(client.baseUrl, shown.id, serverId: _serverId)),
-                      icon: const Icon(Icons.open_in_browser_rounded),
-                    ),
-                ],
+              JellyfinActionButtons(
+                keyPrefix: 'details',
+                views: views,
+                primary: JellyfinAction.putUp,
+                primaryLabel: label,
+                icons: JellyfinActionButtons.panelIcons,
+                busy: _busy,
+                more: false,
+                onRun: run,
               ),
               if (_error != null) ...[
                 const SizedBox(height: 6),
@@ -458,8 +391,11 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
     );
   }
 
+  /// "Episodes", the season picker and the season's own actions (its
+  /// mark; ⋮: the same as its right-click menu on the show page).
   Widget _episodesHeader(BuildContext context, _Data d, String? seasonId) {
     final seasons = d.seasons;
+    final season = seasons.where((s) => s.id == seasonId).firstOrNull;
     return Row(
       children: [
         const Expanded(child: Text('Episodes', style: TextStyle(fontWeight: FontWeight.w600))),
@@ -471,6 +407,14 @@ class _JellyfinDetailsPanelState extends State<JellyfinDetailsPanel> {
               items: [for (final s in seasons) (s.id, s.name)],
               onChanged: (id) => setState(() => _seasonId = id),
             ),
+          ),
+        if (season != null)
+          JellyfinActionButtons(
+            keyPrefix: 'details-season',
+            views: _actions.of(season),
+            icons: const {JellyfinAction.markWatched, JellyfinAction.markUnwatched},
+            busy: _busy,
+            onRun: (a) => _run(season, a),
           ),
       ],
     );

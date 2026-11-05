@@ -381,8 +381,6 @@ What is left (the rest is in [ARCHITECTURE.md](ARCHITECTURE.md), "Jellyfin
 in a session"):
 - Sidecar (external) subtitle streams of Jellyfin items: only embedded
   tracks are mapped to mpv today.
-- Mark a whole show (or season) watched: a button on its page and in its
-  right-click menu.
 
 ## Deferred
 

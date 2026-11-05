@@ -39,6 +39,8 @@ class JellyfinBrowser extends StatefulWidget {
   final BrowseStart? start;
   /// Library chips on Home (off when the Library header shows them).
   final bool libraryStrip;
+  /// Nobody else in the server: the menus' put-up says Play.
+  final bool alone;
   const JellyfinBrowser({
     this.start,
     super.key,
@@ -50,6 +52,7 @@ class JellyfinBrowser extends StatefulWidget {
     this.selected,
     this.onOpenAccounts,
     this.libraryStrip = true,
+    this.alone = false,
     this.searchDebounce = const Duration(milliseconds: 300),
   });
 
@@ -229,6 +232,7 @@ class _JellyfinBrowserState extends State<JellyfinBrowser> {
           : (item, {next = false}) =>
               widget.onAddToQueue!(JellyfinSelection(account.serverId, item.id, item), next: next),
       libraryStrip: widget.libraryStrip,
+      alone: widget.alone,
       child: Focus(
         onKeyEvent: _onKey,
         child: Column(

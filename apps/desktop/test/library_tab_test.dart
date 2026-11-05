@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/gestures.dart' show kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
@@ -73,15 +74,20 @@ class Harness {
   final JellyfinAccounts accounts;
   final FakeJellyfin fake;
   final put = <PickedMedia>[];
+  /// Up next adds (with [pumpLibrary]'s queue): the pick and whether next.
+  final queued = <(PickedMedia, bool)>[];
   final recents = RecentLinks(read: () async => null, write: (_) async {});
   Harness(this.controller, this.accounts, this.fake);
 }
 
+/// The Library tab on the fake server; [queue]: in a server (Up next
+/// adds recorded in [Harness.queued]).
 Future<Harness> pumpLibrary(
   WidgetTester tester,
   Size size, {
   bool alone = false,
   bool isHost = false,
+  bool queue = false,
   MediaKind source = MediaKind.jellyfin,
   Harness? reuse,
   BrowseStart? start,
@@ -124,6 +130,12 @@ Future<Harness> pumpLibrary(
           h.put.add(m);
           return null;
         },
+        onAddToQueue: queue
+            ? (m, {next = false}) async {
+                h.queued.add((m, next));
+                return null;
+              }
+            : null,
       ),
     ),
   )));
@@ -240,13 +252,13 @@ void main() {
     expect(find.text('Put it up · S1E6'), findsOneWidget);
     final resumes = h.fake.count('GET', '/UserItems/Resume');
 
-    await tester.tap(find.byKey(const ValueKey('details-watched')));
+    await tester.tap(find.byKey(const ValueKey('details-markWatched')));
     await settle(tester, 10);
     expect(h.fake.count('POST', '/UserPlayedItems/$bsEpisode'), 1);
     expect(h.fake.count('GET', '/UserItems/Resume'), greaterThan(resumes), reason: 'rows reload');
 
-    expect(find.byKey(const ValueKey('details-remove-continue')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('details-remove-continue')));
+    expect(find.byKey(const ValueKey('details-removeFromContinue')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('details-removeFromContinue')));
     await settle(tester, 10);
     expect(h.accounts.continueDismissed(fixtureServerId), contains(bsSeries));
     expect(find.descendant(of: row, matching: find.text('Black Summoner')), findsNothing);
@@ -324,6 +336,32 @@ void main() {
     await settle(tester, 10);
     expect((h.put.last as LinkMedia).anyway, isTrue);
 
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("link: the preview's right-click is the recent link's menu", (tester) async {
+    final h = await pumpLibrary(tester, const Size(1400, 1000), source: MediaKind.link, queue: true);
+    const url = 'https://www.youtube.com/watch?v=abc';
+    await tester.enterText(find.byKey(const ValueKey('link-field')), url);
+    await settle(tester, 10);
+    List<String> rows() => [
+          for (final e in find
+              .descendant(of: find.byKey(const ValueKey('app-menu')), matching: find.byType(Text))
+              .evaluate())
+            (e.widget as Text).data ?? '',
+        ];
+    await tester.tap(find.byKey(const ValueKey('link-preview')), buttons: kSecondaryButton);
+    await settle(tester, 4);
+    final preview = rows();
+    expect(preview, ['Put it up', 'Add to queue', 'Play next', 'Copy link', 'Copy title', 'Open in browser']);
+    await tester.tap(find.text('Play next'));
+    await settle(tester, 10);
+    expect(h.queued.single.$2, isTrue);
+    await tester.tap(find.byKey(const ValueKey('link-put-up')));
+    await settle(tester, 10);
+    await tester.tap(find.byKey(const ValueKey('recent-link-$url')), buttons: kSecondaryButton);
+    await settle(tester, 4);
+    expect(rows(), preview);
     expect(tester.takeException(), isNull);
   });
 

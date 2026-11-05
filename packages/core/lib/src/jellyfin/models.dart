@@ -329,6 +329,48 @@ class JellyfinItem {
 
   JellyfinItemKind get kind => JellyfinItemKind.parse(type);
 
+  /// The same item with [userData] instead (a watched mark shown before
+  /// the lists that hold it are fetched again).
+  JellyfinItem withUserData(JellyfinUserData userData) => JellyfinItem(
+        id: id,
+        name: name,
+        type: type,
+        serverId: serverId,
+        isFolder: isFolder,
+        collectionType: collectionType,
+        overview: overview,
+        productionYear: productionYear,
+        premiereDate: premiereDate,
+        dateCreated: dateCreated,
+        communityRating: communityRating,
+        officialRating: officialRating,
+        runTimeTicks: runTimeTicks,
+        container: container,
+        mediaType: mediaType,
+        seriesId: seriesId,
+        seriesName: seriesName,
+        seasonId: seasonId,
+        seasonName: seasonName,
+        indexNumber: indexNumber,
+        parentIndexNumber: parentIndexNumber,
+        childCount: childCount,
+        recursiveItemCount: recursiveItemCount,
+        userData: userData,
+        primaryImageAspectRatio: primaryImageAspectRatio,
+        imageTags: imageTags,
+        backdropImageTags: backdropImageTags,
+        seriesPrimaryImageTag: seriesPrimaryImageTag,
+        parentBackdropItemId: parentBackdropItemId,
+        parentBackdropImageTags: parentBackdropImageTags,
+        parentThumbItemId: parentThumbItemId,
+        parentThumbImageTag: parentThumbImageTag,
+        parentLogoItemId: parentLogoItemId,
+        parentLogoImageTag: parentLogoImageTag,
+        providerIds: providerIds,
+        mediaSources: mediaSources,
+        mediaStreams: mediaStreams,
+      );
+
   /// A provider id as a number (`providerId('AniList')`), case-insensitive
   /// on the provider's name; null when absent or not a number.
   int? providerId(String provider) {
