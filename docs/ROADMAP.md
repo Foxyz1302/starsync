@@ -382,8 +382,13 @@ Next: **Playback and presence** (epic, below; protocol 17).
      a 1000 Hz mouse) and skips GTK's background paint in fullscreen.
      It goes in with the fork move (backlog 0): without the fork's
      non-blocking render, the UI over a video drops to the video's rate.
-     Before that: a fullscreen check on a real display with
-     `STARSYNC_FRAME_PACING_LOG=1`. Mouse drags may still feel
+     Checked on the owner's display: a 16:9 window is smooth; fullscreen
+     2560x1080 on the Schedule gets about 70% of pictures one refresh
+     apart, limited by GTK 3 copying each frame (about 6 ms at that
+     size). Upgrade Flutter only once at least two of these are in a
+     beta-channel build: flutter/flutter#194525 (task runner, on master),
+     #191389 (Wayland subsurface renderer, 3.49+), #195287 (desync the
+     subsurface, open). Then recheck the shim's layout checks. Mouse drags may still feel
      sampled at 60 Hz with it (being researched).
    - One open made two session players (#1 and #2) in a diagnostics
      test run: find out why.
