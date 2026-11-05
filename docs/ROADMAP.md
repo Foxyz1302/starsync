@@ -225,7 +225,7 @@ Next, before 1.5.0 is cut (playback and presence is in; protocol 17):
   The release and dev-build scripts sign every manifest; the app refuses
   a manifest without a valid signature and a download whose checksum
   does not match. A signed `starsync-config.json` lists the update
-  sources, defaults (AnimeFlow's address) and its own addresses; the app
+  sources and its own addresses; the app
   takes the first valid, newer copy from its list, keeps the last good
   one on disk and falls back to built-in values, so any address can move
   without a reinstall. It can carry the next public key, signed by the
@@ -245,7 +245,9 @@ Next, before 1.5.0 is cut (playback and presence is in; protocol 17):
 DECISIONS.md): a secrets audit of the whole git history (scrub or
 rotate anything ever committed); the license, likely GPL-3.0, after
 checking which libmpv and FFmpeg builds ship and what they require;
-pol's OK for his server names in the history; a README for strangers and
+pol's OK for his server names in the history; pol's services out of the
+code (AnimeFlow becomes a request backend the user adds, like a Jellyfin
+server, next to Sonarr later); a README for strangers and
 a short "how to build". Then publish the source on GitHub; public repos
 get free GitHub Actions with Windows runners, so CI can leave pol's
 machines and his Gitea becomes optional.
