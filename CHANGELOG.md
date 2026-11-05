@@ -9,14 +9,15 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ### Highlights
 
+- BRB instead of ready: hold Space and everyone waits for you, and nothing starts by itself any more
+- A round menu on a right-click hold: BRB, skip the OP or go to the next episode, step out or join
+- Screenshots: S picks an area (with or without subtitles), Shift+S takes the whole picture
 - People cards: point at someone's avatar or name to see their card
 - Jellyfin: right-click has everything, and a whole show or season can be marked watched
-- Joining without a name just asks what to call you
-- Settings in six tidy pages, the ones you change first
-- Your volume is remembered, and M mutes
+- Smoother on Linux at your monitor's refresh rate, and crashes on Windows should be rarer
+- Joining without a name just asks what to call you, and settings live in six tidy pages
 - Closing the window really closes Starsync, and memory no longer grows with every video
-- A video that stalls because the person passing it on went quiet picks up again instead of ending
-- The timeline shows exactly which parts are downloaded
+- Your volume is remembered, and M mutes
 
 ### Added
 
