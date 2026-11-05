@@ -53,6 +53,7 @@ enum BarControl {
 enum ControlAction {
   changeVideo('Change video', null),
   copyLink('Copy link', null),
+  screenshot('Screenshot', 'S'),
   reload('Reload video', 'Ctrl+R'),
   skipForward('Skip 1:30', 'Shift+Right'),
   chapters('Chapters…', 'PgDn / PgUp'),

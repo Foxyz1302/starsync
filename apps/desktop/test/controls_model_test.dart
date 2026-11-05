@@ -59,6 +59,7 @@ void main() {
     test('⋯ menu: what plays and the server, in a fixed order; ⚙ is the panel', () {
       expect(menuActions(const ControlsSnapshot(), none), [
         ControlAction.changeVideo,
+        ControlAction.screenshot,
         ControlAction.reload,
         ControlAction.markProblem,
         ControlAction.leave,
@@ -66,6 +67,7 @@ void main() {
       expect(menuActions(const ControlsSnapshot(hasChapters: true, hasDuration: true, hasLink: true), none), [
         ControlAction.changeVideo,
         ControlAction.copyLink,
+        ControlAction.screenshot,
         ControlAction.reload,
         ControlAction.skipForward,
         ControlAction.chapters,

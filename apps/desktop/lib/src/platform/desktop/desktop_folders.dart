@@ -1,8 +1,10 @@
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:path_provider_windows/path_provider_windows.dart';
 
 import '../../files/scanner.dart';
+import '../../screenshot/shot_files.dart' as shots;
 import '../ports/folder_access.dart';
 import '../ports/url_opener.dart';
 
@@ -37,4 +39,12 @@ class DesktopFolders implements FolderAccess {
   // The file manager opens a folder path the way a browser opens a link.
   @override
   Future<bool> reveal(String dir) => urls.open(Uri.directory(dir).toString());
+
+  // FOLDERID_Pictures (`WindowsKnownFolder.Pictures`, which the analyzer
+  // sees only as the package's stub off Windows).
+  static const _picturesFolderId = '{33E28130-4E1E-4676-835A-98395C3BC3BB}';
+
+  @override
+  Future<String> screenshotFolder() => shots.screenshotFolder(
+      windowsPictures: () async => Platform.isWindows ? PathProviderWindows().getPath(_picturesFolderId) : null);
 }

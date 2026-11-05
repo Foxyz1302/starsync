@@ -25,4 +25,8 @@ abstract interface class FolderAccess {
   /// Shows the folder [dir] in the file manager; false when nothing
   /// opened it.
   Future<bool> reveal(String dir);
+
+  /// Where screenshots are saved (Pictures / Starsync); it may not
+  /// exist yet.
+  Future<String> screenshotFolder();
 }

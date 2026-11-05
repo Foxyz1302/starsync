@@ -3,6 +3,7 @@ import 'dart:ffi' show Int8;
 import 'dart:io';
 
 import 'package:ffi/ffi.dart' show StringUtf8Pointer, malloc;
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -11,6 +12,7 @@ import 'package:sync_relay_core/core.dart' show DiagUploader, LogThrottle, creat
 
 import '../../state/settings.dart';
 import '../ports/player_host.dart';
+import 'mpv_frame_grab.dart';
 import 'native_heap.dart';
 
 // The desktop's players: media_kit over libmpv. Everything mpv-specific
@@ -66,6 +68,11 @@ bool pinMatches(String wanted, String got) {
 /// The `VideoController` behind [video], for the `Video` widget (the only
 /// media_kit use outside this file).
 VideoController videoControllerOf(HostedVideo video) => (video as _MkVideo).controller;
+
+/// The texture [video] renders into (null until it is up): the
+/// screenshot selection shows the live video small from it, no second
+/// `Video` widget.
+ValueListenable<int?> videoTextureOf(HostedVideo video) => (video as _MkVideo).controller.id;
 
 final _mpvLog = createLogger('mpv');
 final _playerLog = createLogger('player');
@@ -507,6 +514,12 @@ class _MkPlayer implements HostedPlayer {
   }
 
   @override
+  ({String url, Map<String, String> headers})? get opened => switch (_lastOpen) {
+        final o? => (url: o.url, headers: o.headers),
+        null => null,
+      };
+
+  @override
   Future<void> play() => mk.play();
   @override
   Future<void> pause() => mk.pause();
@@ -547,6 +560,21 @@ class _MkPlayer implements HostedPlayer {
     } catch (e) {
       debugPrint('pin $name=$value failed: $e');
       return '$name: $value -> error $e';
+    }
+  }
+
+  @override
+  Future<FrameGrab?> grabFrame({required bool subtitles}) async {
+    if (_retired) return null;
+    try {
+      final dynamic platform = mk.platform;
+      final int ctx = platform.ctx.address;
+      return await grabMpvFrame(ctx, subtitles: subtitles);
+    } catch (e) {
+      // mpv 0.41 with a GPU decoder (`hwdec` without `-copy`) cannot
+      // read the frame back; the caller decodes it again.
+      if (_role != PlayerRole.thumbnail) _playerLog.info('player #$id: no frame from mpv: $e');
+      return null;
     }
   }
 

@@ -204,6 +204,7 @@ what played back at its position, a link everyone opens and a file
 passed on, nothing reopened, the watch and Up next carrying on), `video_reload_e2e` (a fresh player from the
 host, the old one retired, leave releases them all),
 `seek_drag_e2e`, `end_of_file_e2e`, `readahead_e2e`, `chapters_mpv_e2e`,
+`screenshot_e2e` (ARCHITECTURE "Screenshots"),
 `ytdl_headers_e2e` (a page through the app's own resolve against a
 stand-in yt-dlp and a Referer-checking CDN: the EDL, the headers and
 cookies, subtitles without danmaku, a 403, the D11 error),

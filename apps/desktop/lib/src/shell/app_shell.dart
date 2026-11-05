@@ -15,6 +15,7 @@ import '../files/ui/files_page.dart' show showFilesFolder;
 import '../jellyfin/accounts.dart';
 import '../jellyfin/browse_scope.dart' show BrowseStart;
 import '../jellyfin/session_media.dart';
+import '../platform/desktop/media_kit_host.dart' show videoTextureOf;
 import '../screens/home/connect_flow.dart';
 import '../session/app_events.dart' show ActionFailed, ScheduleResult;
 import '../screens/home/health_probe.dart';
@@ -22,6 +23,8 @@ import '../screens/home/media_picker.dart';
 import '../session/identity.dart';
 import '../screens/home/ui.dart' show appName;
 import '../screens/home/update_indicator.dart';
+import '../screenshot/screenshots.dart';
+import '../screenshot/shot_overlay.dart';
 import '../app/app_graph.dart';
 import '../session/navigation.dart' show Place;
 import '../state/settings.dart';
@@ -43,6 +46,7 @@ import 'session_player.dart';
 import 'settings_tab.dart';
 import 'quick_chat.dart';
 import 'toasts.dart';
+import 'video_view.dart' show LiveVideoTexture;
 import 'welcome.dart';
 
 /// The one window: the party strip over a body that fades through between
@@ -129,6 +133,17 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   Alignment _corner = Alignment.bottomRight;
   Offset? _drag; // mini top-left while dragging
   bool _snapping = false;
+
+  /// Screenshots of the session's video; [_shot] is the area selection
+  /// over its frozen frame while it is open.
+  late final _shots = Screenshots(
+      playback: _graph.coordinator.playback,
+      nowPlaying: _graph.coordinator.nowPlaying,
+      folders: _graph.ports.folders,
+      shell: _graph.ports.shell,
+      notify: _graph.notifier.notify);
+  ({Shot shot, ShotImages images})? _shot;
+  bool _shotOpening = false;
 
   /// Last pointer position in the window (where a paste's card opens).
   Offset? _pointer;
@@ -391,6 +406,67 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   }
 
   void _expand() => _show(PlayerMode.full);
+
+  // ----------------------------------------------------------- screenshots
+
+  /// S (an [area]: the selection over the frozen frame) or Shift+S (the
+  /// whole frame, saved and copied at once). The video keeps playing for
+  /// everyone; only this window shows the frozen frame.
+  Future<void> _screenshot({required bool area}) async {
+    if (_shot != null || _shotOpening) return;
+    final shot = await _shots.capture();
+    if (!mounted) return;
+    if (shot == null) {
+      _graph.notifier.notify(const ActionFailed('No picture to take a screenshot of'));
+      return;
+    }
+    if (!area) {
+      // With the subtitles when they are on screen.
+      unawaited(_shots.save(shot, subtitles: shot.hasSubs, onEdit: _editShot));
+      return;
+    }
+    await _openShot(shot, subtitles: shot.hasSubs);
+  }
+
+  /// A click on a screenshot's toast: the same frame again, to crop it
+  /// another way or switch the subtitles.
+  void _editShot(Shot shot) => unawaited(_openShot(shot, subtitles: shot.hasSubs));
+
+  Future<void> _openShot(Shot shot, {required bool subtitles}) async {
+    if (_shot != null || _shotOpening) return;
+    _shotOpening = true;
+    try {
+      final images = await decodeShot(shot);
+      if (!mounted || _shot != null) {
+        images.clean.dispose();
+        images.subs?.dispose();
+        return;
+      }
+      setState(() => _shot = (shot: shot, images: images));
+    } finally {
+      _shotOpening = false;
+    }
+  }
+
+  void _closeShot() {
+    if (_shot == null) return;
+    setState(() => _shot = null);
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
+  Widget _shotOverlay(({Shot shot, ShotImages images}) s) => Positioned.fill(
+        child: ShotOverlay(
+          key: ObjectKey(s.images),
+          images: s.images,
+          subtitles: s.shot.hasSubs,
+          onPick: (subtitles, crop) {
+            _closeShot();
+            unawaited(_shots.save(s.shot, subtitles: subtitles, crop: crop, onEdit: _editShot));
+          },
+          onCancel: _closeShot,
+          live: LiveVideoTexture(playback: _graph.coordinator.playback, textureOf: videoTextureOf),
+        ),
+      );
 
   /// Dev builds: the danmaku preview, made on first use.
   DanmakuPreview? _danmaku;
@@ -912,6 +988,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
             ),
           ),
           if (online && _shown != PlayerMode.none) _playerLayer(area),
+          if (_shot case final s?) _shotOverlay(s),
           _toasts(full && online),
           Positioned(
             top: 12,
@@ -1033,6 +1110,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
                   quickChat: _quickChat,
                   danmakuActive: _danmakuActive,
                   danmaku: _danmaku,
+                  onScreenshot: _screenshot,
                 ),
               ),
             ),

@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart' show Uint8List;
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter/widgets.dart';
 import 'package:fox_utils/fox_utils.dart' show ClipboardX, DesktopDropX, DropTarget;
 import 'package:hive_ce_flutter/hive_flutter.dart';
@@ -135,6 +138,23 @@ class DesktopShell implements ShellPort {
       return await ClipboardX.readText();
     } catch (_) {
       return null;
+    }
+  }
+
+  // Linux: the runner's own channel (linux/runner/clipboard_image.cc)
+  // offers the PNG as `image/png` (fox_utils can only put a file there on
+  // Linux, which chat apps and browsers do not paste as a picture).
+  static const _clipboard = MethodChannel('starsync/clipboard');
+
+  @override
+  Future<bool> copyImage(Uint8List png) async {
+    try {
+      if (Platform.isLinux) return await _clipboard.invokeMethod<bool>('copyImage', png) ?? false;
+      await ClipboardX.copyImage(png);
+      return true;
+    } catch (e) {
+      debugPrint('copy image failed: $e');
+      return false;
     }
   }
 

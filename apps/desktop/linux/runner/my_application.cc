@@ -11,6 +11,7 @@
 #include <gdk/gdkwayland.h>
 #endif
 
+#include "clipboard_image.h"
 #include "flutter/generated_plugin_registrant.h"
 
 struct _MyApplication {
@@ -18,6 +19,8 @@ struct _MyApplication {
   char** dart_entrypoint_arguments;
   // "starsync/window" (lib/src/platform/attention.dart).
   FlMethodChannel* window_channel;
+  // "starsync/clipboard" (clipboard_image.cc).
+  FlMethodChannel* clipboard_channel;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
@@ -199,6 +202,8 @@ static void my_application_activate(GApplication* application) {
                                             window_method_cb, window, nullptr);
   g_signal_connect(window, "focus-in-event", G_CALLBACK(window_focus_in_cb),
                    nullptr);
+  self->clipboard_channel = clipboard_image_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)));
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
@@ -247,6 +252,7 @@ static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   g_clear_object(&self->window_channel);
+  g_clear_object(&self->clipboard_channel);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 

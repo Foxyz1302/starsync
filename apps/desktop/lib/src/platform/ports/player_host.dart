@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:signals/signals.dart';
 
@@ -72,6 +73,19 @@ class HostedPlayerState {
   });
 }
 
+/// One video frame as mpv decoded it: tightly packed RGBA rows (opaque),
+/// at the video's display size (aspect applied).
+class RawFrame {
+  final Uint8List rgba;
+  final int width;
+  final int height;
+  const RawFrame(this.rgba, this.width, this.height);
+}
+
+/// The frame on screen, caught once without subtitles ([clean]) and,
+/// when asked, once with them ([subs]), one right after the other.
+typedef FrameGrab = ({RawFrame clean, RawFrame? subs});
+
 /// One mpv player. Each media gets its own (see ARCHITECTURE "Player
 /// lifecycle"); [PlayerHost.retire] / [PlayerHost.disposeAll] end it.
 abstract interface class HostedPlayer {
@@ -94,6 +108,10 @@ abstract interface class HostedPlayer {
   /// mpv when set ([seek] goes through it too); [syncSeek] always moves
   /// mpv.
   void Function(Duration position)? onUserSeek;
+
+  /// What the last [open] opened (a still frame of it is opened again
+  /// from this); null before one.
+  ({String url, Map<String, String> headers})? get opened;
 
   /// Opens [url] (with [headers] on every request), paused unless [play].
   Future<void> open(String url, {Map<String, String> headers = const {}, bool play = false});
@@ -119,6 +137,12 @@ abstract interface class HostedPlayer {
 
   /// mpv's log level for this player (`warn`, `v`, ...).
   void setLogLevel(String level);
+
+  /// The frame on screen at the video's own resolution, straight from mpv
+  /// (never the app's overlays), off the UI thread; with [subtitles] also
+  /// a second copy with the subtitles drawn in. Null when there is no
+  /// picture (nothing open, no video track, the player gone).
+  Future<FrameGrab?> grabFrame({required bool subtitles});
 }
 
 /// A player's video output (a texture the `Video` widget shows).

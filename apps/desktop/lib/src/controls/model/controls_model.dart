@@ -30,6 +30,7 @@ class PlayerControlsModel {
   final VoidCallback _changeVideo;
   final VoidCallback _collapse;
   final VoidCallback _leave;
+  final VoidCallback? _screenshot;
 
   PlayerControlsModel({
     required this.coord,
@@ -41,7 +42,9 @@ class PlayerControlsModel {
     required VoidCallback onChangeVideo,
     required VoidCallback onCollapse,
     required VoidCallback onLeave,
-  }) : _toggleFullscreen = onToggleFullscreen,
+    VoidCallback? onScreenshot,
+  }) : _screenshot = onScreenshot,
+       _toggleFullscreen = onToggleFullscreen,
        _toggleChat = onToggleChat,
        _changeVideo = onChangeVideo,
        _collapse = onCollapse,
@@ -220,6 +223,9 @@ class PlayerControlsModel {
     coord.markInput();
     coord.reloadVideo();
   }
+
+  /// S: a screenshot of an area of the frame.
+  void screenshot() => _screenshot?.call();
 
   String? link() => coord.currentLink();
 }

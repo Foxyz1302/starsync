@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:sync_relay_core/core.dart' show FeedMessage;
 
 // Everything that may become a toast, a sound, an attention request or an
@@ -301,6 +303,15 @@ class Copied extends AppEvent {
 
 class CopyFailed extends AppEvent {
   const CopyFailed();
+}
+
+/// A screenshot was saved and copied ([text] says what worked); its
+/// toast shows [picture] (a small PNG) and a click on it runs [onEdit].
+class ScreenshotTaken extends AppEvent {
+  final String text;
+  final Uint8List picture;
+  final void Function()? onEdit;
+  const ScreenshotTaken(this.text, this.picture, {this.onEdit});
 }
 
 /// A newer release is out (the update band shows it).

@@ -271,3 +271,25 @@ class _SubtitleLifterState extends State<SubtitleLifter> {
         return const SizedBox.shrink();
       });
 }
+
+/// The session's video as it plays, straight from its output's texture
+/// (no second `Video` widget): the screenshot selection's small live
+/// picture. Nothing without a live player with a video output; it lets
+/// go of the texture at once when the player changes (a retiring player
+/// waits two frames for that).
+class LiveVideoTexture extends StatelessWidget {
+  final PlaybackController playback;
+  final ValueListenable<int?> Function(HostedVideo video) textureOf;
+  const LiveVideoTexture({super.key, required this.playback, required this.textureOf});
+
+  @override
+  Widget build(BuildContext context) => SignalBuilder(builder: (context) {
+        final gen = playback.generation.value;
+        if (!playback.alive.value || !playback.hasVideo) return const SizedBox.shrink();
+        return ValueListenableBuilder<int?>(
+          key: ValueKey(gen),
+          valueListenable: textureOf(playback.video),
+          builder: (context, id, _) => id == null ? const SizedBox.shrink() : Texture(textureId: id),
+        );
+      });
+}

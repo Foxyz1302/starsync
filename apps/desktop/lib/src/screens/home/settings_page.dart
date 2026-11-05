@@ -26,6 +26,8 @@ const playerShortcuts = [
   ('Enter', 'Quick chat box (Enter sends, Esc closes)'),
   ('Tab', 'Open / close chat & activity (anywhere in a server)'),
   ('Ctrl+R', 'Reload the video'),
+  ('S', 'Screenshot of an area: drag over the frozen frame, click for all of it (T: subtitles, Esc: cancel)'),
+  ('Shift+S', 'Screenshot of the whole frame at once (saved to Pictures/Starsync and copied)'),
   ('> or Shift+N', 'Play what is next: Up next, else the next episode'),
   ('< or Shift+P', 'Put up the previous episode'),
   ('Ctrl+1…6', 'Shaders: Anime4K mode A, B, C, A+A, B+B, C+A'),

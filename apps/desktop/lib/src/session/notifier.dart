@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:signals/signals_core.dart';
 import 'package:sync_relay_core/core.dart' show FeedMessage, Presence;
@@ -30,6 +31,11 @@ class ToastItem {
   final NoticeCategory category;
   /// This member's own (their chat message coming back from the server).
   final bool own;
+  /// A picture of its own to show (a screenshot's, a small PNG).
+  final Uint8List? picture;
+  /// What a click on it does (besides taking it away); null: clicks pass
+  /// through, except on chat.
+  final void Function()? onTap;
   const ToastItem(
       {required this.id,
       required this.text,
@@ -39,7 +45,9 @@ class ToastItem {
       this.chat = false,
       this.thumb = '',
       this.category = NoticeCategory.app,
-      this.own = false});
+      this.own = false,
+      this.picture,
+      this.onTap});
 }
 
 /// What a notice is about; the policy filters by it ([noticeFor]).
@@ -213,6 +221,11 @@ class Notice {
   final SystemNote? system;
   /// The feed line it goes into the activity log as.
   final FeedMessage? log;
+  /// The toast's own picture and click ([ToastItem.picture], [ToastItem.onTap]).
+  final Uint8List? picture;
+  final void Function()? onTap;
+  /// How long the toast stays; null: the [Notifier]'s usual time.
+  final Duration? life;
   const Notice({
     this.category = NoticeCategory.app,
     this.toast,
@@ -224,6 +237,9 @@ class Notice {
     this.attention = false,
     this.system,
     this.log,
+    this.picture,
+    this.onTap,
+    this.life,
   });
 
   static const none = Notice();
@@ -239,6 +255,9 @@ class Notice {
         attention: attention,
         system: system,
         log: log,
+        picture: toast ? picture : null,
+        onTap: toast ? onTap : null,
+        life: life,
       );
 }
 
@@ -364,6 +383,9 @@ Notice _plain(AppEvent e) => switch (e) {
         Notice(toast: inSession ? 'Marked in the session log' : "Marked in this app's log"),
       Copied(:final text) => Notice(toast: text),
       CopyFailed() => const Notice(toast: "Couldn't copy"),
+      // Long enough to click it for another crop or the subtitles.
+      ScreenshotTaken(:final text, :final picture, :final onEdit) =>
+        Notice(toast: text, picture: picture, onTap: onEdit, life: const Duration(seconds: 8)),
       // The update band shows it (D8: a clear prompt, never over playback).
       UpdateAvailable() => Notice.none,
     };
@@ -514,9 +536,11 @@ class Notifier {
             chat: n.chat,
             thumb: n.thumb,
             category: n.category,
-            own: n.own),
+            own: n.own,
+            picture: n.picture,
+            onTap: n.onTap),
       ];
-      _timers[id] = Timer(toastLife, () => dismiss(id));
+      _timers[id] = Timer(n.life ?? toastLife, () => dismiss(id));
     }
     final sound = n.sound;
     if (sound != null) unawaited(sfx.play(sound));

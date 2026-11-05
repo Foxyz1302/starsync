@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show Uint8List;
 import 'package:flutter/widgets.dart';
 
 import 'window_activity.dart';
@@ -58,6 +59,10 @@ abstract interface class ShellPort {
   /// The clipboard's text only (the join prompt looks for an invite in
   /// it); null when there is none or it can't be read.
   Future<String?> readClipboardText();
+
+  /// Puts the PNG [png] on the clipboard as an image (a screenshot);
+  /// false when it could not.
+  Future<bool> copyImage(Uint8List png);
 
   /// [child] taking dropped files ([onDrop]: their paths and where they
   /// landed); [enable] off lets drops through.

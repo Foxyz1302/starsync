@@ -15,6 +15,8 @@ dependencies:
     path: ../../third_party/media_kit_video
   media_kit_libs_video: ^1.0.0
   path_provider: ^2.1.0
+  # The Pictures known folder (screenshots); already in through path_provider.
+  path_provider_windows: ^2.3.0
   web_socket_channel: ^3.0.0
   sync_relay_core:
     path: ../../packages/core

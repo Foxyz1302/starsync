@@ -104,6 +104,8 @@ Future<void> runControlAction(BuildContext context, PlayerControlsModel model, C
     case ControlAction.copyLink:
       final link = model.link();
       if (link != null) await copyToClipboard(context, link, done: 'Link copied');
+    case ControlAction.screenshot:
+      model.screenshot();
     case ControlAction.reload:
       model.reload();
     case ControlAction.markProblem:

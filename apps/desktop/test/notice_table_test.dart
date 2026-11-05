@@ -6,6 +6,7 @@
 // notification, activity-log line. A policy change edits a row here on
 // purpose.
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart' show FeedMessage, Presence;
@@ -173,6 +174,8 @@ final _rows = <_Row>[
       toast: "Marked in this app's log"),
   _Row('copied', const Copied('Link copied'), Copied, toast: 'Link copied'),
   _Row('copy failed', const CopyFailed(), CopyFailed, toast: "Couldn't copy"),
+  _Row('screenshot taken', ScreenshotTaken('Saved and copied', Uint8List(0)), ScreenshotTaken,
+      toast: 'Saved and copied'),
   _Row('update available: the band shows it', const UpdateAvailable('1.3.0'), UpdateAvailable),
 ];
 
@@ -391,6 +394,19 @@ void main() {
       expect(n.feedLog.peek(), hasLength(3), reason: 'everything is logged');
       n.clear();
     });
+  });
+
+  test("a screenshot's toast: its picture, a click edits it, 8 s", () {
+    var edits = 0;
+    final n = Notifier(toastLife: const Duration(seconds: 5));
+    final picture = Uint8List.fromList([1, 2, 3]);
+    n.notify(ScreenshotTaken('Saved and copied', picture, onEdit: () => edits++));
+    final t = n.toasts.peek().single;
+    expect(t.picture, picture);
+    t.onTap!();
+    expect(edits, 1);
+    expect(noticeFor(ScreenshotTaken('x', picture)).life, const Duration(seconds: 8));
+    n.clear();
   });
 
   test('every concrete AppEvent subtype has a row', () {

@@ -1948,12 +1948,16 @@ handed on from there (the coordinator gets its `Notifier`, `Connection` and
   bringing the window up and focusing it (`focus`, with another start's
   activation token, see "Single instance" below), dragging (`WindowDragArea`), close, the way out
   (save, hide, quit), attention, the clipboard paste (files, else text), the clipboard's
-  text alone (`readClipboardText`, for the join prompt)
+  text alone (`readClipboardText`, for the join prompt), a picture onto
+  the clipboard (`copyImage`, a screenshot's PNG: on Linux the runner's
+  `starsync/clipboard` channel offers it as `image/png`, since fox_utils
+  can only put a file reference there; on Windows fox_utils, a bitmap)
   and drop targets (fox_utils).
 - `UrlOpener` (`DesktopUrls`): `xdg-open`, `open`, Windows' `url.dll`.
 - `FolderAccess` (`DesktopFolders`): folder and file dialogs
   (file_picker), the Files scan, folder exists, file stat, showing a
-  folder in the file manager. Paths for now.
+  folder in the file manager, where screenshots go (`screenshotFolder`,
+  see "Screenshots"). Paths for now.
 - `LinkResolver` (`AppYtDlp`): the app's yt-dlp, link probes (what a
   page plays, see "yt-dlp"), whether this device resolves pages
   (`resolvesLinks`, the media plan's capability), warm-up.
@@ -2564,9 +2568,11 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   the avatar of their `ToastItem.actor` (feed and chat toasts; the app's
   own have none) and an Up next item's picture (`ToastItem.thumb`, from
   the queue's picture cache); each slides in, stays while the Notifier
-  keeps it (5 s), then slides out and collapses its gap. A click on a chat
-  toast opens the chat; the others let clicks through, but for the
-  sender's picture (their people card). They never cover
+  keeps it (5 s; a toast may ask for longer, `Notice.life`), then slides
+  out and collapses its gap. A click on a chat toast opens the chat, one
+  with its own action (`ToastItem.onTap`, with its own picture,
+  `ToastItem.picture`: a screenshot's) runs that; the others let clicks
+  through, but for the sender's picture (their people card). They never cover
   the player's controls: over the full player (both skins, windowed and
   fullscreen) they sit `toastInset` (16 px) above the control bar
   (`controlsBottomHeight` of the skin and size in use) while the controls
@@ -2578,6 +2584,56 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   (`own`); the shell leaves out those flying as danmaku and your own chat
   coming back for a line the quick chat box already showed
   (`PartyToasts.skip`).
+- **Screenshots** (`screenshot/`, the shell's `Screenshots`): S in the
+  full player (and Screenshot in the ⋯ menu) catches the frame on screen
+  and opens the area selection over it; Shift+S saves the whole frame at
+  once, with the subtitles when they are on. The video keeps playing for
+  everyone: only this window shows the frozen frame. The catch comes from
+  mpv, never the screen (`HostedPlayer.grabFrame`,
+  `platform/desktop/mpv_frame_grab.dart`): `screenshot-raw` straight on
+  media_kit's mpv handle on a short-lived isolate, outside media_kit's
+  one lock for all players (its `Player.screenshot` holds that lock while
+  it encodes, which would hold up the session's commands), once with
+  `subtitles` (when a subtitle track is on) and once `video`, back to
+  back, so the overlay's subtitle switch is instant; a playing video can
+  give them a frame apart. Both are the video's own resolution at its
+  display aspect, never the app's overlays. media_kit's render context
+  gives mpv no render-thread access (no
+  `MPV_RENDER_PARAM_ADVANCED_CONTROL`), so mpv takes its software path:
+  the picture before the output's shaders (Anime4K and the other
+  `glsl-shaders` are never in it, nothing is upscaled). On mpv 0.41 that
+  path cannot read a frame from a GPU decoder (`hwdec` without `-copy`,
+  Linux's `auto`: "Input image format cuda not supported"; mpv after 0.41
+  can again; Windows' `auto-copy` never hits it): the frame is then
+  decoded once more by a hidden player (`decodeStillFrame`: the same
+  source and headers, `vo=null`, software decoding, an exact seek to the
+  press's position, the same subtitle track and `sub-scale`), which gives
+  both copies from the very same frame; a moment for a file (about
+  0.5 s), longer for a stream. The selection (`ShotOverlay`) shows the
+  frame fitted like the video (bars around it) over the player, with the
+  live video small in a corner (`LiveVideoTexture`: the output's texture,
+  no second `Video`) that moves away from the pointer and the selection
+  (`pipCorner`). A drag draws the rectangle (kept on the picture, its size
+  in the frame's pixels beside it), a click takes the whole frame; letting
+  go saves at once and the selection goes. Its bar switches the subtitles
+  (T), Esc or a right-click cancels; it holds the keys (`KeyboardClaim`)
+  while up. The crop maps from the screen to the frame's pixels
+  (`cropFor`, edges rounded outward). The PNG is encoded on an isolate
+  (`image`), saved to Pictures / Starsync (`FolderAccess.screenshotFolder`:
+  Linux the XDG pictures folder from `user-dirs.dirs`, else `~/Pictures`;
+  Windows the Pictures known folder), named after the show, the episode
+  and the moment (`screenshotName`: "Frieren S01E05 12m34s.png", from
+  `coordinator.nowPlaying`; the title alone without an episode; names
+  safe on both systems, " (2)" for a name taken), and copied
+  (`ShellPort.copyImage`). A toast with the picture says "Saved and
+  copied" (or what failed) for 8 s; a click on it opens the selection on
+  the same frame again (both copies stay in memory for the toast's life)
+  and picking again saves a new file. No setting: the folder is the
+  system's. Tests: `screenshot_test` (names, the folder, the crop with
+  bars, the corner, the selection's keys and clicks, S in the player and
+  in the quick chat box), `screenshot_e2e` (the frame decoded again with
+  real mpv: the subtitles only on the second copy, an anamorphic file at
+  its display size).
 - **Quick chat** (`shell/quick_chat.dart`): Enter in the full player
   (not the mini: it is a corner thumbnail while you are elsewhere in the
   app, where Enter belongs to that page; nor while out) opens a
@@ -2826,7 +2882,8 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   chapter buttons, subtitles, audio, chat); the rest keep their order, so
   play is always first and fullscreen last. `menuActions` is the top
   bar's ⋯ menu ("Video and session"; `ControlAction`, fixed order):
-  change video, copy link (when `currentLink` has one), reload, Skip
+  change video, copy link (when `currentLink` has one), screenshot (S),
+  reload, Skip
   1:30 (with a duration), chapters (with chapters), the hidden track
   lists and chat, mark a problem, leave. Icons, tooltips (with keys) and the clock text (`clockText`)
   are defined there too, once.

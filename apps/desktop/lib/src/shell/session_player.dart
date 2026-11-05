@@ -93,6 +93,9 @@ class SessionPlayer extends StatefulWidget {
   /// Dev builds: the danmaku preview, shown over the full player while
   /// it is active.
   final DanmakuPreview? danmaku;
+  /// A screenshot (S, and the ⋯ menu: an [area]; Shift+S: the whole
+  /// frame at once); the shell takes it.
+  final void Function({required bool area})? onScreenshot;
   const SessionPlayer({
     super.key,
     required this.mode,
@@ -114,6 +117,7 @@ class SessionPlayer extends StatefulWidget {
     this.quickChat,
     this.danmakuActive,
     this.danmaku,
+    this.onScreenshot,
   });
 
   @override
@@ -174,6 +178,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
     onChangeVideo: () => widget.onChangeVideo(),
     onCollapse: () => widget.onCollapse(),
     onLeave: () => widget.onLeave(),
+    onScreenshot: () => widget.onScreenshot?.call(area: true),
   );
 
   late final SessionCoordinator _coord = AppScope.of(context).coordinator;
@@ -417,6 +422,14 @@ class _SessionPlayerState extends State<SessionPlayer> {
     if (key == LogicalKeyboardKey.pageUp || key == LogicalKeyboardKey.pageDown) {
       _lastKeyAt = now;
       return model.stepChapter(key == LogicalKeyboardKey.pageUp ? 1 : -1);
+    }
+    // S: a screenshot of an area (a selection over the frozen frame);
+    // Shift+S: the whole frame, saved and copied at once.
+    if (key == LogicalKeyboardKey.keyS && widget.onScreenshot != null && !HardwareKeyboard.instance.isControlPressed &&
+        !HardwareKeyboard.instance.isAltPressed && !HardwareKeyboard.instance.isMetaPressed) {
+      _lastKeyAt = now;
+      widget.onScreenshot!(area: !shift);
+      return true;
     }
     if (shift && key == LogicalKeyboardKey.arrowRight) {
       _lastKeyAt = now;

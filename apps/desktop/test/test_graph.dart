@@ -1,4 +1,5 @@
 // Test support (not a test): the app's composition root for tests.
+import 'package:flutter/foundation.dart' show Uint8List;
 import 'package:flutter/widgets.dart';
 import 'package:starsync/src/app/app_graph.dart';
 import 'package:starsync/src/platform/desktop/desktop_ports.dart';
@@ -77,6 +78,13 @@ class FakeShell implements ShellPort {
   Future<Paste> readPaste() async => paste;
   @override
   Future<String?> readClipboardText() async => null;
+  /// The images [copyImage] put on the clipboard.
+  final images = <Uint8List>[];
+  @override
+  Future<bool> copyImage(Uint8List png) async {
+    images.add(png);
+    return true;
+  }
   @override
   Widget dropTarget({
     Key? key,
