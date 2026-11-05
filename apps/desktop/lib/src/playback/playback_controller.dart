@@ -67,6 +67,12 @@ class PlaybackController {
   /// at most once per player and media; the coordinator opens it again.
   void Function()? onStreamLost;
 
+  /// The player stopped at the end of the file at `at`, more than
+  /// [finishSlackSecs] short of its duration: a read that failed (a relay
+  /// whose source sent nothing for longer than ffmpeg's reconnects) taken
+  /// for the end. The coordinator reopens a relay viewer.
+  void Function(Duration at)? onEndedShort;
+
   /// Seeks from the controls (seek bar, the video widget's own) go here
   /// instead of to mpv.
   void Function(Duration position)? onUserSeek;
@@ -214,6 +220,15 @@ class PlaybackController {
     return Duration(milliseconds: ms - ms % 250);
   }
 
+  /// [p] stopped at the end of the file, not short of it (see
+  /// [onEndedShort]).
+  bool _atEnd(HostedPlayer p) {
+    final d = duration.peek();
+    return p.state.completed &&
+        d > Duration.zero &&
+        (d - p.state.position).inMilliseconds <= finishSlackSecs * 1000;
+  }
+
   // Position, duration and volume from the player's streams; chapter-list
   // and track-list observed in mpv (read back as JSON).
   void _watchMarks(HostedPlayer p) {
@@ -223,7 +238,7 @@ class PlaybackController {
     _timeSubs.add(p.positionStream.listen((d) {
       // At the end the bar shows full: mpv's last position is the last
       // frame's start (and the 250 ms steps round down), short of duration.
-      if (p.state.completed && duration.value > Duration.zero) {
+      if (_atEnd(p)) {
         position.value = duration.value;
         return;
       }
@@ -236,7 +251,12 @@ class PlaybackController {
       }
     }));
     _timeSubs.add(p.completedStream.listen((done) {
-      if (done && duration.value > Duration.zero) position.value = duration.value;
+      if (!done || duration.peek() <= Duration.zero) return;
+      if (_atEnd(p)) {
+        position.value = duration.peek();
+      } else if (identical(p, _player)) {
+        onEndedShort?.call(p.state.position);
+      }
     }));
     _timeSubs.add(p.bufferStream.listen((d) => buffered.value = _step(d)));
     _timeSubs.add(p.durationStream.listen((d) {

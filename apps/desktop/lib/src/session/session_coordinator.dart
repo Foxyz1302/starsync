@@ -419,6 +419,7 @@ class SessionCoordinator {
     try {
       playback.onLoadError = _setPlayerError;
       playback.onStreamLost = _streamLost;
+      playback.onEndedShort = _endedShort;
       playback.onUserSeek = (d) => _userSeek(d.inMicroseconds / 1e6);
       _bufferSub ??= playback.buffered.subscribe((_) => _onBuffered());
       await media.start();
@@ -482,6 +483,40 @@ class SessionCoordinator {
     if (_streamReloadedFor == _mediaId || _mediaId < 0) return;
     _streamReloadedFor = _mediaId;
     _log.info('media $_mediaId: the stream lost its size; reloading the video once');
+    unawaited(reloadVideo());
+  }
+
+  // A relay read that stopped short of the end ([_endedShort]): the media
+  // waiting to be reopened (-1: none), and the reopens so far per media.
+  int _shortEndFor = -1;
+  ({int mediaId, int count}) _shortReopens = (mediaId: -1, count: 0);
+  static const _maxShortReopens = 3;
+
+  /// The player stopped at [at], short of the end: when it reads a relay,
+  /// that is a read that failed (the source sent nothing for longer than
+  /// ffmpeg's reconnects), not the end. [_reopenShort] opens it again at
+  /// the server's position once the relay has its source.
+  void _endedShort(Duration at) {
+    if (_mediaId < 0 || !media.readsRelay) return;
+    _log.info('media $_mediaId: the player stopped at ${(at.inMilliseconds / 1000).toStringAsFixed(1)} s, '
+        'short of the end, reading the relay');
+    _shortEndFor = _mediaId;
+  }
+
+  void _reopenShort(StateBroadcast r) {
+    if (_shortEndFor < 0) return;
+    final what = shortEndOf(r, _shortEndFor,
+        serverPosition: serverPositionAt(r, connection.serverNow()), selfId: connection.memberId);
+    if (what == ShortEnd.wait) return;
+    _shortEndFor = -1;
+    if (what == ShortEnd.none) return;
+    final n = _shortReopens.mediaId == r.mediaId ? _shortReopens.count + 1 : 1;
+    _shortReopens = (mediaId: r.mediaId, count: n);
+    if (n > _maxShortReopens) {
+      _log.warning('media ${r.mediaId}: stopped short again; reopened $_maxShortReopens times already, leaving it');
+      return;
+    }
+    _log.info('media ${r.mediaId}: reopening the relay at the server\'s position');
     unawaited(reloadVideo());
   }
 
@@ -699,6 +734,7 @@ class SessionCoordinator {
       if (_mediaId == r.mediaId) media.settled(r.mediaId);
     } else {
       await media.onState(r);
+      _reopenShort(r);
     }
     _jellyfinTransport(r);
     if (!_playerReady || _openUrl == null) {

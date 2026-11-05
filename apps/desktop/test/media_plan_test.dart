@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
+import 'package:starsync/src/session/delivery.dart' show ShortEnd, shortEndOf;
 import 'package:starsync/src/session/media_plan.dart';
 import 'package:starsync/src/session/relay_feeder.dart';
 import 'package:starsync/src/session/status.dart';
@@ -121,6 +122,25 @@ void main() {
     expect(jellyfinRelayNeeded(with_([_m('m2')], relay: true), _jf, 'm1'), isFalse, reason: "the server's login passes it on");
     expect(jellyfinRelayNeeded(with_([_m('m2', presence: Presence.away)]), _jf, 'm1'), isFalse, reason: 'sitting out');
     expect(jellyfinRelayNeeded(with_([]), _jf, 'm1'), isFalse, reason: 'alone');
+  });
+
+  test('a relay viewer stopped short of the end: reopened once the relay has its source', () {
+    StateBroadcast at(MediaRelay relay, {String transport = 'playing', double duration = 600}) =>
+        _state({'name': 'f.mkv', 'duration': duration, 'relay': _relay(relay)}, transport: transport);
+    ShortEnd of(StateBroadcast r, {int mediaId = 7, double pos = 100, String self = 'm1'}) =>
+        shortEndOf(r, mediaId, serverPosition: pos, selfId: self);
+    const up = MediaRelay(source: 'm2', live: true);
+    expect(of(at(up)), ShortEnd.reopen);
+    expect(of(at(up, transport: 'held')), ShortEnd.reopen, reason: 'everyone held for it');
+    expect(of(at(const MediaRelay(source: 'm2', live: true, sourceGone: true))), ShortEnd.wait, reason: 'source gone');
+    expect(of(at(const MediaRelay(source: 'm2'))), ShortEnd.wait, reason: 'its channel is down');
+    expect(of(at(const MediaRelay(fetch: true, live: true))), ShortEnd.reopen, reason: 'the server fetches it');
+    expect(of(at(up, transport: 'finished')), ShortEnd.none);
+    expect(of(at(up), mediaId: 6), ShortEnd.none, reason: 'another media');
+    expect(of(at(up), pos: 595), ShortEnd.none, reason: 'near the end');
+    expect(of(at(up, duration: 0), pos: 595), ShortEnd.reopen, reason: 'no known duration');
+    expect(of(at(up), self: 'm2'), ShortEnd.none, reason: 'its source reads its own copy');
+    expect(of(_state({'name': 'f.mkv', 'duration': 600})), ShortEnd.none, reason: 'not relayed');
   });
 
   test('a warm relay this app feeds ends with its Up next item', () async {

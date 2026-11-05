@@ -12,6 +12,38 @@ MediaRelay? stateMediaRelay(StateBroadcast state) {
   return r is Map ? MediaRelay.fromJson(Map<String, Object?>.from(r)) : null;
 }
 
+/// What a relay viewer does about its player having stopped short of the
+/// end (`PlaybackController.onEndedShort`: a read that waited on bytes
+/// the source did not send longer than ffmpeg's reconnects, taken by mpv
+/// for the end of the file).
+enum ShortEnd {
+  /// Nothing: another media, the server finished or is near the end, or
+  /// this member is not a viewer of a relay.
+  none,
+
+  /// The relay has no source now: reopened once it is back.
+  wait,
+
+  /// Reopened now, at the server's position.
+  reopen,
+}
+
+/// Closer than this to the end (seconds, at the server's position), a
+/// short end is left alone: a file whose stated duration runs past its
+/// last frame ends there anyway.
+const shortEndMarginSecs = 10.0;
+
+/// [ShortEnd] in state [r] for media [mediaId], the server at
+/// [serverPosition] seconds; [selfId] is this member.
+ShortEnd shortEndOf(StateBroadcast r, int mediaId, {required double serverPosition, required String selfId}) {
+  final relay = stateMediaRelay(r);
+  if (r.mediaId != mediaId || relay == null || r.transport == 'finished') return ShortEnd.none;
+  if (!relay.fetch && relay.source == selfId) return ShortEnd.none;
+  final duration = (r.media?['duration'] as num?)?.toDouble() ?? 0;
+  if (duration > 0 && duration - serverPosition < shortEndMarginSecs) return ShortEnd.none;
+  return relay.live && !relay.sourceGone ? ShortEnd.reopen : ShortEnd.wait;
+}
+
 /// "4.1 MB/s", "850 kB/s".
 String formatRate(int bytesPerSec) {
   if (bytesPerSec >= 1000000) {

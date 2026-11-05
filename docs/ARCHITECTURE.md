@@ -788,6 +788,21 @@ ready.
   drops, a seek past what the server got, a member joining meanwhile):
   at most one seek per viewer while it is gone, nobody's player broken,
   all play from the seek once it is back.
+  A read that waits on bytes nobody sends for longer than ffmpeg's
+  reconnects (`stream-lavf-o` above: 4 tries per read, about 40 s with
+  the 4 s header rule;
+  measured with mpv 0.41 / ffmpeg 9.0.2) fails, and mpv takes that for
+  the end of the file. The player stopping more than 3 s
+  (`finishSlackSecs`) short of its duration says so
+  (`PlaybackController.onEndedShort`; the bar then shows where it
+  stopped, not full): a relay viewer whose server has not finished and
+  is more than 10 s from the end (`shortEndOf`, `shortEndMarginSecs`)
+  is reopened in a fresh player at the server's position ("Reload
+  video"), at once when the relay has its source, else once it is back;
+  at most 3 times per media. A longer reconnect budget for relay URLs
+  was the other way: it only moves the limit (the source may be away
+  for its whole grace), and a long `reconnect_delay_max` leaves ffmpeg
+  asleep for that long after the bytes are there again.
 
 Chapters, segments, tracks (`PlaybackController` signals, values from
 `playback/media_marks.dart`, no widgets; any controls UI reads them):

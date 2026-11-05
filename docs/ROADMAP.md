@@ -52,14 +52,6 @@ Problems are numbered; delete a line when its fix ships.
   the `close:` log lines.
 - P33 No volume readout on wheel: likely fixed by the controls rework
   (1.2.1-dev.1; a test covers both skins); confirm in real use.
-- P37 A relay viewer whose read waits on bytes the source does not send
-  for longer than ffmpeg's reconnect budget (4 tries per read, about
-  40 s with the 4 s header rule) gets an I/O error that mpv takes as the
-  end of the file. Measured with mpv 0.41 / ffmpeg 9.0.2 and the source
-  away about a minute across a seek: it played on; one read stalled past
-  the budget ends the file. Options: a longer `reconnect_delay_max` for
-  relay URLs only, or the end-of-file path reopening a relay viewer
-  that stopped short while the server plays.
 
 **Restructure** (in order; reviewed against the code). Truth lives in
 three places: the server (members, presence, gate, transport, queue incl.

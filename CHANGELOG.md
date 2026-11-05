@@ -48,6 +48,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - The arrow keys could move to the window buttons at the top, and Enter then closed the app; the window buttons never take the keys now, and in the player the arrows and Enter only do player things
 - PgUp and PgDn went the wrong way through chapters: PgUp is the next chapter and PgDn the previous one, as in mpv
 - Minimal player design: a click near the time at the end of the timeline switched the time display instead of seeking; only a click on the time itself switches it now
+- When the person passing a video on stopped sending it for a while (about 40 s or more), your video could stop as if it had ended; it now opens again where everyone is once the video comes through again
 - With the window in the background, a burst of news (a video change, Up next, chat) no longer makes some desktop notifications go missing (KDE refused them): the first shows at once and the rest come together in one a few seconds later
 
 ## 1.4.0

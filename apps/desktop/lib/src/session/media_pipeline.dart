@@ -682,6 +682,13 @@ class MediaPipeline {
   /// gone, or left: it plays what the server has.
   bool get sourceDown => _recovery != null;
 
+  /// The player reads the current media through the server's relay (a
+  /// `/r/` URL, or an EDL of its tracks).
+  bool get readsRelay {
+    final url = _openUrl;
+    return url != null && (url.startsWith('edl://') || Uri.tryParse(url)?.pathSegments.firstOrNull == 'r');
+  }
+
   /// The user sought to [to] (applied at once): while the source is down,
   /// that is the one try.
   void noteUserSeek(double to) {
@@ -716,10 +723,8 @@ class MediaPipeline {
   /// apply.
   List<PlayerAction> recover(StateBroadcast r, List<PlayerAction> actions, {required double serverPosition}) {
     final relay = stateMediaRelay(r);
-    final url = _openUrl;
-    final viaRelay = url != null && (url.startsWith('edl://') || Uri.tryParse(url)?.pathSegments.firstOrNull == 'r');
     final down = relay != null &&
-        viaRelay &&
+        readsRelay &&
         !relay.fetch &&
         relay.source != session.selfId() &&
         (relay.sourceGone || !relay.live);
