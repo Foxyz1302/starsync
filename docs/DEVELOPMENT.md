@@ -328,11 +328,13 @@ User pushes tags; CI does the rest.
 
 1. `tool/release.sh [patch|minor|major] [--dry-run]`: derives the next
    version from the latest tag, refuses when the [changelog](#changelog)'s
-   Unreleased has no items (warns when it has no summary) and prints it,
+   Unreleased has no items (warns when it has no Highlights or no summary)
+   and prints it,
    renames Unreleased to `X.Y.Z` under a fresh empty Unreleased, bumps the
    three pubspecs in lockstep, writes `updates/manifest.json` (per-platform
    `assets` URLs are predictable; `url` stays the Linux tarball for builds
-   <= 0.2.1; `notes` is the section's summary, `changes` its lists), commits
+   <= 0.2.1; `notes` is the section's summary, `highlights` and `changes`
+   its lists), commits
    `Release vX.Y.Z` (with `CHANGELOG.md`), makes an annotated tag.
    `--dry-run` stops after printing.
 2. Review, then `git push --follow-tags`.
@@ -352,8 +354,9 @@ repository read/write) builds the working tree here as `<next>-dev.N` (N
 one past the published one; `<next>` the pubspec's next patch, or next
 minor / major when asked, and once such a line is published later runs
 follow it until a release moves the pubspec) and replaces the assets of the
-`dev` prerelease with the tarball and its `manifest.json` (`changes`:
-the changelog's Unreleased, which also becomes the prerelease's text). Dev builds
+`dev` prerelease with the tarball and its `manifest.json` (`highlights`
+and `changes`: the changelog's Unreleased, which also becomes the
+prerelease's text). Dev builds
 update from it on the Dev update channel, which a test build starts on
 and keeps after a release ([Updater](ARCHITECTURE.md#updater)). Any
 install switches channel in Settings → Updates → More; the command the script
@@ -369,17 +372,25 @@ updater skips the check when absent. Workflows live in `.gitea/workflows`
 
 ### Changelog
 
-`CHANGELOG.md` is what people read: the update band's first items, the
-What's new card ([Updater](ARCHITECTURE.md#updater)) and the release page.
-A user-facing change adds a line to its `## Unreleased` section in the same
-commit, under `### Added`, `### Changed` or `### Fixed` (no other
-headings), as a `- ` item in plain words for the people watching, not
-commit-speak ("Chat pop-ups stay away while the chat panel is open", not
-"Notifier: suppress toasts when panel open"). Internal changes (tests,
-refactors, docs, CI) get no line. The paragraph under the version heading
-is an optional one-line summary: it becomes the manifest's `notes`, the
-only thing 1.2.x/1.3.x apps show (without it, the first items); refresh it
-before cutting. Versions carry no date (the tag and release page have it).
+`CHANGELOG.md` is what people read: the update band, the What's new card
+([Updater](ARCHITECTURE.md#updater)) and the release page. A version's
+section is, in order: an optional one-line summary, `### Highlights`, then
+`### Added`, `### Changed` and `### Fixed` (no other headings), each a list
+of `- ` items in plain words for the people watching, not commit-speak
+("Chat pop-ups stay away while the chat panel is open", not "Notifier:
+suppress toasts when panel open").
+
+A user-facing change adds a line to `## Unreleased` in the same commit,
+under Added, Changed or Fixed: that is the full list. Internal changes
+(tests, refactors, docs, CI) get no line. Highlights are written once, when
+a release is cut, not per commit: 2 to 5 noticeable things, one short line
+each, for someone who reads nothing else ("Your volume is remembered, and M
+mutes"). The app shows them first, with the full list behind "All
+changes"; the band shows the first three. Without them (`tool/release.sh`
+warns) the app shows the first few items instead. The summary becomes the
+manifest's `notes`, the only thing 1.2.x/1.3.x apps show (without it, the
+highlights, else the first items); refresh it before cutting too. Versions
+carry no date (the tag and release page have it).
 `tool/changelog.dart` reads and cuts the file (`cut X.Y.Z`, `json
 <version|unreleased>`, `markdown <version|unreleased>`); its tests are
 `tool/test/changelog_test.dart` (`cd tool && dart test`).

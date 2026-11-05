@@ -34,8 +34,10 @@ class UpdateBar extends StatelessWidget {
         final behind = isDevBuild(current) ? null : 'You are running $current';
         final String title;
         String detail;
-        // The offered version's first changes instead of its notes.
+        // The offered version's highlights (or first changes) instead of
+        // its notes.
         var preview = false;
+        final told = m.changes != null || m.highlights.isNotEmpty;
         switch (s.phase) {
           case UpdatePhase.downloading:
             title = 'Downloading $appName ${m.version}… ${((s.progress ?? 0) * 100).round()}%';
@@ -56,11 +58,11 @@ class UpdateBar extends StatelessWidget {
             } else if (m.isRequired) {
               title = '$appName ${m.version} is required to join servers on it';
               detail = m.notes;
-              preview = m.changes != null;
+              preview = told;
             } else {
               title = '$appName ${m.version} is ready';
               detail = m.notes;
-              preview = m.changes != null;
+              preview = told;
             }
             detail = [?behind, detail].where((t) => t.isNotEmpty).join(' · ');
         }
@@ -96,7 +98,7 @@ class UpdateBar extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(color: fg, fontWeight: FontWeight.w600)),
                       if (preview)
-                        WhatsNewPreview(changes: m.changes!, color: fg, lead: behind)
+                        WhatsNewPreview(notes: ReleaseNotes.of(m), color: fg, lead: behind)
                       else if (detail.isNotEmpty)
                         Tooltip(
                           message: detail,
@@ -111,7 +113,7 @@ class UpdateBar extends StatelessWidget {
                 ),
                 if (!busy) ...[
                   const SizedBox(width: 12),
-                  if (m.changes != null || m.notes.trim().isNotEmpty)
+                  if (told || m.notes.trim().isNotEmpty)
                     TextButton.icon(
                       key: const ValueKey('update-whats-new'),
                       style: TextButton.styleFrom(foregroundColor: fg),

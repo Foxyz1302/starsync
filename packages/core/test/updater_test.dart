@@ -189,6 +189,7 @@ void main() {
     };
     final old = UpdateManifest.fromJson(base);
     expect(old.changes, isNull);
+    expect(old.highlights, isEmpty);
     expect(old.notes, 'One line for older apps.');
 
     final m = UpdateManifest.fromJson({
@@ -211,6 +212,13 @@ void main() {
       expect(UpdateManifest.fromJson({...base, 'changes': junk}).changes, isNull);
     }
     expect(UpdateManifest.fromJson({...base, 'notes': 3}).notes, '');
+
+    // `highlights`: a list of lines, read leniently.
+    expect(UpdateManifest.fromJson({...base, 'highlights': [' People cards ', '', 3, 'Six settings pages']}).highlights,
+        ['People cards', 'Six settings pages']);
+    for (final junk in [null, 'text', {}, 7]) {
+      expect(UpdateManifest.fromJson({...base, 'highlights': junk}).highlights, isEmpty);
+    }
   });
 
   test('the repo manifest parses, and keeps a one-line string notes for 1.2.x/1.3.x', () {

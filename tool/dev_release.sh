@@ -10,8 +10,8 @@
 # following it (1.2.0-dev.2, ...) until the release moves the pubspec.
 # Token: RELEASE_TOKEN, else the file ~/.config/watch-together-release-token
 # (a Gitea access token with repository read/write; keep the file 0600).
-# The manifest's `changes` (What's new) and the dev release's page are
-# CHANGELOG.md's Unreleased.
+# The manifest's `highlights` and `changes` (What's new) and the dev
+# release's page are CHANGELOG.md's Unreleased.
 # Prints the one-time command that moves a stable install onto test builds
 # and sets its update channel to Dev (the `update-channel` file the app
 # takes at its next start).
@@ -79,9 +79,12 @@ manifest = {'version': e['MANIFEST_VER'], 'protocol': int(e['MANIFEST_PROTO']),
             'url': url, 'sha256': e['MANIFEST_SHA'], 'notes': e['MANIFEST_NOTES'],
             'assets': {'linux-x64': url}}
 # What's new in a test build: CHANGELOG.md's Unreleased, when it has items.
-changes = json.loads(e['MANIFEST_CHANGES']).get('changes') or {}
+log = json.loads(e['MANIFEST_CHANGES'])
+changes = log.get('changes') or {}
 if any(changes.values()):
     manifest['changes'] = changes
+    if log.get('highlights'):
+        manifest['highlights'] = log['highlights']
 with open(sys.argv[1], 'w') as f:
     json.dump(manifest, f, indent=2, ensure_ascii=False)
 EOF

@@ -1,12 +1,14 @@
 // CHANGELOG.md, read and cut for releases (docs/DEVELOPMENT.md,
 // "Changelog"). The file: `## Unreleased`, then `## X.Y.Z` sections newest
-// first; each has an optional one-paragraph summary and `### Added` /
-// `### Changed` / `### Fixed` lists of `- ` items.
+// first; each has an optional one-paragraph summary, a short
+// `### Highlights` list (what the app shows first, written when a release is
+// cut) and `### Added` / `### Changed` / `### Fixed` lists of `- ` items.
 // Usage: dart tool/changelog.dart cut X.Y.Z
 //          (tool/release.sh: Unreleased becomes X.Y.Z, a fresh empty
 //          Unreleased on top; fails when Unreleased has no items)
 //        dart tool/changelog.dart json <X.Y.Z|unreleased>
-//          (the manifest's {"notes": "...", "changes": {...}})
+//          (the manifest's {"notes": "...", "highlights": [...],
+//          "changes": {...}})
 //        dart tool/changelog.dart markdown <X.Y.Z|unreleased> [X.Y.Z]
 //          (the release page's body; the last argument names the version
 //          when it is not the section's own)
@@ -18,25 +20,35 @@ import 'dart:io';
 const unreleased = 'Unreleased';
 const kinds = ['Added', 'Changed', 'Fixed'];
 
+/// The few noticeable things, for people who read nothing else.
+const highlightsHeading = 'Highlights';
+
+/// Every `### ` heading a section may have, in file order.
+const headings = [highlightsHeading, ...kinds];
+
 /// The empty section [cutRelease] puts on top.
-const freshUnreleased = '## $unreleased\n\n### Added\n\n### Changed\n\n### Fixed\n';
+const freshUnreleased = '## $unreleased\n\n### $highlightsHeading\n\n### Added\n\n### Changed\n\n### Fixed\n';
 
 class ChangelogSection {
   /// `Unreleased` or a version.
   final String title;
   /// The paragraph under the heading, one line ('' when there is none).
   final String summary;
-  /// [kinds] name -> items, in file order.
+  /// [headings] name -> items, in file order.
   final Map<String, List<String>> items;
   const ChangelogSection(this.title, this.summary, this.items);
 
   List<String> of(String kind) => items[kind] ?? const [];
+  List<String> get highlights => of(highlightsHeading);
+
+  /// No Added / Changed / Fixed items (highlights alone are no release).
   bool get isEmpty => kinds.every((k) => of(k).isEmpty);
 
   /// One line for apps that read only `notes` (1.2.x, 1.3.x): the summary,
-  /// else the first items.
+  /// else the highlights, else the first items.
   String get notes {
     if (summary.isNotEmpty) return summary;
+    if (highlights.isNotEmpty) return highlights.join('; ');
     final all = [for (final k in kinds) ...of(k)];
     final head = all.take(3).join('; ');
     return all.length > 3 ? '$head; and more' : head;
@@ -44,6 +56,7 @@ class ChangelogSection {
 
   Map<String, Object?> toManifest() => {
         'notes': notes,
+        'highlights': highlights,
         'changes': {for (final k in kinds) k.toLowerCase(): of(k)},
       };
 
@@ -51,7 +64,7 @@ class ChangelogSection {
   String render([String? heading]) {
     final b = StringBuffer('## ${heading ?? title}\n');
     if (summary.isNotEmpty) b.write('\n$summary\n');
-    for (final k in kinds) {
+    for (final k in headings) {
       if (of(k).isEmpty) continue;
       b.write('\n### $k\n\n');
       for (final item in of(k)) {
@@ -65,7 +78,7 @@ class ChangelogSection {
   String releaseBody(String version) {
     final b = StringBuffer('## Starsync $version\n');
     if (summary.isNotEmpty) b.write('\n$summary\n');
-    for (final k in kinds) {
+    for (final k in headings) {
       if (of(k).isEmpty) continue;
       b.write('\n### $k\n\n');
       for (final item in of(k)) {
@@ -119,12 +132,12 @@ class Changelog {
         pre.writeln(raw);
       } else if (line.startsWith('### ')) {
         final name = line.substring(4).trim();
-        kind = kinds.where((k) => k.toLowerCase() == name.toLowerCase()).firstOrNull ??
-            (throw bad('a section is ${kinds.join(' / ')}'));
+        kind = headings.where((k) => k.toLowerCase() == name.toLowerCase()).firstOrNull ??
+            (throw bad('a section is ${headings.join(' / ')}'));
         if (items.containsKey(kind)) throw bad('$kind twice');
         items[kind] = [];
       } else if (RegExp(r'^[-+*] ').hasMatch(line)) {
-        if (kind == null) throw bad('an item needs ${kinds.join(' / ')} above it');
+        if (kind == null) throw bad('an item needs ${headings.join(' / ')} above it');
         items[kind]!.add(line.substring(2).trim());
       } else if (line.isEmpty) {
         continue;

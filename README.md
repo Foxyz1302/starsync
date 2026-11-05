@@ -41,9 +41,10 @@ Documents folder) and leaves the originals where they were.
 
 Update from the app: the app looks for a new version at start and every
 few hours, and when one exists a band across the top of the window says so
-(never over a playing video), with its first changes. "What's new" lists
-them all ([CHANGELOG.md](CHANGELOG.md)); the first start after an update
-shows that list once, and Settings → Help & about has it again. "Update and
+(never over a playing video), with its highlights. "What's new" shows
+them, with every change behind "All changes" ([CHANGELOG.md](CHANGELOG.md));
+the first start after an update shows it once, and Settings → Help & about
+has it again. "Update and
 restart" downloads, verifies, applies in place and restarts; "Later" hides
 it until the next check; the install folder must be writable by you. The version you run is
 at the bottom of every Settings page (and in the Settings tab's tooltip). Settings → Updates has Check now. From a terminal:

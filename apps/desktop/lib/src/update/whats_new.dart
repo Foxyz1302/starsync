@@ -19,9 +19,13 @@ class ReleaseNotes {
   /// The one-line notes (all a manifest from before the changelog has).
   final String notes;
   final ReleaseChanges? changes;
-  const ReleaseNotes({required this.version, this.notes = '', this.changes});
 
-  factory ReleaseNotes.of(UpdateManifest m) => ReleaseNotes(version: m.version, notes: m.notes, changes: m.changes);
+  /// The few lines shown first (empty for a version from before them).
+  final List<String> highlights;
+  const ReleaseNotes({required this.version, this.notes = '', this.changes, this.highlights = const []});
+
+  factory ReleaseNotes.of(UpdateManifest m) =>
+      ReleaseNotes(version: m.version, notes: m.notes, changes: m.changes, highlights: m.highlights);
 
   /// Null for anything unreadable.
   static ReleaseNotes? fromJson(Object? json) {
@@ -33,6 +37,7 @@ class ReleaseNotes {
       version: version,
       notes: notes is String ? notes : '',
       changes: ReleaseChanges.fromJson(json['changes']),
+      highlights: releaseHighlights(json['highlights']),
     );
   }
 
@@ -40,9 +45,10 @@ class ReleaseNotes {
     'version': version,
     'notes': notes,
     if (changes != null) 'changes': changes!.toJson(),
+    if (highlights.isNotEmpty) 'highlights': highlights,
   };
 
-  bool get isEmpty => notes.trim().isEmpty && (changes?.isEmpty ?? true);
+  bool get isEmpty => notes.trim().isEmpty && (changes?.isEmpty ?? true) && highlights.isEmpty;
 }
 
 /// Where [WhatsNew] keeps its two values (settings box; tests: memory).

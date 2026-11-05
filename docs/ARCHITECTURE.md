@@ -3014,7 +3014,7 @@ One implementation, `packages/core/lib/src/updater.dart` (pure Dart, tested
 in `packages/core/test/updater_test.dart`), with two front ends: the app and
 the dedicated server. Both binaries ship in the same archive, so either one
 updates the whole install folder. Reads a manifest (`version`, `protocol`, `url`, optional `sha256`, `notes`,
-optional `changes`) from `updateManifestUrl`, compares versions, downloads the tarball, checks
+optional `changes` and `highlights`) from `updateManifestUrl`, compares versions, downloads the tarball, checks
 sha256 when present, then extracts into a staging dir inside the install
 folder (same filesystem, so moves are renames; the folder must be
 user-writable). Each top-level entry is moved aside and the new one moved in,
@@ -3057,8 +3057,8 @@ does the same from the app binary. In the app, `UpdateController`
 (`apps/desktop/lib/src/update/`) runs the same code for the update bar
 (`UpdateBar`, `screens/home/update_indicator.dart`): a band across the
 window under the strip while an update is available: "Starsync X.Y.Z is
-ready", the first three changes (each with its kind's icon; the notes
-when the manifest has no `changes`), What's new, Later (hidden until the
+ready", the first three highlights (else the first three changes, each
+with its kind's icon; the notes when the manifest has neither), What's new, Later (hidden until the
 next check or start) and "Update and restart" (download, apply, then the
 app close above with Hive closed and the new binary started), its
 progress in the band. A release
@@ -3094,14 +3094,18 @@ release. `--upgrade` uses the default channel of the binary's version.
 `0.0.0-dev` (a dev run) checks nothing.
 
 **What's new.** The manifest's `notes` is one line (all 1.2.x and 1.3.x
-read; they ignore other keys) and `changes` (`{"added": [...], "changed":
-[...], "fixed": [...]}`, `ReleaseChanges`, read leniently: anything
-malformed is no `changes`) the version's lists; both come from
+read; they ignore other keys), `highlights` a few short lines (1.4.x and
+older ignore it) and `changes` (`{"added": [...], "changed": [...],
+"fixed": [...]}`, `ReleaseChanges`) the version's full lists; both lists
+are read leniently (anything malformed is none), and all three come from
 `CHANGELOG.md` ([Changelog](DEVELOPMENT.md#changelog)). The card
-(`WhatsNewCard`, `widgets/whats_new_card.dart`) shows them as Added /
-Changed / Fixed sections, each with its icon and colour, on `AppGlass` in
-a popover, the rows easing in one after another, the list scrolling in a
-short window; notes alone show as one paragraph. Three ways open it: the
+(`WhatsNewCard`, `widgets/whats_new_card.dart`), on `AppGlass` in a
+popover, the rows easing in one after another, shows the highlights, then
+"All changes (N)", which unfolds the full Added / Changed / Fixed sections
+(each with its icon and colour) in place, the list scrolling in a short
+window. A version without highlights shows its summary and first four
+items (`whatsNewFirstItems`) before "All changes", or the whole list when
+it is no longer; notes alone show as one paragraph. Three ways open it: the
 band's What's new (the offered version, with Update and restart), the
 first start of a new version, and Settings → Help & about ("What's new in X.Y.Z",
 once this version's notes are known). The first start (`WhatsNew`,

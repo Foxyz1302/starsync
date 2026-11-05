@@ -13,6 +13,10 @@ Intro text.
 Summary of the next one,
 over two lines.
 
+### Highlights
+
+- Danmaku
+
 ### Added
 
 - Danmaku style notifications
@@ -39,16 +43,20 @@ void main() {
     expect(next.of('Added'), ['Danmaku style notifications', 'Bilibili style chat box that wraps']);
     expect(next.of('Changed'), isEmpty);
     expect(next.of('Fixed'), ['Optimized relay']);
+    expect(next.highlights, ['Danmaku']);
     expect(next.toManifest(), {
       'notes': 'Summary of the next one, over two lines.',
+      'highlights': ['Danmaku'],
       'changes': {
         'added': ['Danmaku style notifications', 'Bilibili style chat box that wraps'],
         'changed': <String>[],
         'fixed': ['Optimized relay'],
       },
     });
-    // No summary: the first items.
+    // No summary: the highlights, else the first items.
     expect(log.section('1.0.0')!.notes, 'Various bug fixes');
+    expect(log.section('1.0.0')!.highlights, isEmpty);
+    expect(Changelog.parse('## 1.0.0\n\n### Highlights\n\n- A\n- B\n\n### Fixed\n\n- x\n').sections.single.notes, 'A; B');
   });
 
   test('cut: Unreleased becomes the version, a fresh empty one on top', () {
@@ -57,10 +65,13 @@ void main() {
     expect(log.sections.map((s) => s.title), ['Unreleased', '1.1.0', '1.0.0']);
     expect(log.section('Unreleased')!.isEmpty, isTrue);
     expect(log.section('1.1.0')!.of('Added'), hasLength(2));
+    expect(log.section('1.1.0')!.highlights, ['Danmaku']);
     expect(log.preamble, contains('Intro text.'));
     expect(cut, contains(freshUnreleased));
     // Nothing new: no release.
     expect(() => log.cutRelease('1.2.0'), throwsStateError);
+    // Highlights alone are no release either.
+    expect(() => Changelog.parse('## Unreleased\n\n### Highlights\n\n- x\n').cutRelease('1.2.0'), throwsStateError);
     expect(() => Changelog.parse(_sample).cutRelease('1.0.0'), throwsStateError);
   });
 
@@ -73,6 +84,7 @@ void main() {
   test('release body: heading, summary, lists', () {
     final body = Changelog.parse(_sample).section('unreleased')!.releaseBody('1.1.0');
     expect(body, startsWith('## Starsync 1.1.0\n\nSummary of the next one'));
+    expect(body, contains('### Highlights\n\n- Danmaku\n\n### Added'));
     expect(body, contains('### Added\n\n- Danmaku style notifications\n'));
     expect(body, isNot(contains('### Changed')));
   });

@@ -8,12 +8,14 @@ import '../shell/motion.dart';
 import '../update/whats_new.dart';
 import 'app_menu.dart';
 
-// The "What's new" card: a version's changes (CHANGELOG.md, through the
-// manifest's `changes`) as Added / Changed / Fixed sections, each with its
-// icon and colour, on the app's glass. The update band opens it for the
-// offered version, the first start after an update for the new one
-// ([WhatsNew]), Settings → About for the running one. Notes without
-// `changes` (older manifests) show as one paragraph.
+// The "What's new" card: a version's highlights (CHANGELOG.md's
+// `### Highlights`, the manifest's `highlights`), then "All changes"
+// unfolds its full Added / Changed / Fixed sections (`changes`), each with
+// its icon and colour, on the app's glass. A version without highlights
+// shows its first items instead. The update band opens it for the offered
+// version, the first start after an update for the new one ([WhatsNew]),
+// Settings → About for the running one. Notes without `changes` (older
+// manifests) show as one paragraph.
 
 enum ChangeKind {
   added('Added', Icons.auto_awesome_rounded, Icons.add_rounded, Color(0xFF7EE0A6)),
@@ -41,6 +43,13 @@ List<(ChangeKind, String)> topChanges(ReleaseChanges c, int n) => [
   for (final k in ChangeKind.values)
     for (final item in k.of(c)) (k, item),
 ].take(n).toList();
+
+/// How many items a version without highlights shows before "All changes".
+const whatsNewFirstItems = 4;
+
+/// A highlight's bullet and colour (a soft lilac that reads on the glass).
+const _highlightBullet = Icons.star_rounded;
+const _highlightColor = Color(0xFFD2B6FF);
 
 /// Opens the card over the window. [action]: a button beside Close (the
 /// band's "Update and restart").
@@ -73,7 +82,21 @@ class _WhatsNewCardState extends State<WhatsNewCard> with SingleTickerProviderSt
     duration: easeTime + Duration(milliseconds: 45 * math.min(_rows, 12)),
   )..forward();
 
-  int get _rows => widget.notes.changes?.length ?? 1;
+  /// "All changes" was clicked: the full lists show under the highlights.
+  bool _all = false;
+
+  ReleaseChanges? get _changes => widget.notes.changes;
+  List<String> get _highlights => widget.notes.highlights;
+
+  /// The full lists wait behind "All changes": there are highlights, or
+  /// more items than the first few.
+  bool get _folded => _changes != null && (_highlights.isNotEmpty || _changes!.length > whatsNewFirstItems);
+
+  int get _rows => _highlights.isNotEmpty
+      ? _highlights.length
+      : _folded
+      ? whatsNewFirstItems
+      : _changes?.length ?? 1;
 
   @override
   void dispose() {
@@ -105,19 +128,46 @@ class _WhatsNewCardState extends State<WhatsNewCard> with SingleTickerProviderSt
     final scheme = theme.colorScheme;
     const muted = Color(0xB3FFFFFF);
     final n = widget.notes;
-    final changes = n.changes;
+    final changes = _changes;
+    final highlights = _highlights;
+    final folded = _folded && !_all;
     final screen = MediaQuery.sizeOf(context);
     final maxHeight = math.min(620.0, screen.height - 64);
     var row = 0;
     final body = <Widget>[
-      if (changes == null)
-        _staggered(row++, Text(n.notes, style: const TextStyle(fontSize: 13.5, height: 1.45)))
-      else
+      for (final item in highlights)
+        _staggered(row++, _Item(bullet: _highlightBullet, color: _highlightColor, text: item, strong: true)),
+      if (highlights.isNotEmpty) const SizedBox(height: 10),
+      if (changes == null) ...[
+        if (highlights.isEmpty) _staggered(row++, Text(n.notes, style: const TextStyle(fontSize: 13.5, height: 1.45))),
+      ] else if (folded) ...[
+        if (highlights.isEmpty)
+          for (final (k, item) in topChanges(changes, whatsNewFirstItems))
+            _staggered(row++, _Item(bullet: k.bullet, color: k.color, text: item)),
+        _staggered(
+          row++,
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: TextButton.icon(
+              key: const ValueKey('whats-new-all'),
+              style: TextButton.styleFrom(
+                foregroundColor: muted,
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsetsDirectional.fromSTEB(0, 0, 10, 0),
+              ),
+              onPressed: () => setState(() => _all = true),
+              icon: const Icon(Icons.expand_more_rounded, size: 18),
+              label: Text('All changes (${changes.length})'),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+      ] else
         for (final k in ChangeKind.values)
           if (k.of(changes).isNotEmpty) ...[
             _staggered(row++, _SectionHead(kind: k, count: k.of(changes).length)),
             const SizedBox(height: 6),
-            for (final item in k.of(changes)) _staggered(row++, _Item(kind: k, text: item)),
+            for (final item in k.of(changes)) _staggered(row++, _Item(bullet: k.bullet, color: k.color, text: item)),
             const SizedBox(height: 10),
           ],
     ];
@@ -182,7 +232,8 @@ class _WhatsNewCardState extends State<WhatsNewCard> with SingleTickerProviderSt
                 ],
               ),
             ),
-            if (changes != null && n.notes.trim().isNotEmpty)
+            // The summary, unless the highlights already say it.
+            if (changes != null && highlights.isEmpty && n.notes.trim().isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
                 child: Text(n.notes, style: const TextStyle(color: muted, fontSize: 13, height: 1.4)),
@@ -193,7 +244,12 @@ class _WhatsNewCardState extends State<WhatsNewCard> with SingleTickerProviderSt
               child: SingleChildScrollView(
                 key: const ValueKey('whats-new-list'),
                 padding: const EdgeInsets.fromLTRB(18, 14, 18, 4),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: body),
+                child: AnimatedSize(
+                  duration: easeTime,
+                  curve: ease,
+                  alignment: Alignment.topCenter,
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: body),
+                ),
               ),
             ),
             const Divider(height: 1, thickness: 0.5, color: AppMenuStyle.border),
@@ -258,9 +314,13 @@ class _SectionHead extends StatelessWidget {
 }
 
 class _Item extends StatelessWidget {
-  final ChangeKind kind;
+  final IconData bullet;
+  final Color color;
   final String text;
-  const _Item({required this.kind, required this.text});
+
+  /// A highlight: a touch brighter than a list item.
+  final bool strong;
+  const _Item({required this.bullet, required this.color, required this.text, this.strong = false});
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -271,47 +331,55 @@ class _Item extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(top: 2, left: 2),
           child: DecoratedBox(
-            decoration: BoxDecoration(color: kind.color.withValues(alpha: 0.16), shape: BoxShape.circle),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.16), shape: BoxShape.circle),
             child: SizedBox.square(
               dimension: 16,
               child: Icon(
-                kind.bullet,
+                bullet,
                 size: 12,
-                color: kind.color,
+                color: color,
               ),
             ),
           ),
         ),
         const SizedBox(width: 10),
-        Expanded(child: Text(text, style: const TextStyle(fontSize: 13.5, height: 1.4))),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(fontSize: strong ? 14 : 13.5, height: 1.4, fontWeight: strong ? FontWeight.w500 : null),
+          ),
+        ),
       ],
     ),
   );
 }
 
-/// The band's line: the first items with their kind's icon, in [color].
+/// The band's line: the first highlights (or, without them, the first
+/// items with their kind's icon), in [color].
 class WhatsNewPreview extends StatelessWidget {
-  final ReleaseChanges changes;
+  final ReleaseNotes notes;
   final Color color;
   final String? lead;
-  const WhatsNewPreview({super.key, required this.changes, required this.color, this.lead});
+  const WhatsNewPreview({super.key, required this.notes, required this.color, this.lead});
 
   @override
   Widget build(BuildContext context) {
-    final top = topChanges(changes, 3);
+    final top = notes.highlights.isNotEmpty
+        ? [for (final h in notes.highlights.take(3)) (Icons.auto_awesome_rounded, h)]
+        : [for (final (k, item) in topChanges(notes.changes ?? const ReleaseChanges(), 3)) (k.icon, item)];
     final style = TextStyle(color: color.withValues(alpha: 0.85), fontSize: 12);
     return Text.rich(
       key: const ValueKey('whats-new-preview'),
       TextSpan(
         children: [
           if (lead != null) TextSpan(text: '$lead  ·  '),
-          for (final (i, (k, item)) in top.indexed) ...[
+          for (final (i, (icon, item)) in top.indexed) ...[
             if (i > 0) const TextSpan(text: '   '),
             WidgetSpan(
               alignment: PlaceholderAlignment.middle,
               child: Padding(
                 padding: const EdgeInsets.only(right: 4),
-                child: Icon(k.icon, size: 13, color: color.withValues(alpha: 0.85)),
+                child: Icon(icon, size: 13, color: color.withValues(alpha: 0.85)),
               ),
             ),
             TextSpan(text: item),

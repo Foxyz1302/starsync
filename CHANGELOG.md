@@ -7,6 +7,14 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ## Unreleased
 
+### Highlights
+
+- People cards: point at someone's avatar or name to see their card
+- Jellyfin: right-click has everything, and a whole show or season can be marked watched
+- Joining without a name just asks what to call you
+- Settings in six tidy pages, the ones you change first
+- Your volume is remembered, and M mutes
+
 ### Added
 
 - The video's volume is remembered: the next start begins where you left it
@@ -36,6 +44,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - The old program names from before Starsync (`watch_together`, `watch-together-server`, `.exe` on Windows) are gone from the folder: if you start Starsync from an old shortcut, make a new one to `starsync` / `starsync.exe`
 - A Jellyfin item's right-click menu now has everything its details panel has, with the same names and icons: Mark watched or unwatched, Remove from Continue and Open the show page sit next to Put it up, the queue, Copy title and Open in Jellyfin, for episodes, movies, shows and seasons everywhere they show. A mark shows on every row at once
 - Right-click a show in Files to put up its next episode or open its page; a video's right-click works without a server too, and a link's preview has the same menu as a recent link
+- What's new shows a version's few highlights; All changes opens the full list right there
 
 ### Fixed
 

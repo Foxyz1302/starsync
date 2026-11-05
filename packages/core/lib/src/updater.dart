@@ -107,6 +107,14 @@ class ReleaseChanges {
   int get length => added.length + changed.length + fixed.length;
 }
 
+/// The manifest's `highlights`, read leniently: anything but a list is
+/// none, entries that are not strings (or blank) are dropped.
+List<String> releaseHighlights(Object? json) => List.unmodifiable([
+      if (json case final List l)
+        for (final item in l)
+          if (item is String && item.trim().isNotEmpty) item.trim(),
+    ]);
+
 class UpdateManifest {
   final String version;
   final int protocol;
@@ -116,13 +124,17 @@ class UpdateManifest {
   final String notes;
   /// Null in manifests from before the changelog (show [notes] then).
   final ReleaseChanges? changes;
+  /// The few noticeable things What's new shows first (CHANGELOG.md's
+  /// `### Highlights`); empty in manifests from before them.
+  final List<String> highlights;
   const UpdateManifest(
       {required this.version,
       required this.protocol,
       required this.url,
       this.sha256,
       required this.notes,
-      this.changes});
+      this.changes,
+      this.highlights = const []});
 
   // `assets` maps platform → archive URL. Top-level `url` is the Linux
   // tarball, kept for builds from before `assets` existed (<= 0.2.1).
@@ -149,7 +161,8 @@ class UpdateManifest {
         url: url,
         sha256: sha is String && sha.isNotEmpty ? sha : null,
         notes: json['notes'] is String ? json['notes'] as String : '',
-        changes: ReleaseChanges.fromJson(json['changes']));
+        changes: ReleaseChanges.fromJson(json['changes']),
+        highlights: releaseHighlights(json['highlights']));
   }
 
   // Newer wire protocol: this build can't join servers running it.

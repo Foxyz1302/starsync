@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Cut a release without typing a version anywhere: derives the next
 # version (patch by default), turns CHANGELOG.md's Unreleased into that
-# version (refuses when it has no items), bumps all three pubspecs in
-# lockstep, writes updates/manifest.json (predictable asset URL — no CI
-# roundtrip needed; `notes` and `changes` from the changelog), commits,
+# version (refuses when it has no items, warns when it has no Highlights),
+# bumps all three pubspecs in lockstep, writes updates/manifest.json
+# (predictable asset URL — no CI roundtrip needed; `notes`, `highlights`
+# and `changes` from the changelog), commits,
 # and tags. Review, then `git push --follow-tags` —
 # CI takes it from there (build, Forgejo release, asset upload).
 # Usage: tool/release.sh [patch|minor|major] [--dry-run]
@@ -51,8 +52,12 @@ if [[ "$COUNT" == "0" ]]; then
   echo "error: CHANGELOG.md's Unreleased has no items — write what changed for people first" >&2
   exit 1
 fi
+HIGHLIGHTS="$(python3 -I -c 'import json,sys; print(len(json.loads(sys.argv[1])["highlights"]))' "$CHANGES")"
+if [[ "$HIGHLIGHTS" == "0" ]]; then
+  echo "warning: Unreleased has no ### Highlights; What's new shows its first items instead (write 2-5 short lines)" >&2
+fi
 if [[ -z "$(sed -n '/^## Unreleased/,/^### /{/^#/d;p}' "$ROOT/CHANGELOG.md" | tr -d '[:space:]')" ]]; then
-  echo "warning: Unreleased has no summary line; older apps (which show only notes) get its first items" >&2
+  echo "warning: Unreleased has no summary line; older apps (which show only notes) get its highlights or first items" >&2
 fi
 echo "changelog for v$VER:"
 dart "$ROOT/tool/changelog.dart" markdown unreleased "$VER" | sed 's/^/  /'
@@ -99,6 +104,11 @@ manifest.update({
     # {"added": [...], "changed": [...], "fixed": [...]}: What's new.
     'changes': log['changes'],
 })
+# The few lines What's new shows first (1.4.x and older ignore the key).
+if log['highlights']:
+    manifest['highlights'] = log['highlights']
+else:
+    manifest.pop('highlights', None)
 manifest.pop('sha256', None)
 with open(path, 'w') as f:
     json.dump(manifest, f, indent=2, ensure_ascii=False)
