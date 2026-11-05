@@ -19,7 +19,7 @@ jobs:
         run: |
           SUDO=sudo; [ "$(id -u)" = 0 ] && SUDO=
           $SUDO apt-get update
-          $SUDO apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev \
+          $SUDO apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libwayland-dev \
             liblzma-dev g++ libmpv-dev libepoxy-dev xz-utils unzip curl python3
 
       - name: Setup Flutter (stable)

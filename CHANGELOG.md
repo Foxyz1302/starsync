@@ -35,6 +35,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ### Changed
 
+- Linux: animations, scrolling and dragging follow your monitor's refresh rate (for example 75 Hz) instead of a fixed 60, and dragging rows with a fast mouse no longer stutters
 - Play and pause are everyone's: one press of Space or the play button plays or pauses for the whole group, and nobody presses "ready" any more (the ready count, Force ready and Mark everyone ready are gone). A new video waits for one Play, and putting something up keeps it playing or paused
 - Nothing starts by itself because time passed: the group waits for a video that is still loading until it is there or someone goes on without it
 - The pill at the bottom says who everyone waits for, with their pictures and the keys that do something now ("Space: BRB too · Hold Space: continue without"); holding Space fills it, and subtitles move up out of its way

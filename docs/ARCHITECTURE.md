@@ -3024,6 +3024,47 @@ after the window is destroyed, while the engine and plugins go (only
 with an engine: `Win32Window::Create` runs `OnDestroy` before the window
 exists, and a timer armed there ended every start at 3 s).
 
+### Linux frame pacing
+
+Flutter's GTK embedder gives the engine no vsync source, so it paces with
+a fixed 1/60 s timer (flutter/flutter#191245), and GTK 3's GL window gets
+no presentation feedback on Wayland: whatever the monitor runs at, Linux
+frames come at 60 Hz. `linux/runner/frame_pacing.cc` fixes this in the
+runner:
+- **Vsync source:** `frame_pacing_install` (right after `fl_view_new`,
+  before the engine starts) swaps a function in the engine's private
+  `FlEngine` proc table to add a vsync callback, and lets GTK's frame
+  clock run at the monitor's interval (a private `GdkFrameTimings`
+  field). Both layouts are checked at start; on a mismatch (another
+  Flutter version) it logs why and leaves stock 60 Hz behaviour.
+- **Grid pacing (default):** frames start once per refresh at the moment
+  KWin sends its `wl_surface.frame` callbacks, on the vblank grid read
+  from `wp_presentation` feedback (`wayland/` holds the wayland-scanner
+  output for `presentation-time.xml`), and up to three paints may await
+  feedback. A heavy frame (build, raster and GTK's own paint, about 6 ms
+  at 2560x1080) then has two refreshes to reach the screen instead of
+  one, at the cost of up to one refresh more latency on heavy pages.
+- **Mouse motion:** GDK's motion compression is off, and motion reaches
+  Flutter at most once per 8 ms between frames and once right before
+  each frame (the newest position). Flutter 3.48's task runner re-arms a
+  1 ms timer on every posted task, so a 1000 Hz mouse otherwise pushed
+  frames back (37 fps while dragging).
+- **Switches** (environment): `STARSYNC_FRAME_PACING=off` (stock),
+  `callback` (one frame at a time on frame callbacks), `timer` (GTK's
+  clock only); `STARSYNC_POINTER=direct` (stock motion delivery);
+  `STARSYNC_FRAME_PACING_LOG=1` (every 5 s: refreshes, frames and shown
+  pictures by refreshes apart, discarded, direct scanout, and the time
+  split into raster, waiting for GTK and GTK's paint).
+
+It needs the media_kit fork's non-blocking render: with mpv waiting
+inside Flutter's frame, the UI over a video would drop to the video's
+rate. Measured on a 75 Hz KWin display: a 16:9 window holds 75 Hz on
+drags; fullscreen 2560x1080 on the Schedule gets about 70% of pictures
+one refresh apart, limited by GTK 3 copying each frame. On X11 (no
+frame callbacks) it paces on GTK's frame clock at the monitor's
+interval. Release builds are made by CI on Flutter stable; the
+layout check decides there whether it is active.
+
 ## Logging
 
 `packages/core/lib/src/logging.dart`, one setup for the app and the

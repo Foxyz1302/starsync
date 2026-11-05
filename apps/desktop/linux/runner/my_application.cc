@@ -13,6 +13,7 @@
 
 #include "clipboard_image.h"
 #include "flutter/generated_plugin_registrant.h"
+#include "frame_pacing.h"
 
 struct _MyApplication {
   GtkApplication parent_instance;
@@ -174,6 +175,7 @@ static void my_application_activate(GApplication* application) {
       project, self->dart_entrypoint_arguments);
 
   FlView* view = fl_view_new(project);
+  frame_pacing_install(view, project);
   GdkRGBA background_color;
   // Background defaults to black, override it here if necessary, e.g. #00000000
   // for transparent.
@@ -187,6 +189,7 @@ static void my_application_activate(GApplication* application) {
   g_signal_connect_swapped(view, "first-frame", G_CALLBACK(first_frame_cb),
                            self);
   gtk_widget_realize(GTK_WIDGET(view));
+  frame_pacing_attach(GTK_WIDGET(window));
 
   // Before the plugins: window_manager's delete-event handler stops the
   // emission while the app holds the close.

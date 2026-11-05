@@ -334,23 +334,13 @@ Next, before 1.5.0 is cut (playback and presence is in; protocol 17):
    saved.
 
 11. **Smaller items**
-   - Linux frames are capped at 60 Hz whatever the monitor runs at: the
-     GTK embedder gives the engine no vsync source (a fixed 1/60 s
-     fallback, flutter/flutter#191245) and GTK3's GL window gets no
-     presentation feedback on Wayland. A runner shim paces frames to the
-     compositor through private Flutter and GTK structures, hands mouse
-     motion over once per frame (Flutter 3.48's task runner falls behind
-     a 1000 Hz mouse) and skips GTK's background paint in fullscreen.
-     It needs the fork's non-blocking render (in since the fork move):
-     without it, the UI over a video drops to the video's rate.
-     Checked on the owner's display: a 16:9 window is smooth; fullscreen
-     2560x1080 on the Schedule gets about 70% of pictures one refresh
-     apart, limited by GTK 3 copying each frame (about 6 ms at that
-     size). Upgrade Flutter only once at least two of these are in a
-     beta-channel build: flutter/flutter#194525 (task runner, on master),
-     #191389 (Wayland subsurface renderer, 3.49+), #195287 (desync the
-     subsurface, open). Then recheck the shim's layout checks. Mouse drags may still feel
-     sampled at 60 Hz with it (being researched).
+   - Linux frame pacing (ARCHITECTURE "Linux frame pacing"): fullscreen
+     2560x1080 on a heavy page still slips about 30% of refreshes,
+     limited by GTK 3 copying each frame. Upgrade Flutter only once at
+     least two of these are in a beta-channel build:
+     flutter/flutter#194525 (task runner, on master), #191389 (Wayland
+     subsurface renderer, 3.49+), #195287 (desync the subsurface, open).
+     Then recheck the shim's layout checks.
    - One open made two session players (#1 and #2) in a diagnostics
      test run: find out why.
    - The video freeze after GPU idle: next suspect is media_kit's context
