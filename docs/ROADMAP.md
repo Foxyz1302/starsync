@@ -66,8 +66,6 @@ Problems are numbered; delete a line when its fix ships.
   the budget ends the file. Options: a longer `reconnect_delay_max` for
   relay URLs only, or the end-of-file path reopening a relay viewer
   that stopped short while the server plays.
-- P42 Autoplay can time out, and the ready system as a whole is not
-  thought through (see "Starting together" under Open decisions).
 
 **Restructure** (in order; reviewed against the code). Truth lives in
 three places: the server (members, presence, gate, transport, queue incl.
@@ -207,10 +205,6 @@ export its hint types), so a shell may name it "starsync" from the
 bundle rather than "Starsync".
 
 **Open decisions:**
-- Starting together: today someone has to stay unready so others can
-  join first. Ideas: a short "starting in 30 s, ready up" countdown;
-  waiting for everyone from the last session.
-
 - Platform decision: "Desktop + mpv only" becomes "mpv only, desktop
   first" if Android goes ahead.
 - D10 was dropped on purpose (preload/warm relay/fresh player are folded
@@ -231,6 +225,8 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
 - `err` code `rate`: reserved, nothing sends it.
 
 ## Backlog
+
+Next: **Playback and presence** (epic, below; protocol 17).
 
 0. **media_kit fork evaluation** (after the restructure): upstream
    media-kit releases stalled at media_kit_video 2.0.1 (Dec 2025) though
@@ -348,6 +344,15 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
    saved.
 
 11. **Smaller items**
+   - Linux frames are capped at 60 Hz whatever the monitor runs at: the
+     GTK embedder gives the engine no vsync source (a fixed 1/60 s
+     fallback, flutter/flutter#191245) and GTK3's GL window gets no
+     presentation feedback on Wayland. With a video open, mpv also waits
+     inside Flutter's frame for the video frame's time, so a quarter of
+     UI frames come late. A runner prototype paces frames to the
+     compositor through private Flutter and GTK structures, and mpv
+     renders without waiting; undecided. Mouse drags may still feel
+     sampled at 60 Hz with it (being researched).
    - The video freeze after GPU idle: next suspect is media_kit's context
      switching on the raster thread with NVIDIA.
    - Timelines: draw mpv's real cached ranges (`demuxer-cache-state`
@@ -369,6 +374,72 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
    - Up next follow-ups (see ARCHITECTURE "Up next"): a whole season or
      a pick list at once ("Add the rest of the season").
    - Sidecar subtitles.
+
+## Epic: Playback and presence
+
+Replaces the ready system, every timeout that can start playback, and D1's
+presence. The app waits only for what it can measure (someone's video) and
+for what people say on purpose (BRB); nothing starts because time passed.
+Protocol 17: everyone updates together. The gestures are tried first in a
+test page.
+
+**People** (one state each; Loading and Reconnecting are only labels):
+- **Watching**: no badge. The group waits only for their video.
+- **BRB**: set on purpose; the group waits until they are back or someone
+  continues without them. Never runs out. Kept across a dropped connection
+  (while the seat is kept), an app restart, a new video and a server
+  restart (the app reports it again). A BRB member who leaves for good
+  leaves a plain pause; it never plays by itself.
+- **AFK**: no input for about 10 minutes while nothing plays (plain pause,
+  end card, nothing on). Never set during playback or on a BRB member.
+  The group stops waiting for their video, new videos stop loading for
+  them (an already loaded one plays along), and an episode that ends while
+  they are AFK is not counted as watched. Any input brings them back,
+  joining at the current moment.
+- **Out** (name not final): left out by "continue without", chosen in the
+  radial, player closed, or the window minimised 10 minutes while it plays.
+  Not waited for, not counted as watched; the player stays at their spot;
+  Space or Join puts them at the current moment. Never stops them passing
+  the video on.
+
+**The group** is playing, paused, or "Waiting for …" (someone's BRB, or
+someone's video loading or running dry). Play and pause are anyone's. The
+group keeps an intent (play or pause) and a BRB only holds it back: when
+the last one is back it does what was intended. Pill: "Waiting for Alice"
+(it wants to play) or "Paused · Alice is BRB" (nobody asked). A pause lasts
+until someone plays. Putting something up keeps play or pause, so the
+start of an evening waits for one Play and nobody has to hold it.
+
+**Keys and clicks:**
+- Space tap: play or pause. Hold about 0.4 s: BRB (the pause happens on
+  key-down, a ring fills while held; key repeat ignored).
+- While someone is BRB: your own tap means "I'm back"; anyone else's tap
+  toggles the intent; a hold of 2 to 3 s fills "Continuing without Alice"
+  and plays.
+- Continue without a BRB member makes them Out; continue without
+  someone's video leaves them Watching to catch up.
+- Right-click hold on the video: a radial (BRB or I'm back, Out, Next
+  episode during the ending). A plain right-click leaves it open for a
+  click.
+
+**Drops and catching up:** a dropped connection never pauses (as now).
+Anyone who comes back behind the group (a stalled stream, an app crash,
+being left out) gives everyone "Rewind for Alice (1:42)" for about 30 s.
+
+**End of an episode:** a "Next episode" button through the ending (the ED
+chapter, or the last 90 s). Up next counts down over the last 10 s and the
+next item starts the moment this one ends; the next item starts loading
+when the countdown appears. Videos under a minute show only "Up next".
+Pause or Cancel stops it at the end. The silent stop when the performer
+does not act on a play request asks again (another member if needed).
+
+**Undecided:** "Still watching?" (after two autoplays in a row with no
+input from anyone, the next waits for Play); "Wait for Bob" on a person
+card (a friend sets someone's BRB); the name "Out".
+
+**Goes away:** ready and unready and the ready counter, Mark everyone ready,
+Force ready (becomes "Don't wait for Alice"), Space as ready, the 15 s
+joiner bound, the 60 s joining flip, the 5-minute idle sit-out.
 
 ## Epic: Jellyfin
 
