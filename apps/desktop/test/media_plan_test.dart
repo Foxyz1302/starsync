@@ -123,6 +123,36 @@ void main() {
     expect(jellyfinRelayNeeded(with_([]), _jf, 'm1'), isFalse, reason: 'alone');
   });
 
+  test('a warm relay this app feeds ends with its Up next item', () async {
+    final tmp = await Directory(Platform.environment['WT_TEST_TMP'] ?? Directory.systemTemp.path).createTemp('feeder');
+    addTearDown(() => tmp.delete(recursive: true));
+    final file = File('${tmp.path}/f.mkv')..writeAsBytesSync(List.filled(100, 1));
+    final ended = <String>[];
+    // Nothing listens there: the source keeps re-dialling.
+    final feeder = RelayFeeder(server: () => const ServerAddress('127.0.0.1', 1, 'TOK'), notify: (_) {}, onWarmEnded: ended.add);
+    addTearDown(feeder.stopAll);
+    QueueItem item(String id) =>
+        QueueItem(id: id, media: const HelloMedia(name: 'f.mkv', size: 100, duration: 0), how: QueueHow.file, title: 'F');
+    StateBroadcast at({List<QueueItem> queue = const [], MediaRelay? media}) => StateBroadcast(
+        eventId: 1,
+        transport: 'held',
+        position: 0,
+        serverTime: DateTime.utc(2026),
+        mediaId: 7,
+        media: media == null ? null : {'name': 'f.mkv', 'relay': _relay(media)},
+        members: [_m('m1'), _m('m2')],
+        queue: queue);
+    feeder.feedWarm('q1', RelayMedia.single(FileRelayBytes(file)));
+    feeder.onState(at(queue: [item('q1')]));
+    expect(feeder.feedsWarm('q1'), isTrue, reason: "Up next's first");
+    feeder.onState(at(media: const MediaRelay(source: 'm1', queueId: 'q1')));
+    expect(feeder.feedsWarm('q1'), isTrue, reason: 'put up as the media');
+    expect(ended, isEmpty);
+    feeder.onState(at(queue: [item('q2')], media: const MediaRelay(source: 'm2', queueId: 'q0')));
+    expect(feeder.feedsWarm('q1'), isFalse, reason: 'played: over');
+    expect(ended, ['q1']);
+  });
+
   test("D6: held for the source: everyone's status waits for it by name", () {
     final r = _state({'name': 'f.mkv', 'relay': _relay(const MediaRelay(source: 'm2', live: true, sourceGone: true))},
         members: [

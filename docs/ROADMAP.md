@@ -52,9 +52,6 @@ Problems are numbered; delete a line when its fix ships.
   the `close:` log lines.
 - P33 No volume readout on wheel: likely fixed by the controls rework
   (1.2.1-dev.1; a test covers both skins); confirm in real use.
-- P36 After a reconnect the app re-dials the warm relay of an Up next
-  item that was already played ("relay channel refused: not the source of
-  Up next item q8"): harmless, the feeder should end with its item.
 - P37 A relay viewer whose read waits on bytes the source does not send
   for longer than ffmpeg's reconnect budget (4 tries per read, about
   40 s with the 4 s header rule) gets an I/O error that mpv takes as the

@@ -5,6 +5,7 @@ import 'package:signals/signals.dart';
 import 'package:sync_relay_core/core.dart';
 
 import 'app_events.dart';
+import 'delivery.dart' show stateMediaRelay;
 import 'media_plan.dart' show ServerAddress;
 import 'party.dart' show isPresent;
 
@@ -13,7 +14,10 @@ import 'party.dart' show isPresent;
 /// first item on the warm relay (`?q=<queueId>`), which the swap that puts
 /// the item up carries on as the media's. A source re-dials by itself
 /// through a drop of this app (the server keeps the relay through the
-/// grace; the same `info` continues it).
+/// grace; the same `info` continues it). One started for an Up next item
+/// ends with its item: at a state ([onState]) where the item is neither
+/// Up next's first nor the media, and before a re-dial, which waits for
+/// the next state (after a reconnect: the first one back) to know.
 class RelayFeeder {
   final ServerAddress Function() server;
   final void Function(AppEvent event) notify;
@@ -27,6 +31,26 @@ class RelayFeeder {
   RelaySource? _source;
   int _mediaId = -1;
   ({String queueId, RelaySource src})? _warm;
+  Completer<StateBroadcast>? _next;
+
+  /// Up next item [queueId] is still on in [r]: Up next's first, or the
+  /// media it was put up as (its relay carries the queue id).
+  static bool itemOn(String queueId, StateBroadcast r) =>
+      r.queue.firstOrNull?.id == queueId || stateMediaRelay(r)?.queueId == queueId;
+
+  /// Every state the server sends (about one a second): a source fed for
+  /// an Up next item that is over stops.
+  void onState(StateBroadcast r) {
+    final next = _next;
+    _next = null;
+    next?.complete(r);
+    final w = _warm;
+    if (w != null && !itemOn(w.queueId, r)) stopWarm();
+  }
+
+  /// Asked before a re-dial of the source of Up next item [queueId]: is
+  /// it still on in the next state?
+  Future<bool> _stillOn(String queueId) async => itemOn(queueId, await (_next ??= Completer()).future);
 
   /// This member serves the current media's bytes through the server.
   final relaying = signal(false);
@@ -112,7 +136,7 @@ class RelayFeeder {
       return;
     }
     stopWarm();
-    final src = RelaySource(server().sourceChannel(queueId), media);
+    final src = RelaySource(server().sourceChannel(queueId), media, beforeRedial: () => _stillOn(queueId));
     _warm = (queueId: queueId, src: src);
     unawaited(() async {
       try {

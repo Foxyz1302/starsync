@@ -5,6 +5,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:sync_relay_core/core.dart';
+import 'package:sync_relay_core/testing.dart';
 import 'package:sync_relay_server/server.dart';
 import 'package:test/test.dart';
 
@@ -679,6 +680,37 @@ void main() {
       await src.done.timeout(const Duration(seconds: 5));
       expect((await get(qUrl(bob, id))).$1, 404);
       expect(server.hub.warm!.queueId, isNot(id));
+    });
+
+    test('a source asks before a re-dial: its item over, it stops without dialling', () async {
+      final alice = await join('alice');
+      final bob = await join('bob');
+      final id = await add(alice, through('k-abcdefgh'));
+      final proxy = await FlakyProxy.start(server.boundPort);
+      cleanup.add(proxy.close);
+      var asked = 0;
+      var on = true;
+      final src = RelaySource(
+          Uri.parse('ws://127.0.0.1:${proxy.port}/r/default/${alice.welcome.token}/source?q=$id'),
+          RelayMedia.single(FileRelayBytes(file)),
+          backoff: (_) => const Duration(milliseconds: 100), beforeRedial: () async {
+        asked++;
+        return on;
+      });
+      await src.start();
+      cleanup.add(src.close);
+      await _until(() => headRelay(bob)?['live'] == true, 'warm relay live');
+      // A drop while the item is on: dialled again.
+      proxy.links.single.reset();
+      await _until(() => proxy.links.length == 2, 'dialled again');
+      expect(asked, 1);
+      // A drop once it is over (a reconnect's first state says so): no dial.
+      on = false;
+      proxy.links.last.reset();
+      await src.done.timeout(const Duration(seconds: 5));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(asked, 2);
+      expect(proxy.links, hasLength(2));
     });
 
     test('not for an adder alone; kept while its adder is gone, dropped when it leaves', () async {

@@ -1113,7 +1113,13 @@ How bytes move:
   stop drops it (its URLs 404, its source gets 4001); a restart starts
   with none. A manual swap to something else keeps it (the item is
   still first). A failed warm fetch is not promoted: the swap fetches
-  again and reports the reason.
+  again and reports the reason. The feeding app ends such a source with
+  its item too, also when the 4001 was lost in a drop of its own
+  (`RelayFeeder.onState`, every state: the item neither Up next's first
+  nor the media's `relay.queueId` stops it), and asks before each
+  re-dial (`RelaySource.beforeRedial`): the next state, after a
+  reconnect the first one back, says whether the item is still on, so
+  it does not dial an item already played.
 - Before the source's channel is first up, a viewer request gets no
   answer (the server cannot send headers before it knows the size), and
   media_kit's mpv gives up on a silent request after 5 s

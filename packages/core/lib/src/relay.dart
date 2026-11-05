@@ -347,20 +347,25 @@ const relayStopCodes = {CloseCodes.relayNotSource, CloseCodes.relayOtherMedia, C
 /// server keeps the relay through the source's grace and pulls what it
 /// still lacks); stops for good on [relayStopCodes]. [name] and
 /// [duration] (seconds, 0 unknown) go in its `info`, so a re-dial is
-/// recognised as the same media.
+/// recognised as the same media. [beforeRedial], when given, is asked
+/// before every dial after the first (once the backoff ran out): false
+/// stops the source for good (what it served is over), without a dial.
 class RelaySource {
   final Uri url;
   final RelayMedia media;
   final String name;
   final double duration;
   final Duration Function(int attempt) backoff;
-  RelaySource(this.url, this.media, {this.name = '', this.duration = 0, Duration Function(int attempt)? backoff})
+  final Future<bool> Function()? beforeRedial;
+  RelaySource(this.url, this.media,
+      {this.name = '', this.duration = 0, Duration Function(int attempt)? backoff, this.beforeRedial})
       : backoff = backoff ?? ((a) => Duration(milliseconds: min(8000, 500 * (1 << min(a, 4)))));
 
   final window = RelayWindow();
   final _pulls = <int, _Pull>{};
   WebSocket? _ws;
   var _closed = false;
+  final _closing = Completer<void>();
   final _done = Completer<void>();
 
   /// Completes when the source stopped for good (closed or refused).
@@ -433,6 +438,17 @@ class RelaySource {
       _abandonAll();
       if (_closed) break;
       await Future<void>.delayed(backoff(attempt++));
+      final ask = beforeRedial;
+      if (ask != null && !_closed) {
+        final again = await Future.any([
+          ask().catchError((Object _) => true),
+          _closing.future.then((_) => false),
+        ]);
+        if (!again && !_closed) {
+          _log.info('relay channel: what it served is over, stopping ($where, sent $bytesSent bytes)');
+          _closed = true;
+        }
+      }
     }
     _abandonAll();
     await media.close();
@@ -538,6 +554,7 @@ class RelaySource {
   /// pending reconnect delay runs out first).
   Future<void> close() async {
     _closed = true;
+    if (!_closing.isCompleted) _closing.complete();
     await _ws?.close();
   }
 }

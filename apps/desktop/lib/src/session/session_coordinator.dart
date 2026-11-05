@@ -633,6 +633,7 @@ class SessionCoordinator {
     final hold = _restore;
     if (hold != null && r.media != null) _landRestore(hold, r);
     serverState.value = r;
+    media.feeder.onState(r);
     _stateSelf = connection.memberId;
     if (r.transport == 'playing') switchTrace.mark(r.mediaId, SwitchTrace.playing);
     _toastMemberErrors(r);
