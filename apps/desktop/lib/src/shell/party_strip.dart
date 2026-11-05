@@ -15,6 +15,7 @@ import '../widgets/window_buttons.dart';
 import 'avatar.dart';
 import 'delivery_line.dart';
 import 'motion.dart';
+import 'person_card.dart';
 import 'your_invite.dart';
 
 export 'your_invite.dart' show YourInvite, inviteFriends;
@@ -41,9 +42,10 @@ const stripCompactBelow = 1100.0;
 /// The 60 px strip over everything: your avatar (profile), the tabs, and
 /// the party. Alone on your own server it is a plain player's: Join a
 /// friend and Invite (a "Sharing" chip while your server is open to
-/// friends); with others there the avatars (members card), server and
-/// readiness, chat, and Invite (yours) or Leave (a friend's). Empty space
-/// drags the window. The arrow keys never move focus onto it.
+/// friends); with others there the avatars (each person's card), server
+/// and readiness (members card), chat, and Invite (yours) or Leave (a
+/// friend's). Empty space drags the window. The arrow keys never move
+/// focus onto it.
 class PartyStrip extends StatelessWidget {
   final ShellTab tab;
   final ValueChanged<ShellTab> onTab;
@@ -264,24 +266,33 @@ class _ServerLabel extends StatelessWidget {
       // counts who the presence policy counts), from the one status.
       final graph = AppScope.of(context);
       final line = graph.coordinator.status.value.party;
-      return Column(
+      // A click: who is in it (the avatars' clicks are each person's).
+      return InkWell(
         key: const ValueKey('server-label'),
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            serverName(graph),
-            style: const TextStyle(fontWeight: FontWeight.w600, height: 1.1),
+        canRequestFocus: false,
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => showMembersCard(context),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                serverName(graph),
+                style: const TextStyle(fontWeight: FontWeight.w600, height: 1.1),
+              ),
+              Text(
+                line,
+                style: TextStyle(
+                  color: scheme.onSurfaceVariant,
+                  fontSize: 12,
+                  height: 1.2,
+                ),
+              ),
+            ],
           ),
-          Text(
-            line,
-            style: TextStyle(
-              color: scheme.onSurfaceVariant,
-              fontSize: 12,
-              height: 1.2,
-            ),
-          ),
-        ],
+        ),
       );
     },
   );
@@ -562,12 +573,21 @@ class _MemberTile extends StatelessWidget {
       key: ValueKey('member-${m.id}'),
       dense: true,
       contentPadding: const EdgeInsets.only(left: 20, right: 8),
-      leading: StatusAvatar(info: info, size: 36, badges: false),
+      // The person's card, without the link back to this card.
+      leading: PersonHover(
+        person: PersonRef.of(info),
+        everyone: false,
+        child: StatusAvatar(info: info, size: 36, badges: false),
+      ),
       title: Wrap(
         spacing: 6,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Text(info.self ? '${m.name} (you)' : m.name),
+          PersonHover(
+            person: PersonRef.of(info),
+            everyone: false,
+            child: Text(info.self ? '${m.name} (you)' : m.name),
+          ),
           if (m.app.isNotEmpty) VersionText(key: ValueKey('version-${m.id}'), version: m.app),
           if (info.host) const Pill('host', Colors.amber),
           if (info.relaying)
@@ -575,27 +595,12 @@ class _MemberTile extends StatelessWidget {
         ],
       ),
       subtitle: DeliveryStatus(status: status, delivery: delivery),
-      trailing: AppMenuButton<String>(
+      // The same actions as the person's card.
+      trailing: AppMenuButton<MemberAction>(
         tooltip: 'More',
-        onSelected: (v) {
-          switch (v) {
-            case 'force':
-              coord.forceTarget(m.id, !m.ready);
-            case 'nudge':
-              coord.nudgeMember(m.id);
-            case 'out':
-              coord.sitOut(m.id);
-            case 'back':
-              coord.joinBack();
-          }
-        },
+        onSelected: (a) => runMemberAction(coord, m.id, a),
         items: () => [
-          if (m.presence != Presence.away) AppMenuItem(value: 'force', label: m.ready ? 'Force unready' : 'Force ready'),
-          if (!info.self) const AppMenuItem(value: 'nudge', label: 'Nudge'),
-          if (info.self && m.presence == Presence.away)
-            const AppMenuItem(value: 'back', label: 'Join back')
-          else if (m.presence != Presence.away)
-            const AppMenuItem(value: 'out', label: 'Sit out'),
+          for (final a in memberActions(info)) AppMenuItem(value: a.action, label: a.label, icon: a.icon),
         ],
       ),
     );

@@ -345,6 +345,14 @@ class DanmakuController extends ChangeNotifier {
     return items;
   }
 
+  /// The layer showing the lines, while there is one.
+  _DanmakuLayerState? _layer;
+
+  /// The flying line whose sender (avatar and name) is at [global] now,
+  /// with that part's rect on screen; null over anything else or a line
+  /// with no sender.
+  ({DanmakuItem item, Rect rect})? senderAt(Offset global) => _layer?._senderAt(global);
+
   @override
   void dispose() {
     onScreen.dispose();
@@ -377,7 +385,10 @@ class _Line {
   final double width;
   final double height;
   final Widget widget;
-  _Line(this.item, this.width, this.height, this.widget);
+  /// From the line's left edge: where its sender (avatar and name) ends;
+  /// 0 when it names nobody.
+  final double senderWidth;
+  _Line(this.item, this.width, this.height, this.widget, {this.senderWidth = 0});
 }
 
 class _DanmakuLayerState extends State<DanmakuLayer> with SingleTickerProviderStateMixin {
@@ -398,6 +409,7 @@ class _DanmakuLayerState extends State<DanmakuLayer> with SingleTickerProviderSt
   void initState() {
     super.initState();
     widget.controller.addListener(_onAdd);
+    widget.controller._layer = this;
     _onAdd();
   }
 
@@ -406,12 +418,36 @@ class _DanmakuLayerState extends State<DanmakuLayer> with SingleTickerProviderSt
     super.didUpdateWidget(old);
     if (old.controller != widget.controller) {
       old.controller.removeListener(_onAdd);
+      if (old.controller._layer == this) old.controller._layer = null;
       widget.controller.addListener(_onAdd);
+      widget.controller._layer = this;
     }
+  }
+
+  /// See [DanmakuController.senderAt]: where each line is at this
+  /// moment, as the flow paints it.
+  ({DanmakuItem item, Rect rect})? _senderAt(Offset global) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize || !box.attached) return null;
+    final p = box.globalToLocal(global);
+    final s = widget.style;
+    final size = box.size;
+    final top = s.bandTop * size.height;
+    final lane = s.laneHeightFor(size.height);
+    for (final f in _shown) {
+      final l = f.item;
+      if (l.senderWidth <= 0 || l.item.avatar == null) continue;
+      final x = f.x(_t, size.width);
+      final y = top + f.lane * lane + (lane - l.height) / 2;
+      final r = Rect.fromLTWH(x, y, l.senderWidth, l.height);
+      if (r.contains(p)) return (item: l.item, rect: box.localToGlobal(r.topLeft) & r.size);
+    }
+    return null;
   }
 
   @override
   void dispose() {
+    if (widget.controller._layer == this) widget.controller._layer = null;
     widget.controller.removeListener(_onAdd);
     _ticker.dispose();
     _repaint.dispose();
@@ -495,7 +531,20 @@ class _DanmakuLayerState extends State<DanmakuLayer> with SingleTickerProviderSt
       );
     }
     final height = math.max(textH, avatar == null ? 0.0 : avatarSize);
-    return _Line(item, width, height, SizedBox(width: width, height: height, child: Center(child: line)));
+    // The sender's part (a click there opens their card).
+    var senderWidth = 0.0;
+    final name = item.sender;
+    if (name != null && item.avatar != null) {
+      final m = TextPainter(
+          text: TextSpan(style: base, children: [TextSpan(text: name, style: TextStyle(fontWeight: s.nameWeight))]),
+          textDirection: TextDirection.ltr,
+          maxLines: 1)
+        ..layout();
+      senderWidth = padX + (avatar == null ? 0 : avatarSize + avatarGap) + m.width;
+      m.dispose();
+    }
+    return _Line(item, width, height, SizedBox(width: width, height: height, child: Center(child: line)),
+        senderWidth: senderWidth);
   }
 
   void _onTick(Duration elapsed) {

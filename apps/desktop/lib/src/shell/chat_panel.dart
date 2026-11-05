@@ -7,6 +7,7 @@ import '../widgets/app_menu.dart';
 import '../widgets/copy_open.dart';
 import '../widgets/text_focus.dart';
 import 'avatar.dart';
+import 'person_card.dart' show PersonHover, PersonRef;
 
 /// Activity lines (joins, ready, seeks...) between the messages: off by
 /// default, kept for the app's run.
@@ -188,7 +189,14 @@ class ActivityRow extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                StatusAvatar(info: avatarForName(item.actor, AppScope.of(context).coordinator, item.actorId), size: 34, badges: false),
+                // The sender's card on their picture and name.
+                PersonHover(
+                  person: PersonRef(id: item.actorId, name: item.actor),
+                  child: StatusAvatar(
+                      info: avatarForName(item.actor, AppScope.of(context).coordinator, item.actorId),
+                      size: 34,
+                      badges: false),
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -197,10 +205,13 @@ class ActivityRow extends StatelessWidget {
                       Row(
                         children: [
                           Flexible(
-                            child: Text(item.actor,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontWeight: FontWeight.w700)),
+                            child: PersonHover(
+                              person: PersonRef(id: item.actorId, name: item.actor),
+                              child: Text(item.actor,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontWeight: FontWeight.w700)),
+                            ),
                           ),
                           const SizedBox(width: 6),
                           Text(time, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11)),

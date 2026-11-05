@@ -1994,7 +1994,8 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   your server runs), plus a "Sharing · port 8080" chip while it is shared
   (it opens the members card). With others there, or in a friend's server:
   `AvatarStack` (host first, then ready; spreads on hover; 5 shown, 3
-  under 1100 px), the server name ("Your server", else the joined one's
+  under 1100 px; each avatar its person's card, see "People cards"), the
+  server name ("Your server", else the joined one's
   `/health` name, else its address) and `Status.party` ("ready n/m": who
   the ready counter counts, `countsForReady` in `session/party.dart`, on
   `PresencePolicy`, so not away, gone or errored; "connecting…",
@@ -2003,12 +2004,13 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   Invite (`inviteFriends`, `shell/your_invite.dart`) shares your server if
   it is not yet and copies the invite link ("Invite link copied"); a port
   it cannot open
-  is a notice pointing at Settings. The stack
-  opens the members card (the server's version under its title: yours is
+  is a notice pointing at Settings. The server name and "ready n/m" (a
+  click), "+N" and a people card's "Everyone in the server" open the
+  members card (the server's version under its title: yours is
   this app's, a joined one's from `/health.version`; the source
   line, then per member status, route and buffer dot (see "Relay",
   Stats), their Starsync version (`members[].app`, amber when it is not
-  this app's; also in the avatar's hover), host / relay pills; "joining…", "sitting out", or for a `gone` member
+  this app's; also on their people card), host / relay pills; "joining…", "sitting out", or for a `gone` member
   "reconnecting… (2 min)" with how long; per member force ready, Nudge and Sit
   out (anyone, the host too), your own row Sit out / Join back; at the
   bottom, on yours: not shared, "Only you can reach it" and Invite;
@@ -2037,6 +2039,33 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   looked up again while its picture is missing, so a picture that lands
   after the line (fetched from `/a/` once the member is seen; a failed
   fetch retries) still shows on it.
+- **People cards** (`person_card.dart`): one card for a person wherever
+  they show: the strip's and the fullscreen `AvatarStack`, the members
+  card's rows (picture and name; no link back to it), chat lines
+  (picture and name), toasts (the picture: `ToastColumn` puts a
+  `PersonHover` over it, the rest of a toast still lets clicks through)
+  and danmaku lines (their sender's avatar and name). `PersonHover`: the
+  mouse resting 450 ms shows it under the person (over them when the
+  room below is short) as an overlay, moving into it keeps it, leaving
+  both hides it after 220 ms; a click pins it (`showPersonCard`, a popup
+  route: a click outside or Esc closes it). Danmaku lines move too fast
+  to rest on: `DanmakuPersonTaps` around the player's controls asks the
+  layer where each line's sender is now (`DanmakuController.senderAt`,
+  from the flow's own positions) and pins the card on a click there,
+  while the controls still get the click. The card is frosted glass
+  (`AppGlass`, 312 px) read live from the state by member id (else by
+  name; the place's own `AvatarInfo` once they left: "Not in the
+  server"): a 64 px `StatusAvatar` (with a picture, a click shows it full
+  size, `showPictureView`), name ("you"), presence (Watching, Away ·
+  sitting out, Gone · reconnecting (2 min), Joining…), host / passing
+  the video on pills, ready (or can't play, buffering), their route and
+  buffer, what they pass on ("Passing on <now playing>", or "Hosts" the
+  file, with the source line's numbers), their Starsync version
+  (`VersionText`), their actions (`memberActions`: Force ready /
+  unready, Nudge, Sit out, Join back; the members card's ⋮ shows the
+  same list) and "Everyone in the server". In fullscreen an open card
+  holds the controls up. The status pill's avatars keep a plain name
+  tooltip (a click there is the pill's).
 - **Join card** (`connect_cards.dart`): recent servers as one-click rows
   that poll `GET /health` every 10 s while the card is open
   (`health_probe.dart`: online, name, viewer count, "needs update" with
@@ -2352,9 +2381,9 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   look. Under it at the right, in fullscreen (the strip is hidden), the
   party's `AvatarStack`: it comes and goes with the controls (fades with
   `controlsShown`, takes no clicks while hidden), moves left of the
-  player panel while that is open, and works as the strip's (names on
-  hover, a click opens the members card; the mouse on it and the open
-  card hold the controls up); with the controls down and unread chat,
+  player panel while that is open, and works as the strip's (people
+  cards, "+N" or a card's link for the members card; the mouse on it and
+  an open card hold the controls up); with the controls down and unread chat,
   the unread chip top right. The action area: one band just above the bottom controls
   (`_actionArea`; their height per skin and size, `controlsBottomHeight`,
   16 px gap), sliding down to
@@ -2390,7 +2419,8 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   own have none) and an Up next item's picture (`ToastItem.thumb`, from
   the queue's picture cache); each slides in, stays while the Notifier
   keeps it (5 s), then slides out and collapses its gap. A click on a chat
-  toast opens the chat; the others let clicks through. They never cover
+  toast opens the chat; the others let clicks through, but for the
+  sender's picture (their people card). They never cover
   the player's controls: over the full player (both skins, windowed and
   fullscreen) they sit `toastInset` (16 px) above the control bar
   (`controlsBottomHeight` of the skin and size in use) while the controls
@@ -2474,7 +2504,8 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   white text at the chosen weight (`weight`, 400 to 900, the name a step
   bolder) with a dark outline and no box, the sender's avatar and
   coloured name first, the app's own notices without one, own lines in
-  an accent frame; the layer's own clock (lines fly on while paused),
+  an accent frame (a click on the sender: their people card); the
+  layer's own clock (lines fly on while paused),
   ticking only while lines fly or wait. Each line is a widget moved by a
   `Flow`: per frame only paint runs. The look (`AppSettings.danmakuStyle`,
   one map, `DanmakuStyle.toJson` / `fromJson`, which clamps every value

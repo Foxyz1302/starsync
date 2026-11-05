@@ -7,6 +7,7 @@ import '../session/session_coordinator.dart' show ToastItem;
 import '../app/app_graph.dart';
 import 'avatar.dart';
 import 'motion.dart';
+import 'person_card.dart' show PersonHover, PersonRef;
 
 /// One toast on screen: who (null = the app itself), what, a picture
 /// (an Up next item's), and whether it is on its way out.
@@ -151,15 +152,34 @@ class ToastColumn extends StatelessWidget {
   Widget _card(ShellToast t) {
     final card = ToastCard(toast: t);
     final tap = onTap;
-    if (!t.chat || tap == null || t.leaving) return IgnorePointer(child: card);
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        key: ValueKey('toast-open-chat-${t.id}'),
-        onTap: () => tap(t),
-        child: card,
+    final Widget body = !t.chat || tap == null || t.leaving
+        ? IgnorePointer(child: card)
+        : MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              key: ValueKey('toast-open-chat-${t.id}'),
+              onTap: () => tap(t),
+              child: card,
+            ),
+          );
+    final who = t.who;
+    if (who == null || t.leaving) return body;
+    // The sender's picture is theirs: their card on it (the rest of a
+    // toast still lets clicks through).
+    return Stack(children: [
+      body,
+      Positioned(
+        left: ToastCard.avatarInset,
+        top: ToastCard.avatarInset,
+        width: ToastCard.avatarSize,
+        height: ToastCard.avatarSize,
+        child: PersonHover(
+          key: ValueKey('toast-person-${t.id}'),
+          person: PersonRef.of(who),
+          child: const SizedBox.expand(),
+        ),
       ),
-    );
+    ]);
   }
 
   @override
@@ -206,6 +226,10 @@ class ToastCard extends StatelessWidget {
   final ShellToast toast;
   const ToastCard({super.key, required this.toast});
 
+  /// Where the sender's avatar sits in the card, and its size.
+  static const avatarInset = 10.0;
+  static const avatarSize = 38.0;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -217,13 +241,13 @@ class ToastCard extends StatelessWidget {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 380),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 10, 16, 10),
+          padding: const EdgeInsets.fromLTRB(avatarInset, avatarInset, 16, 10),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: who == null ? CrossAxisAlignment.center : CrossAxisAlignment.start,
             children: [
               if (who != null)
-                LineAvatar(info: who, size: 38)
+                LineAvatar(info: who, size: avatarSize)
               else if (toast.thumb.isNotEmpty)
                 _Thumb(hash: toast.thumb)
               else

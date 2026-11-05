@@ -347,12 +347,7 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
    Jellyfin show: one after another with Up next's countdown, nothing
    saved.
 
-11. **People cards**: a richer hover card for a person anywhere they
-   appear (strip, members card, chat, toasts, danmaku): a larger avatar
-   (click to view it full), name, presence, ready, app version, what
-   they are passing on. Hover and click work wherever a person shows.
-
-12. **Smaller items**
+11. **Smaller items**
    - The video freeze after GPU idle: next suspect is media_kit's context
      switching on the raster thread with NVIDIA.
    - Timelines: draw mpv's real cached ranges (`demuxer-cache-state`

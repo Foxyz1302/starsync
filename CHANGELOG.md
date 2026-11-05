@@ -13,6 +13,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - M mutes and unmutes the video
 - When Starsync crashes or freezes, it now notes it in the diagnostics it shares by itself (on Windows with the system's crash report from the next start), so a problem can be tracked down without you sending anything
 - Mark a whole Jellyfin show or season watched (or unwatched) from its page or its right-click menu; a whole show asks first
+- People cards: rest the mouse on someone (their avatar in the top bar or in fullscreen, a member's row, a chat line, a toast, or click a danmaku line's name) for a card with a bigger picture (click it to see it full size), whether they are watching, away or reconnecting, ready, their Starsync version and what they pass on, plus Nudge, Force ready and Sit out. A click keeps it open
 
 ### Changed
 
@@ -27,7 +28,8 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - Diagnostics, sharing them with the server, the keyboard shortcuts (now all of them: M, Ctrl+, Ctrl+V and the library's keys) and About are together in Settings → Help & about
 - A few choices made way for their defaults: the controls always hide after 3 s, you stay ready when the video changes, and updates are always checked (nothing installs without asking). The time display follows a click on the time, and hiding re-releases is in the Latest row's menu
 - Joining without a name no longer stops with an error: the app asks "Wait, what do we call you?" right there (your computer's user name to start with, plus picture and colour), and OK carries on with the join
-- In fullscreen the party's avatars come up with the controls, also while the video plays, and work like the ones in the strip: hover for names, click for who is in the server
+- In fullscreen the party's avatars come up with the controls, also while the video plays, and work like the ones in the strip
+- A click on an avatar in the top bar now opens that person's card; who is in the server opens from the server's name next to the avatars (or "Everyone in the server" on a card)
 - A message sent from the quick chat box now shows as your own chat bubble with everyone else's, instead of a separate echo where the box was
 - A pasted or dropped link goes up with one click on its card, like adding it to Up next (it used to open the Link page first). While the others are watching something, Add to queue comes first on the card and putting up says "Put it up now"
 - The old program names from before Starsync (`watch_together`, `watch-together-server`, `.exe` on Windows) are gone from the folder: if you start Starsync from an old shortcut, make a new one to `starsync` / `starsync.exe`

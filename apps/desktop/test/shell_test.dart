@@ -245,8 +245,8 @@ void main() {
       // Five shown, the sixth as "+1"; ready ones first.
       expect(find.descendant(of: stack, matching: find.byType(StatusAvatar)), findsNWidgets(5));
       expect(find.descendant(of: stack, matching: find.text('+1')), findsOneWidget);
-      final alex = tester.getTopLeft(find.descendant(of: stack, matching: find.byTooltip('Alex')));
-      final bob = tester.getTopLeft(find.descendant(of: stack, matching: find.byTooltip('Bob')));
+      final alex = tester.getTopLeft(find.descendant(of: stack, matching: find.byKey(const ValueKey('stack-a-Alex'))));
+      final bob = tester.getTopLeft(find.descendant(of: stack, matching: find.byKey(const ValueKey('stack-b-Bob'))));
       expect(alex.dx, lessThan(bob.dx));
       // Leave asks first.
       await tester.tap(find.byKey(const ValueKey('strip-leave')));
@@ -277,7 +277,8 @@ void main() {
       addTearDown(() => session.navigation.serverVersion.value = '');
       online([member('a', 'Alex', ready: true, app: '1.3.0-dev.1'), ...party.skip(1)], media: false);
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('avatar-stack')));
+      // The server label opens it (an avatar is its person's card).
+      await tester.tap(find.byKey(const ValueKey('server-label')));
       await tester.pumpAndSettle();
       final card = find.byKey(const ValueKey('members-card'));
       expect(card, findsOneWidget);
@@ -623,14 +624,18 @@ void main() {
       expect(tester.getRect(stack).right, lessThan(panel.left));
       model.panelOpen.value = false;
       await tester.pump(const Duration(milliseconds: 400));
-      // Hover names, as in the strip.
-      expect(
-          find.descendant(
-              of: stack, matching: find.byWidgetPredicate((w) => w is Tooltip && w.message!.startsWith('Bob'))),
-          findsOneWidget);
-      await tester.tap(stack);
+      // People cards, as in the strip: a click on an avatar pins its
+      // person's card, which leads to the members card.
+      expect(find.descendant(of: stack, matching: find.byKey(const ValueKey('stack-b-Bob'))), findsOneWidget);
+      await tester.tap(find.descendant(of: stack, matching: find.byKey(const ValueKey('stack-b-Bob'))));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byKey(const ValueKey('person-card')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const ValueKey('person-card')), matching: find.text('Bob')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('person-everyone')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byKey(const ValueKey('person-card')), findsNothing);
       final card = find.byKey(const ValueKey('members-card'));
       expect(card, findsOneWidget);
       expect(find.descendant(of: card, matching: find.text('Cleo')), findsOneWidget);

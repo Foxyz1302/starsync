@@ -10,6 +10,7 @@ import '../session/party.dart';
 import '../session/session_coordinator.dart';
 import '../app/app_graph.dart';
 import 'motion.dart';
+import 'person_card.dart' show PersonHover, PersonRef;
 
 /// What an avatar shows: who, their picture or initial on [color], and
 /// the status the ring and badges carry.
@@ -300,13 +301,29 @@ class StatusAvatar extends StatelessWidget {
 }
 
 /// Overlapping avatars, host first then ready (the stack itself reads as
-/// progress); they spread apart on hover. "+N" past [shown].
+/// progress); they spread apart on hover. "+N" past [shown]. Each avatar
+/// is its person's ([PersonHover]: card on hover, pinned by a click).
 class AvatarStack extends StatefulWidget {
   final List<AvatarInfo> members;
+  /// A click on the stack outside an avatar ("+N"), and the people
+  /// cards' "Everyone in the server": the members card.
   final VoidCallback? onTap;
   final int shown;
   final double size;
-  const AvatarStack({super.key, required this.members, this.onTap, this.shown = 5, this.size = 42});
+  /// Each avatar has its person's card (hover shows it, a click pins
+  /// it); off: a plain name tooltip.
+  final bool people;
+  /// Hears a person's card open and close (the player's controls stay up).
+  final ValueChanged<bool>? onCard;
+  const AvatarStack({
+    super.key,
+    required this.members,
+    this.onTap,
+    this.shown = 5,
+    this.size = 42,
+    this.people = true,
+    this.onCard,
+  });
 
   @override
   State<AvatarStack> createState() => _AvatarStackState();
@@ -347,16 +364,23 @@ class _AvatarStackState extends State<AvatarStack> {
                   curve: ease,
                   left: i * step,
                   top: 0,
-                  child: Tooltip(
-                    message: [
-                      visible[i].error.isEmpty
-                          ? visible[i].name
-                          : "${visible[i].name} can't play this: ${visible[i].error}",
-                      if (visible[i].delivery.isNotEmpty) visible[i].delivery,
-                      if (visible[i].app.isNotEmpty) 'Starsync ${visible[i].app}',
-                    ].join('\n'),
-                    child: StatusAvatar(info: visible[i], size: size),
-                  ),
+                  child: widget.people
+                      ? PersonHover(
+                          person: PersonRef.of(visible[i]),
+                          onEveryone: widget.onTap,
+                          onOpen: widget.onCard,
+                          child: StatusAvatar(info: visible[i], size: size),
+                        )
+                      : Tooltip(
+                          message: [
+                            visible[i].error.isEmpty
+                                ? visible[i].name
+                                : "${visible[i].name} can't play this: ${visible[i].error}",
+                            if (visible[i].delivery.isNotEmpty) visible[i].delivery,
+                            if (visible[i].app.isNotEmpty) 'Starsync ${visible[i].app}',
+                          ].join('\n'),
+                          child: StatusAvatar(info: visible[i], size: size),
+                        ),
                 ),
               if (extra > 0)
                 AnimatedPositioned(

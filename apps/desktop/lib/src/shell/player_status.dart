@@ -163,7 +163,7 @@ class _StatusLine extends StatelessWidget {
         if (infos.isEmpty) return null;
         final avatar = infos.length == 1
             ? StatusAvatar(info: infos.first, size: _avatar, badges: false)
-            : AvatarStack(members: infos, shown: 4, size: _avatar);
+            : AvatarStack(members: infos, shown: 4, size: _avatar, people: false);
         if (v.progress == null) return avatar;
         // Loading: the progress runs round the avatar.
         return Stack(

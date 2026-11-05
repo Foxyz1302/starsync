@@ -34,6 +34,7 @@ import 'avatar.dart';
 import 'motion.dart';
 import 'now_playing_title.dart';
 import 'party_strip.dart' show showMembersCard;
+import 'person_card.dart' show DanmakuPersonTaps, PersonRef, showPersonCard;
 import 'player_status.dart';
 import 'quick_chat.dart';
 import 'settings_tab.dart' show SettingsSection;
@@ -603,17 +604,27 @@ class _SessionPlayerState extends State<SessionPlayer> {
             builder: (context) =>
                 d.active.value ? DanmakuPreviewLayers(preview: d, lift: _lift) : const SizedBox.shrink(),
           ),
-        SessionControls(
-          model: _model,
-          shown: _controlsShown,
-          hold: _hold,
-          onDoubleClick: widget.onToggleFullscreen,
-          windowButtons: _fullscreenWindowButtons(),
-          suppress: _boxUp,
+        // A click on a flying line's sender pins their card.
+        DanmakuPersonTaps(
+          lines: _lines,
+          onTap: (item, rect) => showPersonCard(context, PersonRef.of(item.avatar!), rect,
+              onEveryone: _openMembers, onOpen: _holdForCard),
+          child: SessionControls(
+            model: _model,
+            shown: _controlsShown,
+            hold: _hold,
+            onDoubleClick: widget.onToggleFullscreen,
+            windowButtons: _fullscreenWindowButtons(),
+            suppress: _boxUp,
+          ),
         ),
       ],
     );
   }
+
+  /// A person's card is open: the controls (and the fullscreen avatars)
+  /// stay up.
+  void _holdForCard(bool open) => _hold.set(#personCard, open);
 
   /// The side inset every floating element keeps (the bars' own), and
   /// the gap between them and the controls.
@@ -764,8 +775,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
 
   /// Fullscreen hides the strip: the party's avatars come and go with the
   /// controls, top right under the top bar (left of the player panel
-  /// while it is open), and work as the strip's do: names on hover, a
-  /// click opens the members card (the controls stay up while it is open).
+  /// while it is open), and work as the strip's do: each person's card on
+  /// hover, pinned by a click, the members card from it or "+N" (the
+  /// controls stay up while a card is open).
   Widget _fullscreenParty() => ListenableBuilder(
         listenable: _controlsShown,
         builder: (context, _) => SignalBuilder(builder: (context) {
@@ -789,6 +801,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                       key: const ValueKey('fullscreen-party'),
                       members: partyAvatars(_coord),
                       onTap: _openMembers,
+                      onCard: _holdForCard,
                     ),
                   ),
                 ),
