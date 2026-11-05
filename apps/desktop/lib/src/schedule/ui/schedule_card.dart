@@ -186,8 +186,11 @@ class AiringCard extends StatelessWidget {
 
   String get _id => '${entry.airing.anilistId}-${entry.airing.episode}';
 
-  Widget _image(String? url, Widget fallback) =>
-      url == null ? fallback : Image.network(url, fit: BoxFit.cover, errorBuilder: (_, _, _) => fallback);
+  /// Decoded at twice the slot's [width] (enough for 2x screens), not at
+  /// AniList's 460 px: a full board shows dozens of covers at once.
+  Widget _image(String? url, Widget fallback, double width) => url == null
+      ? fallback
+      : Image.network(url, fit: BoxFit.cover, cacheWidth: (width * 2).round(), errorBuilder: (_, _, _) => fallback);
 
   static Widget _hinted(String? hint, Widget child) => hint == null ? child : Tooltip(message: hint, child: child);
 
@@ -304,7 +307,7 @@ class AiringCard extends StatelessWidget {
                     height: 48,
                     child: Stack(
                       fit: StackFit.expand,
-                      children: [_dimmed(_image(a.cover, tint)), ..._watchMarks(small: true)],
+                      children: [_dimmed(_image(a.cover, tint, 34)), ..._watchMarks(small: true)],
                     ),
                   ),
                 ),
@@ -371,7 +374,7 @@ class AiringCard extends StatelessWidget {
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          _dimmed(_image(a.cover, tint)),
+                          _dimmed(_image(a.cover, tint, 84)),
                           Positioned(
                             left: 4,
                             top: 4,
