@@ -2616,7 +2616,7 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   (`pipCorner`). A drag draws the rectangle (kept on the picture, its size
   in the frame's pixels beside it), a click takes the whole frame; letting
   go saves at once and the selection goes. Its bar switches the subtitles
-  (T), Esc or a right-click cancels; it holds the keys (`KeyboardClaim`)
+  (T); during a drag Esc or a right-click drops the rectangle to draw it again, otherwise they cancel; it holds the keys (`KeyboardClaim`)
   while up. The crop maps from the screen to the frame's pixels
   (`cropFor`, edges rounded outward). The PNG is encoded on an isolate
   (`image`), saved to Pictures / Starsync (`FolderAccess.screenshotFolder`:

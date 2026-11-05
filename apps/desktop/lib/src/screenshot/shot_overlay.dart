@@ -33,7 +33,9 @@ ShotKey? shotKeyFor(KeyEvent event, {bool control = false, bool alt = false, boo
 /// is let go ([onPick]: the subtitles choice and the crop in the frame's
 /// own pixels, null for the whole frame). The bar at the top switches
 /// the subtitles (T; instant, both copies were caught at the press);
-/// Esc or a right-click cancels ([onCancel]). While it is up it has the
+/// During a drag, Esc or a right-click drops the rectangle to draw it
+/// again (letting go then takes nothing); otherwise they cancel
+/// ([onCancel]). While it is up it has the
 /// keys ([KeyboardClaim]): the player's and the app's keys stay off.
 /// The video playing on shows small in a corner ([live]), out of the way
 /// of the pointer and the selection. It disposes [images] when it goes.
@@ -68,6 +70,10 @@ class _ShotOverlayState extends State<ShotOverlay> {
   late bool _subs = widget.subtitles && widget.images.subs != null;
   Offset? _anchor;
   Offset? _end;
+
+  /// The drag was dropped (Esc or a right-click while drawing): the
+  /// button's release picks nothing.
+  bool _dropped = false;
   Rect _picture = Rect.zero;
   bool _done = false;
   Offset? _pointer;
@@ -101,6 +107,13 @@ class _ShotOverlayState extends State<ShotOverlay> {
     setState(() => _subs = !_subs);
   }
 
+  /// Drops the rectangle being drawn, to draw it again.
+  void _drop() => setState(() {
+        _anchor = null;
+        _end = null;
+        _dropped = true;
+      });
+
   void _cancel() {
     if (_done) return;
     _done = true;
@@ -119,7 +132,7 @@ class _ShotOverlayState extends State<ShotOverlay> {
     final keys = HardwareKeyboard.instance;
     switch (shotKeyFor(event, control: keys.isControlPressed, alt: keys.isAltPressed, meta: keys.isMetaPressed)) {
       case ShotKey.cancel:
-        _cancel();
+        _anchor != null ? _drop() : _cancel();
       case ShotKey.pick:
         _pick();
       case ShotKey.subtitles:
@@ -132,7 +145,7 @@ class _ShotOverlayState extends State<ShotOverlay> {
   }
 
   void _down(PointerDownEvent e) {
-    if (e.buttons & kSecondaryMouseButton != 0) return _cancel();
+    if (e.buttons & kSecondaryMouseButton != 0) return _anchor != null ? _drop() : _cancel();
     if (e.buttons & kPrimaryMouseButton == 0) return;
     final p = clampToPicture(e.localPosition, _picture);
     setState(() {
@@ -143,6 +156,8 @@ class _ShotOverlayState extends State<ShotOverlay> {
 
   void _move(PointerMoveEvent e) {
     _pointer = e.localPosition;
+    // A right-click while drawing comes as a move with both buttons.
+    if (_anchor != null && e.buttons & kSecondaryMouseButton != 0) return _drop();
     if (_anchor == null) return setState(() {});
     setState(() => _end = clampToPicture(e.localPosition, _picture));
   }
@@ -153,6 +168,10 @@ class _ShotOverlayState extends State<ShotOverlay> {
   }
 
   void _up(PointerUpEvent e) {
+    if (_dropped) {
+      _dropped = false;
+      return;
+    }
     if (_anchor == null) return;
     _end = clampToPicture(e.localPosition, _picture);
     _pick();

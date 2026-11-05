@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
-import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
+import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryMouseButton, kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -258,6 +258,38 @@ void main() {
       await tester.pump();
       expect(picks, ['cancel']);
     });
+
+    testWidgets('during a drag, Esc or a right-click drops it to draw again', (tester) async {
+      final picks = await pumpOverlay(tester);
+      // Esc while drawing: the release takes nothing, the overlay stays.
+      var g = await tester.startGesture(const Offset(100, 150));
+      await g.moveTo(const Offset(300, 300));
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      await g.up();
+      await tester.pump();
+      expect(picks, isEmpty);
+      // A right-click while drawing (a move with both buttons) does the same.
+      g = await tester.createGesture(pointer: 7, kind: PointerDeviceKind.mouse, buttons: kPrimaryMouseButton);
+      await g.down(const Offset(100, 150));
+      await g.moveTo(const Offset(300, 300));
+      await g.updateWithCustomEvent(const PointerMoveEvent(
+          pointer: 7,
+          kind: PointerDeviceKind.mouse,
+          position: Offset(301, 300),
+          buttons: kPrimaryMouseButton | kSecondaryMouseButton));
+      await tester.pump();
+      await g.up();
+      await tester.pump();
+      expect(picks, isEmpty);
+      // Then a fresh drag picks.
+      g = await tester.startGesture(const Offset(0, 20));
+      await g.moveTo(const Offset(400, 300));
+      await g.up();
+      await tester.pump();
+      expect(picks, [(true, (x: 0, y: 0, width: 960, height: 540))]);
+    });
   });
 
   group('S in the player', () {
@@ -280,7 +312,6 @@ void main() {
             theme: ThemeData.dark(),
             shortcuts: appShortcuts,
             home: AppKeys(
-              onToggleReady: () {},
               child: AppShell(
                 updates: UpdateController(currentVersion: '0.0.0-dev'),
                 autoUpdateCheck: false,
@@ -296,7 +327,7 @@ void main() {
         serverTime: DateTime.now().toUtc(),
         mediaId: 1,
         media: const {'name': 'Movie.mkv', 'size': 1, 'duration': 0},
-        members: [MemberView(id: 'a', name: 'Alex', ready: false, inSet: false, buffered: 0)],
+        members: [const MemberView(id: 'a', name: 'Alex')],
       );
       _graph.navigation.place.value = Place.friend;
       await tester.pumpAndSettle();
