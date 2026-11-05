@@ -30,6 +30,7 @@ import '../widgets/whats_new_card.dart';
 import 'chat_panel.dart';
 import 'connect_cards.dart';
 import 'handoff.dart';
+import '../widgets/app_menu.dart' show AppGlass;
 import 'join_offer_card.dart';
 import 'library_link.dart' show LinkProber, RecentLinks, rememberPutUpLink;
 import 'library_tab.dart';
@@ -131,6 +132,20 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   /// Last pointer position in the window (where a paste's card opens).
   Offset? _pointer;
   bool _dragging = false;
+
+  /// What a drop or paste is doing while it works ("Opening youtube.com…"),
+  /// shown as a pill at the bottom; null: nothing.
+  String? _handoffBusy;
+
+  /// [work] with [label] showing at the bottom until it is done.
+  Future<T> _busyWhile<T>(String label, Future<T> Function() work) async {
+    setState(() => _handoffBusy = label);
+    try {
+      return await work();
+    } finally {
+      if (mounted) setState(() => _handoffBusy = null);
+    }
+  }
   bool _handoffOpen = false;
 
   late final AppGraph _graph = AppScope.of(context);
@@ -551,7 +566,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
     if (action == null || !mounted) return;
     switch ((item, action)) {
       case (HandoffVideos(:final paths), HandoffAction.putUp):
-        final error = await _putUp(FileMedia(paths.first));
+        final error = await _busyWhile('Opening ${handoffName(paths.first)}…', () => _putUp(FileMedia(paths.first)));
         if (error != null) {
           _graph.coordinator.notify(ActionFailed(error));
         } else {
@@ -562,7 +577,8 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
         // In order: with Play next, the last one added goes first.
         final next = action == HandoffAction.playNext;
         for (final p in next ? paths.reversed : paths) {
-          final error = await _graph.coordinator.queue.add(FileMedia(p), next: next);
+          final error = await _busyWhile(
+              'Adding ${handoffName(p)} to Up next…', () => _graph.coordinator.queue.add(FileMedia(p), next: next));
           if (error != null) {
             _graph.coordinator.notify(ActionFailed(error));
             break;
@@ -572,7 +588,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
         // At once, in the Link page's mode (alone: direct), refused like
         // there; the Link page holds it too (Put it up anyway, other ways).
         _picker.link.text = url;
-        final error = await _putUp(LinkMedia(url, relay: _picker.linkRelay));
+        final error = await _busyWhile('Opening ${handoffName(url)}…', () => _putUp(LinkMedia(url, relay: _picker.linkRelay)));
         if (error != null) {
           _graph.coordinator.notify(ActionFailed(error));
         } else {
@@ -581,8 +597,8 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       case (HandoffLink(:final url), HandoffAction.queue || HandoffAction.playNext):
         // In the Link page's mode, probed and refused like there.
         final coord = _graph.coordinator;
-        final error = await coord.queue
-            .add(LinkMedia(url, relay: _picker.linkRelay), next: action == HandoffAction.playNext);
+        final error = await _busyWhile('Adding ${handoffName(url)} to Up next…',
+            () => coord.queue.add(LinkMedia(url, relay: _picker.linkRelay), next: action == HandoffAction.playNext));
         if (error != null) coord.notify(ActionFailed(error));
       case (HandoffVideos(:final paths), HandoffAction.addFolder):
         await _addFolder(File(paths.first).parent.path);
@@ -633,6 +649,35 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
                   curve: ease,
                   opacity: _dragging ? 1 : 0,
                   child: const _DropOverlay(),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 24,
+              child: IgnorePointer(
+                child: Center(
+                  child: AnimatedSwitcher(
+                    duration: easeTime,
+                    child: _handoffBusy == null
+                        ? const SizedBox.shrink()
+                        : AppGlass.pill(
+                            key: const ValueKey('handoff-busy'),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                const SizedBox.square(
+                                    dimension: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                                const SizedBox(width: 10),
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(maxWidth: 420),
+                                  child: Text(_handoffBusy!, overflow: TextOverflow.ellipsis),
+                                ),
+                              ]),
+                            ),
+                          ),
+                  ),
                 ),
               ),
             ),

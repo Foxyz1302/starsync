@@ -15,6 +15,16 @@ import '../screens/home/picked_media.dart' show LinkRelay;
 /// stays off while any is open.
 int handoffHolds = 0;
 
+/// A short name for a pasted link (its site, without `www.`) or a file
+/// (its name), for "Opening …".
+String handoffName(String linkOrPath) {
+  final uri = Uri.tryParse(linkOrPath);
+  if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https') && uri.host.isNotEmpty) {
+    return uri.host.startsWith('www.') ? uri.host.substring(4) : uri.host;
+  }
+  return baseName(_pathOf(linkOrPath));
+}
+
 /// What was dropped or pasted.
 sealed class Handoff {
   const Handoff();

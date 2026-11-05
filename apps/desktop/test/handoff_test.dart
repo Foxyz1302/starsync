@@ -76,6 +76,13 @@ void main() {
     expect((of(paths: ['/v/Season 1'], text: 'https://x.example') as HandoffFolder).path, '/v/Season 1');
   });
 
+  test('handoffName: a link by its site, a file by its name', () {
+    expect(handoffName('https://www.youtube.com/watch?v=x'), 'youtube.com');
+    expect(handoffName('https://x.com/a/status/1'), 'x.com');
+    expect(handoffName('/home/a/Videos/Ep 01.mkv'), 'Ep 01.mkv');
+    expect(handoffName('file:///home/a/b.mp4'), 'b.mp4');
+  });
+
   group('the card', () {
     Future<HandoffAction?> show(WidgetTester tester, Widget card, {String? tap}) async {
       HandoffAction? picked;

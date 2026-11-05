@@ -28,6 +28,8 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ### Changed
 
+- The server's name in the top bar shows it can be clicked (a ▾, a hover and a tooltip): it opens everyone in the server
+- A pasted or dropped link or video says "Opening youtube.com…" (or "Adding … to Up next…") at the bottom of the window until it is up
 - The player's timeline shows exactly which parts of the video are downloaded, also behind you and around a jump, not just how far ahead (both designs, and Minimal's thin line)
 - The volume slider now stays next to the speaker in the player (in a narrow window it still slides out when you point at the speaker)
 - The player panel opens with Sound: the video's volume and App sounds (how loud the app's own cues are, so the two are no longer confused); its All settings button opens the matching Settings page

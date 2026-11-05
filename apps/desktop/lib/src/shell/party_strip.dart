@@ -267,10 +267,15 @@ class _ServerLabel extends StatelessWidget {
       final graph = AppScope.of(context);
       final line = graph.coordinator.status.value.party;
       // A click: who is in it (the avatars' clicks are each person's).
-      return InkWell(
+      // The ▾, the hover and the tooltip say it opens something.
+      return Tooltip(
+        message: 'Everyone in the server',
+        waitDuration: const Duration(milliseconds: 500),
+        child: InkWell(
         key: const ValueKey('server-label'),
         canRequestFocus: false,
         borderRadius: BorderRadius.circular(8),
+        hoverColor: Colors.white.withValues(alpha: 0.06),
         onTap: () => showMembersCard(context),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -278,10 +283,16 @@ class _ServerLabel extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                serverName(graph),
-                style: const TextStyle(fontWeight: FontWeight.w600, height: 1.1),
-              ),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Flexible(
+                  child: Text(
+                    serverName(graph),
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w600, height: 1.1),
+                  ),
+                ),
+                Icon(Icons.expand_more, size: 16, color: scheme.onSurfaceVariant),
+              ]),
               Text(
                 line,
                 style: TextStyle(
@@ -292,6 +303,7 @@ class _ServerLabel extends StatelessWidget {
               ),
             ],
           ),
+        ),
         ),
       );
     },

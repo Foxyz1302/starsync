@@ -2041,7 +2041,8 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   it is not yet and copies the invite link ("Invite link copied"); a port
   it cannot open
   is a notice pointing at Settings. The server name and "ready n/m" (a
-  click), "+N" and a people card's "Everyone in the server" open the
+  click; a ▾ after the name, a hover tint and an "Everyone in the server"
+  tooltip say so), "+N" and a people card's "Everyone in the server" open the
   members card (the server's version under its title: yours is
   this app's, a joined one's from `/health.version`; the source
   line, then per member status, route and buffer dot (see "Relay",
@@ -2284,7 +2285,9 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   finished) Add to queue is the filled first button and the put-up reads
   "Put it up now" (its tooltip: it stops what is on for everyone), since
   replacing what everyone watches is the bigger step; otherwise Put it up
-  leads. Images are ignored.
+  leads. While a put-up or an add works (a link is probed first), a pill
+  at the bottom of the window says what ("Opening youtube.com…", "Adding
+  Ep 01.mkv to Up next…", `handoffName`). Images are ignored.
   Nothing happens while a dialog or popover is over the shell.
 - **Sounds** (`sfx/`): the `Notifier` plays an `SfxCue` for ready,
   unready, force-ready, join, leave, swap and others' chat (feed
