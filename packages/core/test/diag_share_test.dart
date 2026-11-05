@@ -83,5 +83,30 @@ void main() {
       expect(got.last.marks.single.note, 'it froze');
       await u.stop();
     });
+
+    test('a carried line waits for the next session; flushSoon sends at once, then at most every 2 s', () async {
+      DiagUploader.carry('crash', 'previous run ended without a clean close', warning: true);
+      final u = make()..start();
+      expect(u.pending, 1, reason: 'the carried line');
+      DiagUploader.flushAllSoon();
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(got.length, 1);
+      expect(got.single.lines.single.message, 'previous run ended without a clean close');
+      expect(got.single.lines.single.level, 'WARNING');
+      Logger('player').info('player #1 session: open');
+      await Future<void>.delayed(Duration.zero);
+      DiagUploader.flushAllSoon();
+      DiagUploader.flushAllSoon();
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(got.length, 1, reason: 'within the gap');
+      await Future<void>.delayed(DiagUploader.urgentGap);
+      expect(got.length, 2);
+      expect(got.last.lines.single.message, 'player #1 session: open');
+      DiagUploader.carry('crash', 'while one runs it goes the normal way');
+      await Future<void>.delayed(Duration.zero);
+      expect(u.pending, 1);
+      await u.stop();
+      expect(make().pending, 0);
+    });
   });
 }

@@ -180,6 +180,53 @@ class DiagUploader {
 
   bool get running => _sub != null;
 
+  static final _running = <DiagUploader>{};
+  static final _carried = <DiagLine>[];
+
+  /// Logs [message] on [logger] (INFO, or WARNING with [warning]); with no uploader running
+  /// (out of a session) the line also waits for the next one that
+  /// [start]s, so startup findings reach a session log too.
+  static void carry(String logger, String message, {bool warning = false}) {
+    final level = warning ? Level.WARNING : Level.INFO;
+    Logger(logger).log(level, message);
+    if (_running.isNotEmpty || !sends(logger)) return;
+    if (_carried.length >= 50) _carried.removeAt(0);
+    _carried.add(DiagLine(
+        t: DateTime.now().millisecondsSinceEpoch, level: level.name, logger: logger, message: redactLog(message)));
+  }
+
+  /// [flushSoon] on every running uploader: a player opens, switches or
+  /// goes, the app closes or stalled (a crash there must not take the
+  /// last 10 s of lines with it).
+  static void flushAllSoon() {
+    for (final u in _running.toList()) {
+      u.flushSoon();
+    }
+  }
+
+  /// The least time between two [flushSoon] posts (the server takes 30 a
+  /// minute per member; a refused one waits for the next).
+  static const urgentGap = Duration(seconds: 2);
+  DateTime? _urgentAt;
+  Timer? _urgentTimer;
+
+  /// Sends what waits now, or once [urgentGap] after the last such send.
+  void flushSoon() {
+    if (_sub == null || _urgentTimer != null) return;
+    final t = _now(), at = _urgentAt;
+    final wait = at == null ? Duration.zero : urgentGap - t.difference(at);
+    if (wait <= Duration.zero) {
+      _urgentAt = t;
+      unawaited(flush());
+      return;
+    }
+    _urgentTimer = Timer(wait, () {
+      _urgentTimer = null;
+      _urgentAt = _now();
+      if (_sub != null) unawaited(flush());
+    });
+  }
+
   /// Lines waiting to go.
   int get pending => _lines.length;
 
@@ -196,6 +243,13 @@ class DiagUploader {
   void start() {
     _sub ??= Logger.root.onRecord.listen(_onRecord);
     _last = _now();
+    _running.add(this);
+    if (_share) {
+      for (final l in _carried) {
+        add(l);
+      }
+    }
+    _carried.clear();
   }
 
   void _onRecord(LogRecord r) {
@@ -374,6 +428,9 @@ class DiagUploader {
   Future<void> stop({Duration timeout = const Duration(milliseconds: 1500)}) async {
     await _sub?.cancel();
     _sub = null;
+    _running.remove(this);
+    _urgentTimer?.cancel();
+    _urgentTimer = null;
     if ((_lines.isNotEmpty || _marks.isNotEmpty || _dropped > 0) && target() != null) {
       try {
         await flush().timeout(timeout);

@@ -7,7 +7,7 @@ import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:signals/signals.dart';
-import 'package:sync_relay_core/core.dart' show LogThrottle, createLogger;
+import 'package:sync_relay_core/core.dart' show DiagUploader, LogThrottle, createLogger;
 
 import '../../state/settings.dart';
 import '../ports/player_host.dart';
@@ -68,6 +68,18 @@ bool pinMatches(String wanted, String got) {
 VideoController videoControllerOf(HostedVideo video) => (video as _MkVideo).controller;
 
 final _mpvLog = createLogger('mpv');
+final _playerLog = createLogger('player');
+
+// A session or preload player's lifecycle, one short line each, sent to
+// the session log at once: a crash on Windows ends the process without a
+// Dart line, and the lines of its last seconds would wait for the next
+// 10 s batch.
+var _playerIds = 0;
+void _lifecycle(_MkPlayer p, String what) {
+  if (p._role == PlayerRole.thumbnail) return;
+  _playerLog.info('player #${p.id} ${p._role.name}: $what (${p._age.elapsedMilliseconds} ms, live ${p.host._live.length})');
+  DiagUploader.flushAllSoon();
+}
 
 class MediaKitHost implements PlayerHost {
   /// The hwdec setting ([AppSettings.hwdec] by default).
@@ -140,6 +152,7 @@ class MediaKitHost implements PlayerHost {
     });
     final p = _MkPlayer(this, mk, role);
     _live.add(p);
+    _lifecycle(p, 'created');
     if (role != PlayerRole.thumbnail) {
       p._logSub = p.logs.listen((l) => _route(p, l));
       final mismatches = <String>[];
@@ -153,6 +166,7 @@ class MediaKitHost implements PlayerHost {
           ..clear()
           ..addAll(mismatches);
       }
+      _lifecycle(p, 'setup done');
     }
     return p;
   }
@@ -161,6 +175,7 @@ class MediaKitHost implements PlayerHost {
   Future<void> promote(HostedPlayer p) async {
     final mk = p as _MkPlayer;
     mk._role = PlayerRole.session;
+    _lifecycle(mk, 'promoted');
     mk.setLogLevel(sessionLogLevel);
     final mismatches = <String>[];
     if (await p.pin('mute', 'no') case final m?) mismatches.add(m);
@@ -357,6 +372,7 @@ class MediaKitHost implements PlayerHost {
     final p = player as _MkPlayer;
     if (!_live.remove(p)) return;
     p._retired = true;
+    _lifecycle(p, 'dispose start');
     if (p._video case final v?) {
       _videos.remove(v);
       await v._paramsSub?.cancel();
@@ -365,6 +381,7 @@ class MediaKitHost implements PlayerHost {
     try {
       await p.mk.dispose();
     } catch (_) {}
+    _lifecycle(p, 'dispose end');
     // After media_kit's own deferred destroy of the mpv core (5 s): a
     // session switch, leaving, a thumbnail batch.
     trimNativeHeapSoon();
@@ -418,11 +435,14 @@ class _MkPlayer implements HostedPlayer {
   _MkPlayer(this.host, this.mk, this._role) {
     _firstFrame = mk.stream.width.listen((w) {
       if (w == null || w <= 0 || _role == PlayerRole.thumbnail) return;
+      _lifecycle(this, 'first frame ${w}x${mk.state.height}');
       unawaited(_firstFrame?.cancel());
       unawaited(host._logFirstFrame(this));
     });
   }
 
+  final int id = ++_playerIds;
+  final _age = Stopwatch()..start();
   StreamSubscription<PlayerLogLine>? _logSub;
   StreamSubscription<int?>? _firstFrame;
   bool _probing = false;
@@ -481,6 +501,7 @@ class _MkPlayer implements HostedPlayer {
     if (_videoReady case final ready?) await ready;
     _lastOpen = (url: url, headers: headers, play: play);
     _voRetried = false;
+    _lifecycle(this, 'open');
     // An empty map, not null: media_kit caches headers per URI.
     await mk.open(Media(url, httpHeaders: headers), play: play);
   }

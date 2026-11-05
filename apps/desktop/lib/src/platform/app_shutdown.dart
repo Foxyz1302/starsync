@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:sync_relay_core/core.dart' show DiagUploader;
 
 import '../files/thumbnails.dart';
 import '../app/app_graph.dart';
+import 'crash_watch.dart';
 import 'single_instance.dart';
 
 // The one way out of the app (close button, Alt+F4, Update and restart).
@@ -43,6 +45,8 @@ Future<void> shutDownApp({Future<void> Function()? beforeQuit, bool restart = fa
   final graph = _graph;
   if (_shuttingDown || graph == null) return;
   _shuttingDown = true;
+  crashWatchClosing();
+  DiagUploader.flushAllSoon();
   // Every step is bounded, but a timeout only stops waiting and the quit
   // itself is not: whatever stalls, the process ends.
   Timer(const Duration(seconds: 20), () {
@@ -75,6 +79,7 @@ Future<void> shutDownApp({Future<void> Function()? beforeQuit, bool restart = fa
   if (restart) await _step('instance', _instance?.release(), const Duration(milliseconds: 500));
   if (beforeQuit != null) await _step('before quit', beforeQuit(), const Duration(seconds: 3));
   debugPrint('close: ready to quit after ${total.elapsedMilliseconds} ms');
+  crashWatchClean();
   await shell.quit();
   // The engine stops with the window, so this only fires when the close
   // did not go through. A kill, not exit(): no exit handlers (NVIDIA's
