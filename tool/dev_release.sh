@@ -40,7 +40,7 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # The manifest goes out signed (DEVELOPMENT "Signing"): no key, no publish,
 # found out before the build. --no-publish signs only when there is one.
-[[ -f "$ROOT/tool/.dart_tool/package_config.json" ]] || (cd "$ROOT/tool" && dart pub get >/dev/null)
+(cd "$ROOT/tool" && dart pub get >/dev/null)
 SIGN=1
 if [[ "$PUBLISH" == "1" ]]; then
   dart "$ROOT/tool/sign.dart" --check-key
