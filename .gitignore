@@ -43,3 +43,6 @@ Thumbs.db
 # Misc
 *.swp
 *.pyc
+
+# Claude Code session files and agent worktrees
+.claude/
