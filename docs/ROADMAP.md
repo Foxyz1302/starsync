@@ -214,7 +214,7 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
 
 Next: **Playback and presence** (epic, below; protocol 17).
 
-0. **Move to the owner's media_kit fork** (after 1.4.1):
+0. **Move to the owner's media_kit fork** (for 1.5.0):
    `Foxyz1302/media-kit`, branch `integration` (a local checkout sits
    beside this repo as `../media-kit`). Replacing the
    vendored `third_party/media_kit_video` brings:
@@ -364,10 +364,14 @@ Next: **Playback and presence** (epic, below; protocol 17).
    - Linux frames are capped at 60 Hz whatever the monitor runs at: the
      GTK embedder gives the engine no vsync source (a fixed 1/60 s
      fallback, flutter/flutter#191245) and GTK3's GL window gets no
-     presentation feedback on Wayland. A runner prototype paces frames to
-     the compositor through private Flutter and GTK structures;
-     undecided. (mpv waiting inside Flutter's frame is the fork move,
-     backlog 0.) Mouse drags may still feel
+     presentation feedback on Wayland. A runner shim paces frames to the
+     compositor through private Flutter and GTK structures, hands mouse
+     motion over once per frame (Flutter 3.48's task runner falls behind
+     a 1000 Hz mouse) and skips GTK's background paint in fullscreen.
+     It goes in with the fork move (backlog 0): without the fork's
+     non-blocking render, the UI over a video drops to the video's rate.
+     Before that: a fullscreen check on a real display with
+     `STARSYNC_FRAME_PACING_LOG=1`. Mouse drags may still feel
      sampled at 60 Hz with it (being researched).
    - One open made two session players (#1 and #2) in a diagnostics
      test run: find out why.
@@ -447,9 +451,11 @@ when the countdown appears. Videos under a minute show only "Up next".
 Pause or Cancel stops it at the end. The silent stop when the performer
 does not act on a play request asks again (another member if needed).
 
-**Undecided:** "Still watching?" (after two autoplays in a row with no
-input from anyone, the next waits for Play); "Wait for Bob" on a person
-card (a friend sets someone's BRB); the name "Out".
+**Also:** "Wait for Bob" on a person card: a friend sets someone's BRB
+when they ran off without it; their own tap clears it.
+
+**Undecided:** the name "Out" (fits next to BRB and AFK, but may not be
+clear enough).
 
 **Goes away:** ready and unready and the ready counter, Mark everyone ready,
 Force ready (becomes "Don't wait for Alice"), Space as ready, the 15 s

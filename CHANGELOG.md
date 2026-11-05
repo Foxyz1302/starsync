@@ -9,11 +9,12 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ### Highlights
 
-- People cards: point at someone's avatar or name to see their card
-- Jellyfin: right-click has everything, and a whole show or season can be marked watched
-- Joining without a name just asks what to call you
-- Settings in six tidy pages, the ones you change first
-- Your volume is remembered, and M mutes
+- People cards: point at anyone to see their card, with their connection route, how much they have buffered, their Starsync version and what they pass on
+- Jellyfin: every action in every right-click menu, and a whole show or season can be marked watched in one go
+- The timeline shows exactly what mpv has buffered, gaps and all, not just the stretch ahead
+- A relayed video whose source goes quiet past ffmpeg's retries no longer just ends: it reopens where everyone is once the source is back
+- Crashes and freezes are noticed and logged by themselves (on Windows with the system's own crash record), so they can be tracked down without you sending anything
+- Joining without a name just asks what to call you, and settings live in six tidy pages
 
 ### Added
 
