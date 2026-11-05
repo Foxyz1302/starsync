@@ -101,6 +101,7 @@ class StandardControls extends StatelessWidget {
                             position: model.position.value,
                             duration: model.duration.value,
                             buffer: model.buffered.value,
+                            cached: model.cached.value,
                             chapters: model.chapters.value,
                             height: ChapterSeekBar.defaultHeight * scale,
                             onSeek: model.seek,

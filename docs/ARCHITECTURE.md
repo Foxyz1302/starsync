@@ -818,8 +818,15 @@ Chapters, segments, tracks (`PlaybackController` signals, values from
   language, title, codec, channels, default / forced / hearing-impaired /
   external, `selected`), re-read after every selection.
 - `position` (250 ms steps), `duration`, `buffered` (end of the cached
-  range: mpv `demuxer-cache-time`, media_kit's `buffer`, 250 ms steps);
-  computed `opening`, `ending` (`SkipRange`) and `currentChapter`.
+  range: mpv `demuxer-cache-time`, media_kit's `buffer`, 250 ms steps),
+  `cached` (`CachedRanges`: mpv `demuxer-cache-state` observed and read
+  as JSON, `parseCacheState`: its `seekable-ranges` in order, ends in
+  250 ms steps, the first from 0 with `bof-cached`, the last to the end
+  with `eof-cached`; set only when that changes); computed `opening`,
+  `ending` (`SkipRange`) and `currentChapter`. The timelines draw
+  `cachedSpans` (those ranges, gaps under 0.5 s closed; while mpv names
+  none, 0 to `buffered`) or, for the Minimal stripes, the rest
+  (`uncachedSpans`, slivers under 0.5 s left out), as uosc does.
 
 Skip rules (pure, `media_marks.dart`):
 - Opening = first Intro segment, else the first chapter whose title has a
@@ -2730,8 +2737,9 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   (`session_controls.dart`) puts the skin the settings pick into one
   frame, live, and gives the overlay the bars' heights.
 - **Standard skin** (`standard/`): Material-style. A top gradient with the
-  top bar (72 px); at the bottom a gradient with `ChapterSeekBar` (played
-  and buffered track in the theme's primary, a diamond at each chapter
+  top bar (72 px); at the bottom a gradient with `ChapterSeekBar` (the
+  played part in the theme's primary, mpv's cached ranges a lighter
+  white each, `cachedSpans`, a diamond at each chapter
   start, hover tip with the time and the chapter title, a press holds the
   frame and every drag move seeks) over a 56 px row of round white icon
   buttons in the layout's order (badges for track counts and unread
@@ -2742,8 +2750,10 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   `MinimalButton` rounded squares, the play button a filled accent
   circle) above `MinimalTimeline`, a 36 px band across the bottom: the
   played part tinted in the theme's primary (40 %), the position a white line,
-  the part not downloaded yet (from `buffered`, or the position when
-  that is behind, to the end) in thin stripes, chapter starts as dots on
+  the parts not downloaded (outside mpv's cached ranges, `uncachedSpans`:
+  behind a dropped back buffer too; while mpv names none, from
+  `buffered`, or the position when that is behind, to the end) in thin
+  stripes on one grid, chapter starts as dots on
   the top edge with a dark cut through the band (a press within reach of
   a dot jumps to it), elapsed time left and the total or the time left
   right (the bar's clock lives here; a press on its text switches, the
@@ -2756,9 +2766,7 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
 that is the band itself, smaller: the same dark band, the same played
 tint (40 % of the accent), so growing or shrinking never changes colour;
 the stripes are stronger on the line (a few pixels of each show) so the
-part not downloaded still reads; chapter cuts are a light dark line.
-  We know only the end of mpv's cache, so a dropped back buffer is not
-  shown.
+parts not downloaded still read; chapter cuts are a light dark line.
 - **Settings** (`AppSettings`, `model/controls_prefs.dart`, all live):
   `controlsSkin` (`ControlsSkin` standard / minimal; a stored
   `mpvControls: true` from before becomes minimal), `timeDisplay` (set

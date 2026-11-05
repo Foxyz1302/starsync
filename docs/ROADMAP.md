@@ -373,9 +373,6 @@ Next: **Playback and presence** (epic, below; protocol 17).
      test run: find out why.
    - The video freeze after GPU idle: next suspect is media_kit's context
      switching on the raster thread with NVIDIA.
-   - Timelines: draw mpv's real cached ranges (`demuxer-cache-state`
-     `seekable-ranges`, read through media_kit's `observeProperty`), not
-     only the end of the cache ahead, like uosc.
    - Link conveniences: a link swap in session updates the remembered media;
      show the open link with an open-in-browser button.
    - Time UI: remaining time, scrubber preview.

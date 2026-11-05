@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:sync_relay_core/core.dart' show JellyfinMediaSegment, JellyfinSegmentType, JellyfinStreamType;
 
@@ -261,6 +262,110 @@ SkipOffer? skipOfferAt({
     return SkipOffer(SkipKind.fixed, to < duration ? to : duration);
   }
   return null;
+}
+
+/// A stretch of the media, [start] to [end].
+typedef MediaSpan = ({Duration start, Duration end});
+
+/// What mpv's demuxer cache holds (`demuxer-cache-state`): its
+/// `seekable-ranges` in order, the first from 0 when `bof-cached`, the
+/// last to the end when `eof-cached` ([toEnd]). Empty when it says none.
+class CachedRanges {
+  final List<MediaSpan> ranges;
+  final bool toEnd;
+  const CachedRanges([this.ranges = const [], this.toEnd = false]);
+
+  static const none = CachedRanges();
+
+  @override
+  bool operator ==(Object other) =>
+      other is CachedRanges && other.toEnd == toEnd && _sameSpans(other.ranges, ranges);
+
+  @override
+  int get hashCode => Object.hash(toEnd, Object.hashAll(ranges));
+}
+
+bool _sameSpans(List<MediaSpan> a, List<MediaSpan> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
+/// mpv's `demuxer-cache-state` as read back (JSON) to [CachedRanges],
+/// each end in [step]s (the controls redraw only when a step changes).
+CachedRanges parseCacheState(String json, {Duration step = const Duration(milliseconds: 250)}) {
+  final Object? raw;
+  try {
+    raw = jsonDecode(json);
+  } on FormatException {
+    return CachedRanges.none;
+  }
+  if (raw is! Map || raw['seekable-ranges'] is! List) return CachedRanges.none;
+  final st = step.inMicroseconds;
+  Duration q(num s) {
+    final us = (s * 1e6).round();
+    return Duration(microseconds: st > 0 ? us - us % st : us);
+  }
+
+  final ranges = <MediaSpan>[
+    for (final r in raw['seekable-ranges'] as List)
+      if (r is Map && r['start'] is num && r['end'] is num && (r['start'] as num).isFinite && (r['end'] as num).isFinite)
+        (start: q(math.max(0, r['start'] as num)), end: q(r['end'] as num)),
+  ]
+    ..removeWhere((r) => r.end <= r.start)
+    ..sort((a, b) => a.start.compareTo(b.start));
+  if (ranges.isEmpty) return CachedRanges.none;
+  if (raw['bof-cached'] == true) ranges[0] = (start: Duration.zero, end: ranges[0].end);
+  return CachedRanges(ranges, raw['eof-cached'] == true);
+}
+
+/// Gaps and slivers shorter than this are not drawn.
+const cacheSliver = Duration(milliseconds: 500);
+
+/// What the timeline shows as cached: mpv's [cached] ranges within
+/// [duration] (gaps under [cacheSliver] closed), else, while mpv names
+/// none, the start to the end of its cache ahead ([buffered], at least
+/// [position]). Empty when nothing is known.
+List<MediaSpan> cachedSpans({
+  required CachedRanges cached,
+  required Duration position,
+  required Duration buffered,
+  required Duration duration,
+}) {
+  if (duration <= Duration.zero) return const [];
+  Duration clamp(Duration d) => d < Duration.zero ? Duration.zero : (d > duration ? duration : d);
+  if (cached.ranges.isEmpty) {
+    if (buffered <= Duration.zero) return const [];
+    return [(start: Duration.zero, end: clamp(buffered > position ? buffered : position))];
+  }
+  final out = <MediaSpan>[];
+  for (final r in cached.ranges) {
+    final s = clamp(r.start), e = clamp(r.end);
+    if (e <= s) continue;
+    if (out.isNotEmpty && s - out.last.end < cacheSliver) {
+      if (e > out.last.end) out[out.length - 1] = (start: out.last.start, end: e);
+    } else {
+      out.add((start: s, end: e));
+    }
+  }
+  if (cached.toEnd && out.isNotEmpty) out[out.length - 1] = (start: out.last.start, end: duration);
+  return out;
+}
+
+/// The rest of [duration] after [cached] ([cachedSpans]): what is not
+/// downloaded, slivers under [cacheSliver] left out. Empty when nothing is
+/// known.
+List<MediaSpan> uncachedSpans(List<MediaSpan> cached, Duration duration) {
+  if (cached.isEmpty || duration <= Duration.zero) return const [];
+  final out = <MediaSpan>[];
+  var from = Duration.zero;
+  for (final c in [...cached, (start: duration, end: duration)]) {
+    if (c.start - from > cacheSliver) out.add((start: from, end: c.start));
+    if (c.end > from) from = c.end;
+  }
+  return out;
 }
 
 /// "1:05", "1:02:03".

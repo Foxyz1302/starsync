@@ -490,7 +490,7 @@ Standard (the default): a seek bar that marks chapter starts with a
 diamond (hovering it shows the time and the chapter title) over a row
 of round buttons. Minimal (⚙ → Player design, switches
 right away): a translucent timeline across the bottom tints what has
-played, stripes the part not downloaded yet, marks chapter starts with
+played, stripes the parts not downloaded, marks chapter starts with
 dots (click one to jump), shows the elapsed time left and the total or
 the time left right (click it to switch) and, while less than a minute
 is buffered, the buffered seconds next to the position; hovering it shows

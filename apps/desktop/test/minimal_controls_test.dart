@@ -60,12 +60,38 @@ Future<TestGesture> mouseAt(WidgetTester tester, Offset at) async {
 
 void main() {
   group('timeline math', () {
-    test('missing part: from the cache end (or the position) to the end', () {
-      expect(uncachedFrom(position: m(6), buffered: m(9), duration: m(24)), 9 / 24);
-      expect(uncachedFrom(position: m(6), buffered: m(5), duration: m(24)), 6 / 24, reason: 'stale cache end');
-      expect(uncachedFrom(position: m(6), buffered: Duration.zero, duration: m(24)), isNull, reason: 'unknown');
-      expect(uncachedFrom(position: m(6), buffered: m(24), duration: m(24)), isNull, reason: 'cached to the end');
-      expect(uncachedFrom(position: m(6), buffered: m(9), duration: Duration.zero), isNull);
+    test('missing parts without mpv ranges: from the cache end (or the position) to the end', () {
+      List<(double, double)> u(Duration b, [Duration d = const Duration(minutes: 24)]) =>
+          uncachedParts(position: m(6), buffered: b, duration: d);
+      expect(u(m(9)), [(9 / 24, 1.0)]);
+      expect(u(m(5)), [(6 / 24, 1.0)], reason: 'stale cache end');
+      expect(u(Duration.zero), isEmpty, reason: 'unknown');
+      expect(u(m(24)), isEmpty, reason: 'cached to the end');
+      expect(u(m(9), Duration.zero), isEmpty);
+    });
+
+    test("missing parts from mpv's cached ranges: everything outside them, slivers left out", () {
+      Duration s(num x) => Duration(milliseconds: (x * 1000).round());
+      final c = parseCacheState('{"seekable-ranges":[{"start":600,"end":700.1},{"start":60,"end":120},'
+          '{"start":700.3,"end":800}],"bof-cached":false,"eof-cached":false}');
+      expect(c.ranges, [(start: s(60), end: s(120)), (start: s(600), end: s(700)), (start: s(700.25), end: s(800))],
+          reason: 'in order, ends in 250 ms steps');
+      expect(uncachedParts(cached: c, position: m(11), buffered: m(13), duration: s(1000)), [
+        (0.0, 0.06),
+        (0.12, 0.6),
+        (0.8, 1.0),
+      ], reason: 'the 0.25 s gap closed');
+      final ends = parseCacheState('{"seekable-ranges":[{"start":0.4,"end":100},{"start":900,"end":999.6}],'
+          '"bof-cached":true,"eof-cached":true}');
+      expect(uncachedParts(cached: ends, position: m(1), buffered: m(1), duration: s(1000)), [(0.1, 0.9)],
+          reason: 'from the start and to the end');
+      expect(parseCacheState('{"seekable-ranges":[]}'), CachedRanges.none);
+      expect(parseCacheState('nope'), CachedRanges.none);
+      expect(
+        cachedSpans(cached: c, position: m(11), buffered: m(13), duration: s(1000)),
+        [(start: s(60), end: s(120)), (start: s(600), end: s(800))],
+        reason: 'what the Standard bar draws',
+      );
     });
 
     test('cache label: seconds ahead, under 60 s, not when cached to the end', () {
@@ -95,7 +121,7 @@ void main() {
       expect(p.progress, 0.25);
       expect(p.lineX(800), 200);
       expect(p.visibility, 1);
-      expect(p.uncached, 6.5 / 24);
+      expect(p.uncached, [(6.5 / 24, 1.0)]);
       expect(p.elapsed, '6:00');
       expect(p.right, '-18:00');
       expect(p.cache, '30s');

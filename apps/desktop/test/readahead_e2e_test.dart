@@ -64,6 +64,14 @@ void main() {
             'served ${server.session.totalBytesServed >> 20} MiB');
         expect(best, greaterThan(120),
             reason: 'paused player reads ahead about two minutes');
+        // The timelines' cached ranges: mpv's demuxer-cache-state, read
+        // back as JSON through observeProperty.
+        final cached = p.cached.peek();
+        // ignore: avoid_print
+        print('cached ranges: ${cached.ranges}');
+        expect(cached.ranges, isNotEmpty);
+        expect(cached.ranges.first.start, Duration.zero);
+        expect(cached.ranges.first.end.inSeconds, greaterThan(100));
       } finally {
         await m.dispose();
         await server.stop();

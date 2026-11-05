@@ -121,6 +121,10 @@ class PlaybackController {
   /// End of the cached range ahead of the position, in 250 ms steps.
   final buffered = signal(Duration.zero);
 
+  /// What mpv's cache holds (`demuxer-cache-state`), ends in 250 ms steps;
+  /// the timelines draw it.
+  final cached = signal(CachedRanges.none);
+
   /// The player's volume, 0..[maxVolume]; kept across players.
   final volume = signal(100.0);
 
@@ -164,6 +168,7 @@ class PlaybackController {
     position.value = _step(st.position);
     duration.value = st.duration;
     buffered.value = _step(st.buffer);
+    cached.value = CachedRanges.none;
     chapters.value = const [];
     tracks.value = const [];
     _logSub = p.logs.listen(_onLog);
@@ -213,6 +218,7 @@ class PlaybackController {
     chapters.value = const [];
     tracks.value = const [];
     buffered.value = Duration.zero;
+    cached.value = CachedRanges.none;
   }
 
   static Duration _step(Duration d) {
@@ -279,8 +285,13 @@ class PlaybackController {
           if (!identical(p, _player)) return;
           _setTracks(parseTrackList(v));
         });
+        await p.observeProperty('demuxer-cache-state', (String v) async {
+          if (!identical(p, _player)) return;
+          final c = parseCacheState(v);
+          if (c != cached.peek()) cached.value = c;
+        });
       } catch (e) {
-        debugPrint('observe chapters / tracks failed: $e');
+        debugPrint('observe chapters / tracks / cache failed: $e');
       }
     }();
   }
@@ -305,6 +316,7 @@ class PlaybackController {
     position.value = Duration.zero;
     duration.value = Duration.zero;
     buffered.value = Duration.zero;
+    cached.value = CachedRanges.none;
   }
 
   // -------------------------------------------------------------- log

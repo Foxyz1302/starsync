@@ -17,6 +17,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ### Changed
 
+- The player's timeline shows exactly which parts of the video are downloaded, also behind you and around a jump, not just how far ahead (both designs, and Minimal's thin line)
 - The volume slider now stays next to the speaker in the player (in a narrow window it still slides out when you point at the speaker)
 - The player panel opens with Sound: the video's volume and App sounds (how loud the app's own cues are, so the two are no longer confused); its All settings button opens the matching Settings page
 - ⚙ in the player now opens and closes the player settings panel directly. Change video, Copy link, Reload video, Skip 1:30, Chapters, Mark everyone ready, Mark a problem and Leave server moved to a new ⋯ button in the player's top bar ("Video and session"), next to Up next. The shader is picked in the panel (or with Ctrl+0…6)

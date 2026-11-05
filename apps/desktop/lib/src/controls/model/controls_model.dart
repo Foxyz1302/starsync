@@ -58,6 +58,9 @@ class PlayerControlsModel {
 
   /// End of the cached range ahead of the position.
   ReadonlySignal<Duration> get buffered => playback.buffered;
+
+  /// What mpv's cache holds (its ranges, for the timelines).
+  ReadonlySignal<CachedRanges> get cached => playback.cached;
   ReadonlySignal<List<MediaChapter>> get chapters => playback.chapters;
   ReadonlySignal<int?> get currentChapter => playback.currentChapter;
   ReadonlySignal<List<MpvTrack>> get tracks => playback.tracks;

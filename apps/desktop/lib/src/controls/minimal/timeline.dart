@@ -8,8 +8,9 @@ import '../frame.dart';
 import 'style.dart';
 
 // The Minimal skin's timeline: a band across the bottom with the played
-// part tinted in the accent and the position as a line, the part not
-// downloaded yet striped, chapter starts as dots on the top edge (click one
+// part tinted in the accent and the position as a line, the parts not
+// downloaded striped (everything outside mpv's cached ranges), chapter
+// starts as dots on the top edge (click one
 // to jump), the elapsed time left and the total or the time left right,
 // the buffered seconds by the position while under a minute, and a tip
 // with the time (and the chapter title) under the mouse. Hidden, it shrinks
@@ -55,16 +56,22 @@ double timelineFraction(Duration d, Duration total) {
   return (d.inMicroseconds / t).clamp(0.0, 1.0);
 }
 
-/// Where the part not downloaded yet starts (it runs to the end), as a
-/// fraction; null when nothing known is missing. We know only the end of
-/// mpv's cache ahead ([buffered]); a cache within half a second of the end
-/// leaves nothing.
-double? uncachedFrom({required Duration position, required Duration buffered, required Duration duration}) {
-  if (duration <= Duration.zero || buffered <= Duration.zero) return null;
-  final from = buffered > position ? buffered : position;
-  if (duration - from <= const Duration(milliseconds: 500)) return null;
-  return timelineFraction(from, duration);
-}
+/// The parts not downloaded, as fractions: everything outside mpv's
+/// cached ranges ([cached]; while it names none, from the end of its cache
+/// ahead, [buffered], to the end), slivers under half a second left out.
+/// Empty when nothing is known.
+List<(double, double)> uncachedParts({
+  CachedRanges cached = CachedRanges.none,
+  required Duration position,
+  required Duration buffered,
+  required Duration duration,
+}) => [
+  for (final s in uncachedSpans(
+    cachedSpans(cached: cached, position: position, buffered: buffered, duration: duration),
+    duration,
+  ))
+    (timelineFraction(s.start, duration), timelineFraction(s.end, duration)),
+];
 
 /// The cache label by the position ("12s"): the seconds buffered ahead,
 /// while under [MinimalTimelineSpec.bufferedThreshold] and the cache does
@@ -90,8 +97,11 @@ class MinimalTimeline extends StatefulWidget {
   final Duration position;
   final Duration duration;
 
-  /// End of the cached range.
+  /// End of the cached range ahead.
   final Duration buffered;
+
+  /// mpv's cached ranges (the stripes go over the rest).
+  final CachedRanges cached;
   final List<MediaChapter> chapters;
   final bool expanded;
 
@@ -105,6 +115,7 @@ class MinimalTimeline extends StatefulWidget {
     required this.position,
     required this.duration,
     this.buffered = Duration.zero,
+    this.cached = CachedRanges.none,
     this.chapters = const [],
     this.expanded = true,
     this.remaining = true,
@@ -268,7 +279,12 @@ class _MinimalTimelineState extends State<MinimalTimeline> {
       visibility: visibility,
       accent: primary,
       scale: _scale,
-      uncached: uncachedFrom(position: widget.position, buffered: widget.buffered, duration: duration),
+      uncached: uncachedParts(
+        cached: widget.cached,
+        position: widget.position,
+        buffered: widget.buffered,
+        duration: duration,
+      ),
       chapters: [for (final c in marks) timelineFraction(c.start, duration)],
       hoveredChapter: hovered,
       hoverX: hovered == null ? cursorX : null,
@@ -436,8 +452,8 @@ class MinimalTimelinePainter extends CustomPainter {
   final Color accent;
   final double scale;
 
-  /// Start of the part not downloaded (to the end), as a fraction.
-  final double? uncached;
+  /// The parts not downloaded, as fractions (from, to).
+  final List<(double, double)> uncached;
 
   /// Chapter starts, as fractions.
   final List<double> chapters;
@@ -453,7 +469,7 @@ class MinimalTimelinePainter extends CustomPainter {
     this.visibility = 1,
     this.accent = Colors.white,
     this.scale = 1,
-    this.uncached,
+    this.uncached = const [],
     this.chapters = const [],
     this.hoveredChapter,
     this.hoverX,
@@ -495,23 +511,25 @@ class MinimalTimelinePainter extends CustomPainter {
     }
   }
 
-  /// Thin 45° stripes over the part not downloaded yet.
+  /// Thin 45° stripes over the parts not downloaded, on one grid so
+  /// neighbouring parts line up.
   void _stripes(Canvas canvas, double w, double h) {
-    final from = uncached;
-    if (from == null) return;
-    final ax = (w * from).floorToDouble();
-    if (ax >= w) return;
+    if (uncached.isEmpty) return;
     final period = 7.0 * scale;
-    canvas.save();
-    canvas.clipRect(Rect.fromLTRB(ax, 0, w, h));
     final paint = Paint()
       // Stronger on the line, where only a few pixels of each show.
       ..color = Colors.white.withValues(alpha: 0.12 + 0.22 * (1 - visibility))
       ..strokeWidth = 1.5 * scale;
-    for (var c = (ax / period).floorToDouble() * period - h; c <= w; c += period) {
-      canvas.drawLine(Offset(c, h), Offset(c + h, 0), paint);
+    for (final (from, to) in uncached) {
+      final ax = (w * from).floorToDouble(), bx = (w * to).ceilToDouble();
+      if (ax >= w || bx <= ax) continue;
+      canvas.save();
+      canvas.clipRect(Rect.fromLTRB(ax, 0, bx, h));
+      for (var c = (ax / period).floorToDouble() * period - h; c <= bx; c += period) {
+        canvas.drawLine(Offset(c, h), Offset(c + h, 0), paint);
+      }
+      canvas.restore();
     }
-    canvas.restore();
   }
 
   void _chapters(Canvas canvas, double w, double h) {

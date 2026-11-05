@@ -6,9 +6,9 @@ import '../../playback/media_marks.dart';
 import '../frame.dart';
 
 // The Standard skin's seek bar: a Material-style track with the played and
-// buffered parts, chapter marks and a hover tip.
+// cached parts (mpv's cached ranges), chapter marks and a hover tip.
 
-/// The seek bar: played / buffered track, a diamond at each chapter start
+/// The seek bar: played / cached track, a diamond at each chapter start
 /// (not the one at 0), and on hover the time with the chapter title above
 /// it. Like media_kit's bar it reports a seek on every drag move and on
 /// release ([onSeek]); the session routes those through the user-seek path
@@ -16,7 +16,11 @@ import '../frame.dart';
 class ChapterSeekBar extends StatefulWidget {
   final Duration position;
   final Duration duration;
+  /// End of the cached range ahead.
   final Duration buffer;
+
+  /// mpv's cached ranges, drawn as they are (else 0 to [buffer]).
+  final CachedRanges cached;
   final List<MediaChapter> chapters;
   final ValueChanged<Duration> onSeek;
 
@@ -27,6 +31,7 @@ class ChapterSeekBar extends StatefulWidget {
     required this.position,
     required this.duration,
     this.buffer = Duration.zero,
+    this.cached = CachedRanges.none,
     this.chapters = const [],
     required this.onSeek,
     this.height = ChapterSeekBar.defaultHeight,
@@ -118,13 +123,19 @@ class _ChapterSeekBarState extends State<ChapterSeekBar> {
                     height: barHeight,
                     child: Container(color: Colors.white24),
                   ),
-                  Positioned(
-                    left: 0,
-                    top: mid - barHeight / 2,
-                    height: barHeight,
-                    width: width * _fraction(widget.buffer),
-                    child: Container(color: Colors.white24),
-                  ),
+                  for (final s in cachedSpans(
+                    cached: widget.cached,
+                    position: widget.position,
+                    buffered: widget.buffer,
+                    duration: widget.duration,
+                  ))
+                    Positioned(
+                      left: width * _fraction(s.start),
+                      top: mid - barHeight / 2,
+                      height: barHeight,
+                      width: width * (_fraction(s.end) - _fraction(s.start)),
+                      child: Container(color: Colors.white24),
+                    ),
                   if (hoverX != null && !_dragging)
                     Positioned(
                       left: 0,

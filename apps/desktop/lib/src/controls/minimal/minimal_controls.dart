@@ -135,6 +135,7 @@ class MinimalControls extends StatelessWidget {
                       position: model.position.value,
                       duration: model.duration.value,
                       buffered: model.buffered.value,
+                      cached: model.cached.value,
                       chapters: model.chapters.value,
                       expanded: visible,
                       remaining: model.settings.timeDisplay.value == TimeDisplay.remaining,
