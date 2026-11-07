@@ -289,6 +289,14 @@ dropped (DEVELOPMENT "The 1.4 bridge").
    Jellyfin/Files) opened from anywhere a show appears, e.g. a Schedule
    entry. With the account: track progress on AniList, and carry over
    what Jellyfin already has as watched.
+   **Requests, with the browser:** one "Requests" spot of the user's own
+   in Settings → Library & accounts (None / AnimeFlow / Sonarr). AnimeFlow
+   needs only its address and which Jellyfin account it rides on (it takes
+   that account's token); Sonarr needs its address and API key. The
+   Starsync server only pre-fills AnimeFlow's address as a hint (as now:
+   `animeFlow` in the server config, remembered by the app), so friends
+   still touch nothing; the user's own choice wins. Nothing is asked of
+   the AnimeFlow side and no address is in the code.
 
 4. **Ops**: Check shaders on Windows; run the relay e2e "the source drops
    uncleanly and comes back" a few times under the full suite (its
