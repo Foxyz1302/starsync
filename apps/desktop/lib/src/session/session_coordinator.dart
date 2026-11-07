@@ -25,6 +25,7 @@ import '../sfx/sfx.dart' show NoopSfxService, SfxService;
 import '../state/settings.dart';
 import '../watch/watch_tracker.dart';
 import '../sync/avatar_cache.dart';
+import '../sync/live_follow.dart';
 import '../sync/state_diff.dart';
 import '../sync/user_seek.dart';
 import '../queue/queue_controller.dart';
@@ -171,6 +172,7 @@ class SessionCoordinator {
       names: memberNames,
       restarts: restarts.value,
       pausedBy: pausedBy.value,
+      livePaused: livePaused.value,
       now: _clock.value,
     ));
   });
@@ -214,7 +216,7 @@ class SessionCoordinator {
   late final Computed<SkipOffer?> skipOffer = computed(() {
     final r = serverState.value;
     final duration = playback.duration.value;
-    if (r == null || r.transport == 'finished' || duration <= Duration.zero) return null;
+    if (r == null || r.transport == 'finished' || duration <= Duration.zero || live.value) return null;
     return skipOfferAt(
       position: playback.position.value,
       duration: duration,
@@ -239,6 +241,21 @@ class SessionCoordinator {
 
   /// Self is BRB: the group waits for it.
   late final Computed<bool> selfBrb = computed(() => selfMember.value?.brb ?? false);
+
+  /// What plays is a live stream (`media.live`, ARCHITECTURE "Live
+  /// streams"): no time or timeline, no seeking; pause is this member's
+  /// own ([livePaused]) and playing again goes back to the group's live
+  /// point.
+  late final Computed<bool> live = computed(() => _isLive(serverState.value));
+
+  /// This member paused the live stream (only here); playing again goes
+  /// back to the group's live point. A new media clears it.
+  final livePaused = signal(false);
+  final LiveFollow _liveFollow = LiveFollow();
+  int _livePausedFor = -1;
+  DateTime? _liveReloadAt;
+
+  static bool _isLive(StateBroadcast? r) => r?.media?['live'] == true;
 
   Timer? _ticker;
   StreamSubscription? _stateSub;
@@ -634,6 +651,7 @@ class SessionCoordinator {
   /// (a prepared media already has its buffer).
   void _onOpened(int mediaId, String url) {
     diff.reset();
+    _liveFollow.reset();
     final r = serverState.peek();
     if (r != null && r.mediaId == mediaId && url == _openUrl && connection.token.isNotEmpty && _playerReady) {
       _sendReport(r);
@@ -681,6 +699,10 @@ class SessionCoordinator {
     _warnSlowSource(r);
     _checkPlayerError(r.mediaId);
     _maybeSendArt(r);
+    _enqueueApply(r);
+  }
+
+  void _enqueueApply(StateBroadcast r) {
     _queuedState = r;
     if (_applying) return;
     _applying = true;
@@ -751,6 +773,10 @@ class SessionCoordinator {
       _wasPlayAllowed = false;
       return;
     }
+    if (_isLive(r)) {
+      await _applyLive(r);
+      return;
+    }
     // Server clock: serverTime in the state is the server's.
     final now = connection.serverNow();
     final allowed = localPlayAllowed(r, connection.memberId);
@@ -786,6 +812,60 @@ class SessionCoordinator {
       _seekRetries = 0;
     }
     await playback.apply(actions);
+  }
+
+  /// A live stream ([live]): no diff, no seeks from the server; the player
+  /// plays unless this member paused it, kept on the group's live point
+  /// in stream time ([LiveFollow]); at `finished` it stops where it is.
+  Future<void> _applyLive(StateBroadcast r) async {
+    // Whatever comes after it starts from a fresh diff.
+    diff.reset();
+    _wasPlayAllowed = false;
+    if (_livePausedFor != r.mediaId) {
+      _livePausedFor = r.mediaId;
+      livePaused.value = false;
+      _liveFollow.reset();
+    }
+    if (playback.switching || media.playerMediaId != r.mediaId) return;
+    if (livePaused.peek() || r.transport == 'finished') {
+      if (playback.playing) await playback.apply(const [TransportAction(false)]);
+      return;
+    }
+    // At the stream's end the player stays there (its reports say so; a
+    // play would start the now finished playlist over).
+    if (playback.completed) return;
+    final start = await playback.streamStart();
+    final group = r.transport == 'playing' ? serverPositionAt(r, connection.serverNow()) : null;
+    final step = _liveFollow.step(
+        group: group,
+        own: playback.positionSecs + start,
+        start: start,
+        cached: playback.cached.peek(),
+        now: DateTime.now().toUtc());
+    if (step.reload) {
+      final at = _liveReloadAt;
+      final now = DateTime.now().toUtc();
+      if (at == null || now.difference(at) > const Duration(seconds: 30)) {
+        _liveReloadAt = now;
+        _log.info('live: the live point is far past what this player holds; opening it afresh');
+        unawaited(reloadVideo());
+        return;
+      }
+    }
+    await playback.apply([
+      if (!playback.playing) const TransportAction(true),
+      ...step.actions,
+    ]);
+  }
+
+  /// Pauses or plays the live stream here only; playing again goes back to
+  /// the group's live point.
+  void _setLivePaused(bool paused) {
+    if (livePaused.peek() == paused) return;
+    livePaused.value = paused;
+    _liveFollow.reset();
+    final r = serverState.peek();
+    if (r != null) _enqueueApply(r);
   }
 
   /// Mirrors self's standing in the server into [_lastPresence] (set by
@@ -872,11 +952,35 @@ class SessionCoordinator {
     final starved = holds && media.starved(serverPositionAt(r, connection.serverNow()));
     final buffered = holds && !starved ? playback.bufferedSecsAhead : 0.0;
     if (holds && buffered >= r.bufferNeed) switchTrace.mark(r.mediaId, SwitchTrace.buffered);
+    // A live stream (or one this player found growing): positions in
+    // stream time with this player's edge; a length only once the player
+    // reached the end (PROTOCOL.md "Live").
+    final start = playback.knownStreamStart;
+    if (holds && known && (_isLive(r) || playback.growing.peek())) {
+      if (start == null) {
+        unawaited(playback.streamStart());
+      } else {
+        final own = playback.positionSecs + start;
+        final ended = playback.completed;
+        connection.sendReport(
+          position: own,
+          buffered: buffered,
+          eventId: r.eventId,
+          duration: ended ? own : 0,
+          mediaId: r.mediaId,
+          jf: _jfAccessFor(r),
+          error: _playerErrorFor == r.mediaId ? error : '',
+          edge: ended ? 0 : playback.durationSecs + start,
+        );
+        return;
+      }
+    }
     connection.sendReport(
       position: holds ? playback.positionSecs : 0,
       buffered: buffered,
       eventId: r.eventId,
-      duration: known ? playback.durationSecs : 0,
+      // A live stream's growing length is no end.
+      duration: known && !_isLive(r) && !playback.growing.peek() ? playback.durationSecs : 0,
       mediaId: known ? r.mediaId : 0,
       jf: _jfAccessFor(r),
       error: known && _playerErrorFor == r.mediaId ? error : '',
@@ -912,7 +1016,13 @@ class SessionCoordinator {
     final hold = _restore;
     final waiting = hold != null && state.media == null;
     final r = waiting ? hold.before : state;
-    final holds = _playerReady && !_lastOut && !_opening && _openUrl != null && media.playerMediaId == r.mediaId;
+    // A live stream has no length or place to resume: watched for nothing.
+    final holds = _playerReady &&
+        !_lastOut &&
+        !_opening &&
+        _openUrl != null &&
+        media.playerMediaId == r.mediaId &&
+        !_isLive(r);
     final ending = playback.ending.peek()?.start;
     final self = selfMember.peek();
     watch.sample(WatchSample(
@@ -928,7 +1038,7 @@ class SessionCoordinator {
       endingStart: ending == null ? null : ending.inMilliseconds / 1000,
       at: now,
     ));
-    if (waiting) return;
+    if (waiting || _isLive(r)) return;
     if (r.transport == 'finished' && _watchEndFor != r.mediaId) {
       _watchEndFor = r.mediaId;
       watch.checkpoint(at: now);
@@ -999,6 +1109,8 @@ class SessionCoordinator {
   void _userSeek(double position) {
     if (!position.isFinite || position < 0) return;
     if (serverState.peek() == null || _openUrl == null) return;
+    // Live: there is nothing to seek to but the live point.
+    if (live.peek()) return;
     markInput();
     final now = DateTime.now().toUtc();
     _seekGate.request(position, now);
@@ -1027,19 +1139,33 @@ class SessionCoordinator {
   /// for.
   void play() {
     markInput();
+    if (live.peek()) {
+      _setLivePaused(false);
+      return;
+    }
     connection.sendTransport(true);
   }
 
-  /// The group pauses (anyone's); it lasts until someone plays.
+  /// The group pauses (anyone's); it lasts until someone plays. Live: only
+  /// here.
   void pause() {
     markInput();
+    if (live.peek()) {
+      _setLivePaused(true);
+      return;
+    }
     connection.sendTransport(false);
   }
 
-  /// The play button: out, it joins; else play or pause the group's wish.
+  /// The play button: out, it joins; else play or pause the group's wish
+  /// (live: this player only).
   void togglePlay() {
     if (selfOut.peek()) {
       join();
+      return;
+    }
+    if (live.peek()) {
+      livePaused.peek() ? play() : pause();
       return;
     }
     if (serverState.peek()?.wantsPlay ?? false) {
@@ -1300,8 +1426,12 @@ class SessionCoordinator {
     final uri = Uri.tryParse(url) ?? Uri();
     final name = probe?.title ?? (probe != null || hasMediaExtension(uri) || uri.host.isEmpty ? media.name : uri.host);
     final what = linkMediaRef(name);
-    if (relay == LinkRelay.direct) {
-      _swap(HelloMedia(name: name, size: 0, duration: 0, url: url, ref: what), queueId: queueId, restore: restore);
+    // A live stream is never passed on or fetched: everyone opens it, in
+    // any mode (ARCHITECTURE "Live streams").
+    final live = probe?.info?.isLive ?? false;
+    if (relay == LinkRelay.direct || live) {
+      _swap(HelloMedia(name: name, size: 0, duration: 0, url: url, ref: what, live: live),
+          queueId: queueId, restore: restore);
       return null;
     }
     if (relay == LinkRelay.me) {

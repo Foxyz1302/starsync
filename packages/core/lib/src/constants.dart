@@ -113,6 +113,20 @@ abstract class RelayConstants {
   static const int queuePlayTimeoutSecs = 30;
   static const int advanceSecs = 10;
 
+  /// Live streams (ARCHITECTURE "Live streams"). The group's live point
+  /// starts halfway between where the first player that reports plays and
+  /// its edge (about three segments), [liveMarginSecs] further back, so
+  /// members whose CDN edge runs a few seconds late still reach it. A
+  /// player further than [liveMaxLagSecs] behind its own edge (a stitched
+  /// ad, a stalled start) sets it at its edge minus [liveFallbackLagSecs]
+  /// instead. It is set again when it runs [liveStallSecs] past every
+  /// member's edge (the stream stalled or started over) or falls twice
+  /// [liveMaxLagSecs] behind (the stream's clock jumped ahead).
+  static const double liveMarginSecs = 3.0;
+  static const double liveMaxLagSecs = 60.0;
+  static const double liveFallbackLagSecs = 10.0;
+  static const double liveStallSecs = 3.0;
+
   /// Diagnostics sharing (`/l/...`, ARCHITECTURE "Logging"): a member's
   /// batch carries at most [diagBatchBytes] of lines (gzip on the wire, at
   /// most [diagBatchBytes] compressed and [diagDecodedBytes] unpacked); it

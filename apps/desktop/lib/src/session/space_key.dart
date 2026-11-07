@@ -36,6 +36,12 @@ class SpaceKey {
   /// Space went down (not a repeat).
   void keyDown() {
     if (gesture.down) return;
+    // Live: Space pauses and plays this player only (nobody waits, so no
+    // BRB hold); out, it joins.
+    if (coord.live.peek()) {
+      coord.togglePlay();
+      return;
+    }
     _press
       ..reset()
       ..start();

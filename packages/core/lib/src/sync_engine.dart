@@ -115,6 +115,12 @@ class EngineMember {
   /// Where it was in the video when it dropped (`gone` while in): its
   /// `return` line says how much it missed.
   double? droppedAt;
+  /// A live stream's edge as its player last reported it (`report.edge`,
+  /// stream time); 0 before one.
+  double liveEdge = 0;
+  /// Its player reached the end of the live stream there (a live report
+  /// with a `duration`); null while it goes on.
+  double? liveEnd;
   DateTime lastSeen;
   EngineMember({
     required this.id,
@@ -305,6 +311,11 @@ class SyncEngine {
       member.error.isEmpty &&
       !member.skipped &&
       !(member.loading && transport == Transport.playing);
+
+  /// The current media is a live stream ([HelloMedia.live]): the clock is
+  /// the group's live point in stream time, set from the players' reports
+  /// ([_liveReport]); nobody waits for anyone, pause is each member's own.
+  bool get live => media?.live ?? false;
 
   /// Media length in seconds, null while nobody has reported it.
   double? get duration {
@@ -701,9 +712,10 @@ class SyncEngine {
     return null;
   }
 
-  /// Held now at the current position (the clock stops), when playing.
+  /// Held now at the current position (the clock stops), when playing. A
+  /// live stream never holds: it goes on whoever pauses or is BRB.
   void _holdNow() {
-    if (transport != Transport.playing) return;
+    if (transport != Transport.playing || live) return;
     position = positionAt();
     serverTime = now;
     eventId++;
@@ -717,6 +729,8 @@ class SyncEngine {
     final member = members[token];
     if (member == null) return;
     _seen(member);
+    // Live: pause is each member's own (its app never sends it).
+    if (live) return;
     if (wantsPlay == play) {
       evaluate();
       return;
@@ -835,6 +849,8 @@ class SyncEngine {
     if (member == null) return;
     if (!seekPosition.isFinite || seekPosition < 0) return;
     _seen(member);
+    // Live: there is nothing to seek to but the live point.
+    if (live) return;
     position = seekPosition;
     serverTime = now;
     eventId++;
@@ -883,9 +899,13 @@ class SyncEngine {
         ..buffered = 0
         ..skipped = false
         ..spot = null
-        ..droppedAt = null;
+        ..droppedAt = null
+        ..liveEdge = 0
+        ..liveEnd = null;
     }
-    if (restore != null) {
+    // A live stream restored after a restart starts from a fresh live
+    // point (the players' next reports).
+    if (restore != null && !next.live) {
       final d = next.duration;
       position = restore.position < 0 ? 0 : (d > 0 && restore.position > d ? d : restore.position);
       if (restore.transport == 'finished' && d > 0) {
@@ -899,8 +919,11 @@ class SyncEngine {
     return true;
   }
 
+  /// [edge]: a live stream's edge as the member's player sees it
+  /// (`report.edge`); with it, [reportPosition] is in stream time and a
+  /// [duration] says the player reached the stream's end there.
   void applyReport(String token, double reportPosition, double buffered, int reportEventId,
-      {double duration = 0, int mediaId = 0, Map<String, bool>? jf, String error = ''}) {
+      {double duration = 0, int mediaId = 0, Map<String, bool>? jf, String error = '', double edge = 0}) {
     final member = members[token];
     if (member == null) return;
     if (!reportPosition.isFinite) return;
@@ -913,6 +936,30 @@ class SyncEngine {
     member.buffered = earlier || !buffered.isFinite || buffered < 0 ? 0 : buffered;
     if (!earlier && reportEventId >= eventId) member.spot = reportPosition;
     final m = media;
+    final liveNow = m != null && mediaId == this.mediaId && edge.isFinite && edge > 0;
+    if (liveNow && !m.live) {
+      // A player found it live (its length keeps growing): from now on it
+      // is, with a live point set from the reports.
+      media = m.copyWith(live: true, duration: 0);
+      position = 0;
+      serverTime = now;
+      eventId++;
+      transport = Transport.held;
+    }
+    if (live) {
+      if (mediaId == this.mediaId && (liveNow || duration > 0)) {
+        _liveReport(member, reportPosition, edge, duration.isFinite ? duration : 0);
+        if (member.loading && !member.presence.isOut && liveNow) _caughtUp(member);
+      }
+      if (member.loading && member.error.isNotEmpty) {
+        member
+          ..loading = false
+          ..skipped = false
+          ..droppedAt = null;
+      }
+      evaluate();
+      return;
+    }
     // First report of the length wins; only for the media the client has open.
     if (m != null && m.duration <= 0 && mediaId == this.mediaId &&
         duration.isFinite && duration > 0) {
@@ -939,6 +986,79 @@ class SyncEngine {
     evaluate();
   }
 
+  /// A live report of [member]: its player at [pos] with the stream's edge
+  /// at [edge] (stream time), or at its end at [ended]. The first one sets
+  /// the group's live point: halfway from that player's position to its
+  /// edge (a player opens a live stream six segments behind its edge, so
+  /// that is three segments, where players play a live stream by
+  /// default), [RelayConstants.liveMarginSecs] further back; behind its
+  /// edge when it plays far from it (a stitched ad). It is set again when
+  /// it runs past every member's edge (the stream stalled or started over)
+  /// or far behind it (its clock jumped ahead).
+  void _liveReport(EngineMember member, double pos, double edge, double ended) {
+    if (ended > 0) {
+      member.liveEnd = ended;
+    } else {
+      member.liveEnd = null;
+      member.liveEdge = edge;
+    }
+    if (edge <= 0) return;
+    final lag = edge - pos;
+    final behind = lag >= 0 && lag <= RelayConstants.liveMaxLagSecs ? lag / 2 : RelayConstants.liveFallbackLagSecs;
+    final point = edge - behind - RelayConstants.liveMarginSecs;
+    final t = now;
+    if (transport == Transport.held) {
+      _setLivePoint(point, t);
+      return;
+    }
+    if (transport != Transport.playing) return;
+    var top = 0.0;
+    for (final m in members.values) {
+      if (!m.gone && m.liveEdge > top) top = m.liveEdge;
+    }
+    final g = positionAt(t);
+    if (g > top + RelayConstants.liveStallSecs || g < top - 2 * RelayConstants.liveMaxLagSecs) _setLivePoint(point, t);
+  }
+
+  void _setLivePoint(double point, DateTime t) {
+    position = point < 0 ? 0 : point;
+    serverTime = t;
+    eventId++;
+    transport = Transport.playing;
+    // The group watches it; what comes after it plays on.
+    wantsPlay = true;
+  }
+
+  /// A live stream ends once a member's player reached its end and nobody
+  /// else's still sees it go on past there (one player losing the stream
+  /// is not the end); what comes next goes up at once (no countdown:
+  /// nobody knew the end was near).
+  void _liveEnd(DateTime t) {
+    if (transport != Transport.playing) return;
+    double? end;
+    for (final m in members.values) {
+      final e = m.liveEnd;
+      if (!m.gone && e != null && (end == null || e > end)) end = e;
+    }
+    if (end == null) return;
+    for (final m in members.values) {
+      if (!m.gone && m.liveEnd == null && m.liveEdge > end + RelayConstants.liveStallSecs) return;
+    }
+    position = end;
+    serverTime = t;
+    eventId++;
+    transport = Transport.finished;
+    final first = queue.items.firstOrNull;
+    if (first != null && queue.play == null && _advanceOffFor != mediaId) {
+      advance = QueueAdvance(
+          id: first.id,
+          at: t.subtract(const Duration(seconds: RelayConstants.advanceSecs)),
+          secs: RelayConstants.advanceSecs);
+    }
+    feed.add(_line('finished'));
+    whatsNext();
+  }
+
   /// An error means the group stops waiting for its video; clearing it
   /// waits for its video again.
   void _setError(EngineMember member, String error) {
@@ -955,6 +1075,10 @@ class SyncEngine {
   void evaluate({bool quiet = false}) {
     final t = now;
     if (transport == Transport.finished) return;
+    if (live) {
+      _liveEnd(t);
+      return;
+    }
     final need = requiredBufferSecs(t);
     if (transport == Transport.playing) {
       final d = duration;
@@ -992,7 +1116,7 @@ class SyncEngine {
   /// ([HoldInfo]); null when nobody is. [sourceGone]: the current media's
   /// relay source is `gone` (the short buffers are its doing).
   HoldInfo? holdInfo({bool sourceGone = false}) {
-    if (transport != Transport.held || media == null) return null;
+    if (transport != Transport.held || media == null || live) return null;
     final need = requiredBufferSecs();
     final brb = [for (final m in brbs) m.id];
     final video = !wantsPlay

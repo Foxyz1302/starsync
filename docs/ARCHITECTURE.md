@@ -405,6 +405,9 @@ people say on purpose (BRB); nothing starts because time passed.
   for attention when its window is not focused: the runners' `starsync/window`
   channel (`attention`), the urgency hint on Linux (GTK, cleared on focus)
   and `FlashWindowEx` until foreground on Windows.
+- **Live streams**: no length and no seeking; the clock is the group's
+  live point in the stream's own time, nobody waits for anyone and pause
+  is each member's own (see "Live streams").
 - **Deviations from Syncplay**: clock never follows the slowest watcher; no
   pause-on-leave; no ready flags (play and pause are anyone's, BRB holds
   everyone, anyone continues without anyone); the clock is server time
@@ -541,7 +544,10 @@ read-ahead: rides out short drops, intro skips are instant),
 `demuxer-max-bytes=268435456` (150 s up to ~14 Mbit/s; a 1.4 GB / 24 min
 file is ~8), `demuxer-max-back-bytes=67108864`,
 `stream-lavf-o=reconnect_streamed=1,reconnect_on_http_error=5xx,reconnect_delay_max=4,reconnect_max_retries=3`
-(comma form; this mpv build rejects colon-joined): a dropped connection
+(comma form; this mpv build rejects colon-joined), `demuxer-lavf-o=live_start_index=-6`
+(a live HLS stream opens six segments behind its edge instead of
+three, so the group's live point is in every player's cache; see "Live
+streams"; other formats ignore it): a dropped connection
 or a 5xx is retried, at most 3 times per read and 4 s apart at most; a
 4xx (a CDN refusing a request) fails at once instead of being retried
 (older ffmpeg ignores `reconnect_max_retries`), `ytdl=no` (pages are
@@ -1398,9 +1404,10 @@ all three link modes. Nothing is bundled or installed by hand.
   machine, so each app resolves its own; a page is resolved again at
   Reload video and for Up next's 30-minute refresh (they expire).
 - **Through me**: the putter's probe must give tracks, and a pieces
-  track's playlist must be readable, else the swap is refused ("Live
-  streams can't be passed on", DRM, or nothing a relay can read) with a
-  hint to use "Everyone fetches it". The swap names the tracks; its relay
+  track's playlist must be readable, else the swap is refused (DRM, or
+  nothing a relay can read) with a hint to use "Everyone fetches it". A
+  live stream goes up as a link everyone opens in any mode (see "Live
+  streams"). The swap names the tracks; its relay
   source reads them with yt-dlp's headers and cookies (`PageRelayMedia`),
   and the putter's own player plays those same tracks through the one
   reader ("Read once" under "Relay"), not yt-dlp's `requested_formats`:
@@ -1422,6 +1429,70 @@ all three link modes. Nothing is bundled or installed by hand.
   the reason. Viewers open a fetched
   link's `/r/` URL only once `relay.live` is set ("the server is getting
   the video…" until then; see "Relay" for why).
+
+## Live streams
+
+A live stream (Twitch, YouTube Live, Kick, any HLS playlist without an
+end) plays for everyone at the same moment of the stream. Wire:
+[PROTOCOL.md "Live"](PROTOCOL.md#live-proto-17).
+
+- **Detection**: yt-dlp's `is_live` in the putter's probe (it also marks
+  a bare HLS playlist without `#EXT-X-ENDLIST` live): `swapLink` puts it
+  up as a link everyone opens, in any mode (a live stream is never
+  relayed), with `media.live`. A player whose length keeps growing
+  (`growsLikeLive`: three rises of half a second or more;
+  `PlaybackController.growing`) reports it live too, and the server
+  marks it so from then on.
+- **No relay**: every member opens the stream itself, through its own
+  yt-dlp (YouTube: an EDL of its video and audio playlists); a member who
+  cannot gets the usual player error (cookies and so on).
+- **The shared moment**: positions are in the stream's own time, mpv's
+  `time-pos` plus `demuxer-start-time` (`PlaybackController.streamStart`):
+  the stream's timestamps, which HLS requires to match across renditions
+  and which every CDN edge serves alike (checked on YouTube and Twitch:
+  the same segment has the same timestamps in every quality), so it does
+  not matter when or where each player joined. Reports carry the
+  player's position and its edge (where its cache ends). The server
+  sets the group's live point from the first live report (core,
+  `SyncEngine._liveReport`): halfway from that player's position to its
+  edge, since players open six segments behind the edge
+  (`live_start_index=-6`, "Media") that is three segments, where a
+  player plays a live stream by default, plus 3 s
+  (`liveMarginSecs`) so members whose CDN edge runs a few seconds late
+  still reach it. A player far behind its edge (Twitch's stitched
+  preroll ad) sets it at its edge minus 10 s. The clock then runs at 1x;
+  it is set again when it runs past every edge (the stream stalled or
+  started over) or far behind them (its clock jumped).
+- **Following it** (`LiveFollow`, `sync/live_follow.dart`, on every
+  state): within 80 ms nothing; up to 1 s off the rate goes 3 % up or
+  down (scaletempo, no visible hitch); further a seek, only inside what
+  mpv holds (a live stream seeks in its cache alone), then 2 s to land.
+  A point past its cache it cannot reach: it plays on where it is (a
+  late edge), or, 20 s or more behind, opens afresh (Reload video, at
+  most every 30 s). Twitch's preroll ad stalls mpv at the ad's end
+  (the timestamps jump); the seek to the live point unsticks it.
+- **Measured** (`live_e2e`, three app players against a real server, a
+  local ffmpeg HLS stream with 2 s segments, one player on a CDN edge
+  whose playlist runs 3 s late): the players' stream positions within
+  1-24 ms of each other (median 1-21 ms over runs, max 24 ms); back from
+  a 4 s pause here only, 2-22 ms. Against the real thing
+  (`WT_LIVE_URL`, two players, each its own resolve): YouTube (5 s
+  segments, video and audio apart) median 0 ms, max 7 ms, about 9 s
+  behind the edge; Twitch with its preroll ad median 21 ms, max 87 ms,
+  about 5 s behind the edge.
+- **Pause is local**: play and pause (the button, Space, the LIVE badge)
+  only pause this player (`livePaused`; the pill: "Paused here
+  only", Space back to live); playing again seeks back to the live
+  point. The server ignores `play`, `pause` and `seek`; BRB, buffers
+  and loaders hold nothing, so there is no Space hold, no "Waiting
+  for", no AFK while it plays and no "continue without". No time, no
+  timeline, no skips or chapters (see "Desktop UI"); the watch is not
+  tracked.
+- **The end**: a player at the stream's end says so (its report's
+  `duration`); once nobody else still sees the stream go on past there
+  the server finishes it and Up next's first item goes up at once (no
+  countdown). A player at the end stays there (media_kit's play would
+  start the finished playlist over).
 
 ## Jellyfin in a session
 
@@ -2692,7 +2763,8 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   `hwdec-current` and `mpv-version` first (`gpuFrames`) and, for a GPU
   decoder on mpv 0.41 or before, goes straight to a hidden player (`StillFrames`: the same source and
   headers, `vo=null`, software decoding, an exact seek to the press's
-  position, the same subtitle track and `sub-scale`), which gives both
+  position (a live stream: it opens at its own place and seeks to the
+  same moment in the stream's time, `streamStart`, see "Live streams"), the same subtitle track and `sub-scale`), which gives both
   copies from the very same frame. That player stays on the media,
   paused, 2 min after its last frame and all the while the selection is
   up (`hold`), so the next press is only a seek; another media or the
@@ -2993,7 +3065,12 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   reload, Skip
   1:30 (with a duration), chapters (with chapters), the hidden track
   lists and chat, mark a problem, leave. Icons, tooltips (with keys) and the clock text (`clockText`)
-  are defined there too, once.
+  are defined there too, once. A live stream (`ControlsSnapshot.live`)
+  has no chapter buttons, Skip 1:30 or chapters, and its play button
+  pauses this player only ("Pause here only", "Back to live"); both
+  skins show `LiveBadge` (`live_badge.dart`: LIVE, red, grey while
+  paused here, a click goes back to live) where the clock is, and no
+  timeline or progress line.
 - **Shared pieces**: `ControlsFrame` (`frame.dart`): when the controls
   are up (real mouse movement shows them, see "Quick chat"; `suppress`
   holds them hidden; 3 s without movement, `hideAfter`, or the

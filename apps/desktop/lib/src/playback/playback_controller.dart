@@ -9,6 +9,7 @@ import '../platform/ports/player_host.dart';
 import '../shaders/shader_assets.dart';
 import '../shaders/shader_presets.dart';
 import '../state/settings.dart';
+import '../sync/live_follow.dart' show growsLikeLive;
 import '../sync/state_diff.dart';
 import 'media_marks.dart';
 
@@ -128,6 +129,12 @@ class PlaybackController {
   /// The player's volume, 0..[maxVolume]; kept across players.
   final volume = signal(100.0);
 
+  /// The open media's length keeps growing like a live stream's
+  /// ([growsLikeLive]): this player found it live.
+  final growing = signal(false);
+  final List<double> _lengths = [];
+  double? _streamStart;
+
   late final Computed<SkipRange?> opening = computed(() => openingRange(segments.value, chapters.value));
   late final Computed<SkipRange?> ending = computed(() => endingRange(segments.value, chapters.value));
 
@@ -161,6 +168,7 @@ class PlaybackController {
     _loadErrorSent = false;
     _streamLostSent = false;
     _shaders = '';
+    _resetLive();
     _loaded = loaded && p.state.duration > Duration.zero;
     _opened = loaded;
     p.onUserSeek = (d) => onUserSeek?.call(d);
@@ -215,11 +223,40 @@ class PlaybackController {
     _loadErrorSent = false;
     _streamLostSent = false;
     _loaded = false;
+    _resetLive();
     chapters.value = const [];
     tracks.value = const [];
     buffered.value = Duration.zero;
     cached.value = CachedRanges.none;
   }
+
+  void _resetLive() {
+    _lengths.clear();
+    _streamStart = null;
+    growing.value = false;
+  }
+
+  /// The stream time of the player's 0 (mpv `demuxer-start-time`, read once
+  /// per open): a live stream's position in its own time is `time-pos`
+  /// plus this, the same for every viewer. 0 until the media is in.
+  Future<double> streamStart() async {
+    final known = _streamStart;
+    if (known != null) return known;
+    final p = _player;
+    if (p == null || !_loaded) return 0;
+    try {
+      final v = double.tryParse(await p.getProperty('demuxer-start-time'));
+      if (v != null && v.isFinite && identical(p, _player) && _loaded) return _streamStart = v;
+    } catch (_) {}
+    return 0;
+  }
+
+  /// [streamStart] once read for this open, else null.
+  double? get knownStreamStart => _streamStart;
+
+  /// The player stopped at the end of what it had (a live stream: the
+  /// stream ended, or the player lost it).
+  bool get completed => _player?.state.completed ?? false;
 
   static Duration _step(Duration d) {
     final ms = d.inMilliseconds;
@@ -267,6 +304,10 @@ class PlaybackController {
     _timeSubs.add(p.bufferStream.listen((d) => buffered.value = _step(d)));
     _timeSubs.add(p.durationStream.listen((d) {
       duration.value = d;
+      if (identical(p, _player) && d > Duration.zero && !growing.peek() && _lengths.length < 64) {
+        _lengths.add(d.inMicroseconds / 1e6);
+        if (growsLikeLive(_lengths)) growing.value = true;
+      }
       // The last chapter ends at the duration.
       if (_chapterJson.isNotEmpty) chapters.value = parseChapterList(_chapterJson, d);
       if (d > Duration.zero && !_loaded && identical(p, _player)) {
@@ -310,6 +351,7 @@ class PlaybackController {
   }
 
   void _clearMarks() {
+    _resetLive();
     _chapterJson = '';
     chapters.value = const [];
     tracks.value = const [];

@@ -268,8 +268,15 @@ machines and his Gitea becomes optional.
    bundled Windows libmpv plays the app's `edl://` URLs (video + audio
    with headers) through media_kit. YouTube: yt-dlp wants a JS runtime
    (deno) for full extraction.
-   - Live streams through the relay (today refused: the sync model needs a
-     fixed duration and seeking).
+   - Live streams through the relay (today every member opens a live
+     stream itself, ARCHITECTURE "Live streams").
+   - Live follow-ups: a live link only mpv finds live (no yt-dlp verdict)
+     first reports its length like a file's, so the server's clock can
+     finish it before the third rise is seen; Up next preloads a live item
+     like any other (a stale cache, reopened once it plays); Twitch's
+     mid-roll ads per viewer and HLS discontinuities are untested; the
+     live point follows whoever reported first, a member whose CDN edge
+     runs more than ~3 s late plays as near as it can.
    - `tool/relay_e2e.dart`: a two-track case (bytes and pieces) over a
      shaped source link. Pieces on a slow source: a cold piece can take
      longer than media_kit's 5 s `network-timeout`; if it does, fetch the

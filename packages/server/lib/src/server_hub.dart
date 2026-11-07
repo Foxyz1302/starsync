@@ -840,7 +840,8 @@ void mountSyncRoute(
                       size: parsed.size,
                       duration: parsed.duration,
                       url: parsed.url,
-                      ref: parsed.ref));
+                      ref: parsed.ref,
+                      live: parsed.live));
               final current = session.media;
               final matchesFile = current?.file != null &&
                   current!.name == intent.media.name &&
@@ -901,7 +902,11 @@ void mountSyncRoute(
               }
               hub.engine.applyReport(
                   token, report.position, report.buffered, report.eventId,
-                  duration: report.duration, mediaId: report.mediaId, jf: report.jf, error: report.error);
+                  duration: report.duration,
+                  mediaId: report.mediaId,
+                  jf: report.jf,
+                  error: report.error,
+                  edge: report.edge);
               hub.changed();
             case 'ping':
               final ping = PingMessage.fromJson(decoded);

@@ -8,6 +8,7 @@ import '../../state/settings.dart';
 import '../control_menus.dart';
 import '../controls_probe.dart' show ControlsHold;
 import '../frame.dart';
+import '../live_badge.dart';
 import '../model/controls_layout.dart';
 import '../model/controls_model.dart';
 import '../volume.dart';
@@ -97,7 +98,10 @@ class StandardControls extends StatelessWidget {
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: SignalBuilder(
-                          builder: (context) => ChapterSeekBar(
+                          // Live: no timeline (LIVE sits where the clock is).
+                          builder: (context) => model.live.value
+                              ? SizedBox(height: ChapterSeekBar.defaultHeight * scale)
+                              : ChapterSeekBar(
                             position: model.position.value,
                             duration: model.duration.value,
                             buffer: model.buffered.value,
@@ -157,7 +161,9 @@ class StandardControls extends StatelessWidget {
           child: IgnorePointer(
             child: SignalBuilder(
               builder: (context) {
-                if (visible || !AppSettings.instance.progressLine.value) return const SizedBox.shrink();
+                if (visible || !AppSettings.instance.progressLine.value || model.live.value) {
+                  return const SizedBox.shrink();
+                }
                 final d = model.duration.value, p = model.position.value;
                 final v = d.inMilliseconds == 0 ? 0.0 : (p.inMilliseconds / d.inMilliseconds).clamp(0.0, 1.0);
                 return LinearProgressIndicator(
@@ -249,7 +255,9 @@ class StandardControls extends StatelessWidget {
       case BarControl.time:
         return SignalBuilder(
           key: key,
-          builder: (context) => _Clock(
+          builder: (context) => m.live.value
+              ? LiveBadge(paused: m.livePaused.value, scale: scale, onBackToLive: m.togglePlay)
+              : _Clock(
             text: clockText(m.position.value, m.duration.value, m.settings.timeDisplay.value),
             tooltip: controlTooltip(c, s),
             scale: scale,

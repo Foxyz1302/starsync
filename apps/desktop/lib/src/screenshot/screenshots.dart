@@ -106,6 +106,9 @@ class Screenshots {
           url: source.url,
           headers: source.headers,
           at: end > Duration.zero && at > end ? end : at,
+          // A live stream (its stream time is known only then): the same
+          // moment of the stream in the hidden player.
+          streamStart: playback.knownStreamStart,
           sid: sub?.id,
           subScale: subScale);
       grab = still?.grab;
@@ -192,29 +195,38 @@ class StillFrames {
   /// The frame at [at] of [url] (opened with [headers]), and with
   /// subtitle track [sid] (at [subScale]) drawn in for the second copy;
   /// both copies are the very same frame. `warm`: the player was already
-  /// on that media. Null when it cannot be had in [timeout].
+  /// on that media. Null when it cannot be had in [timeout]. A live
+  /// stream ([streamStart]: the session player's `demuxer-start-time`):
+  /// the hidden player opens it at its own place, so it seeks to the same
+  /// moment of the stream, [at] plus [streamStart] in the stream's time.
   Future<({FrameGrab grab, bool warm})?> frameAt(
       {required String url,
       Map<String, String> headers = const {},
       required Duration at,
+      double? streamStart,
       int? sid,
       String subScale = '1',
       Duration timeout = const Duration(seconds: 15)}) {
-    final run = _queue.then((_) => _frameAt(url, headers, at, sid, subScale, timeout));
+    final run = _queue.then((_) => _frameAt(url, headers, at, streamStart, sid, subScale, timeout));
     _queue = run.then((_) {}, onError: (Object _) {});
     return run;
   }
 
-  Future<({FrameGrab grab, bool warm})?> _frameAt(
-      String url, Map<String, String> headers, Duration at, int? sid, String subScale, Duration timeout) async {
+  // The hidden player's own `demuxer-start-time` (a live stream).
+  double? _ownStart;
+
+  Future<({FrameGrab grab, bool warm})?> _frameAt(String url, Map<String, String> headers, Duration at,
+      double? streamStart, int? sid, String subScale, Duration timeout) async {
     _idle?.cancel();
     final source = [url, for (final e in headers.entries) '${e.key}: ${e.value}'].join('\n');
     var p = _player;
     final warm = p != null && !p.disposed && _source == source;
+    var target = at;
     try {
       if (p != null && warm) {
         if (_subs != (sid: sid, subScale: subScale)) await _setSubs(p, sid, subScale);
-        await p.command(['seek', _secs(at), 'absolute+exact']);
+        if (streamStart != null && _ownStart != null) target = _inOwnTime(at, streamStart, _ownStart!);
+        await p.command(['seek', _secs(target), 'absolute+exact']);
       } else {
         await close();
         final h = p = _player = await host.create(PlayerRole.thumbnail);
@@ -226,7 +238,7 @@ class StillFrames {
           ('hwdec', 'no'),
           ('ytdl', 'no'),
           ('hr-seek', 'yes'),
-          ('start', _secs(at)),
+          if (streamStart == null) ('start', _secs(at)) else ('demuxer-lavf-o', 'live_start_index=-6'),
           ('sub-ass', 'yes'),
           ('sub-visibility', 'yes'),
         ]) {
@@ -234,8 +246,18 @@ class StillFrames {
         }
         await _setSubs(h, sid, subScale);
         await h.open(url, headers: headers);
+        if (streamStart != null) {
+          final own = await _liveStart(h, timeout);
+          if (own == null) {
+            await close();
+            return null;
+          }
+          _ownStart = own;
+          target = _inOwnTime(at, streamStart, own);
+          await h.command(['seek', _secs(target), 'absolute+exact']);
+        }
       }
-      final grab = await _settled(p, at, timeout, subtitles: sid != null);
+      final grab = await _settled(p, target, timeout, subtitles: sid != null);
       if (grab == null) {
         await close();
         return null;
@@ -248,6 +270,26 @@ class StillFrames {
     } finally {
       _later();
     }
+  }
+
+  static Duration _inOwnTime(Duration at, double sessionStart, double ownStart) {
+    final us = at.inMicroseconds + ((sessionStart - ownStart) * 1e6).round();
+    return Duration(microseconds: us < 0 ? 0 : us);
+  }
+
+  /// A live stream's `demuxer-start-time` once [p] holds it; null when it
+  /// does not within [timeout].
+  Future<double?> _liveStart(HostedPlayer p, Duration timeout) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      if (await p.getProperty('idle-active') == 'yes') return null;
+      if (p.state.duration > Duration.zero) {
+        final v = double.tryParse(await p.getProperty('demuxer-start-time'));
+        if (v != null && v.isFinite) return v;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    return null;
   }
 
   Future<void> _setSubs(HostedPlayer p, int? sid, String subScale) async {
@@ -301,6 +343,7 @@ class StillFrames {
     _player = null;
     _source = null;
     _subs = null;
+    _ownStart = null;
     if (p != null && !p.disposed) await host.dispose(p);
   }
 

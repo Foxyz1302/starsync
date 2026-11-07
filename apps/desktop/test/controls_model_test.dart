@@ -44,6 +44,16 @@ void main() {
           [BarControl.playPause, BarControl.next, BarControl.volume, BarControl.time]);
     });
 
+    test('live: no chapters or skips; play and pause are your own', () {
+      const s = ControlsSnapshot(hasChapters: true, hasDuration: true, live: true, play: PlayState.playing);
+      expect(barControls(s, none).left, [BarControl.playPause, BarControl.volume, BarControl.time]);
+      expect(menuActions(s, none), isNot(contains(ControlAction.skipForward)));
+      expect(menuActions(s, none), isNot(contains(ControlAction.chapters)));
+      expect(controlTooltip(BarControl.playPause, s), 'Pause here only (Space)');
+      const paused = ControlsSnapshot(live: true, play: PlayState.paused);
+      expect(controlTooltip(BarControl.playPause, paused), 'Back to live (Space)');
+    });
+
     test('hidden optional buttons leave the bar and show in ⋯', () {
       const s = ControlsSnapshot(hasChapters: true, hasDuration: true);
       final hidden = OptionalControl.values.toSet();

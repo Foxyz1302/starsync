@@ -195,6 +195,9 @@ class HelloMedia {
   final MediaRelay? relay;
   /// What it is ([MediaRef]); null when unknown.
   final MediaRef? ref;
+  /// A live stream (`media.live`, PROTOCOL.md "Live"): no length, no
+  /// seeking; the position is the group's live point in stream time.
+  final bool live;
   const HelloMedia(
       {required this.name,
       required this.size,
@@ -202,16 +205,18 @@ class HelloMedia {
       this.url,
       this.jellyfin,
       this.relay,
-      this.ref});
+      this.ref,
+      this.live = false});
 
-  HelloMedia copyWith({double? duration, int? size, MediaRelay? relay}) => HelloMedia(
+  HelloMedia copyWith({double? duration, int? size, MediaRelay? relay, bool? live}) => HelloMedia(
       name: name,
       size: size ?? this.size,
       duration: duration ?? this.duration,
       url: url,
       jellyfin: jellyfin,
       relay: relay ?? this.relay,
-      ref: ref);
+      ref: ref,
+      live: live ?? this.live);
 
   Map<String, Object?> toJson() => {
         'name': name,
@@ -221,6 +226,7 @@ class HelloMedia {
         if (jellyfin != null) 'jellyfin': jellyfin!.toJson(),
         if (relay != null) 'relay': relay!.toJson(),
         if (ref != null) 'ref': ref!.toJson(),
+        if (live) 'live': true,
       };
 
   factory HelloMedia.fromJson(Map<String, Object?> json) {
@@ -234,6 +240,7 @@ class HelloMedia {
       jellyfin: jf is Map ? JellyfinRef.fromJson(Map<String, Object?>.from(jf)) : null,
       relay: relay is Map ? MediaRelay.fromJson(Map<String, Object?>.from(relay)) : null,
       ref: MediaRef.fromJson(json['ref']),
+      live: json['live'] == true,
     );
   }
 }
@@ -912,6 +919,9 @@ class ReportMessage {
   /// Why the player cannot open [mediaId] (short plain text); empty while
   /// it can.
   final String error;
+  /// A live stream's edge as this player sees it, in [position]'s stream
+  /// time (PROTOCOL.md "Live"); 0 when not live.
+  final double edge;
   const ReportMessage(
       {required this.position,
       required this.buffered,
@@ -919,7 +929,8 @@ class ReportMessage {
       this.duration = 0,
       this.mediaId = 0,
       this.jf,
-      this.error = ''});
+      this.error = '',
+      this.edge = 0});
 
   Map<String, Object?> toJson() => {
         't': 'report',
@@ -930,6 +941,7 @@ class ReportMessage {
         if (mediaId != 0) 'mediaId': mediaId,
         if (jf != null) 'jf': jf,
         if (error.isNotEmpty) 'error': error,
+        if (edge > 0) 'edge': edge,
       };
 
   factory ReportMessage.fromJson(Map<String, Object?> json) {
@@ -942,6 +954,7 @@ class ReportMessage {
       mediaId: finiteInt(json['mediaId'], 'mediaId'),
       jf: jfAccessFromJson(json['jf']),
       error: memberErrorFromJson(json['error']),
+      edge: finiteDouble(json['edge'], 'edge'),
     );
   }
 }

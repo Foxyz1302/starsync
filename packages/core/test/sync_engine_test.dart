@@ -918,4 +918,122 @@ void main() {
       expect(const ArtMessage(mediaId: 1).toJson(), {'t': 'art', 'mediaId': 1});
     });
   });
+
+  group('live streams', () {
+    const stream = HelloMedia(name: 'Live', size: 0, duration: 0, url: 'https://x/live.m3u8', live: true);
+    // A live report: the player at [pos] with its edge at [edge] (stream
+    // time), or at the end ([ended]).
+    void live(String token, double pos, double edge, {double ended = 0}) =>
+        engine.applyReport(token, pos, 6, engine.eventId, mediaId: engine.mediaId, edge: edge, duration: ended);
+    void step(double secs) => t = t.add(Duration(milliseconds: (secs * 1000).round()));
+
+    test('the first report sets the live point; nobody waits, pause and BRB are local, no seek', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applySwap('a', stream);
+      expect(engine.transport, Transport.held, reason: 'no live point before a player reports');
+      expect(engine.broadcast().media!['live'], isTrue);
+      expect(engine.broadcast().hold, isNull);
+      // Opened twelve seconds behind its edge: the point is six behind,
+      // plus the margin.
+      live('a', 994, 1006);
+      expect(engine.transport, Transport.playing, reason: 'a live stream goes on without a Play');
+      expect(engine.position, 1000 - RelayConstants.liveMarginSecs);
+      expect(engine.wantsPlay, isTrue, reason: 'what comes after it plays on');
+      step(2);
+      live('b', 990, 1007);
+      expect(engine.positionAt(), closeTo(999, 1e-9), reason: 'a later report does not move it');
+      expect(engine.media!.duration, 0, reason: 'a live stream has no length');
+      pause('b');
+      brb('a');
+      engine.applySeek('b', 10);
+      buffer('b', 0);
+      expect(engine.transport, Transport.playing);
+      expect(engine.positionAt(), closeTo(999, 1e-9));
+      expect(engine.broadcast().hold, isNull);
+      expect(actions(), isNot(contains('pause')));
+      engine.tick();
+      expect(engine.transport, Transport.playing);
+    });
+
+    test('a player far from its edge (a stitched ad) sets it behind the edge instead', () {
+      join('a', 'alice');
+      engine.applySwap('a', stream);
+      live('a', 88, 43000);
+      expect(engine.position, 43000 - RelayConstants.liveFallbackLagSecs - RelayConstants.liveMarginSecs);
+    });
+
+    test('set again when the stream stalls past every edge, or its clock jumps ahead', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applySwap('a', stream);
+      live('a', 100, 106);
+      live('b', 100, 108);
+      // The point: 100.
+      final first = engine.eventId;
+      step(10);
+      live('a', 106, 106);
+      expect(engine.eventId, first, reason: 'within the latest edge plus the slack');
+      step(2);
+      live('a', 106, 106);
+      expect(engine.eventId, greaterThan(first), reason: 'past every edge: the stream stalled');
+      expect(engine.positionAt(), 106 - RelayConstants.liveMarginSecs);
+      final second = engine.eventId;
+      live('a', 4994, 5006);
+      expect(engine.eventId, greaterThan(second), reason: "the stream's clock jumped ahead");
+      expect(engine.positionAt(), 5000 - RelayConstants.liveMarginSecs);
+    });
+
+    test('ends when a player reached the end and nobody sees it go on; Up next goes up at once', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applySwap('a', stream);
+      engine.applyQueueAdd('a', QueueItem(
+          media: const HelloMedia(name: 'next', size: 0, duration: 0, url: 'https://x/next.mp4'),
+          how: QueueHow.direct,
+          title: 'next'));
+      live('a', 100, 106);
+      live('b', 100, 106);
+      step(5);
+      live('a', 0, 0, ended: 102);
+      live('b', 102, 112);
+      engine.tick();
+      expect(engine.transport, Transport.playing, reason: "bob's stream goes on: alice's player only lost it");
+      live('a', 102, 112);
+      live('b', 103, 112, ended: 112);
+      live('a', 0, 0, ended: 112);
+      engine.tick();
+      expect(engine.transport, Transport.finished);
+      expect(engine.position, 112);
+      expect(engine.queue.play, isNotNull, reason: 'what comes next is asked for without a countdown');
+    });
+
+    test('a player that finds a media live makes it live from then on', () {
+      join('a', 'alice');
+      engine.applySwap('a', const HelloMedia(name: 'x.m3u8', size: 0, duration: 0, url: 'https://x/x.m3u8'));
+      engine.applyReport('a', 2, 6, engine.eventId, mediaId: engine.mediaId, duration: 14);
+      expect(engine.media!.duration, 14);
+      live('a', 494, 506);
+      expect(engine.live, isTrue);
+      expect(engine.media!.duration, 0);
+      expect(engine.transport, Transport.playing);
+      expect(engine.position, 500 - RelayConstants.liveMarginSecs);
+      final r = ReportMessage.fromJson(
+          jsonDecode(jsonEncode(const ReportMessage(position: 500, buffered: 6, eventId: 3, edge: 506).toJson())));
+      expect(r.edge, 506);
+      expect(const ReportMessage(position: 1, buffered: 1, eventId: 1).toJson().containsKey('edge'), isFalse);
+      expect(HelloMedia.fromJson(stream.toJson()).live, isTrue);
+      expect(const HelloMedia(name: 'x', size: 0, duration: 0).toJson().containsKey('live'), isFalse);
+    });
+
+    test('a joiner loads until its player reports the stream', () {
+      join('a', 'alice');
+      engine.applySwap('a', stream);
+      live('a', 100, 106);
+      join('b', 'bob');
+      expect(m('b').loading, isTrue);
+      live('b', 50, 106);
+      expect(m('b').loading, isFalse);
+    });
+  });
 }

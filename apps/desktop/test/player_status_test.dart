@@ -122,6 +122,18 @@ void main() {
       expect(st(r, self: me).party, '1 watching · 1 BRB · 1 out', reason: 'gone is not counted');
     });
 
+    test('live: nothing to say before the live point, BRB or not; a pause here only says so', () {
+      final r = held([me, bob]);
+      final live = StateBroadcast.fromJson({
+        ...r.toJson(),
+        'media': {...r.media!, 'live': true},
+      });
+      expect(line(live, self: me), isNull, reason: 'nobody is waited for');
+      final paused = statusOf(StatusFacts(conn: const ConnOnline(), state: live, selfId: 'me', livePaused: true, now: _now));
+      expect(paused.line!.text, 'Paused here only');
+      expect(paused.line!.keys, [('Space', 'back to live')]);
+    });
+
     test('nothing to say: playing, about to play, nothing up', () {
       expect(line(held([me], transport: 'playing'), self: me), isNull);
       expect(line(held([me], wants: true), self: me), isNull, reason: 'it wants to play and waits for nobody');

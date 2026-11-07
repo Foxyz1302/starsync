@@ -8,6 +8,7 @@ import '../../state/settings.dart';
 import '../control_menus.dart';
 import '../controls_probe.dart' show ControlsHold;
 import '../frame.dart';
+import '../live_badge.dart';
 import '../model/controls_layout.dart';
 import '../model/controls_model.dart';
 import '../model/controls_prefs.dart';
@@ -127,6 +128,22 @@ class MinimalControls extends StatelessWidget {
               SignalBuilder(
                 builder: (context) {
                   final line = AppSettings.instance.progressLine.value;
+                  // Live: no timeline; LIVE where its clock is.
+                  if (model.live.value) {
+                    return AnimatedOpacity(
+                      key: const ValueKey('minimal-timeline-wrap'),
+                      duration: fade,
+                      opacity: visible ? 1 : 0,
+                      child: SizedBox(
+                        height: MinimalTimeline.heightFor(scale),
+                        child: Align(
+                          alignment: AlignmentDirectional.centerEnd,
+                          child: LiveBadge(
+                              paused: model.livePaused.value, scale: scale, onBackToLive: model.togglePlay),
+                        ),
+                      ),
+                    );
+                  }
                   return AnimatedOpacity(
                     key: const ValueKey('minimal-timeline-wrap'),
                     duration: fade,

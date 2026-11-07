@@ -112,6 +112,10 @@ class ControlsSnapshot {
   /// The media's length is known (seeks and skips make sense).
   final bool hasDuration;
 
+  /// A live stream: no seeking, skips or chapters; play and pause are
+  /// this player's own.
+  final bool live;
+
   /// Watching alone (no one to mark ready).
   final bool alone;
 
@@ -129,6 +133,7 @@ class ControlsSnapshot {
     this.nextIsUpNext = false,
     this.hasChapters = false,
     this.hasDuration = false,
+    this.live = false,
     this.alone = false,
     this.hasLink = false,
     this.fullscreen = false,
@@ -142,7 +147,8 @@ class ControlsSnapshot {
   bool on(BarControl c) => switch (c) {
     BarControl.previous => s.previousLabel != null,
     BarControl.next => s.nextLabel != null,
-    BarControl.chapterPrevious || BarControl.chapterNext => s.hasChapters && !hidden.contains(OptionalControl.chapters),
+    BarControl.chapterPrevious ||
+    BarControl.chapterNext => s.hasChapters && !s.live && !hidden.contains(OptionalControl.chapters),
     BarControl.subtitles => !hidden.contains(OptionalControl.subtitles),
     BarControl.audio => !hidden.contains(OptionalControl.audio),
     BarControl.chat => !hidden.contains(OptionalControl.chat),
@@ -165,10 +171,10 @@ class ControlsSnapshot {
 List<ControlAction> menuActions(ControlsSnapshot s, Set<OptionalControl> hidden) => [
   for (final a in ControlsLayout.menu)
     if (switch (a) {
-      ControlAction.chapters => s.hasChapters,
+      ControlAction.chapters => s.hasChapters && !s.live,
       ControlAction.subtitles => hidden.contains(OptionalControl.subtitles),
       ControlAction.audio => hidden.contains(OptionalControl.audio),
-      ControlAction.skipForward => s.hasDuration,
+      ControlAction.skipForward => s.hasDuration && !s.live,
       ControlAction.chat => hidden.contains(OptionalControl.chat),
       ControlAction.copyLink => s.hasLink,
       _ => true,
@@ -208,6 +214,8 @@ IconData controlIcon(BarControl c, ControlsSnapshot s) => switch (c) {
 
 /// The tooltip of a bar control, with its key.
 String controlTooltip(BarControl c, ControlsSnapshot s) => switch (c) {
+  BarControl.playPause when s.live && s.play != PlayState.finished =>
+    s.play == PlayState.playing ? 'Pause here only (Space)' : 'Back to live (Space)',
   BarControl.playPause => switch (s.play) {
     PlayState.playing => 'Pause for everyone (Space)',
     PlayState.waiting => 'Waiting for the others; pause for everyone (Space)',

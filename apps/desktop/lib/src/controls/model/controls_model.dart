@@ -73,9 +73,19 @@ class PlayerControlsModel {
   ReadonlySignal<SkipOffer?> get skipOffer => coord.skipOffer;
   ReadonlySignal<RenderMode> get renderMode => playback.renderMode;
 
-  /// Play / pause as the session sees it ([PlayState]).
+  /// A live stream: LIVE instead of the time and timeline, no seeking.
+  ReadonlySignal<bool> get live => coord.live;
+
+  /// The live stream is paused here only.
+  ReadonlySignal<bool> get livePaused => coord.livePaused;
+
+  /// Play / pause as the session sees it ([PlayState]); live, this
+  /// player's own.
   late final Computed<PlayState> play = computed(() {
     final r = coord.serverState.value;
+    if (coord.live.value && r?.transport != 'finished') {
+      return coord.livePaused.value ? PlayState.paused : PlayState.playing;
+    }
     return switch (r?.transport) {
       'playing' => PlayState.playing,
       'finished' => PlayState.finished,
@@ -98,6 +108,7 @@ class PlayerControlsModel {
       nextIsUpNext: queued != null,
       hasChapters: chapters.value.isNotEmpty,
       hasDuration: duration.value > Duration.zero,
+      live: coord.live.value,
       alone: coord.alone.value,
       // Not a signal: read again whenever the state changes.
       hasLink: coord.serverState.value != null && coord.currentLink() != null,

@@ -402,6 +402,7 @@ class Connection {
     int mediaId = 0,
     Map<String, bool>? jf,
     String error = '',
+    double edge = 0,
   }) =>
       client.sendReport(
           position: position,
@@ -410,7 +411,8 @@ class Connection {
           duration: duration,
           mediaId: mediaId,
           jf: jf,
-          error: error);
+          error: error,
+          edge: edge);
   void sendChat(String text) => client.sendChat(text);
   void sendArt(int mediaId, {String? poster, String? banner}) =>
       client.sendArt(mediaId, poster: poster, banner: banner);

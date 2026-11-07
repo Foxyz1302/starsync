@@ -104,8 +104,11 @@ class StatusFacts {
   /// Who paused, for a plain pause ("Paused by Bob"): the member id of the
   /// last `pause` line; null when unknown.
   final String? pausedBy;
+  /// This member paused the live stream (only here).
+  final bool livePaused;
   final DateTime now;
   const StatusFacts({
+    this.livePaused = false,
     this.conn = const ConnClosed(),
     this.state,
     this.selfId = '',
@@ -268,6 +271,13 @@ StatusLine? _line(StatusFacts f, StateBroadcast? r, MemberView? self, SourceTrou
   if (f.playerError.isNotEmpty) {
     return StatusLine(StatusKind.problem, "Can't play this: ${f.playerError}",
         level: StatusLevel.error, action: StatusAction.reload, short: "Can't play this");
+  }
+  // Live: nobody waits for anyone; only a pause here is worth a line.
+  if (r.media?['live'] == true && r.transport != 'finished') {
+    return f.livePaused
+        ? const StatusLine(StatusKind.paused, 'Paused here only',
+            detail: 'The stream goes on for everyone', keys: [('Space', 'back to live')], short: 'Paused here only')
+        : null;
   }
   // The server holds everyone for the relay's source (D6): a viewer's
   // buffer ran dry while it is gone.

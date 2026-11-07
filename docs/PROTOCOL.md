@@ -815,3 +815,47 @@ GET  /l/<sid>/<token>?hours=6
   unknown token, 404 on a server that keeps no session log.
 - Clients send every 10 s and when they leave; each batch carries at
   most 256 KiB of lines.
+
+## Live (proto 17)
+
+A live stream (Twitch, YouTube Live, an HLS playlist without an end):
+no length, no seeking, nobody waits. Behavior: ARCHITECTURE.md "Live
+streams".
+
+```
+swap    media = {"name":"…","size":0,"duration":0,"url":"https://…","live":true}
+state   media.live = true, position = the group's live point (stream time)
+client  {"t":"report","position":43051.2,"buffered":12.0,"eventId":9,"mediaId":3,"edge":43063.1}
+client  {"t":"report","position":43120.0,"buffered":0,"eventId":9,"mediaId":3,"duration":43120.0}   reached the end
+```
+
+- `media.live` (omitted when false): a live stream, set by the putter in
+  `swap.media` (its probe said so) and passed through in `state.media`
+  for a plain link (a relay or a Jellyfin item is never live). A report
+  with `edge` for the current media makes it live too (a player found
+  its length growing): the server sets `media.live`, drops a reported
+  `duration` and starts again from `held`.
+- Units: for live media `state.position` and a report's `position`,
+  `edge` and `duration` are in the stream's own time (mpv's `time-pos`
+  plus `demuxer-start-time`: the stream's timestamps, the same for every
+  viewer and every rendition).
+- `report.edge` (optional, omitted when 0): the end of what the player
+  has of the stream; with it `position` is where the player is. A live
+  report's `duration` says the player reached the end of the stream
+  there (then without `edge`); a live player never sends its growing
+  length.
+- `state.transport`: `held` (position 0) until the first live report
+  sets the live point, then `playing`: halfway from that player's
+  position to its edge, 3 s further back (`RelayConstants.liveMarginSecs`);
+  from a player more than 60 s behind its edge (a stitched ad) its edge
+  minus 10 s, then the 3 s. The wish becomes `play`. The point is set
+  again (`eventId` up) when it runs 3 s past every connected member's
+  last edge (the stream stalled or started over) or falls 120 s behind it
+  (its clock jumped ahead).
+- Nobody waits: no `state.hold`; BRB and short buffers hold nothing;
+  `play`, `pause` and `seek` are ignored (each app pauses its own
+  player). `members[].loading` ends with the member's first live report.
+- End: `finished` (feed `finished`, position the end) once a member
+  reported the end and no connected member reports an edge more than 3 s
+  past it. Up next's first item is asked to play at once (`advance` set
+  as already run out); no countdown runs over live media.

@@ -58,6 +58,12 @@ const sessionLogLevel = 'warn';
 const streamLavfOptions = 'reconnect_streamed=1,reconnect_on_http_error=5xx,'
     'reconnect_delay_max=4,reconnect_max_retries=3';
 
+/// ffmpeg's demuxer options (mpv `demuxer-lavf-o`): a live HLS stream
+/// opens six segments behind its edge (ffmpeg's default is three), so the
+/// group's live point, a little further back, is in every player's cache
+/// (ARCHITECTURE "Live streams"). Other formats ignore it.
+const demuxerLavfOptions = 'live_start_index=-6';
+
 /// mpv echoes numbers in its own format (`150` reads back `150.000000`).
 bool pinMatches(String wanted, String got) {
   if (wanted == got) return true;
@@ -202,6 +208,7 @@ class MediaKitHost implements PlayerHost {
       ('cache-on-disk', 'no'),
       if (hwdec case final h?) ('hwdec', h),
       ('stream-lavf-o', streamLavfOptions),
+      ('demuxer-lavf-o', demuxerLavfOptions),
       // Pages are resolved by the app's own yt-dlp (the media pipeline):
       // mpv's Lua hook never runs one.
       ('ytdl', 'no'),
