@@ -379,6 +379,13 @@ void main() {
       expect(find.text('Ctrl+V'), findsOneWidget);
       expect(find.text('/ or Ctrl+F'), findsOneWidget);
       expect(find.byKey(const ValueKey('uosc-credit')), findsOneWidget);
+      // About → Open-source licenses opens Flutter's license page.
+      final licenses = find.byKey(const ValueKey('open-source-licenses'));
+      await tester.ensureVisible(licenses);
+      await tester.tap(licenses);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.byType(LicensePage), findsOneWidget);
     });
 
     testWidgets('narrow: icon chips instead of the side nav', (tester) async {

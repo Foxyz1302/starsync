@@ -15,6 +15,7 @@ export 'src/cookies.dart';
 export 'src/media_source.dart';
 export 'src/sync_engine.dart';
 export 'src/distribution.dart';
+export 'src/third_party.dart';
 export 'src/remote_config.dart';
 export 'src/signing.dart';
 export 'src/updater.dart';

@@ -532,6 +532,49 @@ carry no date (the tag and release page have it).
 <version|unreleased>`, `markdown <version|unreleased>`); its tests are
 `tool/test/changelog_test.dart` (`cd tool && dart test`).
 
+### Third-party licenses
+
+Starsync is MIT (`LICENSE`). What it ships of others is listed in two
+places, from one list (`starsyncNotices`,
+`packages/core/lib/src/third_party.dart`) plus Flutter's `NOTICES` (every
+Dart package and the engine, which the build writes):
+
+- **In the app**: Settings → Help & about → Open-source licenses opens
+  Flutter's license page; `registerThirdPartyLicenses`
+  (`platform/third_party_licenses.dart`, at start) adds Starsync's own
+  entries: on Windows mpv and FFmpeg (the `libmpv-licenses.txt` the
+  media_kit fork puts beside the exe, after a note with the
+  corresponding-source link), ANGLE, SwiftShader, the Vulkan Loader and
+  d3dcompiler_47 (their texts are assets in
+  `apps/desktop/assets/licenses/`); on Linux a line saying the system's
+  libmpv is used and not included; on both Anime4K (the MIT `LICENSE`
+  beside its shaders) and the uosc credit.
+- **In each archive**: `LICENSE` and `THIRD_PARTY_LICENSES.txt` at its
+  root. Both packagers run `dart tool/third_party_licenses.dart
+  <linux|windows> <bundle> <out>`, which writes the same entries, then the
+  bundle's `NOTICES.Z` unzipped, in NOTICES' format; it stops when an
+  asset or, on Windows, `libmpv-licenses.txt` is missing.
+
+The libmpv the Windows build ships is LGPL-3.0-or-later, so its
+corresponding source must stay downloadable: `libmpvSourcesUrl` (the one
+place it is written) points at a copy in a release of
+`Foxyz1302/starsync`, tag `libmpv-20261021-1`, asset
+`libmpv-windows-20261021-1-sources.tar.xz` (SHA-256
+`77e612c8110b1731c9b180cda840bb965939440c743d480f34cab957861e9d11`).
+**Upload it once**, before the first public Windows build: download it
+from freeKC's release
+(`https://github.com/freeKC/libmpv-builds/releases/download/20261021-1/libmpv-windows-20261021-1-sources.tar.xz`,
+266 MB), check the SHA-256, then `gh release create libmpv-20261021-1
+--repo Foxyz1302/starsync --latest=false --title "libmpv 20261021-1
+sources" --notes "Corresponding source of the libmpv-2.dll in Starsync's
+Windows builds (LGPL-3.0-or-later)."
+libmpv-windows-20261021-1-sources.tar.xz` (`--latest=false` keeps the
+newest Starsync release the latest one). When the fork moves to another
+libmpv build, mirror its sources the same way under a new tag and change
+`libmpvSourcesUrl` and the freeKC release named in `libmpvWindowsNote`;
+when it moves to another ANGLE, refresh the texts in
+`assets/licenses/`.
+
 ## Debugging your server
 
 The app's own server runs on its own isolate (`ServerIsolate`,

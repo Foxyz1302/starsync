@@ -87,4 +87,5 @@ flutter:
   uses-material-design: true
   assets:
     - assets/shaders/anime4k/
+    - assets/licenses/
     - assets/icon/

@@ -34,6 +34,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - Avatar shape: everyone's picture as a rounded square, or as a circle (Settings → Party → More)
 - Screenshots: S freezes the picture for you alone (the video keeps playing for everyone) so you can drag over the part you want, or click for all of it, with or without subtitles (T); Shift+S takes the whole picture at once. Each lands in Pictures/Starsync, named after the show, episode and moment, and is copied to paste anywhere; click the little preview to crop it again
 - Updates are now signed: Starsync only installs updates made by its developer
+- Settings → Help & about lists the open-source licenses
 
 ### Changed
 

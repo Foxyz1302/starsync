@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
+import 'package:sync_relay_core/core.dart' show uoscCredit;
 
 import '../../platform/app_log.dart';
 import '../../shell/mark_problem.dart';
@@ -13,10 +14,6 @@ import '../../widgets/copy_open.dart';
 import 'settings_page.dart';
 import 'ui.dart';
 import 'update_indicator.dart';
-
-/// The Minimal player skin's credit (README says the same).
-const uoscCredit = 'Player timeline and controls inspired by uosc by tomasklaen, LGPL-2.1 '
-    '(github.com/tomasklaen/uosc).';
 
 /// Dev builds only ([devTools]): previews and experiments not decided
 /// yet (DEVELOPMENT.md "Dev tools").
@@ -100,7 +97,23 @@ class AboutPanel extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 4),
+              SettingRow(
+                label: 'Open-source licenses',
+                help: 'Starsync is open source (MIT); this lists what it is built on, with their licenses',
+                control: OutlinedButton(
+                  key: const ValueKey('open-source-licenses'),
+                  onPressed: () => showLicensePage(
+                    context: context,
+                    applicationName: appName,
+                    applicationVersion: displayVersion(),
+                    applicationIcon: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Image.asset('assets/icon/icon_128.png', width: 64, height: 64),
+                    ),
+                  ),
+                  child: const Text('Show'),
+                ),
+              ),
               Text(uoscCredit, key: const ValueKey('uosc-credit'), style: t.bodySmall?.copyWith(color: Colors.grey)),
             ],
           ),

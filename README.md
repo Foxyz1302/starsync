@@ -11,15 +11,32 @@ everyone's play, pause and seek stay together.
 Why not Jellyfin SyncPlay: it runs in the browser and its sync is poor.
 This is a desktop app that drives mpv.
 
-Up to 1.2.x the app was called `watch_together` (its files
-`watch-together-*`); the repository and the update manifest keep their old
-addresses for now.
-
 - Desktop only (Linux and Windows), always mpv. No web clients.
 - No transcoding. Everyone plays the original file.
 - Friends trust model: no accounts, no roles. A blank password means an open server.
 
+**Download**: the [latest release](https://github.com/Foxyz1302/starsync/releases/latest)
+(Linux `.tar.gz`, Windows `.zip`), also on [foxyz.ru](https://foxyz.ru).
+Unpack and run; see [Install and update](#install-and-update).
+
+**Build it yourself**: the Flutter SDK (beta channel); on Linux also clang,
+cmake, ninja, pkg-config, `libgtk-3-dev` and `libmpv-dev`; on Windows Visual
+Studio with its C++ desktop workload.
+
+```
+git clone https://github.com/Foxyz1302/starsync && cd starsync/apps/desktop
+flutter pub get && flutter run -d linux    # or: -d windows
+```
+
+Release builds, tests and the rest: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 How it fits together: [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md).
+
+**License**: MIT, see [LICENSE](LICENSE). What Starsync is built on, with
+its licenses: Settings → Help & about → Open-source licenses in the app,
+and `THIRD_PARTY_LICENSES.txt` in each download.
+
+Up to 1.2.x the app was called `watch_together` (its files
+`watch-together-*`).
 
 ## Install and update
 
@@ -445,8 +462,9 @@ and the rest folded under More:
 - **Help & about**: Something wrong? (copy diagnostics, mark a problem,
   the logs folder, sharing diagnostics with the server), every keyboard
   shortcut, and About (the version, also at the bottom of every
-  Settings page and in the Settings tab's tooltip; and the credits, e.g.
-  that the Minimal player design is inspired by uosc).
+  Settings page and in the Settings tab's tooltip; the credits, e.g.
+  that the Minimal player design is inspired by uosc; and Open-source
+  licenses, everything Starsync is built on with its license).
 
 Player settings live in the player too: ⚙ in the player's bar opens a
 narrow panel at the right edge of the player that stays open while you

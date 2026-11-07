@@ -2,9 +2,11 @@
 # Usage: powershell -File tool/package_windows.ps1 [-SkipBuild]
 # Output: dist/starsync-<version>-windows-x64.zip containing one
 # top-level folder starsync-<version>/ with starsync.exe, its DLLs and
-# data/ as built, plus update.bat (runs starsync-server.exe --upgrade) and
+# data/ as built, plus update.bat (runs starsync-server.exe --upgrade),
 # starsync-server.exe (dedicated server, `dart compile exe` of
-# packages/server/bin/server.dart; both binaries stamped with APP_VERSION).
+# packages/server/bin/server.dart; both binaries stamped with APP_VERSION),
+# LICENSE and THIRD_PARTY_LICENSES.txt (tool/third_party_licenses.dart, from
+# the bundle's NOTICES.Z and libmpv-licenses.txt).
 # Same layout as tool/package_linux.sh; the updater strips the top-level
 # folder.
 # Needs: flutter on PATH, tar.exe (ships with Windows 10+, writes zip).
@@ -73,6 +75,13 @@ Push-Location (Join-Path $Root 'packages/server')
 try {
   Invoke-Checked 'dart pub get' { dart pub get | Out-Null }
   Invoke-Checked 'dart compile exe' { dart compile exe "--define=APP_VERSION=$Version" bin/server.dart -o "$Stage/$Folder/starsync-server.exe" }
+} finally { Pop-Location }
+
+Copy-Item "$Root/LICENSE" "$Stage/$Folder/LICENSE"
+Push-Location (Join-Path $Root 'tool')
+try {
+  Invoke-Checked 'dart pub get (tool)' { dart pub get | Out-Null }
+  Invoke-Checked 'third-party licenses' { dart third_party_licenses.dart windows "$Stage/$Folder" "$Stage/$Folder/THIRD_PARTY_LICENSES.txt" }
 } finally { Pop-Location }
 
 if (Test-Path $Zip) { Remove-Item -Force $Zip }

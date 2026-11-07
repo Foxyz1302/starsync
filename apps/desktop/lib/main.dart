@@ -19,6 +19,7 @@ import 'src/platform/ports/window_activity.dart';
 import 'src/platform/single_instance.dart';
 import 'src/platform/url_scheme.dart';
 import 'src/platform/smoke.dart';
+import 'src/platform/third_party_licenses.dart';
 import 'src/screens/home/ui.dart';
 import 'src/session/app_events.dart' show UpdateAvailable;
 import 'src/session/invite.dart' show InviteLink;
@@ -54,6 +55,8 @@ Future<void> main(List<String> args) async {
         ),
       );
   WidgetsFlutterBinding.ensureInitialized();
+  // Help & about → Open-source licenses: mpv, ANGLE, Anime4K, the uosc credit.
+  registerThirdPartyLicenses();
   final dirs = await const DesktopAppDirs().resolve();
   // One app per profile: a second start (a clicked starsync:// link) hands
   // its arguments to the running one and ends before its window shows.

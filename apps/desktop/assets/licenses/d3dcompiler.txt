@@ -1,0 +1,4 @@
+d3dcompiler_47.dll (Windows): Microsoft's Direct3D shader compiler, which
+ANGLE uses. Copyright (c) Microsoft Corporation. It is not open source:
+it ships as distributable code of the Windows SDK, under the SDK's
+license terms, and Windows 10 and later carry their own copy.

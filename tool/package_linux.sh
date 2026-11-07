@@ -4,10 +4,11 @@
 # Usage: tool/package_linux.sh [--skip-build] [--noupload|--no-upload]
 # Output: dist/starsync-<version>-linux-x64.tar.gz containing one
 # top-level folder starsync-<version>/ with the executable `starsync`, lib/
-# and data/ as built, plus update.sh (runs starsync-server --upgrade) and
+# and data/ as built, plus update.sh (runs starsync-server --upgrade),
 # starsync-server (the dedicated server, `dart compile exe` of
 # packages/server/bin/server.dart, built every run, also with --skip-build;
-# both binaries are stamped with APP_VERSION from the app's pubspec). The
+# both binaries are stamped with APP_VERSION from the app's pubspec),
+# LICENSE and THIRD_PARTY_LICENSES.txt (tool/third_party_licenses.dart). The
 # updater strips that top-level folder — keep the layout in sync with
 # packages/core/test/updater_test.dart.
 # Upload: set DISCORD_WEBHOOK_URL in the environment (never commit it).
@@ -66,6 +67,9 @@ if FLUTTER="$(command -v flutter)"; then
 fi
 (cd "$ROOT/packages/server" && "$DART" pub get >/dev/null &&
   "$DART" compile exe --define=APP_VERSION="$VERSION" bin/server.dart -o "$STAGE/$FOLDER/starsync-server")
+install -m 644 "$ROOT/LICENSE" "$STAGE/$FOLDER/LICENSE"
+(cd "$ROOT/tool" && "$DART" pub get >/dev/null)
+"$DART" "$ROOT/tool/third_party_licenses.dart" linux "$STAGE/$FOLDER" "$STAGE/$FOLDER/THIRD_PARTY_LICENSES.txt"
 tar -czf "$TARBALL" -C "$STAGE" "$FOLDER"
 rm -rf "$STAGE"
 ls -la "$TARBALL"

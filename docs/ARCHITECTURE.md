@@ -2343,7 +2343,8 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   - **Help & about**: Something wrong? (Copy diagnostics, Mark a
     problem, Open logs folder, Share diagnostics with the server),
     Keyboard shortcuts (the player's; folded: anywhere and the library),
-    About, Developer (dev builds).
+    About (with Open-source licenses: DEVELOPMENT "Third-party
+    licenses"), Developer (dev builds).
   No row for what has a fixed default or a place in context: the
   controls hide after 3 s, AFK and its timings, update checks always
   run (D8), the clock's click switches elapsed / remaining, the Latest
