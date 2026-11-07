@@ -5,7 +5,9 @@ AGENTS.md. Source of truth: the code, then the docs below.
 
 ## Docs
 
-- [README.md](README.md): users. [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md):
+- [README.md](README.md): the front door (what, download, getting started).
+  [docs/GUIDE.md](docs/GUIDE.md): the user manual (every feature, setting,
+  shortcut, the dedicated server). [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md):
   plain tour. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): packages, sync,
   media, updater, decisions. [docs/PROTOCOL.md](docs/PROTOCOL.md): wire format.
   [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): build, test, release, gotchas.

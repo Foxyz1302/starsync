@@ -6,10 +6,10 @@
 # watch-together) must run .../starsync-server in its ExecStart: the
 # archive no longer ships watch-together-server.
 # Flags: --port <n> (default 8080), --secret <password> (empty = open
-# server, anyone who can reach the port can join), --name, --media <file>,
-# --advertise-host <host>, --no-yt-dlp, --yt-dlp-dir <dir>, --config
-# <file.yaml|json>. See README. The server's yt-dlp (for web page links it
-# fetches) is downloaded into the state directory below.
+# server, anyone who can reach the port can join), --config
+# <file.yaml|json>, and the rest in docs/GUIDE.md ("Dedicated server").
+# The server's yt-dlp (for web page links it fetches) and its logs go to
+# the state directory below.
 # Prefer --config with a root-only file over --secret here: unit files and
 # process lists are readable by other users.
 

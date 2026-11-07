@@ -4,8 +4,8 @@ Layout and rules: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Build
 
-Needs the Flutter SDK (beta channel, Dart 3.13+) and, for the Linux desktop
-build, the usual GTK toolchain (clang, cmake, ninja, pkg-config, libgtk-3-dev).
+Prerequisites (the Flutter SDK, and the Linux or Windows toolchain and
+libraries): [README "Build from source"](../README.md#build-from-source).
 media_kit is the owner's fork (`github.com/Foxyz1302/media-kit`, a local
 checkout sits beside this repo as `../media-kit`): git dependencies pinned
 to one tag of it for every media_kit package the app uses, `media_kit`,

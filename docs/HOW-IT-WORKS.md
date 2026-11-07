@@ -50,7 +50,8 @@ A five-minute tour. Details: [ARCHITECTURE.md](ARCHITECTURE.md), wire format:
   sharing closes it again. A friend clicks the link, or just copies it,
   and their app asks to join.
 - **Dedicated server**: `starsync-server`, a separate program in the
-  release tarball, for an always-on box. See the README.
+  release download, for an always-on box. See [GUIDE.md "Dedicated
+  server"](GUIDE.md#dedicated-server).
 
 Friends join either way with Join a friend in the strip at the top of the
 window; guests need no Jellyfin or account. Before connecting, the app
