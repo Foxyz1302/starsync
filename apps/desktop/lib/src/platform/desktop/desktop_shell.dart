@@ -141,6 +141,16 @@ class DesktopShell implements ShellPort {
     }
   }
 
+  @override
+  Future<Uint8List?> readImage() async {
+    try {
+      return await ClipboardX.pasteImage();
+    } catch (e) {
+      debugPrint('clipboard image: $e');
+      return null;
+    }
+  }
+
   // Linux: the runner's own channel (linux/runner/clipboard_image.cc)
   // offers the PNG as `image/png` (fox_utils can only put a file there on
   // Linux, which chat apps and browsers do not paste as a picture).

@@ -2216,9 +2216,19 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   `suggestedName` (the OS user name), focused; OK saves the name and the
   same join goes on, Cancel (Esc, a click outside) drops it.
 - **Profile** (`profile_card.dart`, `session/identity.dart`): a card
-  tinted with your colour: picture (hover "Change" opens `CropPicker`:
-  drag, wheel or slider zoom, previews at 88/42/24 px, exports a 256 px
-  PNG), name edited in place, colour swatches, links to the Settings pages.
+  tinted with your colour: picture (a click opens the app's own
+  `CropPicker`, `picture_picker.dart`; without a picture a camera badge on
+  its corner says one can be added), name edited in place, colour
+  swatches, links to the Settings pages. The picker opens at once and
+  never the system's file chooser by itself: a picture comes from the
+  clipboard (Ctrl+V or Shift+Insert, or Paste: `ShellPort.readImage`, an
+  image or a copied image file), a drop on it, or Browse… (the file
+  chooser, "Choosing…" on the button while it is open: on Linux
+  `file_picker` asks the XDG desktop portal over D-Bus, and KDE's portal
+  builds a new file dialog for each request, which is the wait). Then
+  drag, wheel or slider zoom, previews at 88/42/24 px, the crop and
+  previews in the avatar shape (`AvatarShape`); it exports a 256 px PNG
+  of the whole square.
   `Profile` stores the name in the connect form and the PNG and colour in
   the `connect_form` box (an old picture path is shrunk once and kept as
   bytes). Online, a name change (once typing settles) or picture change

@@ -11,24 +11,26 @@ import 'package:starsync/src/session/identity.dart' show ClientIdentity;
 /// until a test calls `navigation.start()` (or `goHome`), so widget tests
 /// see the app before your server is up. Sharing looks up no internet
 /// address unless [publicAddress] gives one. [shell] stands in for the
-/// window (the desktop's needs window_manager), [links] for yt-dlp.
+/// window (the desktop's needs window_manager), [links] for yt-dlp,
+/// [folders] for the file chooser.
 AppGraph testGraph(
         {HealthGetter healthGet = defaultHealthGet,
         Future<String?> Function()? publicAddress,
         ShellPort? shell,
-        LinkResolver? links}) =>
+        LinkResolver? links,
+        FolderAccess? folders}) =>
     AppGraph.build(
-        ports: shell == null && links == null ? null : _withStandIns(shell, links),
+        ports: shell == null && links == null && folders == null ? null : _withStandIns(shell, links, folders),
         identity: ClientIdentity.ephemeral(),
         healthGet: healthGet,
         publicAddress: publicAddress ?? () async => null);
 
-Ports _withStandIns(ShellPort? shell, LinkResolver? links) {
+Ports _withStandIns(ShellPort? shell, LinkResolver? links, FolderAccess? folders) {
   final p = desktopPorts();
   return Ports(
       shell: shell ?? p.shell,
       urls: p.urls,
-      folders: p.folders,
+      folders: folders ?? p.folders,
       links: links ?? p.links,
       notifications: p.notifications,
       players: p.players);
@@ -78,6 +80,10 @@ class FakeShell implements ShellPort {
   Future<Paste> readPaste() async => paste;
   @override
   Future<String?> readClipboardText() async => null;
+  /// What [readImage] finds on the clipboard.
+  Uint8List? clipboardImage;
+  @override
+  Future<Uint8List?> readImage() async => clipboardImage;
   /// The images [copyImage] put on the clipboard.
   final images = <Uint8List>[];
   @override

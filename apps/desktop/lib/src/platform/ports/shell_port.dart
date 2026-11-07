@@ -60,6 +60,10 @@ abstract interface class ShellPort {
   /// it); null when there is none or it can't be read.
   Future<String?> readClipboardText();
 
+  /// The clipboard's picture (an image copied, or an image file copied in
+  /// a file manager), encoded; null when it holds none.
+  Future<Uint8List?> readImage();
+
   /// Puts the PNG [png] on the clipboard as an image (a screenshot);
   /// false when it could not.
   Future<bool> copyImage(Uint8List png);
