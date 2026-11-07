@@ -8,10 +8,10 @@ on:
 
 env:
   # The Flutter the Windows job builds with: a branch of
-  # github.com/flutter/flutter (stable, beta) or a release tag
-  # (3.48.0-0.5.pre). stable is what Gitea CI has always used; the owner
-  # picks. Keep release.yml on the same value.
-  FLUTTER_REF: stable
+  # github.com/flutter/flutter (stable, beta) or a release tag. Pinned to
+  # the exact Flutter the app is developed and tested on (the Linux
+  # frame-pacing shim steps aside on another engine). Keep release.yml equal.
+  FLUTTER_REF: 3.48.0-0.5.pre
 
 # A newer push to the same branch supersedes a running check.
 concurrency:

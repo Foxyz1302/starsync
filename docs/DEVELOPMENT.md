@@ -518,8 +518,11 @@ every release ([Releasing](#releasing)):
   Windows it runs `tool/setup_flutter_windows.ps1 -Ref … -Dir …`, whose
   ATL step does nothing there (GitHub's image has the component).
 - `FLUTTER_REF`, at the top of both workflows (keep them equal): a
-  Flutter branch (`stable`, `beta`) or release tag (`3.48.0-0.5.pre`).
-  `stable`, as on Gitea, until the owner picks.
+  Flutter branch (`stable`, `beta`) or release tag. Pinned to
+  `3.48.0-0.5.pre`, the Flutter the app is developed on, so releases are
+  built exactly as tested (the Linux frame-pacing shim checks the engine's
+  private layout and steps aside on any other version). Move it together
+  with the local SDK.
 
 `tool/publish_github.dart` (`vX.Y.Z <file>...`, `dev <file>...
 <manifest.json>`) creates the release or refreshes its text, replaces each file and a

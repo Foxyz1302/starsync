@@ -14,9 +14,10 @@ on:
 
 env:
   # The Flutter both builds use: a branch of github.com/flutter/flutter
-  # (stable, beta) or a release tag (3.48.0-0.5.pre). stable is what Gitea
-  # CI has always used; the owner picks. Keep ci.yml on the same value.
-  FLUTTER_REF: stable
+  # (stable, beta) or a release tag. Pinned to the exact Flutter the app is
+  # developed and tested on (the Linux frame-pacing shim checks the engine's
+  # layout and steps aside on another version). Keep both workflows equal.
+  FLUTTER_REF: 3.48.0-0.5.pre
 
 permissions:
   contents: read
