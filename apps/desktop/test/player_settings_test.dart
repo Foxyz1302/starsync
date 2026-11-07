@@ -264,6 +264,7 @@ void main() {
         'lift-subtitles',
         'shader-preset',
         'player-design',
+        'wait-display',
         'controls-size',
         'progress-line',
         'auto-advance',
@@ -271,6 +272,10 @@ void main() {
         expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
       }
       expect(find.byKey(const ValueKey('brb-hold')), findsNothing, reason: 'the hold times are under More');
+      expect(find.text('Pill'), findsOneWidget);
+      await pick(tester, 'wait-display', 'Card that fades with the controls');
+      expect(AppSettings.instance.waitDisplay.value, WaitDisplay.fadingCard);
+      AppSettings.instance.waitDisplay.value = WaitDisplay.pill;
       // Dropped for their defaults: no time display or hide delay rows.
       expect(find.text('Time display'), findsNothing);
       expect(find.text('Hide the controls after'), findsNothing);
@@ -333,23 +338,15 @@ void main() {
       await tester.enterText(find.byKey(const ValueKey('party-name')), 'Hana');
       expect(profile.name.peek(), 'Hana');
       expect(find.byKey(const ValueKey('auto-sit-out')), findsNothing, reason: 'AFK has no switch');
-      // How people look lives under More: the shape, the waiting display,
-      // the badges, the top bar's row.
-      const look = ['avatar-shape', 'wait-display', 'badge-style', 'avatar-row'];
-      for (final key in look) {
-        expect(find.byKey(ValueKey(key)), findsNothing, reason: key);
-      }
-      await tester.tap(find.descendant(of: you, matching: find.text('More')));
-      await tester.pumpAndSettle();
+      // How people look is its own card, open: the shape, the badges, the
+      // top bar's row (the waiting display is on the Player page).
       expect(find.text('How people look'), findsOneWidget);
-      for (final key in look) {
+      for (final key in ['avatar-shape', 'badge-style', 'avatar-row']) {
         expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
       }
-      expect(find.text('Pill'), findsOneWidget);
+      expect(find.byKey(const ValueKey('wait-display')), findsNothing, reason: 'on the Player page');
       expect(find.text('Icons'), findsOneWidget);
       expect(find.text('Side by side'), findsOneWidget, reason: 'rounded squares: side by side until picked');
-      await pick(tester, 'wait-display', 'Card that fades with the controls');
-      expect(s.waitDisplay.value, WaitDisplay.fadingCard);
       await pick(tester, 'badge-style', 'Words (BRB, AFK, Out)');
       expect(s.badgeStyle.value, BadgeStyle.words);
       await pick(tester, 'avatar-row', 'Overlap');

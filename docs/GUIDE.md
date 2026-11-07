@@ -203,7 +203,7 @@ or what went wrong, with Retry or Cancel when it helps. While the video
 is paused it shows everyone who is in. Bottom subtitles move up out of
 its way. Waiting for someone can show as this pill, as a card in the
 middle of the picture, or as a card that fades with the controls
-(Settings → Party → More → Waiting display).
+(Settings → Player → Waiting display).
 
 **Chat and activity** open in a panel on the right (the chat button or
 Tab), ready to type. Select text to copy it, or right-click a message for
@@ -588,7 +588,7 @@ are folded under **More**. Every change applies right away.
 | Page | What is there |
 |---|---|
 | **Player** | Sound (Volume); Subtitles (Subtitle size, Subtitles above the controls); Picture (Upscaling shader; More: Custom shader files, Sharp video and subtitles, Hardware decoding); Controls (Player design, Controls size, Progress line when hidden; More: which buttons sit in the bar); Playback (Play the next episode automatically; More: BRB hold, Continue-without hold) |
-| **Party** | You (picture, name, colour; More, "How people look": Avatar shape, rounded square or circle; Waiting display; Badges, icons or words; Avatars in the top bar, overlapping or side by side); Your server (Port and Password for Invite); Recent servers |
+| **Party** | You (picture, name, colour); How people look (Avatar shape, rounded square or circle; Badges, icons or words; Avatars in the top bar, overlapping or side by side); Your server (Port and Password for Invite); Recent servers |
 | **Notifications & sounds** | Over the video (Notifications: Toasts or Danmaku; Chat pop-ups: All, Only when paused or Off; Joins and leaves too; More: the danmaku look and what pops up when); Sounds (App sounds, Sound set; More: each sound with a preview, its own set and a switch) |
 | **Library & accounts** | Jellyfin servers; AnimeFlow, once a server offered it; Web links (yt-dlp and its cookies) |
 | **Updates** | Where updates stand, Check now; More: Update channel, Config address |

@@ -125,6 +125,7 @@ class PlayerPanel extends StatelessWidget {
                       ]),
                       const _Section(section: PanelSection.controls, children: [
                         PlayerDesignSetting(),
+                        WaitDisplaySetting(),
                         ControlsSizeSetting(),
                         ProgressLineSetting(),
                       ]),

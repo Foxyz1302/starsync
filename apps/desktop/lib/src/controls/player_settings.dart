@@ -479,3 +479,28 @@ class ContinueHoldSetting extends StatelessWidget {
     );
   }
 }
+
+/// "Waiting display": how the group waiting for someone's BRB shows over
+/// the paused picture: the pill (the default), a card in the middle, or
+/// that card fading with the controls. Settings → Player → Controls and the
+/// player panel's Controls (the same row).
+class WaitDisplaySetting extends StatelessWidget {
+  const WaitDisplaySetting({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context).coordinator.settings;
+    return SignalBuilder(
+      builder: (context) => SettingRow(
+        label: 'Waiting display',
+        help: 'How waiting for someone who is BRB shows over the paused video',
+        control: AppSelect<WaitDisplay>(
+          key: const ValueKey('wait-display'),
+          value: s.waitDisplay.value,
+          items: [for (final d in WaitDisplay.values) (d, d.label)],
+          onChanged: s.setWaitDisplay,
+        ),
+      ),
+    );
+  }
+}

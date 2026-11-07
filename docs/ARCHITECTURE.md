@@ -2259,7 +2259,7 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   badge (`StateBadge`): a small dark tile with a thin dark outline a third
   over the bottom-right corner, a muted glyph in its colour: a cup for
   BRB, "Zz" for AFK, an eye with a line through it for Out (with
-  Settings → Party → More "Badges: Words", `AppSettings.badgeStyle`,
+  Settings → Party → How people look "Badges: Words", `AppSettings.badgeStyle`,
   `badgeWords`: the word "BRB", "AFK" or "Out" in the same tile, as wide
   as it needs, everywhere a badge shows); AFK and Out
   are darkened (a black layer, not transparency, so an overlapping
@@ -2280,7 +2280,7 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   (`AvatarStack`: the strip and the fullscreen row) they sit side by side
   (an 8 px gap, no halo) or overlap (a halo in the background colour
   behind each picture, the step in whole pixels) and spread apart on
-  hover: Settings → Party → More "Avatars in the top bar"
+  hover: Settings → Party → How people look "Avatars in the top bar"
   (`AppSettings.avatarOverlap`; never picked: the shape decides,
   circles overlap and rounded squares sit side by side,
   `overlapAvatars`). `memberAvatarImage` is the one picture lookup: yours from the
@@ -2502,11 +2502,9 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
     player's ⚙ opens these while watching.
   - **Party**: You (picture, name and colour edited in place with the
     profile card's `ProfilePicture` / `ProfileColors`; the profile card's
-    Settings link opens this page; More: "How people look": Avatar shape
-    (Rounded square or Circle), Waiting display (Pill, Centre card, Card
-    that fades with the controls; see "Playback and presence"), Badges
-    (Icons or Words), Avatars in the top bar (Overlap or Side by side;
-    see "Avatars")), Your server (port and password, used the next time it is
+    Settings link opens this page), How people look, its own card: Avatar
+    shape (Rounded square or Circle), Badges (Icons or Words), Avatars in
+    the top bar (Overlap or Side by side; see "Avatars"), Your server (port and password, used the next time it is
     shared, in the connect form), Recent servers (Forget, as on the Join
     card).
   - **Notifications & sounds**: Over the video (Notifications: toasts or
@@ -2666,7 +2664,7 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   existing lift (`SubtitleLift`), whatever "Subtitles above the controls"
   says. The pill glass, colour only for problems; it fades through
   between kinds. The mini shows its short line in its hover bar.
-  Settings → Party → More "Waiting display" (`AppSettings.waitDisplay`,
+  Settings → Player → Controls "Waiting display" (`AppSettings.waitDisplay`,
   live) picks how the BRB waiting shows: the pill (the default), a
   centre card (`WaitCard`, `wait_card.dart`: over a dimmed paused
   picture, the line as a title, 64 px avatars with name and "BRB · 4
@@ -2724,7 +2722,7 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   Hardware decoding, set live on mpv's `hwdec`, with the custom value's
   field), Over the video (Notifications: Toasts / Danmaku, Chat
   pop-ups, and with Danmaku the look's knobs folded, see "Danmaku
-  notifications") and Controls (Player design, Controls size, Progress
+  notifications") and Controls (Player design, Waiting display, Controls size, Progress
   line when hidden). At its foot All settings and Mark a problem: All
   settings opens the Settings page of the section last opened or
   clicked in (`settingsPageFor`, through the shell's `_openSettings`,

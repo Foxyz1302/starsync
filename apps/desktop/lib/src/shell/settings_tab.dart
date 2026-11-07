@@ -17,7 +17,7 @@ import '../screens/home/about_page.dart';
 import '../screens/home/settings_page.dart';
 import '../screens/home/ui.dart' show appName, devTools, displayVersion;
 import '../session/identity.dart' show Profile;
-import '../state/settings.dart' show BadgeStyle, WaitDisplay;
+import '../state/settings.dart' show BadgeStyle;
 import '../sfx/sfx.dart';
 import '../sfx/sound_bank.dart';
 import '../app/app_graph.dart';
@@ -105,6 +105,7 @@ class SettingsTab extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const PlayerDesignSetting(),
+                const WaitDisplaySetting(),
                 const ControlsSizeSetting(),
                 const ProgressLineSetting(),
                 SettingFold(children: [
@@ -132,6 +133,7 @@ class SettingsTab extends StatelessWidget {
       case SettingsSection.party:
         return [
           const YouPanel(),
+          const SettingsPanel(title: 'How people look', child: PeopleLookSettings()),
           const YourServerPanel(),
           const RecentServersPanel(),
         ];
@@ -335,7 +337,6 @@ class _YouPanelState extends State<YouPanel> {
                       ],
                     ),
                   ),
-                  const SettingFold(children: [PeopleLookSettings()]),
                 ],
               ),
             ),
@@ -1009,53 +1010,19 @@ class AvatarShapeSetting extends StatelessWidget {
   }
 }
 
-/// "How people look" (Settings → Party → More): the avatar shape, the
-/// waiting display, the badges and the top bar's row. All live.
+/// "How people look" (its own card on Settings → Party): the avatar shape,
+/// the badges and the top bar's row. All live. (The waiting display is on
+/// Settings → Player, with the player design.)
 class PeopleLookSettings extends StatelessWidget {
   const PeopleLookSettings({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 2, bottom: 2),
-          child: Text('How people look', style: TextStyle(color: muted, fontSize: 12, fontWeight: FontWeight.w600)),
-        ),
-        const AvatarShapeSetting(),
-        const WaitDisplaySetting(),
-        const BadgeStyleSetting(),
-        const AvatarRowSetting(),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => const Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [AvatarShapeSetting(), BadgeStyleSetting(), AvatarRowSetting()],
+      );
 }
 
-/// "Waiting display": how the group waiting for someone's BRB shows over
-/// the paused picture: the pill (the default), a card in the middle, or
-/// that card fading with the controls. Settings → Party → More only.
-class WaitDisplaySetting extends StatelessWidget {
-  const WaitDisplaySetting({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final s = AppScope.of(context).coordinator.settings;
-    return SignalBuilder(
-      builder: (context) => SettingRow(
-        label: 'Waiting display',
-        help: 'How waiting for someone who is BRB shows over the paused video',
-        control: AppSelect<WaitDisplay>(
-          key: const ValueKey('wait-display'),
-          value: s.waitDisplay.value,
-          items: [for (final d in WaitDisplay.values) (d, d.label)],
-          onChanged: s.setWaitDisplay,
-        ),
-      ),
-    );
-  }
-}
 
 /// "Badges": where people stand as icons (the default) or words.
 /// Settings → Party → More only.

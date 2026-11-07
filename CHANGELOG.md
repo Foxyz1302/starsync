@@ -33,8 +33,8 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - "Wait for Bob" on someone's card when they ran off without pressing anything, and "Don't wait for Bob" to go on without whoever everyone waits for
 - Someone back from a dropped connection or a crash shows how much they missed: "Bob is back (missed 1:42)"
 - Up next counts down over the last 10 seconds of a video and the next one starts the moment it ends; a pause or Cancel stops it at the end. Clips under a minute just say what is up next
-- Avatar shape: everyone's picture as a rounded square, or as a circle (Settings → Party → More)
-- How people look, in Settings → Party → More: show waiting for someone who is BRB as the pill, a card in the middle, or a card that fades with the controls; badges as icons or words (BRB, AFK, Out); avatars in the top bar overlapping or side by side. In Settings → Player → More: how long to hold Space for BRB and for going on without someone
+- Avatar shape: everyone's picture as a rounded square, or as a circle (Settings → Party → How people look)
+- Settings → Player → Waiting display: show waiting for someone who is BRB as the pill, a card in the middle, or a card that fades with the controls. Settings → Party → How people look: badges as icons or words (BRB, AFK, Out), avatars in the top bar overlapping or side by side. In Settings → Player → More: how long to hold Space for BRB and for going on without someone
 - Screenshots: S freezes the picture for you alone (the video keeps playing for everyone) so you can drag over the part you want, or click for all of it, with or without subtitles (T); Shift+S takes the whole picture at once. Each lands in Pictures/Starsync, named after the show, episode and moment, and is copied to paste anywhere; click the little preview to crop it again
 - Updates are now signed: Starsync only installs updates made by its developer
 - Settings → Help & about lists the open-source licenses
