@@ -1,6 +1,7 @@
 import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
@@ -263,11 +264,11 @@ class StatusAvatar extends StatelessWidget {
     final mark = (size * 0.42).clamp(10.0, 24.0);
     final darken = marks && info.isOut ? 0.62 : (dim ? 0.38 : 0.0);
     // Dimmed by darkening, not transparency: an overlapping neighbour must
-    // not show through. The picture is one draw clipped to the shape, its
-    // darkening a filter on it: anything drawn under it to the same edge
-    // (the person's colour, a black layer) bleeds through the edge's
-    // anti-aliased pixels as a thin frame. The colour stays only for a
-    // picture with transparent parts, a pixel inside the edge.
+    // not show through. The picture is one filled shape, its darkening
+    // drawn on it alone ([AvatarPicture]): anything drawn under it to the
+    // same edge (the person's colour, a black layer) bleeds through the
+    // edge's anti-aliased pixels as a thin frame. The colour stays only for
+    // a picture with transparent parts, a pixel inside the edge.
     final image = info.image;
     final picture = TweenAnimationBuilder<double>(
       tween: Tween(end: darken),
@@ -294,16 +295,7 @@ class StatusAvatar extends StatelessWidget {
                 decoration: BoxDecoration(color: color, borderRadius: shape.radius(size - 2)),
               ),
             ),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: shape.radius(size),
-                image: DecorationImage(
-                  image: image,
-                  fit: BoxFit.cover,
-                  colorFilter: d > 0 ? ColorFilter.mode(shade, BlendMode.srcATop) : null,
-                ),
-              ),
-            ),
+            AvatarPicture(image: image, corner: shape.corner, darken: d),
           ],
         );
       },
@@ -382,6 +374,113 @@ class StatusAvatar extends StatelessWidget {
       ),
     );
   }
+}
+
+/// [image] cover-fitted into a rounded shape ([corner]: the corner as a
+/// share of the width), darkened by [darken] (0..1). One filled shape with
+/// the picture as its paint, never a clip: Impeller smooths a clip's edge
+/// only with MSAA, which Linux's GL surface lacks (the corners were jagged,
+/// and smooth only while a blur was on screen), and a filled shape's edge
+/// without it.
+class AvatarPicture extends StatefulWidget {
+  final ImageProvider image;
+  final double corner;
+  final double darken;
+  const AvatarPicture({super.key, required this.image, required this.corner, this.darken = 0});
+
+  @override
+  State<AvatarPicture> createState() => _AvatarPictureState();
+}
+
+class _AvatarPictureState extends State<AvatarPicture> {
+  ImageStream? _stream;
+  ImageInfo? _info;
+  late final _listener = ImageStreamListener(_onImage, onError: (_, _) {});
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _resolve();
+  }
+
+  @override
+  void didUpdateWidget(AvatarPicture old) {
+    super.didUpdateWidget(old);
+    if (old.image != widget.image) _resolve();
+  }
+
+  void _resolve() {
+    final stream = widget.image.resolve(createLocalImageConfiguration(context));
+    if (stream.key == _stream?.key) return;
+    _stream?.removeListener(_listener);
+    _stream = stream..addListener(_listener);
+  }
+
+  void _onImage(ImageInfo info, bool _) {
+    setState(() {
+      _info?.dispose();
+      _info = info;
+    });
+  }
+
+  @override
+  void dispose() {
+    _stream?.removeListener(_listener);
+    _info?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final image = _info?.image;
+    if (image == null) return const SizedBox.expand();
+    return CustomPaint(
+      size: Size.infinite,
+      painter: _PicturePainter(image: image, corner: widget.corner, darken: widget.darken),
+    );
+  }
+}
+
+class _PicturePainter extends CustomPainter {
+  final ui.Image image;
+  final double corner;
+  final double darken;
+  _PicturePainter({required this.image, required this.corner, required this.darken});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final rrect = RRect.fromRectAndRadius(rect, Radius.circular(size.shortestSide * corner));
+    // BoxFit.cover, centred.
+    final w = image.width.toDouble(), h = image.height.toDouble();
+    final s = math.max(size.width / w, size.height / h);
+    final cover = Matrix4.identity()
+      ..translateByDouble((size.width - w * s) / 2, (size.height - h * s) / 2, 0, 1)
+      ..scaleByDouble(s, s, 1, 1);
+    final picture = Paint()
+      ..shader = ImageShader(image, TileMode.clamp, TileMode.clamp, cover.storage, filterQuality: FilterQuality.medium)
+      ..isAntiAlias = true;
+    if (darken <= 0) {
+      canvas.drawRRect(rrect, picture);
+      return;
+    }
+    // Darkened on its own layer: black over the picture's pixels only.
+    // (A colour filter on the shader's paint darkens twice on Impeller.)
+    // The black reaches past the shape: off the pixel grid its plain edge
+    // would miss the picture's smoothed outer pixels.
+    final over = rect.inflate(1);
+    canvas.saveLayer(over, Paint());
+    canvas.drawRRect(rrect, picture);
+    canvas.drawRect(
+        over,
+        Paint()
+          ..color = Colors.black.withValues(alpha: darken)
+          ..blendMode = BlendMode.srcATop);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_PicturePainter old) => old.image != image || old.corner != corner || old.darken != darken;
 }
 
 /// The standing badge's tile for an avatar of [avatar] px (15 at the

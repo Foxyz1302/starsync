@@ -703,6 +703,13 @@ is off), not software rendering.
 
 ## Gotchas
 
+- Impeller on Linux (GL, no MSAA on the window's surface) leaves a
+  rounded clip's edge jagged, smooth only in frames where a backdrop
+  blur renders the frame offscreen; a filled shape's edge is smoothed
+  without MSAA. Round pictures are therefore a `drawRRect` with an
+  `ImageShader` (`AvatarPicture`), never a clip or a `DecorationImage`
+  with a `borderRadius`. A `colorFilter` on that paint applies twice;
+  darken on a layer instead.
 - Relic gives Range as a typed `RangeHeader`; convert from unit + first range.
 - A killed isolate (`Isolate.kill`) does not close its listening socket:
   the port stays bound in the process until exit. `SyncServer` binds with

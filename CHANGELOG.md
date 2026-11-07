@@ -86,6 +86,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 - Scrolling a list over the player (the player settings panel, for example) past its end no longer changes the volume; only the wheel over the video itself does
 - A thin rim of a person's colour could show round their picture
+- Linux: the rounded corners of people's pictures are smooth; they looked jagged except while a card was open
 - Closing the window could leave Starsync running unseen in the background, with its players, for hours; it now ends within a few seconds (and always within 20)
 - A video could take seconds to show, or Up next could stop getting ready, when it was started while nothing on screen moved
 - Video memory no longer grows with every video played (about 10 MB more per video at 2560×1080 until the app was closed)

@@ -394,10 +394,7 @@ Future<void> showPictureView(BuildContext context, ImageProvider image, String n
                     borderRadius: BorderRadius.circular(24),
                     boxShadow: const [BoxShadow(color: Color(0x88000000), blurRadius: 32, offset: Offset(0, 12))],
                   ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(24),
-                    child: Image(image: image, width: side, height: side, fit: BoxFit.cover, filterQuality: FilterQuality.medium),
-                  ),
+                  child: SizedBox.square(dimension: side, child: AvatarPicture(image: image, corner: 24 / side)),
                 ),
                 const SizedBox(height: 14),
                 Text(name,
