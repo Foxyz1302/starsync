@@ -46,7 +46,9 @@ to touch anything new. Details: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 
 ## Releases
 
-`tool/release.sh [patch|minor|major]` then `git push --follow-tags`; CI
-publishes. Details: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Never commit
+`tool/release.sh [patch|minor|major]`, `git push github --follow-tags`,
+wait for GitHub's `release` run, then `tool/sign_release.sh X.Y.Z --push`
+(signs the update file; also bridges it to the Gitea for 1.4.x apps).
+Details: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Never commit
 secrets: tokens come from env (`DISCORD_WEBHOOK_URL`, `RELEASE_TOKEN`) or
 Actions (`GITHUB_TOKEN`/`GITEA_TOKEN`).
