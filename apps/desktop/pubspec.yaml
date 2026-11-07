@@ -16,22 +16,22 @@ dependencies:
   media_kit:
     git:
       url: https://github.com/Foxyz1302/media-kit.git
-      ref: v1.5.0-starsync.1
+      ref: v1.5.0-starsync.2
       path: media_kit
   media_kit_video:
     git:
       url: https://github.com/Foxyz1302/media-kit.git
-      ref: v1.5.0-starsync.1
+      ref: v1.5.0-starsync.2
       path: media_kit_video
   media_kit_libs_linux:
     git:
       url: https://github.com/Foxyz1302/media-kit.git
-      ref: v1.5.0-starsync.1
+      ref: v1.5.0-starsync.2
       path: libs/linux/media_kit_libs_linux
   media_kit_libs_windows_video:
     git:
       url: https://github.com/Foxyz1302/media-kit.git
-      ref: v1.5.0-starsync.1
+      ref: v1.5.0-starsync.2
       path: libs/windows/media_kit_libs_windows_video
   path_provider: ^2.1.0
   # The Pictures known folder (screenshots); already in through path_provider.
@@ -77,7 +77,7 @@ dependency_overrides:
   media_kit:
     git:
       url: https://github.com/Foxyz1302/media-kit.git
-      ref: v1.5.0-starsync.1
+      ref: v1.5.0-starsync.2
       path: media_kit
 dev_dependencies:
   flutter_test:

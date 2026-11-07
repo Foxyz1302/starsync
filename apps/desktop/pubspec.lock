@@ -491,8 +491,8 @@ packages:
     dependency: "direct main"
     description:
       path: media_kit
-      ref: "v1.5.0-starsync.1"
-      resolved-ref: "424354254660c81d2b50ef4fa778286a43a752da"
+      ref: "v1.5.0-starsync.2"
+      resolved-ref: "8726f7d120e54b4775c2caa37cbe39ce002c1a32"
       url: "https://github.com/Foxyz1302/media-kit.git"
     source: git
     version: "1.2.6"
@@ -500,8 +500,8 @@ packages:
     dependency: "direct main"
     description:
       path: "libs/linux/media_kit_libs_linux"
-      ref: "v1.5.0-starsync.1"
-      resolved-ref: "424354254660c81d2b50ef4fa778286a43a752da"
+      ref: "v1.5.0-starsync.2"
+      resolved-ref: "8726f7d120e54b4775c2caa37cbe39ce002c1a32"
       url: "https://github.com/Foxyz1302/media-kit.git"
     source: git
     version: "1.2.1"
@@ -509,8 +509,8 @@ packages:
     dependency: "direct main"
     description:
       path: "libs/windows/media_kit_libs_windows_video"
-      ref: "v1.5.0-starsync.1"
-      resolved-ref: "424354254660c81d2b50ef4fa778286a43a752da"
+      ref: "v1.5.0-starsync.2"
+      resolved-ref: "8726f7d120e54b4775c2caa37cbe39ce002c1a32"
       url: "https://github.com/Foxyz1302/media-kit.git"
     source: git
     version: "1.0.12"
@@ -518,8 +518,8 @@ packages:
     dependency: "direct main"
     description:
       path: media_kit_video
-      ref: "v1.5.0-starsync.1"
-      resolved-ref: "424354254660c81d2b50ef4fa778286a43a752da"
+      ref: "v1.5.0-starsync.2"
+      resolved-ref: "8726f7d120e54b4775c2caa37cbe39ce002c1a32"
       url: "https://github.com/Foxyz1302/media-kit.git"
     source: git
     version: "2.0.1"
