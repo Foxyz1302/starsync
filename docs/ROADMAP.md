@@ -359,6 +359,15 @@ machines and his Gitea becomes optional.
      flutter/flutter#194525 (task runner, on master), #191389 (Wayland
      subsurface renderer, 3.49+), #195287 (desync the subsurface, open).
      Then recheck the shim's layout checks.
+   - Player log noise from real use (1.5.0-dev, three machines): about
+     3,000 `h264: Invalid NAL unit size` lines on relayed or HLS streams
+     (vaapi and nvdec alike: the source, not the decoder) and the AV1
+     hwaccel probe on GPUs without AV1 (Pascal). Collapse repeated mpv
+     lines into "xN in 10 s"; log `decoder-frame-drop-count` and
+     `frame-drop-count` at each video end or switch, to tell whether the
+     h264 warnings cost frames; split the open time into open to first
+     byte and first byte to first frame (first frames up to 74 s lined up
+     with relay or link waits).
    - One open made two session players (#1 and #2) in a diagnostics
      test run: find out why.
    - The video freeze after GPU idle: next suspect is media_kit's context
