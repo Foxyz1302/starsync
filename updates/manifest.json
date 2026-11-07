@@ -1,10 +1,10 @@
 {
   "version": "1.4.0",
   "protocol": 16,
-  "url": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.4.0/starsync-1.4.0-linux-x64.tar.gz",
+  "url": "https://github.com/Foxyz1302/starsync/releases/download/v1.4.0/starsync-1.4.0-linux-x64.tar.gz",
   "assets": {
-    "linux-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.4.0/starsync-1.4.0-linux-x64.tar.gz",
-    "windows-x64": "https://git.example.org/Foxyz/sync_replay_project/releases/download/v1.4.0/starsync-1.4.0-windows-x64.zip"
+    "linux-x64": "https://github.com/Foxyz1302/starsync/releases/download/v1.4.0/starsync-1.4.0-linux-x64.tar.gz",
+    "windows-x64": "https://github.com/Foxyz1302/starsync/releases/download/v1.4.0/starsync-1.4.0-windows-x64.zip"
   },
   "assetSha256": {
     "linux-x64": "63a01f2c02eb1943b875201b1c25e088753f869e958bcd151fc29a556c12286c",
