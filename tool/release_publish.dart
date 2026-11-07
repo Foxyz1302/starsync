@@ -13,7 +13,9 @@
 //   the manifest's signature `<manifest.json>.sig` must be next to it and
 //   is uploaded with it.
 // Env: RELEASE_TOKEN (preferred) or the Actions-provided GITHUB_TOKEN /
-// GITEA_TOKEN. dart: imports only — runs without `pub get`.
+// GITEA_TOKEN; the repo is origin's, or RELEASE_REPO_URL
+// (https://gitea.example.org/owner/repo). dart: imports only — runs without
+// `pub get`.
 import 'dart:convert';
 import 'dart:io';
 
@@ -104,7 +106,7 @@ String _token() {
 
 // The repo's API URL, from origin.
 String _apiBase(String root) {
-  final origin = _git(root, ['remote', 'get-url', 'origin']);
+  final origin = Platform.environment['RELEASE_REPO_URL'] ?? _git(root, ['remote', 'get-url', 'origin']);
   final server = RegExp(r'^(https?://[^/]+)/').firstMatch(origin)?.group(1) ??
       Platform.environment['GITHUB_SERVER_URL'] ??
       _die('cannot derive server from origin $origin');

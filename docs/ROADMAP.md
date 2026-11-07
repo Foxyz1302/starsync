@@ -220,13 +220,13 @@ Next, before 1.5.0 is cut (playback and presence is in; protocol 17):
   (`shell/wait_design.dart`, DEVELOPMENT "Dev tools").
 - **The name "Out"**: fits next to BRB and AFK, but may not be clear
   enough; settle it from the same evenings.
-- **GitHub as the public home** (needs the owner's go): each release's
-  archives (CI), its signed manifest and the signed config
-  (`tool/sign_release.sh`) go to `Foxyz1302/starsync` too (the website's
-  downloads already come from there); `starsync-config.json` at that
-  repo's root is the address apps already try first, and its
-  `updates` then list GitHub before pol's Gitea. Mirror `fox_utils` and
-  `leaf_widgets` there so builds do not depend on pol's server.
+- **GitHub as the public home** (needs the owner's go): apps already
+  read their config and manifests only from `Foxyz1302/starsync`; each
+  release's archives (CI), its signed manifest and the `dev` prerelease
+  (`tool/sign_release.sh`, `tool/dev_release.sh`, still publishing to
+  the Gitea) go there too, the manifests' asset URLs with them. Mirror
+  `fox_utils` and `leaf_widgets` there so builds do not depend on pol's
+  server (the desktop pubspec still names it).
 
 **Open source** (decided, after 1.5.0; as portfolio, foxyz-presence
 DECISIONS.md; the license is MIT: DEVELOPMENT "Third-party

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The owner's step after CI published a release (DEVELOPMENT "Releasing",
 # "Signing"): CI has no signing key, so this downloads the release's
-# archives (Linux and Windows) from the Gitea release, checks each is the
+# archives (Linux and Windows) from the Gitea release (origin's, or
+# RELEASE_REPO_URL: https://gitea.example.org/owner/repo), checks each is the
 # bundle of that version, writes updates/manifest.json (asset URLs, their
 # sha256 in `assetSha256`, `notes` / `highlights` / `changes` from
 # CHANGELOG.md), signs it (manifest.json.sig) and the config when it
@@ -23,7 +24,7 @@ dart "$ROOT/tool/sign.dart" --check-key
 BRANCH="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)"
 [[ "$BRANCH" == "main" ]] || echo "warning: on $BRANCH, not main: apps read the manifest from main" >&2
 
-ORIGIN="$(git -C "$ROOT" remote get-url origin)"
+ORIGIN="${RELEASE_REPO_URL:-$(git -C "$ROOT" remote get-url origin)}"
 SERVER="$(echo "$ORIGIN" | sed -E 's#(https?://[^/]+)/.*#\1#')"
 REPO="$(echo "${ORIGIN%.git}" | sed -E 's#.*[:/]([^/]+/[^/]+)$#\1#')"
 BASE="$SERVER/$REPO/releases/download/v$VER/starsync-$VER"

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build a Linux test build here and publish it to the `dev` prerelease on
-# Gitea, where dev builds update from (see Updater in docs/ARCHITECTURE.md).
+# the Gitea of `origin` (or RELEASE_REPO_URL, e.g. https://gitea.example.org/owner/repo),
+# where dev builds update from (see Updater in docs/ARCHITECTURE.md).
 # No tag push, no CI, no commit: the working tree is built as it is.
 # Usage: tool/dev_release.sh [--minor|--major] [--no-publish]
 # Version: `<next>-dev.N`, N one past the published dev build of that
@@ -50,7 +51,13 @@ fi
 if [[ -n "$(git -C "$ROOT" status --porcelain -- updates/starsync-config.json)" ]]; then
   echo "warning: updates/starsync-config.json has changes that are not published: dart tool/sign_config.dart, commit and push" >&2
 fi
-BASE_URL="https://git.example.org/Foxyz/sync_replay_project/releases/download/dev"
+# The repo the dev prerelease lives in: RELEASE_REPO_URL, else origin (an
+# ssh origin needs RELEASE_REPO_URL: downloads are https).
+REPO_URL="${RELEASE_REPO_URL:-$(git -C "$ROOT" remote get-url origin)}"
+REPO_URL="${REPO_URL%.git}"
+[[ "$REPO_URL" =~ ^https?:// ]] ||
+  { echo "error: $REPO_URL is not an https repo address: set RELEASE_REPO_URL" >&2; exit 1; }
+BASE_URL="$REPO_URL/releases/download/dev"
 
 PUB="$(sed -n 's/^version: \([0-9.]*\).*/\1/p' "$ROOT/apps/desktop/pubspec.yaml")"
 IFS=. read -r MA MI PA <<<"$PUB"

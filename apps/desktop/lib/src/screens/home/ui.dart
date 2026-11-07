@@ -5,7 +5,7 @@ import 'package:sync_relay_core/core.dart' show appVersion, isDevBuild;
 /// Product name (working title). Change it here only.
 const appName = 'Starsync';
 
-const repoUrl = 'https://git.example.org/Foxyz/sync_replay_project';
+const repoUrl = 'https://github.com/Foxyz1302/starsync';
 
 /// The pubspec's version: the Flutter tool defines it for every build and
 /// run (`flutter run` too).

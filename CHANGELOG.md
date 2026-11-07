@@ -38,7 +38,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ### Changed
 
-- Updates now come from example.org (the old update address stopped working)
+- Updates now come from GitHub (the old update address stopped working)
 - The Schedule's statuses and requests come from the server you join: a server that has AnimeFlow brings it along, and Starsync keeps it for when you are not in one
 - Screenshots answer at once: S dims the picture with "Capturing…" and Shift+S shows a small note until the picture is in, keys pressed meanwhile no longer reach the player (Esc gives the screenshot up), and the next screenshots of the same video come much faster
 - Your picture: a click opens Starsync's own picker, not a file window. Paste a picture (Ctrl+V or Paste), drop one on it, or Browse… for a file; the crop and its previews follow your avatar shape, and a small camera badge shows where to add one

@@ -22,9 +22,9 @@ that C++ toolchain (MSVC on Windows); it needs no audio dev headers (miniaudio
 loads ALSA / PulseAudio / JACK at run time) and, with `no_xiph_libs` set in
 the desktop pubspec, downloads nothing. `fox_utils` (drag & drop,
 clipboard files and images; native Linux/Windows plugin) is the owner's
-shared package, a git dependency pinned to a tag of
-`git.example.org/Foxyz/fox_utils`: bump it by tagging there and changing
-`ref` in the desktop pubspec.
+shared package, a git dependency pinned to a tag of its repo (`url` in
+the desktop pubspec, as for `leaf_widgets`): bump it by tagging there and
+changing `ref` in the desktop pubspec.
 
 ```
 cd apps/desktop && flutter pub get && flutter run -d linux
@@ -408,17 +408,17 @@ Tokens come from the environment (`RELEASE_TOKEN`, or Actions-provided
 `.gitea` before `.github`, so it ignores the other); GitHub runs
 `.github/workflows` ([CI on GitHub](#ci-on-github)).
 
-The repo and its releases live on pol's Gitea,
-`https://git.example.org/Foxyz/sync_replay_project` (a GitHub mirror
-feeds the website's downloads). Apps read their manifests there (the
-signed config, else `distribution.dart`: [Signing](#signing));
-`tool/dev_release.sh`'s `BASE_URL` names it too, and `tool/release.sh`,
-`tool/sign_release.sh` and `tool/release_publish.dart` take the server
-from `origin`. Apps up to 1.4.x have the server's old name,
-`git.example.org`, built in and check no signature: pol keeps that
-name as an alias until everyone is past 1.4.x, and they update to 1.5.0
-through the same `updates/manifest.json` (they ignore the `.sig` and
-`assetSha256`).
+The repo and its releases still live on a Gitea (`origin`), with GitHub,
+`https://github.com/Foxyz1302/starsync`, as the public home (it feeds
+the website's downloads). Apps read their config and manifests from
+GitHub only (the signed config, else `distribution.dart`:
+[Signing](#signing)). `tool/dev_release.sh`, `tool/sign_release.sh` and
+`tool/release_publish.dart` publish to and download from the Gitea of
+`origin`, or of `RELEASE_REPO_URL` when set (the repo's https address);
+no Gitea address is written in the tree. Apps up to 1.4.x have the
+Gitea's address built in and check no signature: they update through
+the Gitea's copy of `updates/manifest.json` on `main` (they ignore the
+`.sig` and `assetSha256`), so that file stays.
 
 ### Signing
 
@@ -502,10 +502,10 @@ posts a release's tarball to Discord; Gitea's CI never did). No other.
 
 Left to switch: Actions on for the repo (if Gitea push-mirrors to it, the
 workflows run from the next mirrored push: `ci.yml` on every push,
-publishing on the next tag); `tool/release.sh` and `tool/dev_release.sh`
-pointed at GitHub (manifest URLs, `publish_github.dart`); the updater
-reading GitHub (ROADMAP "GitHub as the public home"); `fox_utils` and
-`leaf_widgets`, git dependencies on pol's Gitea, mirrored there; then
+publishing on the next tag); `tool/release.sh`, `tool/sign_release.sh`
+and `tool/dev_release.sh` pointed at GitHub (manifest URLs,
+`publish_github.dart`; ROADMAP "GitHub as the public home"); `fox_utils`
+and `leaf_widgets`, git dependencies on the Gitea, mirrored there; then
 `.gitea/workflows` removed.
 
 ### Changelog

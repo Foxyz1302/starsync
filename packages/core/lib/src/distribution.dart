@@ -18,21 +18,15 @@ const trustedKeys = [
 /// host is safe to list: a copy counts only when its signature does.
 const builtInConfigUrls = [
   'https://raw.githubusercontent.com/Foxyz1302/starsync/main/updates/starsync-config.json',
-  'https://git.example.org/Foxyz/sync_replay_project/raw/branch/main/updates/starsync-config.json',
-  'https://git.example.org/Foxyz/sync_replay_project/raw/branch/main/updates/starsync-config.json',
 ];
 
 /// The releases' manifest until a config says otherwise, tried in order.
 const builtInStableManifestUrls = [
   'https://raw.githubusercontent.com/Foxyz1302/starsync/main/updates/manifest.json',
-  'https://git.example.org/Foxyz/sync_replay_project/raw/branch/main/updates/manifest.json',
-  'https://git.example.org/Foxyz/sync_replay_project/raw/branch/main/updates/manifest.json',
 ];
 
 /// The test builds' manifest (the `dev` prerelease, `tool/dev_release.sh`)
 /// until a config says otherwise, tried in order.
 const builtInDevManifestUrls = [
   'https://github.com/Foxyz1302/starsync/releases/download/dev/manifest.json',
-  'https://git.example.org/Foxyz/sync_replay_project/releases/download/dev/manifest.json',
-  'https://git.example.org/Foxyz/sync_replay_project/releases/download/dev/manifest.json',
 ];
