@@ -375,6 +375,9 @@ void main() {
     });
 
     testWidgets('Library & accounts: AnimeFlow says who you are connected as, or why not; web links', (tester) async {
+      // The card shows once a server has offered an AnimeFlow address.
+      AppSettings.instance.animeFlowAddress.value = 'https://anime.example.org/api/app/v1';
+      addTearDown(() => AppSettings.instance.animeFlowAddress.value = '');
       await pumpSettings(tester, SettingsSection.library,
           me: () async => const AnimeFlowMe(
               userId: 'u1', name: 'foxyz', scopes: {AnimeFlowScope.view, AnimeFlowScope.request}));
