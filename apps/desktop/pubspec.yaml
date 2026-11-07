@@ -52,13 +52,13 @@ dependencies:
   # Drag & drop and clipboard files/images (vendored desktop_drop + pasteboard).
   fox_utils:
     git:
-      url: https://git.example.org/Foxyz/fox_utils.git
-      ref: v0.1.9
+      url: https://github.com/Foxyz1302/fox_utils.git
+      ref: v0.1.10
   # LeafPopover (the Up next popover).
   leaf_widgets:
     git:
-      url: https://git.example.org/Foxyz/leaf_widgets.git
-      ref: v0.1.0
+      url: https://github.com/Foxyz1302/leaf_widgets.git
+      ref: v0.1.1
   # App sounds (sfx/, platform/audio/): SoLoud + miniaudio, built from
   # source by its build hook (needs only a C++ toolchain).
   flutter_soloud: ^5.2.1
