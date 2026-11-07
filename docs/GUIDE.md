@@ -163,8 +163,8 @@ from there. Nothing is uploaded or stored anywhere else.
 One window. Along the top, the strip:
 
 - **Your avatar**: your profile (name, picture with a crop editor,
-  colour) and links to the settings. Your name and picture change for
-  everyone right away; the colour is yours only.
+  colour) and links to the settings. Your name, picture and colour change
+  for everyone right away.
 - **The tabs**: Library, Schedule, Settings.
 - **The party**: alone on your server, Join a friend and Invite (and
   "Sharing" while friends can reach it). With others there, everyone's

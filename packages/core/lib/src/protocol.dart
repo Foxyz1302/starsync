@@ -30,15 +30,27 @@ String cleanMemberName(String name) {
   return trimmed.substring(0, trimmed.length.clamp(0, RelayConstants.maxNameLength));
 }
 
+/// A member colour as shown to everyone: `#rrggbb` in lower case; ''
+/// for anything else (absent, not a string, not six hex digits).
+String cleanMemberColor(Object? color) {
+  if (color is! String || !RegExp(r'^#[0-9a-fA-F]{6}$').hasMatch(color)) return '';
+  return color.toLowerCase();
+}
+
 class HelloUser {
   final String name;
   final String avatar;
-  const HelloUser({required this.name, this.avatar = ''});
+  /// The colour picked in the profile (`#rrggbb`, see [cleanMemberColor]);
+  /// '' for none.
+  final String color;
+  const HelloUser({required this.name, this.avatar = '', this.color = ''});
 
-  Map<String, Object?> toJson() => {'name': name, 'avatar': avatar};
+  Map<String, Object?> toJson() => {'name': name, 'avatar': avatar, if (color.isNotEmpty) 'color': color};
 
-  factory HelloUser.fromJson(Map<String, Object?> json) =>
-      HelloUser(name: (json['name'] as String?) ?? '', avatar: (json['avatar'] as String?) ?? '');
+  factory HelloUser.fromJson(Map<String, Object?> json) => HelloUser(
+      name: (json['name'] as String?) ?? '',
+      avatar: (json['avatar'] as String?) ?? '',
+      color: cleanMemberColor(json['color']));
 }
 
 /// A Jellyfin item the session plays, by reference: each viewer resolves it
@@ -1030,23 +1042,31 @@ class ChatMessage {
   }
 }
 
-/// Changes this member's name and/or picture mid-session. Null fields stay
-/// as they are; an empty [avatar] removes the picture.
+/// Changes this member's name, picture and/or colour mid-session. Null
+/// fields stay as they are; an empty [avatar] removes the picture, an
+/// empty [color] the colour.
 class ProfileIntent {
   final String? name;
   /// Base64 PNG, like `hello.user.avatar`.
   final String? avatar;
-  const ProfileIntent({this.name, this.avatar});
+  /// `#rrggbb`, like `hello.user.color`; a malformed one counts as none.
+  final String? color;
+  const ProfileIntent({this.name, this.avatar, this.color});
 
   Map<String, Object?> toJson() => {
         't': 'profile',
         if (name != null) 'name': name,
         if (avatar != null) 'avatar': avatar,
+        if (color != null) 'color': color,
       };
 
   factory ProfileIntent.fromJson(Map<String, Object?> json) {
     if (json['t'] != 'profile') throw const ProtocolException('not a profile intent');
-    return ProfileIntent(name: json['name'] as String?, avatar: json['avatar'] as String?);
+    final color = json['color'];
+    return ProfileIntent(
+        name: json['name'] as String?,
+        avatar: json['avatar'] as String?,
+        color: color == null ? null : cleanMemberColor(color));
   }
 }
 
@@ -1082,6 +1102,9 @@ class MemberView {
   /// Content hash of the member's picture, fetched at `/a/...`; empty when
   /// none.
   final String avatarHash;
+  /// The colour it picked (`#rrggbb`); empty when none (the app picks one
+  /// from the name).
+  final String color;
   final double buffered;
   /// Where it stands ([Presence]).
   final Presence presence;
@@ -1112,6 +1135,7 @@ class MemberView {
     required this.id,
     required this.name,
     this.avatarHash = '',
+    this.color = '',
     this.buffered = 0,
     this.presence = Presence.watching,
     this.since,
@@ -1136,6 +1160,7 @@ class MemberView {
         'id': id,
         'name': name,
         if (avatarHash.isNotEmpty) 'avatarHash': avatarHash,
+        if (color.isNotEmpty) 'color': color,
         'buffered': buffered,
         'presence': presence.wire,
         if (presence != Presence.watching && since != null) 'since': since!.toUtc().toIso8601String(),
@@ -1157,6 +1182,7 @@ class MemberView {
       id: (json['id'] as String?) ?? '',
       name: (json['name'] as String?) ?? '',
       avatarHash: (json['avatarHash'] as String?) ?? '',
+      color: cleanMemberColor(json['color']),
       buffered: finiteDouble(json['buffered'], 'buffered'),
       presence: presence,
       since: presence == Presence.watching || json['since'] == null ? null : DateTime.tryParse('${json['since']}'),

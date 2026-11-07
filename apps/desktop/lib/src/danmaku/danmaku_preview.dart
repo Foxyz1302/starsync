@@ -91,7 +91,7 @@ class DanmakuPreview {
   DanmakuItem sample(DanmakuKind kind, {bool own = false}) {
     final a = own ? selfAvatarInfo() : _sampleSender();
     final who = a.name;
-    final color = own ? a.color : colorForName(who);
+    final color = a.color;
     return switch (kind) {
       DanmakuKind.chat =>
         DanmakuItem(kind: kind, sender: who, senderColor: color, text: _pick(sampleChat), own: own, avatar: a),

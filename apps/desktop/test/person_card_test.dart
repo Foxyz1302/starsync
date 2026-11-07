@@ -307,6 +307,36 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets("a member's picked colour shows for everyone; without one, the name's", (tester) async {
+    coord.serverState.value = StateBroadcast(
+      eventId: 1,
+      transport: 'held',
+      position: 0,
+      serverTime: DateTime.now().toUtc(),
+      mediaId: 1,
+      members: const [
+        MemberView(id: 'p', name: 'pol', color: '#7e57c2'),
+        MemberView(id: 'b', name: 'Bob'),
+      ],
+    );
+    const purple = Color(0xFF7E57C2);
+    Color colorIn(Finder row) =>
+        tester.widget<StatusAvatar>(find.descendant(of: row, matching: find.byType(StatusAvatar))).info.color;
+    await pump(tester, const Center(child: MembersCard()));
+    expect(colorIn(find.byKey(const ValueKey('member-p'))), purple);
+    expect(colorIn(find.byKey(const ValueKey('member-b'))), colorForName('Bob'));
+    // A chat line by the same member, and the lookup toasts and danmaku
+    // lines use: their colour too.
+    await pump(
+        tester,
+        ActivityRow(
+            item: FeedMessage(actor: 'pol', actorId: 'p', action: 'chat', reason: 'hi', at: DateTime.now().toUtc())));
+    expect(tester.widget<StatusAvatar>(find.byType(StatusAvatar)).info.color, purple);
+    expect(avatarForName('pol', coord, 'p').color, purple);
+    expect(avatarForName('Bob', coord, 'b').color, colorForName('Bob'));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets("from a danmaku line: a click on its sender, the controls still get it", (tester) async {
     party();
     final lines = DanmakuController();

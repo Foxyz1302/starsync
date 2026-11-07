@@ -80,6 +80,8 @@ class EngineMember {
   /// Picture bytes, served at `/a/...`; only [avatarHash] is broadcast.
   Uint8List? avatarBytes;
   String avatarHash = '';
+  /// The colour it picked (`#rrggbb`, [cleanMemberColor]); '' for none.
+  String color = '';
   double buffered = 0;
   /// Last reported Jellyfin access by ServerId (`report.jf`).
   Map<String, bool> jf = const {};
@@ -130,6 +132,7 @@ class EngineMember {
     required this.token,
     required this.name,
     String avatar = '',
+    String color = '',
     required DateTime now,
     this.client = '',
     this.seq = 0,
@@ -139,6 +142,15 @@ class EngineMember {
   })  : lastSeen = now,
         since = now {
     setAvatar(avatar);
+    setColor(color);
+  }
+
+  /// Sets the colour (malformed: none). Returns whether it changed.
+  bool setColor(String value) {
+    final c = cleanMemberColor(value);
+    if (c == color) return false;
+    color = c;
+    return true;
   }
 
   /// Sets the picture from base64 (empty or undecodable: none). Returns
@@ -164,6 +176,7 @@ class EngineMember {
         id: id,
         name: name,
         avatarHash: avatarHash,
+        color: color,
         buffered: buffered,
         presence: presence,
         since: presence == Presence.watching ? null : since,
@@ -524,13 +537,19 @@ class SyncEngine {
   /// A new member ([client] empty: one that cannot be taken over). With
   /// media up it loads first ([EngineMember.loading]).
   String applyJoin(String token, String name, String avatar,
-      {String client = '', int seq = 0, String app = '', String platform = '', ClientCaps caps = const ClientCaps()}) {
+      {String color = '',
+      String client = '',
+      int seq = 0,
+      String app = '',
+      String platform = '',
+      ClientCaps caps = const ClientCaps()}) {
     final id = 'm${_nextId++}';
     final m = members[token] = EngineMember(
         id: id,
         token: token,
         name: name,
         avatar: avatar,
+        color: color,
         now: now,
         client: client,
         seq: seq,
@@ -641,15 +660,18 @@ class SyncEngine {
       ..skipped = false;
   }
 
-  /// Name and/or picture change ([ProfileIntent]); null leaves it, an
-  /// empty [avatar] removes the picture. [name] is already cleaned.
-  void applyProfile(String token, {String? name, String? avatar}) {
+  /// Name, picture and/or colour change ([ProfileIntent]); null leaves
+  /// it, an empty [avatar] removes the picture, an empty or malformed
+  /// [color] the colour. [name] is already cleaned. A colour change shows
+  /// in the state only (no feed line).
+  void applyProfile(String token, {String? name, String? avatar, String? color}) {
     final member = members[token];
     if (member == null) return;
     _seen(member);
     final oldName = member.name;
     final renamed = name != null && name != oldName;
     if (renamed) member.name = name;
+    if (color != null) member.setColor(color);
     final pictured = avatar != null && member.setAvatar(avatar);
     if (renamed) {
       feed.add(FeedMessage(

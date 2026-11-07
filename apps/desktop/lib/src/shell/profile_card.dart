@@ -12,9 +12,9 @@ import 'motion.dart';
 import 'picture_picker.dart';
 import 'settings_tab.dart' show SettingsSection;
 
-/// Your profile, from your avatar in the strip: name and picture apply
-/// live (pushed to the server while in one), colour is yours only; links
-/// to the app-wide pages.
+/// Your profile, from your avatar in the strip: name, picture and colour
+/// apply live (pushed to the server while in one); links to the app-wide
+/// pages.
 Future<void> showProfileCard(
   BuildContext context, {
   required ValueChanged<SettingsSection> onOpenSettings,
@@ -157,8 +157,8 @@ class _ProfileCardState extends State<ProfileCard> {
                 padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
                 child: Text(
                   online
-                      ? 'Name and picture update for everyone in the server right away. Colour is yours only.'
-                      : 'Others see your name and picture when they join you or you join them. Colour is yours only.',
+                      ? 'Name, picture and colour update for everyone in the server right away.'
+                      : 'Others see your name, picture and colour when they join you or you join them.',
                   style: small,
                 ),
               ),

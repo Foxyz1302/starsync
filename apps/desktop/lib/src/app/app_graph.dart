@@ -179,8 +179,8 @@ class AppGraph {
     // to whichever server this app is in.
     final profile = Profile.instance
       ..forms = forms
-      ..push = ({String? name, String? avatar}) {
-        if (navigation.online.peek()) coordinator.updateProfile(name: name, avatar: avatar);
+      ..push = ({String? name, String? avatar, String? color}) {
+        if (navigation.online.peek()) coordinator.updateProfile(name: name, avatar: avatar, color: color);
       };
     final updates = UpdateController.instance;
     final whatsNew = WhatsNew(store: SettingsWhatsNewStore(settings));

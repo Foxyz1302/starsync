@@ -90,7 +90,7 @@ yet; the restructure step named next to them does.
 ## Client to server
 
 ```
-{"t":"hello","protoMin":17,"proto":17,"secret":"","user":{"name":"","avatar":""},
+{"t":"hello","protoMin":17,"proto":17,"secret":"","user":{"name":"","avatar":"","color":"#7e57c2"},
  "media":{},"hostKey":"...","client":"<install id>","seq":7,"app":"1.3.0",
  "platform":"linux","caps":{"source":true,"resolve":true,"jellyfin":true},
  "feedAfter":41}
@@ -110,7 +110,7 @@ yet; the restructure step named next to them does.
 {"t":"chat","text":"..."}
 {"t":"bye"}
 {"t":"nudge","target":"<memberId>"}
-{"t":"profile","name":"...","avatar":"<base64>"}
+{"t":"profile","name":"...","avatar":"<base64>","color":"#7e57c2"}
 {"t":"art","mediaId":2,"poster":"<base64>","banner":"<base64>"}
 {"t":"queue","op":"add"|"move"|"remove"|"play"|"skip"|"cancel",...}   see "Queue"
 ```
@@ -179,12 +179,16 @@ Field notes:
 - `ping.c`: the client's clock in epoch ms; answered with `pong`.
 - `user.avatar`: base64 PNG, at most 256 KiB of characters (else
   `rejected: ...`). `name` is trimmed, empty becomes `?`, cut to 32
-  characters. A takeover applies the hello's name and picture like a
-  `profile`.
-- `profile`: changes this member's name and/or picture mid-session. A field
-  that is absent (or null) stays as it is; `avatar: ""` removes the picture.
-  Same rules as `hello.user`; a too large avatar gets `err`
+  characters. `user.color` (optional): the colour picked in the profile,
+  `#` and six hex digits; the server keeps it in lower case, and anything
+  else (absent, malformed) counts as none. A takeover applies the hello's
+  name, picture and colour like a `profile`.
+- `profile`: changes this member's name, picture and/or colour
+  mid-session. A field that is absent (or null) stays as it is;
+  `avatar: ""` removes the picture, `color: ""` (or a malformed colour)
+  the colour. Same rules as `hello.user`; a too large avatar gets `err`
   `rejected: avatar too large` (the socket stays open, nothing changes).
+  A colour change shows in `state` only (no feed line).
 - `art`: pictures of the current media (see "Media art").
 - `chat.text` is cut to 500 characters.
 - `play` / `pause`: the group's wish (`state.wish`), anyone's. A pause
@@ -244,7 +248,7 @@ Field notes:
 {"t":"state","eventId":7,"transport":"playing"|"held"|"finished","position":12.3,
  "serverTime":"<ISO-8601 UTC>","mediaId":1,
  "media":{name,size,duration,url?,jellyfin?,relay?,ref?,swapBy?,art?}|absent,
- "members":[{"id","name","avatarHash"?,"buffered","presence","since"?,"loading"?,
+ "members":[{"id","name","avatarHash"?,"color"?,"buffered","presence","since"?,"loading"?,
    "goneSince"?,"jf"?,"host"?,"error"?,"rate"?,"app"?,"caps"?}],
  "seekBy":"m1","seekSeq":3,"relay":true,"relayNext":true,"queue":[<item>]?,
  "queuePlay":"q3"?,"queuePass":["m2"]?,"wish":"play"|"pause",
@@ -294,10 +298,13 @@ Field notes:
   login), so viewers without access preload it from `/j`. `members[].jf` is the member's last
   `report.jf`, omitted when it never sent one. `members[].avatarHash`
   (omitted when the member has no picture) names the picture's bytes (see
-  "Avatars"). `members[].host` (omitted when false): the member sent the
-  server's `hostKey` (see `hello.hostKey`). `members[].presence`, `since`
-  (ISO, when it began; omitted for `in`), `loading` (omitted when false)
-  and `goneSince` (ISO, only while disconnected): see "Presence".
+  "Avatars"). `members[].color` (omitted when none): the member's
+  `user.color`, `#rrggbb` in lower case; a client shows the member in it,
+  and picks one from the name when it is absent. `members[].host`
+  (omitted when false): the member sent the server's `hostKey` (see
+  `hello.hostKey`). `members[].presence`, `since` (ISO, when it began;
+  omitted for `in`), `loading` (omitted when false) and `goneSince` (ISO,
+  only while disconnected): see "Presence".
   `members[].error` (omitted when
   empty): the member's player cannot open the current media (see
   `report.error`). `members[].rate` (omitted when 0): bytes per second

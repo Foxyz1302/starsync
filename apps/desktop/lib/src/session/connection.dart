@@ -25,6 +25,8 @@ class ConnectParams {
   final String secret;
   final String name;
   final String avatar;
+  /// The profile colour as `#rrggbb` (`hello.user.color`); '' for none.
+  final String color;
   final String mediaPath;
   final String linkUrl;
   /// Sent in hello by the hosting app's own client (see AppConfig.hostKey).
@@ -38,6 +40,7 @@ class ConnectParams {
     required this.secret,
     required this.name,
     this.avatar = '',
+    this.color = '',
     this.mediaPath = '',
     this.linkUrl = '',
     this.hostKey = '',
@@ -50,18 +53,20 @@ class ConnectParams {
         secret: secret,
         name: name,
         avatar: avatar,
+        color: color,
         mediaPath: mediaPath,
         linkUrl: media == null ? linkUrl : '',
         hostKey: hostKey,
         media: media,
       );
 
-  ConnectParams withProfile({String? name, String? avatar}) => ConnectParams(
+  ConnectParams withProfile({String? name, String? avatar, String? color}) => ConnectParams(
         host: host,
         port: port,
         secret: secret,
         name: name ?? this.name,
         avatar: avatar ?? this.avatar,
+        color: color ?? this.color,
         mediaPath: mediaPath,
         linkUrl: linkUrl,
         hostKey: hostKey,
@@ -239,7 +244,7 @@ HelloMessage defaultHello(ConnectParams params, HelloIdentity id) => HelloMessag
       proto: RelayConstants.protoMax,
       protoMin: RelayConstants.protoMin,
       secret: params.secret,
-      user: HelloUser(name: params.name, avatar: params.avatar),
+      user: HelloUser(name: params.name, avatar: params.avatar, color: params.color),
       hostKey: params.hostKey,
       client: id.client,
       seq: id.seq,
@@ -421,10 +426,11 @@ class Connection {
   void sendPresence(PresenceIntent intent) => client.sendPresence(intent);
   void sendNudge(String target) => client.sendNudge(target);
 
-  /// Name and/or picture change for everyone now; reconnects send them too.
-  void updateProfile({String? name, String? avatar}) {
-    _params = _params?.withProfile(name: name, avatar: avatar);
-    client.sendProfile(name: name, avatar: avatar);
+  /// Name, picture and/or colour change for everyone now; reconnects send
+  /// them too.
+  void updateProfile({String? name, String? avatar, String? color}) {
+    _params = _params?.withProfile(name: name, avatar: avatar, color: color);
+    client.sendProfile(name: name, avatar: avatar, color: color);
   }
 
   /// A new epoch: attempts in flight become stale, a scheduled reconnect

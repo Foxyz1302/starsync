@@ -853,6 +853,29 @@ void main() {
       engine.applyProfile('a', avatar: 'not base64!');
       expect(engine.members['a']!.avatarHash, isEmpty);
     });
+
+    test('colour: kept from the join, changed by a profile, a malformed one is none', () {
+      String colorOf(String name) => engine.broadcast().members.firstWhere((m) => m.name == name).color;
+      engine.applyJoin('a', 'alice', '', color: '#7E57C2');
+      engine.applyJoin('b', 'bob', '', color: 'purple');
+      expect(colorOf('alice'), '#7e57c2');
+      expect(colorOf('bob'), '');
+      engine.feed.drain();
+
+      engine.applyProfile('a', name: 'alice');
+      expect(colorOf('alice'), '#7e57c2', reason: 'absent: unchanged');
+      engine.applyProfile('a', color: '#00897b');
+      expect(colorOf('alice'), '#00897b');
+      expect(engine.feed.drain(), isEmpty, reason: 'shows in the state only');
+      engine.applyProfile('a', color: '#00897');
+      expect(colorOf('alice'), '');
+      engine.applyProfile('a', color: '#00897b');
+      engine.applyProfile('a', color: '');
+      expect(colorOf('alice'), '');
+      final back = StateBroadcast.fromJson(
+          Map<String, Object?>.from(jsonDecode(jsonEncode(engine.broadcast().toJson())) as Map));
+      expect([for (final m in back.members) m.color], ['', '']);
+    });
   });
 
   group('media art', () {

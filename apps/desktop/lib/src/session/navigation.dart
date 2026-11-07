@@ -136,6 +136,7 @@ class Navigation {
         secret: '',
         name: name.isEmpty ? 'Me' : name,
         avatar: _me.avatarBase64(),
+        color: _me.colorWire(),
         hostKey: yourServer.hostKey,
       ));
       if (op != _op) return false;

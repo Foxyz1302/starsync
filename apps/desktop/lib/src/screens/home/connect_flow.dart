@@ -68,9 +68,10 @@ class ConnectFlow extends ChangeNotifier {
   }
 
   /// Validates and builds the params; throws [FormatException] with a
-  /// user-facing message. [avatar] is the base64 picture (the profile's);
-  /// the name is the form's (the profile's: [submit] has one by then).
-  static ConnectParams buildParams(ConnectForm f, {String avatar = ''}) {
+  /// user-facing message. [avatar] is the base64 picture and [color] the
+  /// `#rrggbb` colour (the profile's); the name is the form's (the
+  /// profile's: [submit] has one by then).
+  static ConnectParams buildParams(ConnectForm f, {String avatar = '', String color = ''}) {
     final port = int.tryParse(f.port.trim());
     if (port == null || port <= 0 || port > 65535) {
       throw const FormatException('port must be 1–65535');
@@ -78,7 +79,8 @@ class ConnectFlow extends ChangeNotifier {
     if (f.host.trim().isEmpty) {
       throw const FormatException('enter the server address');
     }
-    return ConnectParams(host: f.host.trim(), port: port, secret: f.secret, name: f.name.trim(), avatar: avatar);
+    return ConnectParams(
+        host: f.host.trim(), port: port, secret: f.secret, name: f.name.trim(), avatar: avatar, color: color);
   }
 
   /// [edit] fills the card's fields into a copy of the form; the form is
@@ -100,7 +102,7 @@ class ConnectFlow extends ChangeNotifier {
 
     ConnectParams params;
     try {
-      params = buildParams(form, avatar: profile.avatarBase64());
+      params = buildParams(form, avatar: profile.avatarBase64(), color: profile.colorWire());
     } catch (e) {
       if (myAttempt != _attempt) return;
       busy = false;

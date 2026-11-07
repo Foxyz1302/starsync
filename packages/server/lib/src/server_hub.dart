@@ -883,7 +883,7 @@ void mountSyncRoute(
               final name = intent.name == null ? null : cleanMemberName(intent.name!);
               // Chat names the sender by its token's name.
               if (name != null) viewer.name = name;
-              hub.engine.applyProfile(token, name: name, avatar: avatar);
+              hub.engine.applyProfile(token, name: name, avatar: avatar, color: intent.color);
               hub.changed();
             case 'art':
               if (token == null) return;
@@ -1058,7 +1058,7 @@ void mountSyncRoute(
             seq: hello.seq, app: hello.app, platform: hello.platform, caps: hello.caps);
         final name = cleanMemberName(hello.user.name);
         session.tokens[known.token]?.name = name;
-        hub.engine.applyProfile(known.token, name: name, avatar: hello.user.avatar);
+        hub.engine.applyProfile(known.token, name: name, avatar: hello.user.avatar, color: hello.user.color);
         _hubLog.info('${back ? 'return' : 'takeover'} ${known.name} ($memberId), $about');
       } else {
         try {
@@ -1069,6 +1069,7 @@ void mountSyncRoute(
           return;
         }
         memberId = hub.engine.applyJoin(token, session.tokens[token]!.name, hello.user.avatar,
+            color: hello.user.color,
             client: hello.client, seq: hello.seq, app: hello.app, platform: hello.platform, caps: hello.caps);
         resumed = false;
         hub.sockets[token] = ws;

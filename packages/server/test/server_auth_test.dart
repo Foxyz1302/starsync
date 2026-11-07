@@ -418,5 +418,72 @@ void main() {
         } catch (_) {}
       }
     });
+
+    test('profile colour: hello carries it, a change reaches everyone, a bad one is dropped', () async {
+      final seen = <Map<String, Object?>>[];
+      final channels = <WebSocketChannel>[];
+      final subs = <StreamSubscription<dynamic>>[];
+      Future<Map<String, Object?>> waitFor(bool Function(Map<String, Object?>) test) async {
+        final deadline = DateTime.now().add(const Duration(seconds: 5));
+        while (DateTime.now().isBefore(deadline)) {
+          for (final m in seen) {
+            if (test(m)) return m;
+          }
+          await Future.delayed(const Duration(milliseconds: 20));
+        }
+        fail('timed out; got $seen');
+      }
+
+      /// A hello with `user` as raw JSON (a bad colour must reach the server).
+      WebSocketChannel open(Map<String, Object?> user, {bool watch = false}) {
+        final ch = WebSocketChannel.connect(Uri.parse('ws://127.0.0.1:${server.boundPort}/sync'));
+        channels.add(ch);
+        subs.add(ch.stream.listen((m) {
+          if (watch) seen.add(Map<String, Object?>.from(jsonDecode('$m') as Map));
+        }));
+        final hello = HelloMessage(secret: 'shh', user: const HelloUser(name: '')).toJson()..['user'] = user;
+        ch.sink.add(jsonEncode(hello));
+        return ch;
+      }
+
+      /// [name]'s `members[].color` in a state frame ('' when absent);
+      /// null when it is not one or [name] is not in it.
+      Object? colorOf(Map<String, Object?> frame, String name) {
+        if (frame['t'] != 'state') return null;
+        for (final m in (frame['members'] as List? ?? const [])) {
+          if ((m as Map)['name'] == name) return m['color'] ?? '';
+        }
+        return null;
+      }
+
+      try {
+        // Everything as Alice's app gets it.
+        open({'name': 'alice', 'avatar': ''}, watch: true);
+        await waitFor((m) => m['t'] == 'welcome');
+        final bob = open({'name': 'bob', 'avatar': '', 'color': '#7E57C2'});
+        await waitFor((m) => colorOf(m, 'bob') == '#7e57c2');
+        // A hello with a malformed colour: none.
+        open({'name': 'cleo', 'avatar': '', 'color': 'purple'});
+        await waitFor((m) => colorOf(m, 'cleo') == '');
+
+        // A live change reaches the others.
+        bob.sink.add(jsonEncode(const ProfileIntent(color: '#00897b').toJson()));
+        await waitFor((m) => colorOf(m, 'bob') == '#00897b');
+        // Not `#rrggbb`: counts as none.
+        bob.sink.add(jsonEncode({'t': 'profile', 'color': '#12345g'}));
+        await waitFor((m) => colorOf(m, 'bob') == '');
+        bob.sink.add(jsonEncode(const ProfileIntent(color: '#7e57c2').toJson()));
+        await waitFor((m) => colorOf(m, 'bob') == '#7e57c2');
+      } finally {
+        for (final s in subs) {
+          await s.cancel();
+        }
+        for (final ch in channels) {
+          try {
+            await ch.sink.close();
+          } catch (_) {}
+        }
+      }
+    });
   });
 }

@@ -1348,10 +1348,11 @@ class SessionCoordinator {
     connection.sendChat(text);
   }
 
-  /// Name and/or picture (base64 PNG, empty removes it) change for
-  /// everyone now; a later fresh join sends them too.
-  void updateProfile({String? name, String? avatar}) {
-    connection.updateProfile(name: name, avatar: avatar);
+  /// Name, picture (base64 PNG, empty removes it) and/or colour
+  /// (`#rrggbb`) change for everyone now; a later fresh join sends them
+  /// too.
+  void updateProfile({String? name, String? avatar, String? color}) {
+    connection.updateProfile(name: name, avatar: avatar, color: color);
   }
 
   /// Sets [memberId] out (anyone, the host included), self when null.

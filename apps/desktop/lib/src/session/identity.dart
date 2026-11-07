@@ -7,7 +7,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:signals/signals_flutter.dart';
-import 'package:sync_relay_core/core.dart' show validClientId;
+import 'package:sync_relay_core/core.dart' show cleanMemberColor, validClientId;
 
 import '../state/connect_prefs.dart';
 import '../state/settings.dart' show settingsBoxName;
@@ -89,6 +89,16 @@ const profileColors = <Color>[
   Colors.blueGrey,
 ];
 
+/// [c] as sent in hello and profile updates: `#rrggbb` (no alpha).
+String colorToWire(Color c) => '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+
+/// A member's colour from the wire (`members[].color`); null when it has
+/// none or it is not `#rrggbb`.
+Color? colorFromWire(String wire) {
+  final c = cleanMemberColor(wire);
+  return c.isEmpty ? null : Color(0xFF000000 | int.parse(c.substring(1), radix: 16));
+}
+
 /// A name to offer someone who has none yet: the computer's user name
 /// (`USER`, `USERNAME` on Windows), first letter capitalised; '' when
 /// there is none. [env] stands in for the environment in tests.
@@ -103,9 +113,10 @@ String suggestedName([Map<String, String>? env]) {
 const _keyPicture = 'avatarPng';
 const _keyColor = 'profileColor';
 
-/// Sends a mid-session name/picture change (null = unchanged, empty
-/// avatar = removed). Swappable so tests can watch it.
-typedef ProfilePush = void Function({String? name, String? avatar});
+/// Sends a mid-session name/picture/colour change (null = unchanged,
+/// empty avatar = removed, colour as `#rrggbb`). Swappable so tests can
+/// watch it.
+typedef ProfilePush = void Function({String? name, String? avatar, String? color});
 
 /// Display name, picture and colour of this app's user. Backed by the
 /// connect form ([forms]: the name) and the connect-form box (the cropped
@@ -121,7 +132,7 @@ class Profile {
   final picture = signal<Uint8List?>(null);
   final color = signal<Color>(profileColors.first);
   final error = signal<String?>(null);
-  ProfilePush push = ({String? name, String? avatar}) {};
+  ProfilePush push = ({String? name, String? avatar, String? color}) {};
   ConnectStore forms = ConnectStore();
   bool _loaded = false;
   Timer? _nameTimer;
@@ -164,6 +175,9 @@ class Profile {
     return png == null ? '' : avatarWireBase64(png);
   }
 
+  /// The colour as sent in hello and profile updates (`#rrggbb`).
+  String colorWire() => colorToWire(color.peek());
+
   void setName(String value) {
     final v = value.trim();
     if (v.isEmpty || v == name.peek()) return;
@@ -188,6 +202,7 @@ class Profile {
 
   Future<void> setColor(Color c) async {
     color.value = c;
+    push(color: colorToWire(c));
     await _save();
   }
 

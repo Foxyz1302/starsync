@@ -104,7 +104,12 @@ class AvatarInfo {
   bool get gone => activity == AvatarActivity.reconnecting;
 }
 
-/// Stable colour for someone else (colours are not on the wire).
+/// [m]'s colour: the one they picked (`members[].color`), else one from
+/// their name ([colorForName]).
+Color memberColor(MemberView m) => colorFromWire(m.color) ?? colorForName(m.name);
+
+/// Stable colour for someone without a picked one (a client that sent
+/// none, a line whose sender left, sample names).
 Color colorForName(String name) {
   const palette = [
     Colors.teal,
@@ -189,7 +194,7 @@ AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator 
   return AvatarInfo(
     id: m.id,
     name: m.name,
-    color: self ? Profile.instance.color.value : colorForName(m.name),
+    color: self ? Profile.instance.color.value : memberColor(m),
     image: memberAvatarImage(m, coord),
     relaying: relay != null && relay.source.isNotEmpty && relay.source == m.id,
     presence: m.presence,

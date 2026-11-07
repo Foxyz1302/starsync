@@ -334,11 +334,11 @@ class SyncClient {
     _send(ChatMessage(text: clean).toJson());
   }
 
-  /// Mid-session name/picture change; null leaves it, an empty [avatar]
-  /// (base64 PNG) removes the picture.
-  void sendProfile({String? name, String? avatar}) {
-    if (name == null && avatar == null) return;
-    _send(ProfileIntent(name: name, avatar: avatar).toJson());
+  /// Mid-session name/picture/colour change; null leaves it, an empty
+  /// [avatar] (base64 PNG) removes the picture, [color] is `#rrggbb`.
+  void sendProfile({String? name, String? avatar, String? color}) {
+    if (name == null && avatar == null && color == null) return;
+    _send(ProfileIntent(name: name, avatar: avatar, color: color).toJson());
   }
 
   /// Art for media [mediaId] (base64 picture bytes; null = none).

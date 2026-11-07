@@ -2285,8 +2285,11 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   circles overlap and rounded squares sit side by side,
   `overlapAvatars`). `memberAvatarImage` is the one picture lookup: yours from the
   profile, anyone else's from `coordinator.avatars` by `avatarHash`.
-  Colours are local: yours is picked in the profile, others' come from
-  their name. A toast's or danmaku line's avatar (`LineAvatar`) is
+  Colours travel with the profile (`members[].color`): yours from the
+  profile at once, anyone else's from the state (`memberColor`), from
+  their name (`colorForName`) when they sent none;
+  `memberAvatarInfo` carries it to the letter avatars, chat lines,
+  toasts, danmaku, people cards, the members card and the pill. A toast's or danmaku line's avatar (`LineAvatar`) is
   looked up again while its picture is missing, so a picture that lands
   after the line (fetched from `/a/` once the member is seen; a failed
   fetch retries) still shows on it.
@@ -2354,8 +2357,10 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   of the whole square.
   `Profile` stores the name in the connect form and the PNG and colour in
   the `connect_form` box (an old picture path is shrunk once and kept as
-  bytes). Online, a name change (once typing settles) or picture change
-  goes out through `Profile.push` (`coordinator.updateProfile`).
+  bytes). Joins send the picture and the colour (`#rrggbb`,
+  `colorToWire`) in hello; online, a name change (once typing settles),
+  picture or colour change goes out through `Profile.push`
+  (`coordinator.updateProfile`).
 - **Welcome** (`welcome.dart`): alone on your server the Library opens
   with `WelcomeBand` over the source switch, only for newcomers (no
   Jellyfin account, no recent server, not dismissed with "Don't show
@@ -3666,6 +3671,9 @@ leaves full).
   the bytes of current members in memory and serves them at `/a/...`, which
   clients fetch once per hash (`AvatarCache`). Uplink per broadcast stays
   small whatever the picture size (cap 256 KiB base64 per avatar).
+- Profile colours on the wire as `#rrggbb` (`members[].color`), not an
+  index into the picker's palette: the palette can change without
+  another version showing someone in a colour they did not pick.
 - Media art the same way (`/i/...`, `ArtCache` as `coordinator.art`): the
   member who swapped the media in fetches poster and banner once the state
   shows its swap landed (`media_art.dart`: Jellyfin series/item images with

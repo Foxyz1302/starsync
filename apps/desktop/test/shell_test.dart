@@ -377,7 +377,7 @@ void main() {
     final pushed = <String?>[];
     final p = Profile.instance;
     final before = p.push;
-    p.push = ({String? name, String? avatar}) => pushed.add(name);
+    p.push = ({String? name, String? avatar, String? color}) => pushed.add(name);
     addTearDown(() => p.push = before);
     session.forms.form.name = 'Old';
     p.name.value = 'Old';

@@ -328,8 +328,7 @@ class _YouPanelState extends State<YouPanel> {
                       children: [
                         Expanded(
                           child: Text(
-                              'Others see your name and picture; the colour is yours only. Click the picture to '
-                              'change it.',
+                              'Others see your name, picture and colour. Click the picture to change it.',
                               style: small),
                         ),
                         if (png != null)

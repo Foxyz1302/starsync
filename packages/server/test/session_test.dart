@@ -82,6 +82,23 @@ void main() {
       final p = ProfileIntent.fromJson({'t': 'profile', 'avatar': ''});
       expect(p.name, isNull);
       expect(p.avatar, '');
+      expect(p.color, isNull);
+    });
+
+    test('profile colour: `#rrggbb` round-trips, anything else is none', () {
+      expect(const HelloUser(name: 'a').toJson().containsKey('color'), isFalse);
+      expect(HelloUser.fromJson(const HelloUser(name: 'a', color: '#7e57c2').toJson()).color, '#7e57c2');
+      expect(HelloUser.fromJson({'name': 'a', 'color': '#7E57C2'}).color, '#7e57c2');
+      for (final bad in ['purple', '#7e57c', '#7e57c2ff', '7e57c2', 42, '#zzzzzz']) {
+        expect(HelloUser.fromJson({'name': 'a', 'color': bad}).color, '', reason: '$bad');
+        expect(ProfileIntent.fromJson({'t': 'profile', 'color': bad}).color, '', reason: '$bad');
+        expect(MemberView.fromJson({'id': 'm1', 'name': 'a', 'color': bad}).color, '', reason: '$bad');
+      }
+      expect(const ProfileIntent(color: '#00897b').toJson(), {'t': 'profile', 'color': '#00897b'});
+      const v = MemberView(id: 'm1', name: 'a', color: '#7e57c2');
+      expect(v.toJson()['color'], '#7e57c2');
+      expect(MemberView.fromJson(Map<String, Object?>.from(v.toJson())).color, '#7e57c2');
+      expect(const MemberView(id: 'm1', name: 'a').toJson().containsKey('color'), isFalse);
     });
 
     test('relayed media', () {
