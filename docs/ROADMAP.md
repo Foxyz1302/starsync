@@ -303,6 +303,13 @@ dropped (DEVELOPMENT "The 1.4 bridge").
    Jellyfin/Files) opened from anywhere a show appears, e.g. a Schedule
    entry. With the account: track progress on AniList, and carry over
    what Jellyfin already has as watched.
+   **The Schedule without a request service:** today the AniList↔Jellyfin
+   link ("on Jellyfin", watched marks, Put it up) comes from AnimeFlow's
+   `/library`. Match AniList shows to Jellyfin series directly instead
+   (Jellyfin's AniList/TVDB provider ids, the library matcher's titles as
+   fallback), "followed" being the shows on Jellyfin (and the AniList list
+   once signed in). AnimeFlow or Sonarr then add only download status and
+   requests, through the Requests spot below.
    **Requests, with the browser:** one "Requests" spot of the user's own
    in Settings → Library & accounts (None / AnimeFlow / Sonarr). AnimeFlow
    needs only its address and which Jellyfin account it rides on (it takes
