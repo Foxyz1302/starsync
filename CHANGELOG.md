@@ -41,6 +41,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - Updates and the Schedule now come from example.org (the old update address stopped working)
 - Screenshots answer at once: S dims the picture with "Capturing…" and Shift+S shows a small note until the picture is in, keys pressed meanwhile no longer reach the player (Esc gives the screenshot up), and the next screenshots of the same video come much faster
 - Your picture: a click opens Starsync's own picker, not a file window. Paste a picture (Ctrl+V or Paste), drop one on it, or Browse… for a file; the crop and its previews follow your avatar shape, and a small camera badge shows where to add one
+- The Schedule opens at once on the last one you saw and updates in the background, saying so (and from when, if it is old)
 - Linux: animations, scrolling and dragging follow your monitor's refresh rate (for example 75 Hz) instead of a fixed 60, and dragging rows with a fast mouse no longer stutters
 - Play and pause are everyone's: one press of Space or the play button plays or pauses for the whole group, and nobody presses "ready" any more (the ready count, Force ready and Mark everyone ready are gone). A new video waits for one Play, and putting something up keeps it playing or paused
 - Nothing starts by itself because time passed: the group waits for a video that is still loading until it is there or someone goes on without it

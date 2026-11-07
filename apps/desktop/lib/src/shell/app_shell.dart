@@ -974,6 +974,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
         ),
       ShellTab.schedule => SchedulePage(
           alone: alone,
+          repository: _graph.schedule,
           onPutUp: _putUp,
           onAddToQueue: online ? coord.queue.add : null,
           onToast: (text) => coord.notify(ScheduleResult(text)),

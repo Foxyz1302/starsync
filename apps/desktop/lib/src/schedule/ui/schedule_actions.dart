@@ -6,6 +6,7 @@ import '../../screens/home/picked_media.dart';
 import '../anilist.dart';
 import '../animeflow.dart';
 import '../schedule_model.dart';
+import '../schedule_store.dart';
 
 // What the Schedule page's buttons do beyond one client call: friendly
 // AnimeFlow errors, finding AnimeFlow's own numbering of an airing, the
@@ -105,6 +106,28 @@ JellyfinAccount? jellyfinAccountFor(JellyfinAccounts accounts, AnimeFlowClient? 
     if (a != null) return a;
   }
   return accounts.defaultAccount;
+}
+
+/// The Schedule's data for [accounts]: AniList, AnimeFlow with the token
+/// of the linked account on its domain, that account's Jellyfin episodes,
+/// and the last schedule kept per account and AnimeFlow address ([store]:
+/// on disk too). The app keeps one for its whole run (`AppGraph.schedule`),
+/// so the clients' own caches (AniList's pages, AnimeFlow's ETags and
+/// /me) last across visits of the tab.
+ScheduleRepository scheduleRepositoryFor(JellyfinAccounts accounts, {ScheduleStore? store}) {
+  final flow = AnimeFlowClient.fromAccounts(accounts);
+  return ScheduleRepository(
+    aniList: AniListClient(),
+    animeFlow: flow,
+    jellyfinEpisodes: (id) => jellyfinScheduleEpisodes(accounts, flow, id),
+    store: store,
+    key: () async {
+      await accounts.ensureLoaded(validate: false);
+      final token = AnimeFlowClient.tokenFor(accounts.accounts, flow.baseUrl);
+      final a = accounts.accounts.where((a) => token != null && a.token == token).firstOrNull;
+      return scheduleKeyFor(flow.baseUrl, serverId: a?.serverId, userId: a?.userId);
+    },
+  );
 }
 
 /// The episodes Jellyfin has of [jellyfinSeriesId] (numbers, premiere

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,6 +9,7 @@ import 'package:starsync/src/jellyfin/accounts.dart';
 import 'package:starsync/src/schedule/anilist.dart';
 import 'package:starsync/src/schedule/animeflow.dart';
 import 'package:starsync/src/schedule/schedule_model.dart';
+import 'package:starsync/src/schedule/schedule_store.dart';
 import 'package:starsync/src/schedule/ui/schedule_actions.dart';
 import 'package:starsync/src/schedule/ui/schedule_page.dart';
 import 'package:starsync/src/screens/home/picked_media.dart';
@@ -22,13 +24,22 @@ final _graph = testGraph();
 /// Serves [snap] without any network; [animeFlow] is a real client (over
 /// the fake server) for the page's actions.
 class FakeRepo extends ScheduleRepository {
-  FakeRepo(this.snap, {super.animeFlow}) : super(aniList: AniListClient(cacheDir: () async => null));
+  FakeRepo(this.snap, {super.animeFlow, this.keptSnap, this.gate})
+      : super(aniList: AniListClient(cacheDir: () async => null));
   ScheduleSnapshot Function() snap;
   final forced = <bool>[];
+
+  /// What [kept] has; [gate]: loads wait for it.
+  KeptSchedule? keptSnap;
+  Completer<void>? gate;
+
+  @override
+  Future<KeptSchedule?> kept() async => keptSnap;
 
   @override
   Future<ScheduleSnapshot> load({DateTime? from, DateTime? to, bool force = false}) async {
     forced.add(force);
+    if (gate case final g?) await g.future;
     return snap();
   }
 }
@@ -239,13 +250,15 @@ void main() {
     ScheduleSnapshot Function()? snap,
     bool alone = false,
     JellyfinAccounts? accounts,
+    KeptSchedule? kept,
+    Completer<void>? gate,
   }) async {
     toasts.clear();
     putUp.clear();
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    final repo = FakeRepo(snap ?? snapshot, animeFlow: flow);
+    final repo = FakeRepo(snap ?? snapshot, animeFlow: flow, keptSnap: kept, gate: gate);
     await tester.pumpWidget(scoped(_graph, 
       MaterialApp(
         theme: ThemeData.dark(),
@@ -573,6 +586,65 @@ void main() {
     expect(find.text('Request series'), findsNothing);
     final b = tester.widget<ButtonStyleButton>(find.byKey(const ValueKey('schedule-requests')));
     expect(b.onPressed, isNull);
+    await done(tester);
+  });
+
+  double boardOffset(WidgetTester tester) =>
+      tester.widget<ListView>(find.byKey(const ValueKey('schedule-board'))).controller!.offset;
+
+  testWidgets('opens on the kept schedule at once, says it updates, swaps the fresh one in place',
+      (tester) async {
+    final gate = Completer<void>();
+    await pumpPage(
+      tester,
+      kept: (snapshot: snapshot(list: entries().take(1).toList()), savedAt: DateTime.now()),
+      gate: gate,
+    );
+    expect(card(111, 3), findsOneWidget);
+    expect(card(222, 5), findsNothing);
+    expect(find.text('Updating…'), findsOneWidget);
+    final at = boardOffset(tester);
+    expect(at, greaterThan(0), reason: 'opened on today');
+    gate.complete();
+    await io(tester, rounds: 3);
+    expect(find.byKey(const ValueKey('schedule-kept')), findsNothing);
+    expect(card(222, 5), findsOneWidget);
+    expect(boardOffset(tester), at, reason: 'no jump');
+    await done(tester);
+  });
+
+  testWidgets('old kept data says when it is from; a failed update keeps it, saying so', (tester) async {
+    final gate = Completer<void>();
+    final evening = DateTime(now.year, now.month, now.day - 1, 21, 40);
+    await pumpPage(
+      tester,
+      kept: (snapshot: snapshot(), savedAt: evening),
+      snap: () => snapshot(aniListError: 'AniList unreachable: boom'),
+      gate: gate,
+    );
+    expect(find.text('Schedule from yesterday 21:40 · updating…'), findsOneWidget);
+    gate.complete();
+    await io(tester, rounds: 3);
+    expect(find.text("Couldn't update · schedule from yesterday 21:40"), findsOneWidget);
+    expect(find.byKey(const ValueKey('schedule-error')), findsNothing);
+    expect(card(111, 3), findsOneWidget);
+    await done(tester);
+  });
+
+  testWidgets('a kept schedule of another week keeps the same days on screen', (tester) async {
+    final gate = Completer<void>();
+    final w = ScheduleRepository.defaultWindow(now);
+    final earlier = ScheduleSnapshot(
+      from: DateTime(w.from.year, w.from.month, w.from.day - 7),
+      to: DateTime(w.to.year, w.to.month, w.to.day - 7),
+      entries: entries(),
+      me: owner,
+    );
+    await pumpPage(tester, kept: (snapshot: earlier, savedAt: DateTime.now()), gate: gate);
+    final at = boardOffset(tester);
+    gate.complete();
+    await io(tester, rounds: 3);
+    expect(boardOffset(tester), closeTo(at - 7 * (SchedulePage.columnWidth + SchedulePage.columnGap), 0.5));
     await done(tester);
   });
 

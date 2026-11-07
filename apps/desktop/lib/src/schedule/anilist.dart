@@ -74,6 +74,23 @@ class Airing {
     );
   }
 
+  /// This airing in AniList's row shape: [fromJson] reads it back (the
+  /// kept schedule, `schedule_store.dart`).
+  Map<String, Object?> toJson() => {
+        'airingAt': airingAt.millisecondsSinceEpoch ~/ 1000,
+        'episode': episode,
+        'media': {
+          'id': anilistId,
+          'title': {'romaji': titleRomaji, 'english': title},
+          'coverImage': {
+            'large': ?cover,
+            if (color case final c?) 'color': '#${(c.toARGB32() & 0xffffff).toRadixString(16).padLeft(6, '0')}',
+          },
+          'bannerImage': ?banner,
+          'popularity': popularity,
+        },
+      };
+
   @override
   String toString() => 'Airing($anilistId "$title" ep $episode @ $airingAt)';
 }

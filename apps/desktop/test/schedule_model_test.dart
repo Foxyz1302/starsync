@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:starsync/src/schedule/anilist.dart';
 import 'package:starsync/src/schedule/animeflow.dart';
 import 'package:starsync/src/schedule/schedule_model.dart';
+import 'package:starsync/src/schedule/schedule_store.dart';
 
 import 'schedule_fake_server.dart';
 
@@ -379,6 +380,39 @@ void main() {
       expect(stale.aniListStaleSince, isNotNull);
       expect(stale.entries, hasLength(3));
       expect(stale.entries.first.status, ScheduleStatus.available);
+    });
+
+    test('the last whole schedule is kept per account, on disk too', () async {
+      final kept = Directory('${cache.path}/kept');
+      ScheduleRepository keeping({String key = 'a'}) => ScheduleRepository(
+            aniList: AniListClient(url: '${server.url}/anilist', cacheDir: () async => cache, now: () => now),
+            animeFlow: AnimeFlowClient(baseUrl: '${server.url}/flow', token: 'tok', now: () => now),
+            store: ScheduleStore(dir: () async => kept),
+            key: () async => key,
+            now: () => now,
+          );
+      final r = keeping();
+      expect(await r.kept(), isNull);
+      await r.load();
+      await r.saved;
+      expect((await r.kept())!.savedAt, now);
+      // A new run: from disk, for that account only.
+      final again = await keeping().kept();
+      expect(again!.snapshot.entries.map((e) => (e.airing.anilistId, e.status)), [
+        (100, ScheduleStatus.available),
+        (901, ScheduleStatus.notTracked),
+        (900, ScheduleStatus.notTracked),
+      ]);
+      expect(again.snapshot.me?.name, 'Me');
+      expect(await keeping(key: 'b').kept(), isNull);
+      // AnimeFlow failing, or AniList's stale fallback: what is kept stays.
+      flowStatus = 503;
+      await r.load(force: true);
+      expect((await r.kept())!.snapshot.me?.name, 'Me');
+      flowStatus = 200;
+      aniDown = true;
+      await r.load(force: true);
+      expect((await r.kept())!.snapshot.entries.first.status, ScheduleStatus.available);
     });
   });
 }

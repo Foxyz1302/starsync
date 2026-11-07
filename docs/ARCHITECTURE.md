@@ -2334,7 +2334,21 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   it up resolves the Jellyfin episode (`resolveJellyfinEpisode`:
   AnimeFlow's numbering, else the season and offset, else the air day)
   and goes through the shell's put-up; right-click queues it the same
-  way. Requests and the owner's inbox are in `requests_sheet.dart`. It refreshes every minute; mouse drag and
+  way. Requests and the owner's inbox are in `requests_sheet.dart`. The
+  app keeps one `ScheduleRepository` for its run (`AppGraph.schedule`,
+  `scheduleRepositoryFor`), so the clients' caches (AniList's pages,
+  AnimeFlow's ETags and /me) last across visits, and it keeps the last
+  whole schedule (AniList fresh, AnimeFlow answered or not linked) per
+  account: the AnimeFlow address and the Jellyfin account its token comes
+  from (`scheduleKeyFor`), in memory and on disk in the caches folder
+  (`schedule_store.dart`: the merged entries the page drew, nothing of
+  the clients' own caches; read and written on an isolate). The tab opens
+  on it at once (`kept`) with an "Updating…" pill while a fresh one loads,
+  and amber "Schedule from yesterday 21:40 · updating…" when it is over
+  an hour old or from another day (`keptScheduleIsOld`); the fresh one
+  then swaps in where the board stands (a window that starts on another
+  day is scrolled by as many columns), and a failed load keeps the kept
+  one with "Couldn't update". It refreshes every minute; mouse drag and
   Shift+wheel scroll the board sideways, the plain wheel scrolls a column.
   Settings (`settings_tab.dart`, `SettingsSection`) has a left nav with
   icons (icon chips under 760 px) over pages of rounded Material cards
@@ -2838,8 +2852,8 @@ and `.lock`, by name only, never other apps' boxes there) from the
 documents folder, where `Hive.initFlutter()` kept them up to 1.2.x, into
 `<app support>/hive`. Copied, never moved (1.2.x keeps working), never
 over a file already there. Lines name paths and counts, never contents.
-The caches folder (thumbnails, the AniList schedule) is not copied: it
-refills.
+The caches folder (thumbnails, the AniList schedule, the kept Schedule)
+is not copied: it refills.
 
 **Settings schema** (`state/settings_schema.dart`): the `settings` box
 stores `schemaVersion`; `migrateSettings` (run when `AppSettings` loads)

@@ -10,6 +10,9 @@ import '../platform/desktop/desktop_ports.dart';
 import '../platform/ports/ports.dart';
 import '../schedule/anilist.dart';
 import '../schedule/animeflow.dart';
+import '../schedule/schedule_model.dart' show ScheduleRepository;
+import '../schedule/schedule_store.dart' show ScheduleStore;
+import '../schedule/ui/schedule_actions.dart' show scheduleRepositoryFor;
 import '../screens/home/health_probe.dart';
 import '../session/connection.dart' show Connection;
 import '../session/identity.dart' show ClientIdentity, Profile;
@@ -72,6 +75,11 @@ class AppGraph {
 
   /// Your name, picture and colour.
   final Profile profile;
+
+  /// The Schedule tab's data, made on its first visit and kept for the
+  /// run: its clients' caches and the last schedule (also on disk) last
+  /// across visits.
+  late final ScheduleRepository schedule = scheduleRepositoryFor(coordinator.jellyfin, store: ScheduleStore());
 
   AppGraph._({
     required this.ports,

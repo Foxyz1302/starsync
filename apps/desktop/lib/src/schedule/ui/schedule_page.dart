@@ -10,6 +10,7 @@ import '../../widgets/app_menu.dart';
 import '../anilist.dart';
 import '../animeflow.dart';
 import '../schedule_model.dart';
+import '../schedule_store.dart';
 import 'requests_sheet.dart';
 import 'schedule_actions.dart';
 import 'schedule_card.dart';
@@ -17,11 +18,27 @@ import 'schedule_card.dart';
 // The Schedule tab: one column per day from last week's Monday to four
 // weeks out (AniList), each airing with what AnimeFlow has of it, and the
 // one thing to do about it (put it up, request it; right-click an
-// available one to queue it). Refreshes every minute while visible; ETags
-// keep that cheap. Episodes on Jellyfin show this user's watched state,
-// reloaded after a playback stops (JellyfinAccounts.watched).
+// available one to queue it). Opens on the last schedule loaded for this
+// account (ScheduleRepository.kept, kept on disk too) while a fresh one
+// loads, then swaps it in where the board stands. Refreshes every minute
+// while visible; ETags keep that cheap. Episodes on Jellyfin show this
+// user's watched state, reloaded after a playback stops
+// (JellyfinAccounts.watched).
 
 enum ScheduleFilter { jellyfin, all }
+
+/// When the kept schedule was loaded, for its pill: "21:40" today,
+/// "yesterday 21:40", else "Mon 3 Nov, 21:40".
+String keptWhen(DateTime at, DateTime now) {
+  final a = at.toLocal(), n = now.toLocal();
+  final days = DateTime(n.year, n.month, n.day).difference(DateTime(a.year, a.month, a.day)).inHours / 24;
+  final clock = clockText(a);
+  if (days.round() == 0) return clock;
+  if (days.round() == 1) return 'yesterday $clock';
+  const wd = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return '${wd[a.weekday - 1]} ${a.day} ${mo[a.month - 1]}, $clock';
+}
 
 class SchedulePage extends StatefulWidget {
   /// Nobody else is in the server (D9): available episodes say Play.
@@ -34,7 +51,8 @@ class SchedulePage extends StatefulWidget {
   final AddToQueue? onAddToQueue;
   final void Function(String message) onToast;
 
-  /// Null = the page makes (and closes) its own.
+  /// Null = the page makes (and closes) its own; the app passes its
+  /// long-lived one (`AppGraph.schedule`).
   final ScheduleRepository? repository;
 
   /// Linked Jellyfin servers for Put it up; null = [JellyfinAccounts.instance].
@@ -68,6 +86,13 @@ class _SchedulePageState extends State<SchedulePage> {
   late final bool _ownsRepo;
   ScheduleSnapshot? _snap;
   bool _refreshing = false;
+
+  /// What shows is the kept schedule, loaded then; null once a fresh one
+  /// is in.
+  DateTime? _keptAt;
+
+  /// The fresh load failed: the kept schedule stays, marked.
+  bool _keptFailed = false;
   int _gen = 0;
   Timer? _timer;
   StreamSubscription<String>? _watchedSub;
@@ -101,7 +126,8 @@ class _SchedulePageState extends State<SchedulePage> {
   void initState() {
     super.initState();
     _ownsRepo = widget.repository == null;
-    _repo = widget.repository ?? _ownRepo();
+    _repo = widget.repository ?? scheduleRepositoryFor(_accounts);
+    _showKept();
     _load();
     _timer = Timer.periodic(SchedulePage.refreshEvery, (_) {
       if (mounted && !_refreshing && TickerMode.valuesOf(context).enabled) _load();
@@ -111,15 +137,6 @@ class _SchedulePageState extends State<SchedulePage> {
     _watchedSub = _accounts.watched.listen((_) {
       if (mounted) _load();
     });
-  }
-
-  ScheduleRepository _ownRepo() {
-    final flow = AnimeFlowClient.fromAccounts(_accounts);
-    return ScheduleRepository(
-      aniList: AniListClient(),
-      animeFlow: flow,
-      jellyfinEpisodes: (id) => jellyfinScheduleEpisodes(_accounts, flow, id),
-    );
   }
 
   @override
@@ -138,23 +155,67 @@ class _SchedulePageState extends State<SchedulePage> {
     if (mounted) widget.onToast(s);
   }
 
+  /// The last schedule kept for this account, at once (a fresh load is
+  /// already on its way).
+  Future<void> _showKept() async {
+    final kept = await _repo.kept();
+    if (!mounted || kept == null || _snap != null) return;
+    _show(kept.snapshot, refreshing: true, keptAt: kept.savedAt);
+  }
+
   Future<void> _load({bool force = false}) async {
     final gen = ++_gen;
-    if (_snap != null) setState(() => _refreshing = true);
+    if (_snap != null) {
+      setState(() {
+        _refreshing = true;
+        _keptFailed = false;
+      });
+    }
     final snap = await _repo.load(force: force);
     if (!mounted || gen != _gen) return;
-    final first = _snap == null;
+    if (_keptAt != null && snap.aniListError != null && snap.entries.isEmpty) {
+      // Nothing fresh: the kept schedule stays, saying so.
+      setState(() {
+        _refreshing = false;
+        _keptFailed = true;
+      });
+      return;
+    }
+    _show(snap);
+    await _loadRequests();
+  }
+
+  /// Puts [snap] on the board without a jump: the first one opens on
+  /// today, a later one keeps the days on screen (its window may start
+  /// on another day). [keptAt]: it is the kept schedule, loaded then.
+  void _show(ScheduleSnapshot snap, {bool refreshing = false, DateTime? keptAt}) {
+    final old = _snap;
     setState(() {
       _snap = snap;
-      _refreshing = false;
+      _refreshing = refreshing;
+      _keptAt = keptAt;
+      _keptFailed = false;
       // Without AnimeFlow nothing is "on Jellyfin": start on everything.
-      if (first && !snap.hasAnimeFlow) _filter = ScheduleFilter.all;
+      if (old == null && !snap.hasAnimeFlow) _filter = ScheduleFilter.all;
     });
     if (!_jumped && snap.entries.isNotEmpty) {
       _jumped = true;
       WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToday());
+    } else if (old != null) {
+      final shift = _dayOf(snap.from).difference(_dayOf(old.from)).inHours / 24;
+      if (shift.round() != 0) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!_scroll.hasClients) return;
+          final x = _scroll.offset - shift.round() * (SchedulePage.columnWidth + SchedulePage.columnGap);
+          _scroll.jumpTo(x.clamp(0.0, _scroll.position.maxScrollExtent).toDouble());
+        });
+      }
     }
-    await _loadRequests();
+  }
+
+  static DateTime _dayOf(DateTime t) {
+    final l = t.toLocal();
+    return DateTime(l.year, l.month, l.day);
   }
 
   Future<void> _loadRequests() async {
@@ -458,6 +519,7 @@ class _SchedulePageState extends State<SchedulePage> {
               label: Text(_owner ? 'Requests' : 'My requests'),
             ),
           ),
+          if (_keptAt case final at?) _keptPill(at),
           if (stale != null)
             Pill(
               key: const ValueKey('schedule-stale'),
@@ -475,6 +537,31 @@ class _SchedulePageState extends State<SchedulePage> {
             Pill(key: const ValueKey('schedule-animeflow'), snap!.animeFlowError!, Colors.orangeAccent),
         ],
       ),
+    );
+  }
+
+  /// The kept schedule shows: "Updating…" while the fresh one loads;
+  /// from when, in amber, once it is old ([keptScheduleIsOld]); orange
+  /// when the update failed.
+  Widget _keptPill(DateTime at) {
+    final now = DateTime.now();
+    final old = keptScheduleIsOld(at, now);
+    final (text, color) = _keptFailed
+        ? ("Couldn't update · schedule from ${keptWhen(at, now)}", Colors.orangeAccent)
+        : old
+            ? ('Schedule from ${keptWhen(at, now)} · updating…', Colors.amber)
+            : ('Updating…', Theme.of(context).colorScheme.onSurfaceVariant);
+    return Container(
+      key: const ValueKey('schedule-kept'),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(8)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (_refreshing) ...[
+          SizedBox.square(dimension: 10, child: CircularProgressIndicator(strokeWidth: 1.5, color: color)),
+          const SizedBox(width: 6),
+        ],
+        Text(text, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
+      ]),
     );
   }
 

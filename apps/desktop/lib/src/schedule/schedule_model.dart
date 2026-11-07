@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'anilist.dart';
 import 'animeflow.dart';
+import 'schedule_store.dart';
 
 // The Schedule tab's data: AniList says what airs when, AnimeFlow says
 // what the media server has of it. [matchSchedule] merges the two and
@@ -339,10 +340,19 @@ class ScheduleSnapshot {
   bool get hasAnimeFlow => me != null;
 }
 
-/// Loads AniList and AnimeFlow for a window and merges them.
+/// Loads AniList and AnimeFlow for a window and merges them, and keeps
+/// the last good result per account ([kept]): in memory, and on disk
+/// through [store].
 class ScheduleRepository {
-  ScheduleRepository({required this.aniList, this.animeFlow, this.jellyfinEpisodes, DateTime Function()? now})
-      : _now = now ?? DateTime.now;
+  ScheduleRepository(
+      {required this.aniList,
+      this.animeFlow,
+      this.jellyfinEpisodes,
+      this.store,
+      Future<String> Function()? key,
+      DateTime Function()? now})
+      : _now = now ?? DateTime.now,
+        _key = key ?? (() async => scheduleKeyFor(animeFlow?.baseUrl ?? '-'));
 
   final AniListClient aniList;
   /// Null = not configured (AniList only).
@@ -352,6 +362,50 @@ class ScheduleRepository {
   /// [ScheduleStatus.aired], nothing shows as watched).
   final JellyfinEpisodeLookup? jellyfinEpisodes;
   final DateTime Function() _now;
+
+  /// Keeps the last schedule on disk; null: in memory only.
+  final ScheduleStore? store;
+
+  /// Whose schedule a load is ([scheduleKeyFor]).
+  final Future<String> Function() _key;
+  final _kept = <String, KeptSchedule>{};
+
+  /// The last schedule loaded for the current account (this run's, else
+  /// the one on disk): shown at once while [load] gets a fresh one. Null
+  /// when there is none.
+  Future<KeptSchedule?> kept() async {
+    final String key;
+    try {
+      key = await _key();
+    } catch (_) {
+      return null;
+    }
+    if (_kept[key] case final k?) return k;
+    final read = await store?.read(key);
+    // A load that ended meanwhile wins.
+    if (_kept[key] case final k?) return k;
+    if (read != null) _kept[key] = read;
+    return read;
+  }
+
+  /// Keeps [s] for the current account: in memory at once, on disk in the
+  /// background ([saved]).
+  Future<void> _keep(ScheduleSnapshot s) async {
+    final String key;
+    try {
+      key = await _key();
+    } catch (_) {
+      return;
+    }
+    final at = _now();
+    _kept[key] = (snapshot: s, savedAt: at);
+    if (store case final st?) _saved = st.write(key, s, at);
+  }
+
+  Future<void> _saved = Future.value();
+
+  /// The last disk write is done (tests).
+  Future<void> get saved => _saved;
 
   /// Last week's Monday 00:00 local .. 4 weeks later.
   static ({DateTime from, DateTime to}) defaultWindow(DateTime now) {
@@ -378,7 +432,7 @@ class ScheduleRepository {
         ? await _confirm(
             matchSchedule(airings, schedule: flow.schedule, series: flow.series, library: flow.library, now: now))
         : [for (final a in airings) untrackedEntry(a, now)];
-    return ScheduleSnapshot(
+    final snap = ScheduleSnapshot(
       from: start,
       to: end,
       entries: entries,
@@ -387,6 +441,15 @@ class ScheduleRepository {
       animeFlowException: flow.error is AnimeFlowException ? flow.error as AnimeFlowException : null,
       me: flow.me,
     );
+    // Only a whole answer is worth keeping: AniList's stale fallback is
+    // older than what is kept already, and a failed AnimeFlow would drop
+    // the statuses kept (no account at all is an answer).
+    final flowError = flow.error;
+    final flowAnswered = flowError == null ||
+        (flowError is AnimeFlowException && flowError.code == AnimeFlowErrorCode.missingToken) ||
+        animeFlow == null;
+    if (ani.staleSince == null && flowAnswered) await _keep(snap);
+    return snap;
   }
 
   /// Looks up the episodes of every series an entry on Jellyfin is on
