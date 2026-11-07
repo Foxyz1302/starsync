@@ -268,8 +268,9 @@ SkipOffer? skipOfferAt({
 typedef MediaSpan = ({Duration start, Duration end});
 
 /// What mpv's demuxer cache holds (`demuxer-cache-state`): its
-/// `seekable-ranges` in order, the first from 0 when `bof-cached`, the
-/// last to the end when `eof-cached` ([toEnd]). Empty when it says none.
+/// `seekable-ranges` in order, the first from 0 when `bof-cached` (and it
+/// starts near 0), the last to the end when `eof-cached` ([toEnd]). Empty
+/// when it says none.
 class CachedRanges {
   final List<MediaSpan> ranges;
   final bool toEnd;
@@ -292,6 +293,9 @@ bool _sameSpans(List<MediaSpan> a, List<MediaSpan> b) {
   }
   return true;
 }
+
+// A cached start this close to 0 is the file's start.
+const _bofSlack = Duration(seconds: 2);
 
 /// mpv's `demuxer-cache-state` as read back (JSON) to [CachedRanges],
 /// each end in [step]s (the controls redraw only when a step changes).
@@ -317,7 +321,11 @@ CachedRanges parseCacheState(String json, {Duration step = const Duration(millis
     ..removeWhere((r) => r.end <= r.start)
     ..sort((a, b) => a.start.compareTo(b.start));
   if (ranges.isEmpty) return CachedRanges.none;
-  if (raw['bof-cached'] == true) ranges[0] = (start: Duration.zero, end: ranges[0].end);
+  // A live stream's EDL (a page's video and audio) holds its start too,
+  // but that start is where the player opened it, far from 0.
+  if (raw['bof-cached'] == true && ranges[0].start <= _bofSlack) {
+    ranges[0] = (start: Duration.zero, end: ranges[0].end);
+  }
   return CachedRanges(ranges, raw['eof-cached'] == true);
 }
 

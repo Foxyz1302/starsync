@@ -10,7 +10,9 @@ import 'package:sync_relay_core/core.dart' show JellyfinStreamType, createLogger
 
 import '../playback/playback_controller.dart';
 import '../platform/ports/folder_access.dart';
-import '../platform/ports/player_host.dart' show FrameGrab, HostedPlayer, PlayerHost, PlayerRole, RawFrame;
+import '../playback/live_window.dart' show LiveWindow;
+import '../platform/ports/player_host.dart'
+    show FrameGrab, HostedPlayer, PlayerHost, PlayerRole, RawFrame, liveOpenSegments, liveStartOption;
 import '../platform/ports/shell_port.dart';
 import '../session/app_events.dart';
 import '../session/now_playing.dart';
@@ -102,13 +104,18 @@ class Screenshots {
       if (source == null) return null;
       // At the very end a seek finds nothing: the last moment before it.
       final end = p.state.duration - const Duration(milliseconds: 100);
+      // A live stream (its stream time is known only then): the same
+      // moment of the stream in the hidden player, opened far enough back
+      // for it (a rewind).
+      final start = playback.knownStreamStart;
       final still = await stills.frameAt(
           url: source.url,
           headers: source.headers,
           at: end > Duration.zero && at > end ? end : at,
-          // A live stream (its stream time is known only then): the same
-          // moment of the stream in the hidden player.
-          streamStart: playback.knownStreamStart,
+          streamStart: start,
+          liveSegments: start == null
+              ? liveOpenSegments
+              : playback.liveWindow.segmentsBack(at.inMicroseconds / 1e6 + start, LiveWindow.clock()) ?? liveOpenSegments,
           sid: sub?.id,
           subScale: subScale);
       grab = still?.grab;
@@ -197,17 +204,19 @@ class StillFrames {
   /// both copies are the very same frame. `warm`: the player was already
   /// on that media. Null when it cannot be had in [timeout]. A live
   /// stream ([streamStart]: the session player's `demuxer-start-time`):
-  /// the hidden player opens it at its own place, so it seeks to the same
-  /// moment of the stream, [at] plus [streamStart] in the stream's time.
+  /// the hidden player opens it [liveSegments] behind its edge, at its own
+  /// place, so it seeks to the same moment of the stream, [at] plus
+  /// [streamStart] in the stream's time.
   Future<({FrameGrab grab, bool warm})?> frameAt(
       {required String url,
       Map<String, String> headers = const {},
       required Duration at,
       double? streamStart,
+      int liveSegments = liveOpenSegments,
       int? sid,
       String subScale = '1',
       Duration timeout = const Duration(seconds: 15)}) {
-    final run = _queue.then((_) => _frameAt(url, headers, at, streamStart, sid, subScale, timeout));
+    final run = _queue.then((_) => _frameAt(url, headers, at, streamStart, liveSegments, sid, subScale, timeout));
     _queue = run.then((_) {}, onError: (Object _) {});
     return run;
   }
@@ -216,7 +225,7 @@ class StillFrames {
   double? _ownStart;
 
   Future<({FrameGrab grab, bool warm})?> _frameAt(String url, Map<String, String> headers, Duration at,
-      double? streamStart, int? sid, String subScale, Duration timeout) async {
+      double? streamStart, int liveSegments, int? sid, String subScale, Duration timeout) async {
     _idle?.cancel();
     final source = [url, for (final e in headers.entries) '${e.key}: ${e.value}'].join('\n');
     var p = _player;
@@ -238,7 +247,7 @@ class StillFrames {
           ('hwdec', 'no'),
           ('ytdl', 'no'),
           ('hr-seek', 'yes'),
-          if (streamStart == null) ('start', _secs(at)) else ('demuxer-lavf-o', 'live_start_index=-6'),
+          if (streamStart == null) ('start', _secs(at)) else ('demuxer-lavf-o', liveStartOption(liveSegments)),
           ('sub-ass', 'yes'),
           ('sub-visibility', 'yes'),
         ]) {

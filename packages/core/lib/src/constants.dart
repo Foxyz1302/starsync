@@ -127,6 +127,14 @@ abstract class RelayConstants {
   static const double liveFallbackLagSecs = 10.0;
   static const double liveStallSecs = 3.0;
 
+  /// Rewinding a live stream (ARCHITECTURE "Live streams"): it can be
+  /// rewound when what every member's player reaches spans at least
+  /// [liveMinWindowSecs] before the live point. After a seek the stall
+  /// and clock-jump checks wait [liveSeekSettleSecs] while the players
+  /// open the stream again at the new point.
+  static const double liveMinWindowSecs = 60.0;
+  static const double liveSeekSettleSecs = 15.0;
+
   /// Diagnostics sharing (`/l/...`, ARCHITECTURE "Logging"): a member's
   /// batch carries at most [diagBatchBytes] of lines (gzip on the wire, at
   /// most [diagBatchBytes] compressed and [diagDecodedBytes] unpacked); it

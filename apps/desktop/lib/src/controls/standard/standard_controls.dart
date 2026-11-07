@@ -98,9 +98,21 @@ class StandardControls extends StatelessWidget {
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: SignalBuilder(
-                          // Live: no timeline (LIVE sits where the clock is).
+                          // Live: no timeline (LIVE sits where the clock is),
+                          // or one over what everyone can rewind to, live at
+                          // its right end.
                           builder: (context) => model.live.value
-                              ? SizedBox(height: ChapterSeekBar.defaultHeight * scale)
+                              ? switch (model.liveBar.value) {
+                                  final bar? => ChapterSeekBar(
+                                      key: const ValueKey('live-seek-bar'),
+                                      position: bar.position,
+                                      duration: bar.length,
+                                      cached: bar.cached,
+                                      height: ChapterSeekBar.defaultHeight * scale,
+                                      onSeek: model.seekLive,
+                                    ),
+                                  null => SizedBox(height: ChapterSeekBar.defaultHeight * scale),
+                                }
                               : ChapterSeekBar(
                             position: model.position.value,
                             duration: model.duration.value,
@@ -125,7 +137,10 @@ class StandardControls extends StatelessWidget {
                                   // row has room for it beside the buttons
                                   // and the clock (at its widest).
                                   final d = model.duration.value;
-                                  final clock = _Clock.widthOf(clockText(d, d, model.settings.timeDisplay.value), scale);
+                                  // Live behind live: the badge and Go live.
+                                  final clock = model.liveBehind.value >= LiveBadge.atLive
+                                      ? 170 * scale
+                                      : _Clock.widthOf(clockText(d, d, model.settings.timeDisplay.value), scale);
                                   final slider = volumeSliderRoom(
                                     width: box.maxWidth,
                                     buttons: layout.left.length + layout.right.length - 1,
@@ -256,7 +271,12 @@ class StandardControls extends StatelessWidget {
         return SignalBuilder(
           key: key,
           builder: (context) => m.live.value
-              ? LiveBadge(paused: m.livePaused.value, scale: scale, onBackToLive: m.togglePlay)
+              ? LiveBadge(
+                  paused: m.livePaused.value,
+                  behind: m.liveBehind.value,
+                  scale: scale,
+                  onBackToLive: m.togglePlay,
+                  onGoLive: m.goLive)
               : _Clock(
             text: clockText(m.position.value, m.duration.value, m.settings.timeDisplay.value),
             tooltip: controlTooltip(c, s),

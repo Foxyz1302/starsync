@@ -85,6 +85,10 @@ void main() {
           '"bof-cached":true,"eof-cached":true}');
       expect(uncachedParts(cached: ends, position: m(1), buffered: m(1), duration: s(1000)), [(0.1, 0.9)],
           reason: 'from the start and to the end');
+      expect(
+          parseCacheState('{"seekable-ranges":[{"start":10483.5,"end":10505.4}],"bof-cached":true}').ranges.single.start,
+          s(10483.5),
+          reason: "a live stream's EDL starts where it was opened");
       expect(parseCacheState('{"seekable-ranges":[]}'), CachedRanges.none);
       expect(parseCacheState('nope'), CachedRanges.none);
       expect(

@@ -42,6 +42,24 @@ void main() {
     expect(step(f, 1080, 1040).reload, isTrue);
   });
 
+  test('a point before its cache (a rewind): an open there when the stream can be rewound', () {
+    final f = LiveFollow();
+    final s = f.step(group: 900, own: 1010, start: 1000, cached: cache, now: t0);
+    expect(s.reload, isFalse, reason: 'no window: plays on');
+    expect(s.actions.whereType<SeekAction>(), isEmpty);
+    expect(f.step(group: 900, own: 1010, start: 1000, cached: cache, now: t0, rewind: true).reload, isTrue);
+    expect(f.step(group: 1005, own: 1010, start: 1000, cached: cache, now: t0, rewind: true).reload, isFalse,
+        reason: 'in its cache: a seek');
+  });
+
+  test("the live seek bar: the window from its start, this player and its cache in it", () {
+    final bar = LiveBar.of(from: 400, top: 1000, own: 950, start: 900, cached: cache);
+    expect(bar.length, const Duration(seconds: 600));
+    expect(bar.position, const Duration(seconds: 550));
+    expect(bar.cached.ranges.single, (start: const Duration(seconds: 500), end: const Duration(seconds: 540)));
+    expect(bar.streamTime(const Duration(seconds: 100)), 500);
+  });
+
   test('a length that keeps growing is live; one corrected once or twice is not', () {
     expect(growsLikeLive([14, 16, 18, 20]), isTrue);
     expect(growsLikeLive([1440, 1441.2, 1441.2]), isFalse);

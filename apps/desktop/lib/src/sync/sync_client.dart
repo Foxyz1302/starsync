@@ -309,6 +309,7 @@ class SyncClient {
     Map<String, bool>? jf,
     String error = '',
     double edge = 0,
+    double from = 0,
   }) {
     final safeBuffered = buffered.isNaN || buffered < 0 ? 0.0 : buffered;
     _send(
@@ -321,6 +322,7 @@ class SyncClient {
         jf: jf,
         error: error,
         edge: edge.isFinite && edge > 0 ? edge : 0,
+        from: from.isFinite && from > 0 ? from : 0,
       ).toJson(),
     );
   }

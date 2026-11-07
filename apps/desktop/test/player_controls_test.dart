@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart' show JellyfinStreamType;
 import 'package:starsync/src/controls/control_menus.dart';
+import 'package:starsync/src/controls/live_badge.dart';
 import 'package:starsync/src/controls/standard/seek_bar.dart';
 import 'package:starsync/src/jellyfin/track_prefs.dart';
 import 'package:starsync/src/playback/media_marks.dart';
@@ -174,5 +175,21 @@ void main() {
       expect(items[3].hint, '20:00');
       expect(items[3].value.start, m(20));
     });
+  });
+
+  testWidgets('the live badge: LIVE at live; behind it how far, and Go live', (tester) async {
+    var goLive = 0;
+    Widget badge(double behind) => MaterialApp(
+        home: Scaffold(
+            body: LiveBadge(
+                paused: false, behind: behind, scale: 1, onBackToLive: () {}, onGoLive: () => goLive++)));
+    await tester.pumpWidget(badge(0.4));
+    expect(find.text('LIVE'), findsOneWidget);
+    expect(find.text('Go live'), findsNothing);
+    await tester.pumpWidget(badge(150));
+    expect(find.text('LIVE'), findsNothing);
+    expect(find.text('−2:30'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('go-live')));
+    expect(goLive, 1);
   });
 }

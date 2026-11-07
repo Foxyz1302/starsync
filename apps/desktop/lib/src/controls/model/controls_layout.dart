@@ -112,7 +112,7 @@ class ControlsSnapshot {
   /// The media's length is known (seeks and skips make sense).
   final bool hasDuration;
 
-  /// A live stream: no seeking, skips or chapters; play and pause are
+  /// A live stream: no skips or chapters; play and pause are
   /// this player's own.
   final bool live;
 

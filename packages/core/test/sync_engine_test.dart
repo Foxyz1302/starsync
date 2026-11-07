@@ -1026,6 +1026,100 @@ void main() {
       expect(const HelloMedia(name: 'x', size: 0, duration: 0).toJson().containsKey('live'), isFalse);
     });
 
+    // A live report with the player's rewind window starting at [from].
+    void dvr(String token, double pos, double edge, double from) =>
+        engine.applyReport(token, pos, 6, engine.eventId, mediaId: engine.mediaId, edge: edge, from: from);
+
+    test('rewinding: within what every member reaches, the point runs on behind live; Go live', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applySwap('a', stream);
+      dvr('a', 994, 1006, 200);
+      // The point: 1000 - margin = 997. Bob reaches back to 400 only.
+      dvr('b', 994, 1006, 400);
+      expect(engine.broadcast().liveFrom, 400, reason: 'what every member reaches');
+      expect(engine.broadcast().behind, 0);
+      actions();
+      final before = engine.eventId;
+      engine.applySeek('a', 300);
+      expect(engine.eventId, greaterThan(before));
+      expect(engine.position, 400, reason: "clamped to bob's window");
+      expect(engine.behind, closeTo(597, 1e-9));
+      expect(engine.broadcast().behind, closeTo(597, 1e-9));
+      expect(engine.broadcast().seekBy, m('a').id);
+      expect(actions(), ['seek']);
+      step(10);
+      expect(engine.positionAt(), closeTo(410, 1e-9), reason: 'runs on at 1x');
+      expect(engine.liveTop(), closeTo(1007, 1e-9), reason: 'the live point runs on too');
+      step(RelayConstants.liveSeekSettleSecs);
+      // Behind live, the players' edges are only their read-ahead: no
+      // stall, no clock jump.
+      dvr('a', 425, 575, 225);
+      dvr('b', 425, 560, 425);
+      step(20);
+      dvr('a', 445, 595, 245);
+      expect(engine.positionAt(), closeTo(445, 1e-9));
+      expect(engine.behind, closeTo(597, 1e-9));
+      // Pause is still local.
+      pause('b');
+      expect(engine.transport, Transport.playing);
+      // A seek past the live point: back to live.
+      engine.applySeek('b', 99999);
+      expect(engine.behind, 0);
+      expect(engine.positionAt(), closeTo(1042, 1e-9));
+      expect(engine.feed.drain().last.reason, 'live');
+      expect(engine.broadcast().toJson().containsKey('behind'), isFalse);
+    });
+
+    test('no rewind unless every member has a window of a minute or more; Go live always', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applySwap('a', stream);
+      dvr('a', 994, 1006, 200);
+      live('b', 994, 1006);
+      expect(engine.broadcast().liveFrom, 0, reason: "bob's player cannot rewind");
+      final first = engine.eventId;
+      engine.applySeek('a', 500);
+      expect(engine.eventId, first, reason: 'nothing to rewind into');
+      dvr('b', 994, 1006, 960);
+      expect(engine.broadcast().liveFrom, 0, reason: 'under a minute before the live point');
+      dvr('b', 994, 1006, 900);
+      expect(engine.broadcast().liveFrom, 900);
+      engine.applySeek('a', 950);
+      expect(engine.behind, closeTo(47, 1e-9));
+      // Bob's window goes: Go live still works.
+      live('b', 994, 1006);
+      expect(engine.broadcast().liveFrom, 0);
+      engine.applySeek('a', engine.liveTop());
+      expect(engine.behind, 0);
+      final r = StateBroadcast.fromJson(jsonDecode(jsonEncode(StateBroadcast(
+              eventId: 1, transport: 'playing', position: 1, serverTime: t, mediaId: 1, members: const [], liveFrom: 5, behind: 2)
+          .toJson())));
+      expect((r.liveFrom, r.behind), (5.0, 2.0));
+      final report = ReportMessage.fromJson(
+          jsonDecode(jsonEncode(const ReportMessage(position: 1, buffered: 1, eventId: 1, edge: 9, from: 3).toJson())));
+      expect(report.from, 3);
+    });
+
+    test('after a rewind the stall check waits for the players, then still sees a stall', () {
+      join('a', 'alice');
+      engine.applySwap('a', stream);
+      dvr('a', 994, 1006, 200);
+      engine.applySeek('a', 500);
+      final seeked = engine.eventId;
+      // Its edge is still the old one (the player opens at the point).
+      step(5);
+      dvr('a', 999, 1011, 200);
+      expect(engine.eventId, seeked);
+      step(RelayConstants.liveSeekSettleSecs);
+      // The stream stalls at 530: the point runs past what the player has.
+      dvr('a', 520, 530, 230);
+      step(14);
+      dvr('a', 530, 530, 244);
+      expect(engine.eventId, greaterThan(seeked), reason: 'the point ran past every edge');
+      expect(engine.behind, 0);
+    });
+
     test('a joiner loads until its player reports the stream', () {
       join('a', 'alice');
       engine.applySwap('a', stream);

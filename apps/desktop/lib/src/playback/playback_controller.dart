@@ -11,6 +11,7 @@ import '../shaders/shader_presets.dart';
 import '../state/settings.dart';
 import '../sync/live_follow.dart' show growsLikeLive;
 import '../sync/state_diff.dart';
+import 'live_window.dart';
 import 'media_marks.dart';
 
 export '../platform/ports/player_host.dart' show RenderMode, HostedPlayer, HostedVideo;
@@ -135,6 +136,10 @@ class PlaybackController {
   final List<double> _lengths = [];
   double? _streamStart;
 
+  /// How far back the open live stream lets this player rewind; a new
+  /// media starts it over, [reopenLive] keeps it.
+  LiveWindow liveWindow = LiveWindow();
+
   late final Computed<SkipRange?> opening = computed(() => openingRange(segments.value, chapters.value));
   late final Computed<SkipRange?> ending = computed(() => endingRange(segments.value, chapters.value));
 
@@ -234,6 +239,38 @@ class PlaybackController {
     _lengths.clear();
     _streamStart = null;
     growing.value = false;
+    liveWindow = LiveWindow();
+  }
+
+  /// Opens the live stream again in the same player, [segments] behind its
+  /// edge ([liveStartOption]): mpv seeks a live stream only inside its
+  /// cache, so a rewind past it opens it again there. The URL mpv has
+  /// (no new resolve), its [liveWindow] kept; later opens go back to
+  /// [liveOpenSegments]. False when there is nothing to open again.
+  Future<bool> reopenLive(int segments) async {
+    final p = _player;
+    final o = p?.opened;
+    if (p == null || o == null || p.disposed) return false;
+    final window = liveWindow;
+    final wasGrowing = growing.peek();
+    await p.setProperty('demuxer-lavf-o', liveStartOption(segments));
+    // Stopped first: none of the old open's position or length events
+    // can count as the new one loaded (its start would be the old one's).
+    await p.stop();
+    if (!identical(p, _player)) return false;
+    beginOpen();
+    liveWindow = window;
+    growing.value = wasGrowing;
+    await p.open(o.url, headers: o.headers, play: true);
+    // Back to the usual once this open read its start.
+    unawaited(() async {
+      for (var i = 0; i < 300 && identical(p, _player) && !p.disposed; i++) {
+        if (_loaded) break;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      if (!p.disposed) await p.setProperty('demuxer-lavf-o', liveStartOption(liveOpenSegments));
+    }().catchError((Object e) => debugPrint('live reopen option: $e')));
+    return true;
   }
 
   /// The stream time of the player's 0 (mpv `demuxer-start-time`, read once

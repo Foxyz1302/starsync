@@ -251,3 +251,14 @@ bool mpvLoadFailed(PlayerLogLine log, Duration duration) {
   if (vw / vh > aspect) return (under(vh * aspect, vw), vh); // pillarbox
   return (vw, under(vw / aspect, vh)); // letterbox (or exact)
 }
+
+/// How many segments behind its edge a live HLS stream opens (ffmpeg's
+/// default is three): the group's live point, a little further back, is
+/// then in every player's cache (ARCHITECTURE "Live streams").
+const liveOpenSegments = 6;
+
+/// ffmpeg's demuxer options (mpv `demuxer-lavf-o`) that open a live HLS
+/// stream [segments] behind its edge; other formats ignore them. A live
+/// stream seeks only inside what mpv holds, so a rewind further back opens
+/// it again further back.
+String liveStartOption(int segments) => 'live_start_index=-$segments';

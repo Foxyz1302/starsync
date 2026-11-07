@@ -10,6 +10,7 @@ import 'package:starsync/src/platform/ports/link_resolver.dart';
 import 'package:starsync/src/playback/yt_dlp_app.dart';
 import 'package:starsync/src/screenshot/screenshots.dart' show StillFrames;
 import 'package:starsync/src/session/session_coordinator.dart';
+import 'package:starsync/src/sync/state_diff.dart' show serverPositionAt;
 
 // A live stream watched together (ARCHITECTURE "Live streams"): ffmpeg
 // makes a live HLS stream (2 s segments, no end), served twice over HTTP:
@@ -17,7 +18,9 @@ import 'package:starsync/src/session/session_coordinator.dart';
 // coordinators against a real server open it as a page their resolver
 // says is live (no yt-dlp); the third reads the late edge. Measured: how
 // far apart the three players are in the stream's own time (printed);
-// then a pause here only, back to live, and the stream's end.
+// then a pause here only, back to live; rewinding (the playlist keeps 90 s
+// and more) inside every cache and past it (each opens it again there), a
+// pause here only, Go live; and the stream's end.
 
 const _port = 18091;
 final _tmp = Platform.environment['WT_TEST_TMP'] ?? Directory.systemTemp.path;
@@ -115,6 +118,65 @@ Future<double?> _spread(List<SessionCoordinator> cs) async {
   return at.last - at.first;
 }
 
+/// [cs]' spread sampled every half second for [secs]: median and max, in
+/// seconds; printed with [what].
+Future<({double median, double max})> _spreadOver(List<SessionCoordinator> cs, int secs, String what) async {
+  final spreads = <double>[];
+  final end = DateTime.now().add(Duration(seconds: secs));
+  while (DateTime.now().isBefore(end)) {
+    final s = await _spread(cs);
+    if (s != null) spreads.add(s);
+    await Future.delayed(const Duration(milliseconds: 500));
+  }
+  if (spreads.isEmpty) fail('no spread for $what');
+  spreads.sort();
+  final r = (median: spreads[spreads.length ~/ 2], max: spreads.last);
+  // ignore: avoid_print
+  print('$what: spread over ${spreads.length} samples median ${(r.median * 1000).round()} ms, '
+      'max ${(r.max * 1000).round()} ms');
+  return r;
+}
+
+/// The group's live point now and how far back everyone can rewind, from
+/// [c]'s state (stream time).
+({double point, double top, double from}) _group(SessionCoordinator c) {
+  final r = c.serverState.peek()!;
+  final point = serverPositionAt(r, c.connection.serverNow());
+  return (point: point, top: point + r.behind, from: r.liveFrom);
+}
+
+/// Everyone rewinds to [target] (by [c]); waits until they all play it
+/// (within a second), then samples their spread for [secs].
+Future<({double median, double max})> _rewind(
+    SessionCoordinator c, List<SessionCoordinator> all, double target, String what, {int secs = 10}) async {
+  final before = c.serverState.peek()!.eventId;
+  c.seekLive(target);
+  await _poll(() => c.serverState.peek()!.eventId > before, 'the rewind in the state');
+  try {
+    await _poll(() async {
+      final g = _group(c).point;
+      for (final co in all) {
+        final p = await _streamPos(co);
+        if (p == null || (p - g).abs() > 1) return false;
+      }
+      return true;
+    }, 'everyone at the rewound point ($what)', timeout: const Duration(seconds: 60));
+  } catch (_) {
+    final g = _group(c);
+    for (final co in all) {
+      final start = co.playback.knownStreamStart;
+      // ignore: avoid_print
+      print('at ${g.point.toStringAsFixed(1)} (from ${g.from.toStringAsFixed(1)}, top ${g.top.toStringAsFixed(1)}): '
+          'player at ${(await _streamPos(co))?.toStringAsFixed(1)}, start $start, '
+          'cached ${co.playback.cached.peek().ranges.map((r) => '${r.start.inMilliseconds / 1000}-${r.end.inMilliseconds / 1000}').join(',')}, '
+          'edge ${co.playback.liveWindow.edgeAt(DateTime.now().microsecondsSinceEpoch / 1e6)?.toStringAsFixed(1)}');
+    }
+    rethrow;
+  }
+  await Future.delayed(const Duration(seconds: 3));
+  return _spreadOver(all, secs, what);
+}
+
 void main() {
   // Opt-in: `WT_LIVE_URL=<a live page>` (YouTube, Twitch, ...) resolved by
   // a real yt-dlp (downloaded into WT_TEST_TMP), two members, the spread
@@ -157,6 +219,31 @@ void main() {
       print('real live spread over ${spreads.length} samples: median ${(spreads[spreads.length ~/ 2] * 1000).round()} ms, '
           'max ${(spreads.last * 1000).round()} ms; ${edgeA.toStringAsFixed(1)} s behind the edge');
       expect(spreads[spreads.length ~/ 2], lessThan(0.25));
+
+      // Rewinding, when the stream lets everyone: five minutes back (or
+      // the window's start), then Go live.
+      for (final co in all) {
+        final w = co.playback.liveWindow.playlist;
+        // ignore: avoid_print
+        print('player window: ${w == null ? 'none' : '${w.count} segments, ${w.secs.toStringAsFixed(0)} s'}');
+      }
+      final g = _group(a);
+      if (g.from <= 0) {
+        // ignore: avoid_print
+        print('no rewind window for the group');
+        return;
+      }
+      // ignore: avoid_print
+      print('group window: ${(g.top - g.from).toStringAsFixed(1)} s back from the live point');
+      final target = g.point - 300 > g.from ? g.point - 300 : g.from;
+      final far = await _rewind(b, all, target, 'real live rewound ${(g.point - target).round()} s', secs: 20);
+      expect(far.median, lessThan(0.25));
+      final at = a.serverState.peek()!.eventId;
+      a.goLive();
+      await _poll(() => a.serverState.peek()!.eventId > at, 'go live in the state');
+      await Future.delayed(const Duration(seconds: 8));
+      final live = await _spreadOver(all, 15, 'real live back to live');
+      expect(live.median, lessThan(0.25));
     } finally {
       for (final co in all) {
         await co.dispose();
@@ -169,12 +256,14 @@ void main() {
       () async {
     MediaKit.ensureInitialized();
     final dir = Directory('$_tmp/live_e2e_$pid')..createSync(recursive: true);
+    // 90 s of it at once, then in real time: a playlist of up to 60
+    // segments (2 s each) that can be rewound.
     final ffmpeg = await Process.start('ffmpeg', [
-      '-v', 'error', '-re',
-      '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=30',
-      '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
+      '-v', 'error',
+      '-readrate', '1', '-readrate_initial_burst', '90', '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=30',
+      '-readrate', '1', '-readrate_initial_burst', '90', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
       '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '60', '-pix_fmt', 'yuv420p', '-c:a', 'aac',
-      '-f', 'hls', '-hls_time', '2', '-hls_list_size', '8', '-hls_flags', 'delete_segments+program_date_time',
+      '-f', 'hls', '-hls_time', '2', '-hls_list_size', '60', '-hls_flags', 'delete_segments+program_date_time',
       '${dir.path}/live.m3u8',
     ]);
     final edge = await _serve(dir.path);
@@ -255,11 +344,52 @@ void main() {
         await stills.close();
       }
 
-      // No seeking: a seek request changes nothing.
+      // The seek bar's own path does not seek a live stream.
       final before = a.serverState.peek()!.eventId;
       a.seekTo(1);
       await Future.delayed(const Duration(milliseconds: 600));
       expect(a.serverState.peek()!.eventId, before);
+
+      // Rewinding: the playlist keeps 90 s and more, so everyone can.
+      await _poll(() => a.serverState.peek()!.liveFrom > 0, 'the rewind window');
+      for (final co in all) {
+        final w = co.playback.liveWindow.playlist!;
+        // ignore: avoid_print
+        print('player window: ${w.count} segments, ${w.secs.toStringAsFixed(0)} s');
+      }
+      var g = _group(a);
+      // ignore: avoid_print
+      print('group window: ${(g.top - g.from).toStringAsFixed(1)} s back from the live point');
+      expect(g.top - g.from, greaterThan(RelayConstants.liveMinWindowSecs));
+      expect(a.liveBar.peek(), isNotNull, reason: 'a seek bar over the window');
+      // A little back: inside every player's cache (a seek there).
+      final near = await _rewind(b, all, g.point - 15, 'rewound 15 s (in the cache)');
+      expect(a.liveBehind.peek(), closeTo(15, 1.5));
+      expect(near.median, lessThan(0.25));
+      // To the window's start: past every cache (each opens it again there).
+      g = _group(a);
+      final far = await _rewind(a, all, g.from, 'rewound to the window start (opened again)');
+      expect(a.serverState.peek()!.behind, greaterThan(40));
+      expect(far.median, lessThan(0.25));
+      expect(far.max, lessThan(0.6));
+      // A pause here only, then play: back at the group's point, behind live.
+      c.togglePlay();
+      await Future.delayed(const Duration(seconds: 3));
+      expect(a.serverState.peek()!.behind, greaterThan(40), reason: 'a pause here moves nobody');
+      c.togglePlay();
+      await Future.delayed(const Duration(seconds: 5));
+      final back2 = await _spread(all);
+      // ignore: avoid_print
+      print('rewound, after a 3 s pause here only: spread ${((back2 ?? -1) * 1000).round()} ms');
+      expect(back2!, lessThan(0.6));
+      // Go live: everyone back to the live point.
+      final behindBefore = a.serverState.peek()!.eventId;
+      c.goLive();
+      await _poll(() => a.serverState.peek()!.eventId > behindBefore, 'go live in the state');
+      expect(a.serverState.peek()!.behind, 0);
+      await Future.delayed(const Duration(seconds: 6));
+      final live = await _spreadOver(all, 8, 'back to live');
+      expect(live.median, lessThan(0.25));
 
       // The stream ends (ffmpeg writes its end): the group's media ends.
       ffmpeg.stdin.write('q');

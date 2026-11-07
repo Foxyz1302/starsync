@@ -405,9 +405,10 @@ people say on purpose (BRB); nothing starts because time passed.
   for attention when its window is not focused: the runners' `starsync/window`
   channel (`attention`), the urgency hint on Linux (GTK, cleared on focus)
   and `FlashWindowEx` until foreground on Windows.
-- **Live streams**: no length and no seeking; the clock is the group's
-  live point in the stream's own time, nobody waits for anyone and pause
-  is each member's own (see "Live streams").
+- **Live streams**: no length; the clock is the group's live point in
+  the stream's own time, a seek moves it back only within what every
+  member can rewind to, nobody waits for anyone and pause is each
+  member's own (see "Live streams").
 - **Deviations from Syncplay**: clock never follows the slowest watcher; no
   pause-on-leave; no ready flags (play and pause are anyone's, BRB holds
   everyone, anyone continues without anyone); the clock is server time
@@ -546,8 +547,9 @@ file is ~8), `demuxer-max-back-bytes=67108864`,
 `stream-lavf-o=reconnect_streamed=1,reconnect_on_http_error=5xx,reconnect_delay_max=4,reconnect_max_retries=3`
 (comma form; this mpv build rejects colon-joined), `demuxer-lavf-o=live_start_index=-6`
 (a live HLS stream opens six segments behind its edge instead of
-three, so the group's live point is in every player's cache; see "Live
-streams"; other formats ignore it): a dropped connection
+three, so the group's live point is in every player's cache; a rewind
+opens it further back; see "Live streams"; other formats ignore it,
+`liveStartOption` in `player_host.dart`): a dropped connection
 or a 5xx is retried, at most 3 times per read and 4 s apart at most; a
 4xx (a CDN refusing a request) fails at once instead of being retried
 (older ffmpeg ignores `reconnect_max_retries`), `ytdl=no` (pages are
@@ -864,7 +866,8 @@ Chapters, segments, tracks (`PlaybackController` signals, values from
   range: mpv `demuxer-cache-time`, media_kit's `buffer`, 250 ms steps),
   `cached` (`CachedRanges`: mpv `demuxer-cache-state` observed and read
   as JSON, `parseCacheState`: its `seekable-ranges` in order, ends in
-  250 ms steps, the first from 0 with `bof-cached`, the last to the end
+  250 ms steps, the first from 0 with `bof-cached` when it starts within
+  2 s of 0 (a live stream's EDL starts where it was opened), the last to the end
   with `eof-cached`; set only when that changes); computed `opening`,
   `ending` (`SkipRange`) and `currentChapter`. The timelines draw
   `cachedSpans` (those ranges, gaps under 0.5 s closed; while mpv names
@@ -1462,15 +1465,45 @@ end) plays for everyone at the same moment of the stream. Wire:
   still reach it. A player far behind its edge (Twitch's stitched
   preroll ad) sets it at its edge minus 10 s. The clock then runs at 1x;
   it is set again when it runs past every edge (the stream stalled or
-  started over) or far behind them (its clock jumped).
+  started over) or the live point (where it would be without a rewind)
+  falls far behind them (its clock jumped); for 15 s after a seek
+  (`liveSeekSettleSecs`) neither is checked, while the players open it
+  at the new point.
 - **Following it** (`LiveFollow`, `sync/live_follow.dart`, on every
   state): within 80 ms nothing; up to 1 s off the rate goes 3 % up or
   down (scaletempo, no visible hitch); further a seek, only inside what
-  mpv holds (a live stream seeks in its cache alone), then 2 s to land.
-  A point past its cache it cannot reach: it plays on where it is (a
-  late edge), or, 20 s or more behind, opens afresh (Reload video, at
-  most every 30 s). Twitch's preroll ad stalls mpv at the ad's end
-  (the timestamps jump); the seek to the live point unsticks it.
+  mpv holds (a live stream seeks in its cache alone, an EDL's too), then
+  2 s to land. A point past its cache it cannot reach: it plays on
+  where it is (a late edge), or, 20 s or more behind, opens afresh
+  (Reload video, at most every 30 s). Twitch's preroll ad stalls mpv at
+  the ad's end (the timestamps jump); the seek to the live point
+  unsticks it.
+- **Rewinding** (a stream whose playlist keeps a window: YouTube Live
+  keeps 15 min, `playlist_type/DVR`, 450 segments of 2 s; an HLS
+  playlist with a long list): each player reads its playlist once per
+  media (`LiveWindow`, `playback/live_window.dart`; an EDL's first part,
+  a master playlist's first variant; one that ended has none) and knows
+  the stream's edge from its cache end while that is within 100 s of
+  its position (the furthest seen, then on with the clock; behind
+  that the read-ahead, not the edge, ends the cache). Its reports carry
+  the oldest moment it reaches (`report.from`: the edge minus the
+  window, three segments kept out because they leave the playlist while
+  a player opens them). The server offers the latest of those of every
+  member watching (`state.liveFrom`) when each has one and it reaches a
+  minute or more behind the live point (`liveMinWindowSecs`); a seek by
+  anyone (the timeline, the arrow keys) moves the group's point there,
+  clamped to it, and it runs on at 1x `state.behind` seconds behind the
+  live point. Go live (or a seek at or past the live point, which needs
+  no window) sets it back to 0. A player whose cache does not hold the
+  new point opens the stream again in the same player at it
+  (`PlaybackController.reopenLive`: `live_start_index` that many
+  segments back plus two, no new resolve, the window kept; once per
+  point, then every 30 s at most), then seeks in its cache as above. A
+  player that cannot reach it (a shorter window than it said, nothing
+  read) plays as near as it can, like a late edge; nobody waits. A
+  stream whose playlist keeps less, or a member without a window: no
+  rewinding, LIVE only. The hidden screenshot player opens as far back
+  as the moment needs.
 - **Measured** (`live_e2e`, three app players against a real server, a
   local ffmpeg HLS stream with 2 s segments, one player on a CDN edge
   whose playlist runs 3 s late): the players' stream positions within
@@ -1479,15 +1512,23 @@ end) plays for everyone at the same moment of the stream. Wire:
   (`WT_LIVE_URL`, two players, each its own resolve): YouTube (5 s
   segments, video and audio apart) median 0 ms, max 7 ms, about 9 s
   behind the edge; Twitch with its preroll ad median 21 ms, max 87 ms,
-  about 5 s behind the edge.
+  about 5 s behind the edge. Rewinding (the local stream with a 90 s
+  window, 2 s segments): 15 s back inside every cache median 1-8 ms,
+  max 23 ms; to the window's start (each player opens it again there)
+  median 4-11 ms, max 25 ms; a 3 s pause here only while rewound, 1-9
+  ms; Go live median 0-4 ms, max 21 ms. YouTube (2 s segments, 15 min
+  window, 883 s offered): 300 s back (every player opened 158 segments
+  back) median 1 ms, max 22 ms; Go live (opened 8 segments back) median
+  0 ms, max 27 ms.
 - **Pause is local**: play and pause (the button, Space, the LIVE badge)
   only pause this player (`livePaused`; the pill: "Paused here
-  only", Space back to live); playing again seeks back to the live
-  point. The server ignores `play`, `pause` and `seek`; BRB, buffers
-  and loaders hold nothing, so there is no Space hold, no "Waiting
-  for", no AFK while it plays and no "continue without". No time, no
-  timeline, no skips or chapters (see "Desktop UI"); the watch is not
-  tracked.
+  only", Space back to live, or to the others when rewound); playing
+  again, or a rewind of your own, seeks back to the group's point. The server ignores `play` and
+  `pause`, and a `seek` without a window unless it goes live; BRB,
+  buffers and loaders hold nothing, so there is no Space hold, no
+  "Waiting for", no AFK while it plays and no "continue without". No
+  time, no skips or chapters, a timeline only when it can be rewound
+  (see "Desktop UI"); the watch is not tracked.
 - **The end**: a player at the stream's end says so (its report's
   `duration`); once nobody else still sees the stream go on past there
   the server finishes it and Up next's first item goes up at once (no
@@ -3087,8 +3128,12 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   has no chapter buttons, Skip 1:30 or chapters, and its play button
   pauses this player only ("Pause here only", "Back to live"); both
   skins show `LiveBadge` (`live_badge.dart`: LIVE, red, grey while
-  paused here, a click goes back to live) where the clock is, and no
-  timeline or progress line.
+  paused here, a click goes back to live; behind live "−2:30" and a Go
+  live button) where the clock is, and no progress line. The timeline
+  is there only when everyone can rewind it (`liveBar`, a
+  `ChapterSeekBar` over the window, live at its right end, in the
+  Minimal skin too); its release and the arrow keys rewind for everyone
+  (see "Live streams").
 - **Shared pieces**: `ControlsFrame` (`frame.dart`): when the controls
   are up (real mouse movement shows them, see "Quick chat"; `suppress`
   holds them hidden; 3 s without movement, `hideAfter`, or the

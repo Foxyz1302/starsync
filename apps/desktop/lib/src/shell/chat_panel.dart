@@ -288,7 +288,7 @@ Future<void> _messageMenu(BuildContext context, String text, String? link) async
       return (Icons.fast_forward_rounded, Colors.orange,
           who == null || who.isEmpty ? 'went on without the others' : "doesn't wait for $who");
     case 'seek':
-      return (Icons.fast_forward, scheme.primary, 'seeked');
+      return (Icons.fast_forward, scheme.primary, f.reason == 'live' ? 'went back to live' : 'seeked');
     case 'swap':
       return (Icons.swap_horiz, scheme.primary, f.reason == 'restore' ? 'put back what was playing' : 'changed the media');
     case 'gone':

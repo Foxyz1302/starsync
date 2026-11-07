@@ -275,8 +275,10 @@ StatusLine? _line(StatusFacts f, StateBroadcast? r, MemberView? self, SourceTrou
   // Live: nobody waits for anyone; only a pause here is worth a line.
   if (r.media?['live'] == true && r.transport != 'finished') {
     return f.livePaused
-        ? const StatusLine(StatusKind.paused, 'Paused here only',
-            detail: 'The stream goes on for everyone', keys: [('Space', 'back to live')], short: 'Paused here only')
+        ? StatusLine(StatusKind.paused, 'Paused here only',
+            detail: 'The stream goes on for everyone',
+            keys: [('Space', r.behind > 0 ? 'back to the others' : 'back to live')],
+            short: 'Paused here only')
         : null;
   }
   // The server holds everyone for the relay's source (D6): a viewer's

@@ -195,8 +195,9 @@ class HelloMedia {
   final MediaRelay? relay;
   /// What it is ([MediaRef]); null when unknown.
   final MediaRef? ref;
-  /// A live stream (`media.live`, PROTOCOL.md "Live"): no length, no
-  /// seeking; the position is the group's live point in stream time.
+  /// A live stream (`media.live`, PROTOCOL.md "Live"): no length, seeks
+  /// only back within its window; the position is the group's point in
+  /// stream time.
   final bool live;
   const HelloMedia(
       {required this.name,
@@ -922,6 +923,10 @@ class ReportMessage {
   /// A live stream's edge as this player sees it, in [position]'s stream
   /// time (PROTOCOL.md "Live"); 0 when not live.
   final double edge;
+  /// The oldest moment of a live stream this player can rewind to (its
+  /// playlist's window), in stream time (PROTOCOL.md "Live"); 0 when it
+  /// has no window.
+  final double from;
   const ReportMessage(
       {required this.position,
       required this.buffered,
@@ -930,7 +935,8 @@ class ReportMessage {
       this.mediaId = 0,
       this.jf,
       this.error = '',
-      this.edge = 0});
+      this.edge = 0,
+      this.from = 0});
 
   Map<String, Object?> toJson() => {
         't': 'report',
@@ -942,6 +948,7 @@ class ReportMessage {
         if (jf != null) 'jf': jf,
         if (error.isNotEmpty) 'error': error,
         if (edge > 0) 'edge': edge,
+        if (from > 0) 'from': from,
       };
 
   factory ReportMessage.fromJson(Map<String, Object?> json) {
@@ -955,6 +962,7 @@ class ReportMessage {
       jf: jfAccessFromJson(json['jf']),
       error: memberErrorFromJson(json['error']),
       edge: finiteDouble(json['edge'], 'edge'),
+      from: finiteDouble(json['from'], 'from'),
     );
   }
 }
@@ -1269,6 +1277,13 @@ class StateBroadcast {
   final List<String> queuePass;
   /// The shared countdown to Up next's first item ([QueueAdvance]); null when none runs.
   final QueueAdvance? advance;
+  /// A live stream every member can rewind: the oldest moment of it they
+  /// all reach, in stream time (PROTOCOL.md "Live"); 0 when it cannot be
+  /// rewound.
+  final double liveFrom;
+  /// How far the group's point of a live stream is behind its live point,
+  /// in seconds; 0 at live.
+  final double behind;
   const StateBroadcast({
     required this.eventId,
     required this.transport,
@@ -1287,6 +1302,8 @@ class StateBroadcast {
     this.advance,
     this.wantsPlay = false,
     this.queuePass = const [],
+    this.liveFrom = 0,
+    this.behind = 0,
   });
 
   Map<String, Object?> toJson() => {
@@ -1308,6 +1325,8 @@ class StateBroadcast {
         if (advance != null) 'advance': advance!.toJson(),
         'wish': wantsPlay ? 'play' : 'pause',
         if (queuePass.isNotEmpty) 'queuePass': queuePass,
+        if (liveFrom > 0) 'liveFrom': liveFrom,
+        if (behind > 0) 'behind': behind,
       };
 
   factory StateBroadcast.fromJson(Map<String, Object?> json) {
@@ -1339,6 +1358,8 @@ class StateBroadcast {
       advance: QueueAdvance.fromJson(json['advance']),
       wantsPlay: json['wish'] == 'play',
       queuePass: json['queuePass'] is List ? (json['queuePass'] as List).whereType<String>().toList() : const [],
+      liveFrom: finiteDouble(json['liveFrom'], 'liveFrom'),
+      behind: finiteDouble(json['behind'], 'behind'),
     );
   }
 }

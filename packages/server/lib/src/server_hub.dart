@@ -906,7 +906,8 @@ void mountSyncRoute(
                   mediaId: report.mediaId,
                   jf: report.jf,
                   error: report.error,
-                  edge: report.edge);
+                  edge: report.edge,
+                  from: report.from);
               hub.changed();
             case 'ping':
               final ping = PingMessage.fromJson(decoded);

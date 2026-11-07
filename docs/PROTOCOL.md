@@ -819,14 +819,17 @@ GET  /l/<sid>/<token>?hours=6
 ## Live (proto 17)
 
 A live stream (Twitch, YouTube Live, an HLS playlist without an end):
-no length, no seeking, nobody waits. Behavior: ARCHITECTURE.md "Live
-streams".
+no length, nobody waits, seeking only back within what every member
+can rewind to. Behavior: ARCHITECTURE.md "Live streams".
 
 ```
 swap    media = {"name":"…","size":0,"duration":0,"url":"https://…","live":true}
 state   media.live = true, position = the group's live point (stream time)
 client  {"t":"report","position":43051.2,"buffered":12.0,"eventId":9,"mediaId":3,"edge":43063.1}
 client  {"t":"report","position":43120.0,"buffered":0,"eventId":9,"mediaId":3,"duration":43120.0}   reached the end
+client  {"t":"report","position":43051.2,"buffered":12.0,"eventId":9,"mediaId":3,"edge":43063.1,"from":42169.1}
+client  {"t":"seek","position":42900.0}
+state   position = 42900.0 (running), liveFrom = 42172.0, behind = 151.2
 ```
 
 - `media.live` (omitted when false): a live stream, set by the putter in
@@ -844,17 +847,36 @@ client  {"t":"report","position":43120.0,"buffered":0,"eventId":9,"mediaId":3,"d
   report's `duration` says the player reached the end of the stream
   there (then without `edge`); a live player never sends its growing
   length.
+- `report.from` (optional, omitted when 0): the oldest moment of the
+  stream this player can rewind to (its playlist's window back from the
+  stream's edge), stream time; 0 or absent: it cannot.
 - `state.transport`: `held` (position 0) until the first live report
   sets the live point, then `playing`: halfway from that player's
   position to its edge, 3 s further back (`RelayConstants.liveMarginSecs`);
   from a player more than 60 s behind its edge (a stitched ad) its edge
   minus 10 s, then the 3 s. The wish becomes `play`. The point is set
-  again (`eventId` up) when it runs 3 s past every connected member's
-  last edge (the stream stalled or started over) or falls 120 s behind it
-  (its clock jumped ahead).
+  again (`eventId` up, `behind` back to 0) when it runs 3 s past every
+  connected member's last edge (the stream stalled or started over) or
+  the live point (`position` plus `behind`) falls 120 s behind it (its
+  clock jumped ahead); neither for 15 s after a seek
+  (`RelayConstants.liveSeekSettleSecs`).
+- `state.liveFrom` (omitted when 0): the oldest moment every member
+  watching can rewind to: the latest `report.from` of the connected
+  members who are in and have reported the stream, when each of them
+  sent one and it is 60 s or more behind the live point
+  (`RelayConstants.liveMinWindowSecs`); else 0 (no rewinding).
+- `state.behind` (omitted when 0): seconds the group's point is behind
+  its live point (a rewind); the live point is `position` (as it runs)
+  plus `behind`.
+- `seek` while `playing`: at or past the live point minus 1 s, the group
+  goes back to live (`behind` 0, feed `seek` with reason `live`; also
+  without `liveFrom`); else, with `liveFrom`, the point moves to the
+  position (no earlier than `liveFrom`) and runs on at 1x, `behind` the
+  difference (feed `seek`); else it is ignored. `eventId` goes up,
+  `seekBy`/`seekSeq` as for any seek.
 - Nobody waits: no `state.hold`; BRB and short buffers hold nothing;
-  `play`, `pause` and `seek` are ignored (each app pauses its own
-  player). `members[].loading` ends with the member's first live report.
+  `play` and `pause` are ignored (each app pauses its own player).
+  `members[].loading` ends with the member's first live report.
 - End: `finished` (feed `finished`, position the end) once a member
   reported the end and no connected member reports an edge more than 3 s
   past it. Up next's first item is asked to play at once (`advance` set

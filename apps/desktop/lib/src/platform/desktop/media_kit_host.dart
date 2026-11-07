@@ -59,10 +59,8 @@ const streamLavfOptions = 'reconnect_streamed=1,reconnect_on_http_error=5xx,'
     'reconnect_delay_max=4,reconnect_max_retries=3';
 
 /// ffmpeg's demuxer options (mpv `demuxer-lavf-o`): a live HLS stream
-/// opens six segments behind its edge (ffmpeg's default is three), so the
-/// group's live point, a little further back, is in every player's cache
-/// (ARCHITECTURE "Live streams"). Other formats ignore it.
-const demuxerLavfOptions = 'live_start_index=-6';
+/// opens [liveOpenSegments] behind its edge ([liveStartOption]).
+final demuxerLavfOptions = liveStartOption(liveOpenSegments);
 
 /// mpv echoes numbers in its own format (`150` reads back `150.000000`).
 bool pinMatches(String wanted, String got) {

@@ -12,6 +12,7 @@ import '../live_badge.dart';
 import '../model/controls_layout.dart';
 import '../model/controls_model.dart';
 import '../model/controls_prefs.dart';
+import '../standard/seek_bar.dart' show ChapterSeekBar;
 import '../volume.dart';
 import 'style.dart';
 import 'timeline.dart';
@@ -128,19 +129,37 @@ class MinimalControls extends StatelessWidget {
               SignalBuilder(
                 builder: (context) {
                   final line = AppSettings.instance.progressLine.value;
-                  // Live: no timeline; LIVE where its clock is.
+                  // Live: LIVE where its clock is; a bar over what everyone
+                  // can rewind to beside it when they can.
                   if (model.live.value) {
+                    final bar = model.liveBar.value;
+                    final badge = LiveBadge(
+                        paused: model.livePaused.value,
+                        behind: model.liveBehind.value,
+                        scale: scale,
+                        onBackToLive: model.togglePlay,
+                        onGoLive: model.goLive);
                     return AnimatedOpacity(
                       key: const ValueKey('minimal-timeline-wrap'),
                       duration: fade,
                       opacity: visible ? 1 : 0,
                       child: SizedBox(
                         height: MinimalTimeline.heightFor(scale),
-                        child: Align(
-                          alignment: AlignmentDirectional.centerEnd,
-                          child: LiveBadge(
-                              paused: model.livePaused.value, scale: scale, onBackToLive: model.togglePlay),
-                        ),
+                        child: bar == null
+                            ? Align(alignment: AlignmentDirectional.centerEnd, child: badge)
+                            : Row(children: [
+                                Expanded(
+                                  child: ChapterSeekBar(
+                                    key: const ValueKey('live-seek-bar'),
+                                    position: bar.position,
+                                    duration: bar.length,
+                                    cached: bar.cached,
+                                    height: MinimalTimeline.heightFor(scale),
+                                    onSeek: model.seekLive,
+                                  ),
+                                ),
+                                badge,
+                              ]),
                       ),
                     );
                   }

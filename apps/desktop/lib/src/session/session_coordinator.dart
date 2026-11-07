@@ -13,6 +13,7 @@ import '../jellyfin/progress.dart';
 import '../jellyfin/session_media.dart';
 import '../jellyfin/track_prefs.dart';
 import '../library/media_refs.dart';
+import '../playback/live_window.dart' show LiveWindow;
 import '../playback/media_marks.dart';
 import '../playback/playback_controller.dart';
 import '../platform/desktop/media_kit_host.dart' show MediaKitHost;
@@ -243,7 +244,7 @@ class SessionCoordinator {
   late final Computed<bool> selfBrb = computed(() => selfMember.value?.brb ?? false);
 
   /// What plays is a live stream (`media.live`, ARCHITECTURE "Live
-  /// streams"): no time or timeline, no seeking; pause is this member's
+  /// streams"): no time, a timeline only to rewind; pause is this member's
   /// own ([livePaused]) and playing again goes back to the group's live
   /// point.
   late final Computed<bool> live = computed(() => _isLive(serverState.value));
@@ -254,6 +255,29 @@ class SessionCoordinator {
   final LiveFollow _liveFollow = LiveFollow();
   int _livePausedFor = -1;
   DateTime? _liveReloadAt;
+  // The last time the live stream was opened again at the group's point.
+  ({int mediaId, int eventId, DateTime at})? _liveReopen;
+
+  /// How far the group watches the live stream behind its live point (a
+  /// rewind), seconds; 0 at live.
+  late final Computed<double> liveBehind = computed(() {
+    final r = serverState.value;
+    return _isLive(r) && r!.transport == 'playing' ? r.behind : 0;
+  });
+
+  /// The live stream's seek bar now ([LiveBar]); null unless every
+  /// member can rewind it (`state.liveFrom`). Follows the player's
+  /// position.
+  late final Computed<LiveBar?> liveBar = computed(() {
+    final r = serverState.value;
+    final pos = playback.position.value;
+    final cached = playback.cached.value;
+    if (!_isLive(r) || r!.transport != 'playing' || r.liveFrom <= 0) return null;
+    final start = playback.knownStreamStart;
+    if (start == null) return null;
+    final top = serverPositionAt(r, connection.serverNow()) + r.behind;
+    return LiveBar.of(from: r.liveFrom, top: top, own: pos.inMicroseconds / 1e6 + start, start: start, cached: cached);
+  });
 
   static bool _isLive(StateBroadcast? r) => r?.media?['live'] == true;
 
@@ -836,12 +860,38 @@ class SessionCoordinator {
     if (playback.completed) return;
     final start = await playback.streamStart();
     final group = r.transport == 'playing' ? serverPositionAt(r, connection.serverNow()) : null;
+    final window = playback.liveWindow;
+    if (playback.current?.opened case final o?) unawaited(window.read(o.url, o.headers));
+    final clock = LiveWindow.clock();
+    final rewind = window.fromAt(clock) != null;
     final step = _liveFollow.step(
         group: group,
         own: playback.positionSecs + start,
         start: start,
         cached: playback.cached.peek(),
-        now: DateTime.now().toUtc());
+        now: DateTime.now().toUtc(),
+        rewind: rewind);
+    // Out of what mpv holds, and the stream can be rewound: opened again
+    // at the group's point in this player (no new resolve), once per
+    // point, then every 30 s at most.
+    if (step.reload && rewind && group != null) {
+      final now = DateTime.now().toUtc();
+      final last = _liveReopen;
+      if (last == null ||
+          last.mediaId != r.mediaId ||
+          last.eventId != r.eventId ||
+          now.difference(last.at) > const Duration(seconds: 30)) {
+        final back = window.segmentsBack(group, clock);
+        if (back != null) {
+          _liveReopen = (mediaId: r.mediaId, eventId: r.eventId, at: now);
+          _log.info('live: the group\'s point is out of what this player holds; '
+              'opening the stream again $back segments back');
+          _liveFollow.reset();
+          await playback.reopenLive(back);
+        }
+      }
+      return;
+    }
     if (step.reload) {
       final at = _liveReloadAt;
       final now = DateTime.now().toUtc();
@@ -962,6 +1012,10 @@ class SessionCoordinator {
       } else {
         final own = playback.positionSecs + start;
         final ended = playback.completed;
+        final edge = ended ? 0.0 : playback.durationSecs + start;
+        // With how far back this player can rewind it.
+        final clock = LiveWindow.clock();
+        playback.liveWindow.noteEdge(edge: edge, own: own, at: clock);
         connection.sendReport(
           position: own,
           buffered: buffered,
@@ -970,7 +1024,8 @@ class SessionCoordinator {
           mediaId: r.mediaId,
           jf: _jfAccessFor(r),
           error: _playerErrorFor == r.mediaId ? error : '',
-          edge: ended ? 0 : playback.durationSecs + start,
+          edge: edge,
+          from: ended ? 0 : playback.liveWindow.fromAt(clock) ?? 0,
         );
         return;
       }
@@ -1109,7 +1164,7 @@ class SessionCoordinator {
   void _userSeek(double position) {
     if (!position.isFinite || position < 0) return;
     if (serverState.peek() == null || _openUrl == null) return;
-    // Live: there is nothing to seek to but the live point.
+    // Live: the player time is no group time; rewinds go through [seekLive].
     if (live.peek()) return;
     markInput();
     final now = DateTime.now().toUtc();
@@ -1221,11 +1276,36 @@ class SessionCoordinator {
 
   void seekTo(double position) => _userSeek(position);
 
+  /// Rewinds the live stream for everyone to [streamTime] (the stream's
+  /// own time, within `state.liveFrom` and the live point); at or past the
+  /// live point the group goes back to live. This player follows with the
+  /// state, as everyone does.
+  void seekLive(double streamTime) {
+    if (!live.peek() || !streamTime.isFinite || streamTime <= 0) return;
+    markInput();
+    if (livePaused.peek()) _setLivePaused(false);
+    connection.sendSeek(streamTime);
+  }
+
+  /// Go live: the group back to the live point.
+  void goLive() {
+    final r = serverState.peek();
+    if (r == null || !_isLive(r) || r.transport != 'playing') return;
+    seekLive(serverPositionAt(r, connection.serverNow()) + r.behind + 60);
+  }
+
   /// Arrow keys: relative to a seek still in flight, so repeated presses
-  /// add up.
+  /// add up. Live: within the window everyone can rewind.
   void nudge(double deltaSecs) {
     final r = serverState.peek();
     if (r == null || _openUrl == null) return;
+    if (_isLive(r)) {
+      if (r.liveFrom > 0 && r.transport == 'playing') {
+        final target = serverPositionAt(r, connection.serverNow()) + deltaSecs;
+        seekLive(target < r.liveFrom ? r.liveFrom : target);
+      }
+      return;
+    }
     final base = _seekGate.target ?? serverPositionAt(r, connection.serverNow());
     final target = base + deltaSecs;
     if (target.isNaN) return;

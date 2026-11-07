@@ -121,6 +121,9 @@ class EngineMember {
   /// Its player reached the end of the live stream there (a live report
   /// with a `duration`); null while it goes on.
   double? liveEnd;
+  /// The oldest moment of the live stream its player can rewind to
+  /// (`report.from`, stream time); 0 when it cannot.
+  double liveFrom = 0;
   DateTime lastSeen;
   EngineMember({
     required this.id,
@@ -286,6 +289,11 @@ class SyncEngine {
   String? _seekBy;
   int _seekSeq = 0;
   int _seekEventId = -1;
+  /// A live stream: how far the group's point ([position]) is behind its
+  /// live point (a rewind, `state.behind`); 0 at live.
+  double behind = 0;
+  // When the group's point of a live stream last moved by a seek.
+  DateTime? _liveSeekAt;
 
   SyncEngine({SyncClock? clock, this.liveness = const Liveness()})
       : clock = clock ?? (() => DateTime.now().toUtc()),
@@ -849,8 +857,10 @@ class SyncEngine {
     if (member == null) return;
     if (!seekPosition.isFinite || seekPosition < 0) return;
     _seen(member);
-    // Live: there is nothing to seek to but the live point.
-    if (live) return;
+    if (live) {
+      _liveSeek(member, seekPosition, seq);
+      return;
+    }
     position = seekPosition;
     serverTime = now;
     eventId++;
@@ -901,8 +911,11 @@ class SyncEngine {
         ..spot = null
         ..droppedAt = null
         ..liveEdge = 0
-        ..liveEnd = null;
+        ..liveEnd = null
+        ..liveFrom = 0;
     }
+    behind = 0;
+    _liveSeekAt = null;
     // A live stream restored after a restart starts from a fresh live
     // point (the players' next reports).
     if (restore != null && !next.live) {
@@ -923,7 +936,12 @@ class SyncEngine {
   /// (`report.edge`); with it, [reportPosition] is in stream time and a
   /// [duration] says the player reached the stream's end there.
   void applyReport(String token, double reportPosition, double buffered, int reportEventId,
-      {double duration = 0, int mediaId = 0, Map<String, bool>? jf, String error = '', double edge = 0}) {
+      {double duration = 0,
+      int mediaId = 0,
+      Map<String, bool>? jf,
+      String error = '',
+      double edge = 0,
+      double from = 0}) {
     final member = members[token];
     if (member == null) return;
     if (!reportPosition.isFinite) return;
@@ -948,6 +966,7 @@ class SyncEngine {
     }
     if (live) {
       if (mediaId == this.mediaId && (liveNow || duration > 0)) {
+        member.liveFrom = from.isFinite && from > 0 ? from : 0;
         _liveReport(member, reportPosition, edge, duration.isFinite ? duration : 0);
         if (member.loading && !member.presence.isOut && liveNow) _caughtUp(member);
       }
@@ -1004,20 +1023,28 @@ class SyncEngine {
     }
     if (edge <= 0) return;
     final lag = edge - pos;
-    final behind = lag >= 0 && lag <= RelayConstants.liveMaxLagSecs ? lag / 2 : RelayConstants.liveFallbackLagSecs;
-    final point = edge - behind - RelayConstants.liveMarginSecs;
+    final back = lag >= 0 && lag <= RelayConstants.liveMaxLagSecs ? lag / 2 : RelayConstants.liveFallbackLagSecs;
+    final point = edge - back - RelayConstants.liveMarginSecs;
     final t = now;
     if (transport == Transport.held) {
       _setLivePoint(point, t);
       return;
     }
     if (transport != Transport.playing) return;
+    // Just moved by a seek: the players are still opening the stream at the
+    // new point (their edges say where they were).
+    final seekAt = _liveSeekAt;
+    if (seekAt != null && t.difference(seekAt).inMilliseconds < RelayConstants.liveSeekSettleSecs * 1000) return;
     var top = 0.0;
     for (final m in members.values) {
       if (!m.gone && m.liveEdge > top) top = m.liveEdge;
     }
+    // Stalled: the group's point is past what any player has. A jump: the
+    // live point (where the group would be without a rewind) far behind it.
     final g = positionAt(t);
-    if (g > top + RelayConstants.liveStallSecs || g < top - 2 * RelayConstants.liveMaxLagSecs) _setLivePoint(point, t);
+    if (g > top + RelayConstants.liveStallSecs || g + behind < top - 2 * RelayConstants.liveMaxLagSecs) {
+      _setLivePoint(point, t);
+    }
   }
 
   void _setLivePoint(double point, DateTime t) {
@@ -1025,8 +1052,61 @@ class SyncEngine {
     serverTime = t;
     eventId++;
     transport = Transport.playing;
+    behind = 0;
     // The group watches it; what comes after it plays on.
     wantsPlay = true;
+  }
+
+  /// The live point now: where the group's point would be without a
+  /// rewind.
+  double liveTop([DateTime? at]) => positionAt(at) + behind;
+
+  /// The oldest moment of the live stream every member watching it can
+  /// rewind to (the latest of their `report.from`), stream time; 0 when
+  /// one of them cannot rewind, or the span up to the live point is under
+  /// [RelayConstants.liveMinWindowSecs].
+  double liveFrom([DateTime? at]) {
+    if (!live || transport != Transport.playing) return 0;
+    var from = 0.0;
+    var any = false;
+    for (final m in members.values) {
+      if (m.gone || m.presence.isOut || m.liveEdge <= 0) continue;
+      if (m.liveFrom <= 0) return 0;
+      any = true;
+      if (m.liveFrom > from) from = m.liveFrom;
+    }
+    if (!any || liveTop(at) - from < RelayConstants.liveMinWindowSecs) return 0;
+    return from;
+  }
+
+  /// A seek over a live stream: within what every member can rewind to
+  /// ([liveFrom]) the group's point moves there and runs on at 1x behind
+  /// the live point; at or past the live point it goes back to it (Go
+  /// live, which needs no window).
+  void _liveSeek(EngineMember member, double target, int seq) {
+    if (transport != Transport.playing) return;
+    final t = now;
+    final top = liveTop(t);
+    final String reason;
+    if (target >= top - 1) {
+      if (behind <= 0) return;
+      position = top;
+      behind = 0;
+      reason = 'live';
+    } else {
+      final from = liveFrom(t);
+      if (from <= 0) return;
+      position = target < from ? from : target;
+      behind = top - position;
+      reason = '';
+    }
+    serverTime = t;
+    eventId++;
+    _liveSeekAt = t;
+    _seekBy = member.id;
+    _seekSeq = seq;
+    _seekEventId = eventId;
+    feed.add(_line('seek', actor: member, reason: reason));
   }
 
   /// A live stream ends once a member's player reached its end and nobody
@@ -1166,6 +1246,8 @@ class SyncEngine {
       advance: advance,
       wantsPlay: wantsPlay,
       queuePass: queuePass,
+      liveFrom: liveFrom(),
+      behind: live && transport == Transport.playing ? behind : 0,
     );
   }
 }

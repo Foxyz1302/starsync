@@ -22,6 +22,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 ### Added
 
 - Live streams can be watched together: everyone sees the same moment
+- Live streams that allow it can be rewound together, with Go live to catch up
 - The video's volume is remembered: the next start begins where you left it
 - M mutes and unmutes the video
 - When Starsync crashes or freezes, it now notes it in the diagnostics it shares by itself (on Windows with the system's crash report from the next start), so a problem can be tracked down without you sending anything

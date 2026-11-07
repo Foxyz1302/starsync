@@ -2,8 +2,8 @@ import '../playback/media_marks.dart' show CachedRanges;
 import 'state_diff.dart';
 
 /// What [LiveFollow.step] asks of the player: [actions] (a seek in the
-/// player's own time, a rate), or [reload] (the live point ran far ahead
-/// of anything this player holds: only a fresh open gets there).
+/// player's own time, a rate), or [reload] (the live point is out of
+/// anything this player holds: only an open at it gets there).
 typedef LiveStep = ({List<PlayerAction> actions, bool reload});
 
 /// Keeps this player on the group's live point (ARCHITECTURE "Live
@@ -16,7 +16,8 @@ typedef LiveStep = ({List<PlayerAction> actions, bool reload});
 /// (a live stream seeks in its cache alone), then lets the seek land for
 /// [settle]. A point beyond its cache it cannot reach: it plays on where
 /// it is (a CDN edge a little late), or, more than [reloadOver] behind,
-/// asks for a fresh open.
+/// asks for a fresh open. A point before its cache (a rewind) it asks to
+/// open at when the stream lets it rewind (`rewind`), else it plays on.
 class LiveFollow {
   static const deadBand = 0.08;
   static const seekOver = 1.0;
@@ -42,13 +43,15 @@ class LiveFollow {
   /// [group]: the live point now (stream time; null while the server has
   /// none). [own]: this player's position in stream time; [start]: the
   /// stream time of the player's 0 ([own] minus `time-pos`). [cached]:
-  /// what mpv holds, in player time.
+  /// what mpv holds, in player time. [rewind]: the stream can be opened
+  /// further back.
   LiveStep step({
     required double? group,
     required double own,
     required double start,
     required CachedRanges cached,
     required DateTime now,
+    bool rewind = false,
   }) {
     final out = <PlayerAction>[];
     void setRate(double r) {
@@ -76,7 +79,7 @@ class LiveFollow {
       if (reachable) {
         _seekAt = now;
         out.add(SeekAction(target));
-      } else if (err < -reloadOver) {
+      } else if (err < -reloadOver || (rewind && err > 0)) {
         _seekAt = now;
         return (actions: out, reload: true);
       }
@@ -95,4 +98,42 @@ bool growsLikeLive(List<double> seen) {
     if (seen[i] - seen[i - 1] >= 0.5) rises++;
   }
   return rises >= 3;
+}
+
+/// A live stream's seek bar (ARCHITECTURE "Live streams"): its window from
+/// [from] (stream time, the oldest moment every member reaches) to the
+/// live point, [length] long; this player at [position] in it and what it
+/// holds ([cached]), both from the window's start.
+class LiveBar {
+  final double from;
+  final Duration length;
+  final Duration position;
+  final CachedRanges cached;
+  const LiveBar({required this.from, required this.length, required this.position, required this.cached});
+
+  /// [top]: the live point; [own]: this player's position, [start] its 0,
+  /// [cached] in player time (the rest in stream time).
+  factory LiveBar.of(
+      {required double from,
+      required double top,
+      required double own,
+      required double start,
+      required CachedRanges cached}) {
+    final span = top > from ? top - from : 0.0;
+    Duration d(double secs) => Duration(microseconds: (secs.clamp(0.0, span) * 1e6).round());
+    final shift = start - from;
+    return LiveBar(
+      from: from,
+      length: d(span),
+      position: d(own - from),
+      cached: CachedRanges([
+        for (final r in cached.ranges)
+          if (r.end.inMicroseconds / 1e6 + shift > 0)
+            (start: d(r.start.inMicroseconds / 1e6 + shift), end: d(r.end.inMicroseconds / 1e6 + shift)),
+      ]),
+    );
+  }
+
+  /// The stream time at [at] on the bar.
+  double streamTime(Duration at) => from + at.inMicroseconds / 1e6;
 }

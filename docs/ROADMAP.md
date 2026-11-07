@@ -266,6 +266,12 @@ dropped (DEVELOPMENT "The 1.4 bridge").
      mid-roll ads per viewer and HLS discontinuities are untested; the
      live point follows whoever reported first, a member whose CDN edge
      runs more than ~3 s late plays as near as it can.
+   - Live rewinding follow-ups: Twitch's playlist window is unmeasured
+     (expected too short to offer); a playlist's window is read once per
+     media, so an EVENT playlist (growing from its start) offers what it
+     had then; YouTube's whole broadcast (`--live-from-start`, DASH) is
+     not used, the 15 min HLS window is; no preview thumbnails on the
+     live timeline.
    - `tool/relay_e2e.dart`: a two-track case (bytes and pieces) over a
      shaped source link. Pieces on a slow source: a cold piece can take
      longer than media_kit's 5 s `network-timeout`; if it does, fetch the

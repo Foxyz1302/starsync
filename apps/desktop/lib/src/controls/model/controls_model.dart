@@ -8,6 +8,7 @@ import '../../queue/queue_controller.dart';
 import '../../session/session_coordinator.dart';
 import '../../shaders/shader_presets.dart';
 import '../../state/settings.dart';
+import '../../sync/live_follow.dart' show LiveBar;
 import '../player_settings.dart' show applyShaderChoice, setVideoVolume;
 import '../volume.dart' as vol;
 import 'controls_layout.dart';
@@ -73,11 +74,18 @@ class PlayerControlsModel {
   ReadonlySignal<SkipOffer?> get skipOffer => coord.skipOffer;
   ReadonlySignal<RenderMode> get renderMode => playback.renderMode;
 
-  /// A live stream: LIVE instead of the time and timeline, no seeking.
+  /// A live stream: LIVE instead of the time, a timeline only to rewind
+  /// ([liveBar]).
   ReadonlySignal<bool> get live => coord.live;
 
   /// The live stream is paused here only.
   ReadonlySignal<bool> get livePaused => coord.livePaused;
+
+  /// How far everyone watches the live stream behind live (a rewind), s.
+  ReadonlySignal<double> get liveBehind => coord.liveBehind;
+
+  /// The live stream's seek bar; null when it cannot be rewound.
+  ReadonlySignal<LiveBar?> get liveBar => coord.liveBar;
 
   /// Play / pause as the session sees it ([PlayState]); live, this
   /// player's own.
@@ -148,6 +156,15 @@ class PlayerControlsModel {
   /// A seek bar's press or drag; through `player.seek`, the user-seek
   /// path, so everyone follows.
   void seek(Duration to) => playback.userSeek(to);
+
+  /// The live seek bar's release: everyone rewinds there ([LiveBar]).
+  void seekLive(Duration to) {
+    final bar = coord.liveBar.peek();
+    if (bar != null) coord.seekLive(bar.streamTime(to));
+  }
+
+  /// Go live: everyone back to the live point.
+  void goLive() => coord.goLive();
 
   /// Arrow keys: ±[secs], relative to a seek still in flight.
   void nudge(double secs) => coord.nudge(secs);
