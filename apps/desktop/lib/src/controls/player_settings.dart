@@ -423,3 +423,59 @@ class ProgressLineSetting extends StatelessWidget {
     );
   }
 }
+
+/// A hold time in seconds, one decimal ("0.6 s").
+String _seconds(int ms) => '${(ms / 1000).toStringAsFixed(1)} s';
+
+/// How long Space is held to go BRB ([AppSettings.brbHoldMs], 0.4–0.8 s
+/// in 0.1 s steps). Settings → Player → More only; the next press uses it.
+class BrbHoldSetting extends StatelessWidget {
+  const BrbHoldSetting({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = _settings(context);
+    return SignalBuilder(
+      builder: (context) => SettingTrack(
+        label: 'BRB hold',
+        help: 'How long to hold Space to go BRB; a shorter press plays or pauses',
+        readout: _seconds(s.brbHoldMs.value),
+        track: Slider(
+          key: const ValueKey('brb-hold'),
+          value: s.brbHoldMs.value.toDouble(),
+          min: brbHoldRange.min.toDouble(),
+          max: brbHoldRange.max.toDouble(),
+          divisions: (brbHoldRange.max - brbHoldRange.min) ~/ 100,
+          onChanged: (v) => s.setBrbHold(v.round()),
+        ),
+      ),
+    );
+  }
+}
+
+/// How long Space is held, while someone else is BRB, to continue
+/// without them ([AppSettings.continueHoldMs], 1.5–3 s in 0.5 s steps).
+/// Settings → Player → More only; the next press uses it.
+class ContinueHoldSetting extends StatelessWidget {
+  const ContinueHoldSetting({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = _settings(context);
+    return SignalBuilder(
+      builder: (context) => SettingTrack(
+        label: 'Continue-without hold',
+        help: 'While someone is BRB: how long to hold Space to go on without them; a tap makes you BRB too',
+        readout: _seconds(s.continueHoldMs.value),
+        track: Slider(
+          key: const ValueKey('continue-hold'),
+          value: s.continueHoldMs.value.toDouble(),
+          min: continueHoldRange.min.toDouble(),
+          max: continueHoldRange.max.toDouble(),
+          divisions: (continueHoldRange.max - continueHoldRange.min) ~/ 500,
+          onChanged: (v) => s.setContinueHold(v.round()),
+        ),
+      ),
+    );
+  }
+}

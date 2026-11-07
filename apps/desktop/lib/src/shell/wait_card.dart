@@ -1,10 +1,7 @@
-import 'dart:io' show Platform;
-
 import 'package:flutter/material.dart';
 import 'package:sync_relay_core/core.dart' show MemberView;
 
 import '../app/app_graph.dart';
-import '../screens/home/ui.dart' show devTools;
 import '../session/session_coordinator.dart';
 import '../session/space_gesture.dart' show HoldView;
 import '../session/space_key.dart' show holdKeysFor;
@@ -13,35 +10,20 @@ import 'avatar.dart';
 import 'motion.dart';
 import 'player_status.dart';
 
-// Dev builds only, until real evenings decide (removed before release):
-// how the group's waiting shows. A is the pill at the bottom centre (the
-// default, and the only one in a release); C is a card in the middle of
-// the paused picture; D is C fading with the controls. Env
-// STARSYNC_WAIT_DESIGN=a|c|d; no setting.
-
-enum WaitDesign { a, c, d }
-
-/// The waiting design of this run ([WaitDesign.a] in a release).
-final WaitDesign waitDesign = _design();
-
-WaitDesign _design() {
-  if (!devTools) return WaitDesign.a;
-  return switch (Platform.environment['STARSYNC_WAIT_DESIGN']) {
-    'c' => WaitDesign.c,
-    'd' => WaitDesign.d,
-    _ => WaitDesign.a,
-  };
-}
+// How the group's waiting shows (Settings → Party → More, "Waiting
+// display", `AppSettings.waitDisplay`): the pill at the bottom centre
+// (the default), a card in the middle of the paused picture, or that
+// card fading with the controls.
 
 /// A line about the group waiting for someone's BRB (or yours): what
-/// designs C and D show as the card.
+/// the card shows (the pill leaves it to the card).
 bool isWaitLine(StatusLine l) => l.kind == StatusKind.you || (l.kind == StatusKind.waiting && l.keys.isNotEmpty);
 
-/// Design C's card in the middle of the paused picture: the line as a
+/// The waiting card in the middle of the paused picture: the line as a
 /// title, who the group waits for large (64 px) with their name and "BRB ·
 /// 4 min", and the keys; a Space hold sweeps a fill across it and swaps
 /// the keys for what keeping on and letting go do. [shown] false: it fades
-/// out (design D with the controls hidden; a hold always shows it).
+/// out (the fading card with the controls hidden; a hold always shows it).
 class WaitCard extends StatelessWidget {
   final bool shown;
   const WaitCard({super.key, this.shown = true});

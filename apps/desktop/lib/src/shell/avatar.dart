@@ -11,6 +11,7 @@ import '../session/identity.dart';
 import '../session/delivery.dart';
 import '../session/session_coordinator.dart';
 import '../app/app_graph.dart';
+import '../state/settings.dart' show BadgeStyle;
 import 'motion.dart';
 import 'person_card.dart' show PersonHover, PersonRef;
 
@@ -228,8 +229,20 @@ class AvatarShape {
   }
 }
 
+/// Standing badges as words ("BRB", "AFK", "Out") instead of icons
+/// (Settings → Party → More, "Badges"; tracked when read in a builder);
+/// icons outside the app (tests without a graph).
+bool badgeWords(BuildContext context) =>
+    AppScope.maybeOf(context)?.coordinator.settings.badgeStyle.value == BadgeStyle.words;
+
+/// A row of avatars overlaps (Settings → Party → More, "Avatars in the
+/// top bar"; until picked, circles do); tracked when read in a builder.
+bool overlapAvatars(BuildContext context, AvatarShape shape) =>
+    AppScope.maybeOf(context)?.coordinator.settings.overlapAvatars.value ?? shape.circle;
+
 /// A person: the picture fills the whole shape (no ring). BRB, AFK and
-/// Out are a badge in a small dark tile on the bottom-right; AFK and Out
+/// Out are a badge in a small dark tile on the bottom-right (an icon, or
+/// the word with "Badges: Words"); AFK and Out
 /// are darkened. Loading and reconnecting run along the shape's edge,
 /// over the picture, only while they last. Crown = host, tower = passing
 /// the video on, red "!" = cannot play the media. [badges]: the crown and
@@ -368,7 +381,7 @@ class StatusAvatar extends StatelessWidget {
               key: ValueKey('state-${info.presence.wire}'),
               right: -tile / 3,
               bottom: -tile / 3,
-              child: StateBadge(presence: info.presence, size: tile),
+              child: StateBadge(presence: info.presence, size: tile, words: badgeWords(context)),
             ),
         ],
       ),
@@ -489,11 +502,21 @@ double badgeSize(double avatar) => (avatar * 0.42).clamp(12.0, 19.0);
 
 /// A standing as a small dark tile with a thin dark outline and a muted
 /// glyph in its colour, calm over the glass and the picture: a cup for
-/// BRB, "Zz" for AFK, an eye with a line through it for Out.
+/// BRB, "Zz" for AFK, an eye with a line through it for Out. [words]: the
+/// word instead ("BRB", "AFK", "Out"), the tile as wide as it needs,
+/// growing to the left.
 class StateBadge extends StatelessWidget {
   final Presence presence;
   final double size;
-  const StateBadge({super.key, required this.presence, required this.size});
+  final bool words;
+  const StateBadge({super.key, required this.presence, required this.size, this.words = false});
+
+  static String label(Presence p) => switch (p) {
+        Presence.brb => 'BRB',
+        Presence.afk => 'AFK',
+        Presence.out => 'Out',
+        Presence.watching => '',
+      };
 
   static Color glyphColor(Presence p) => switch (p) {
         Presence.brb => const Color(0xFFE8C77A),
@@ -504,6 +527,30 @@ class StateBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = glyphColor(presence);
+    final decoration = BoxDecoration(
+      color: const Color(0xFF1C1C21),
+      borderRadius: BorderRadius.circular(size * 0.3),
+      border: Border.all(color: const Color(0xCC000000), width: 1),
+    );
+    if (words) {
+      return Container(
+        key: const ValueKey('badge-words'),
+        height: size,
+        padding: EdgeInsets.symmetric(horizontal: size * 0.24),
+        alignment: Alignment.center,
+        decoration: decoration,
+        child: Text(
+          label(presence),
+          style: TextStyle(
+            fontSize: size * 0.56,
+            height: 1,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.2,
+            color: color,
+          ),
+        ),
+      );
+    }
     final g = size * 0.68;
     final Widget glyph = switch (presence) {
       Presence.brb => Icon(Icons.coffee_rounded, size: g, color: color),
@@ -511,21 +558,12 @@ class StateBadge extends StatelessWidget {
       _ => Icon(Icons.visibility_off_rounded, size: g, color: color),
     };
     return Tooltip(
-      message: switch (presence) {
-        Presence.brb => 'BRB',
-        Presence.afk => 'AFK',
-        Presence.out => 'Out',
-        Presence.watching => '',
-      },
+      message: label(presence),
       child: Container(
         width: size,
         height: size,
         alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: const Color(0xFF1C1C21),
-          borderRadius: BorderRadius.circular(size * 0.3),
-          border: Border.all(color: const Color(0xCC000000), width: 1),
-        ),
+        decoration: decoration,
         child: glyph,
       ),
     );
@@ -728,9 +766,9 @@ class _EdgePainter extends CustomPainter {
       old.fill != fill;
 }
 
-/// A row of people, host first, then watching, BRB, out, gone. Rounded
-/// squares sit side by side; circles overlap (each with an outline in the
-/// background colour) and spread apart on hover. "+N" past [shown]. Each
+/// A row of people, host first, then watching, BRB, out, gone. Side by
+/// side (an 8 px gap, no halo) or overlapping (each with a halo in the
+/// background colour), spreading apart on hover: [overlapAvatars]. "+N" past [shown]. Each
 /// avatar is its person's ([PersonHover]: card on hover, pinned by a
 /// click).
 class AvatarStack extends StatefulWidget {
@@ -771,7 +809,7 @@ class _AvatarStackState extends State<AvatarStack> {
     final sorted = [...widget.members]..sort((a, b) => rank(a) - rank(b));
     final visible = sorted.take(widget.shown).toList();
     final extra = sorted.length - visible.length;
-    final overlap = shape.circle;
+    final overlap = overlapAvatars(context, shape);
     // Whole pixels: at a fractional offset Impeller smooths the rounded clip
     // on a half-pixel grid and the corners look jagged.
     final step = !overlap || _hover ? size + 8 : (size * 0.62).roundToDouble();

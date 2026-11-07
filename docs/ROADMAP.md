@@ -213,13 +213,8 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
 ## Backlog
 
 Next, before 1.5.0 is cut (playback and presence is in; protocol 17):
-- **Pick the waiting design** after real evenings with friends: A, the
-  pill (the default), or the centre card (C), or the card stepping aside
-  with the controls (D), tried with `STARSYNC_WAIT_DESIGN` in dev builds;
-  then remove the switch and the designs not picked
-  (`shell/wait_design.dart`, DEVELOPMENT "Dev tools").
 - **The name "Out"**: fits next to BRB and AFK, but may not be clear
-  enough; settle it from the same evenings.
+  enough; settle it from real evenings with friends.
 
 **Open source** (decided, after 1.5.0; as portfolio, foxyz-presence
 DECISIONS.md; the license is MIT: DEVELOPMENT "Third-party

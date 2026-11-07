@@ -2209,15 +2209,18 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   drag area; the window buttons sit at its end.
 - **Avatars** (`avatar.dart`): `StatusAvatar`'s picture fills its shape
   (no ring): a rounded square (22 % corner) or, with Settings → Party →
-  More "Avatar shape: Circle" (`AppSettings.avatarCircle`, the one
-  setting of the redesign), a circle (`AvatarShape`). The picture is one
+  More "Avatar shape: Circle" (`AppSettings.avatarCircle`), a circle
+  (`AvatarShape`). The picture is one
   draw clipped to the shape and darkened by a filter on it; the person's
   colour sits a pixel inside the edge (for pictures with transparent
   parts): drawn to the same edge it bled through the anti-aliased rim
   as a thin coloured frame. The standing is a
   badge (`StateBadge`): a small dark tile with a thin dark outline a third
   over the bottom-right corner, a muted glyph in its colour: a cup for
-  BRB, "Zz" for AFK, an eye with a line through it for Out; AFK and Out
+  BRB, "Zz" for AFK, an eye with a line through it for Out (with
+  Settings → Party → More "Badges: Words", `AppSettings.badgeStyle`,
+  `badgeWords`: the word "BRB", "AFK" or "Out" in the same tile, as wide
+  as it needs, everywhere a badge shows); AFK and Out
   are darkened (a black layer, not transparency, so an overlapping
   neighbour never shows through). What happens to their player runs
   along the shape's edge only while it lasts (`AvatarEdge`, an arc on a
@@ -2233,8 +2236,13 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   (`members[].host` in the state; your own app also knows before the
   first state), a tower at the bottom-left for the member passing the
   video on, a red "!" when their player cannot open the media. In a row
-  (`AvatarStack`) rounded squares sit side by side, circles overlap with
-  an outline in the background colour and spread apart on hover. `memberAvatarImage` is the one picture lookup: yours from the
+  (`AvatarStack`: the strip and the fullscreen row) they sit side by side
+  (an 8 px gap, no halo) or overlap (a halo in the background colour
+  behind each picture, the step in whole pixels) and spread apart on
+  hover: Settings → Party → More "Avatars in the top bar"
+  (`AppSettings.avatarOverlap`; never picked: the shape decides,
+  circles overlap and rounded squares sit side by side,
+  `overlapAvatars`). `memberAvatarImage` is the one picture lookup: yours from the
   profile, anyone else's from `coordinator.avatars` by `avatarHash`.
   Colours are local: yours is picked in the profile, others' come from
   their name. A toast's or danmaku line's avatar (`LineAvatar`) is
@@ -2447,12 +2455,17 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
     shader files, sharp video, hardware decoding), Controls (player
     design, controls size, progress line; More: the bar's optional
     buttons), Playback ("Play the next episode automatically": whether
-    this app adds the continuation, see "What's next"). A line says the
+    this app adds the continuation, see "What's next"; More: BRB hold
+    0.4–0.8 s and Continue-without hold 1.5–3 s, see "Space and the
+    radial"). A line says the
     player's ⚙ opens these while watching.
   - **Party**: You (picture, name and colour edited in place with the
     profile card's `ProfilePicture` / `ProfileColors`; the profile card's
-    Settings link opens this page; More: Avatar shape, Rounded square or
-    Circle), Your server (port and password, used the next time it is
+    Settings link opens this page; More: "How people look": Avatar shape
+    (Rounded square or Circle), Waiting display (Pill, Centre card, Card
+    that fades with the controls; see "Playback and presence"), Badges
+    (Icons or Words), Avatars in the top bar (Overlap or Side by side;
+    see "Avatars")), Your server (port and password, used the next time it is
     shared, in the connect form), Recent servers (Forget, as on the Join
     card).
   - **Notifications & sounds**: Over the video (Notifications: toasts or
@@ -2611,12 +2624,14 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   waiting"). Its height lifts bottom subtitles over it, with the player's
   existing lift (`SubtitleLift`), whatever "Subtitles above the controls"
   says. The pill glass, colour only for problems; it fades through
-  between kinds. The mini shows its short line in its hover bar. Dev
-  builds only (removed before release, no setting): `STARSYNC_WAIT_DESIGN`
-  `c` shows the BRB waiting as a card in the middle of the paused picture
-  instead (`WaitCard`: 64 px avatars with name and "BRB · 4 min", the
-  keys, the hold's fill), `d` the same card fading with the controls (a
-  hold always shows it); see DEVELOPMENT.md "Dev tools".
+  between kinds. The mini shows its short line in its hover bar.
+  Settings → Party → More "Waiting display" (`AppSettings.waitDisplay`,
+  live) picks how the BRB waiting shows: the pill (the default), a
+  centre card (`WaitCard`, `wait_card.dart`: over a dimmed paused
+  picture, the line as a title, 64 px avatars with name and "BRB · 4
+  min", the keys, the hold's fill; the pill then leaves the waiting to
+  it, `isWaitLine`), or the card fading with the controls (a hold
+  always shows it).
 - **Space and the radial**: Space is the session's `SpaceKey`
   (`session/space_key.dart` over the pure `SpaceGesture`,
   `session/space_gesture.dart`), fed by `AppKeys` with key-down, a
@@ -2630,7 +2645,10 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   wanted to play at key-down (it plays once everyone is back). While
   anyone else is BRB a tap (under 0.3 s) toggles your own BRB (BRB too,
   or I'm back) and a hold of 2 s continues without them (`continue`); in
-  between letting go does nothing. BRB with nobody else, AFK or out: back
+  between letting go does nothing. Both holds are settings (Settings →
+  Player → More: BRB hold 0.4–0.8 s, Continue-without hold 1.5–3 s;
+  `AppSettings.brbHoldMs`, `continueHoldMs`), read into `SpaceTiming` at
+  each key-down. BRB with nobody else, AFK or out: back
   on key-down. Any key down is input for AFK. The right button on the
   video (`player_radial.dart`, a raw `Listener` so left clicks and the
   double-click are untouched; the full player only) opens the radial

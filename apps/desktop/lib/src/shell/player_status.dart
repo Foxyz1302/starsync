@@ -7,10 +7,11 @@ import 'package:flutter/rendering.dart';
 import '../session/session_coordinator.dart';
 import '../session/space_gesture.dart' show HoldKind, HoldView;
 import '../app/app_graph.dart';
+import '../state/settings.dart' show WaitDisplay;
 import '../widgets/app_menu.dart' show AppGlass, AppMenuStyle;
 import 'avatar.dart';
 import 'motion.dart';
-import 'wait_design.dart';
+import 'wait_card.dart';
 
 export '../session/status.dart' show KeyHint, StatusAction, StatusKind, StatusLevel, StatusLine, nameList;
 
@@ -106,8 +107,13 @@ class _PlayerStatusState extends State<PlayerStatus> {
         var view = holdLine ?? playerStatusNow(coord, slowConnect: _slow);
         // Out: the card in the middle says it ([OutCard]).
         if (view?.kind == StatusKind.out) view = null;
-        // The dev-only centre card shows the waiting itself.
-        if (holdLine == null && view != null && waitDesign != WaitDesign.a && isWaitLine(view)) view = null;
+        // A waiting card shows the waiting itself (Waiting display).
+        if (holdLine == null &&
+            view != null &&
+            coord.settings.waitDisplay.value != WaitDisplay.pill &&
+            isWaitLine(view)) {
+          view = null;
+        }
         if (view != null) _last = view;
         _visible = view != null;
         _report();

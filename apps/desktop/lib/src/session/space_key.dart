@@ -8,7 +8,9 @@ import 'space_gesture.dart';
 /// key handler ([AppKeys]) feeds it key-down, every frame while held, and
 /// key-up; it drops the press when the window loses the keys. [hold]
 /// follows the press every frame (the pill's fill), [holdLine] says what
-/// keeping on and letting go do, from [SpaceTiming.wordsAfter] on.
+/// keeping on and letting go do, from [SpaceTiming.wordsAfter] on. The
+/// hold times are the settings' (BRB hold, Continue-without hold), read
+/// at each key-down.
 class SpaceKey {
   final SessionCoordinator coord;
   SpaceKey(this.coord);
@@ -42,6 +44,11 @@ class SpaceKey {
       coord.togglePlay();
       return;
     }
+    final s = coord.settings;
+    gesture.timing = SpaceTiming(
+      brbHold: Duration(milliseconds: s.brbHoldMs.peek()),
+      continueHold: Duration(milliseconds: s.continueHoldMs.peek()),
+    );
     _press
       ..reset()
       ..start();
@@ -133,7 +140,7 @@ StatusLine holdLineFor(HoldView h, {MemberView? self, List<MemberView> othersBrb
       who: othersBrb);
 }
 
-/// The keys a hold [h] offers, as keycaps (the dev-only centre card).
+/// The keys a hold [h] offers, as keycaps (the waiting card).
 List<KeyHint> holdKeysFor(HoldView h, List<MemberView> othersBrb) {
   if (h.kind == HoldKind.brb) return [('Keep holding', 'BRB'), ('Let go', h.wasPlaying ? 'just pause' : 'play')];
   final names = nameList([for (final m in othersBrb) m.name]);

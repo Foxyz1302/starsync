@@ -42,7 +42,7 @@ import 'settings_tab.dart' show SettingsSection;
 import 'player_radial.dart';
 import 'start_banner.dart';
 import 'video_view.dart';
-import 'wait_design.dart';
+import 'wait_card.dart';
 
 /// Where the session's video is shown: nowhere, the floating mini player,
 /// or filling the body (and, with fullscreen, the window).
@@ -530,13 +530,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
                 _quickChatBox(),
                 _playerPanel(),
                 if (widget.danmaku case final d?) _danmakuPanel(d),
-                if (waitDesign != WaitDesign.a)
-                  Positioned.fill(
-                    child: ValueListenableBuilder<bool>(
-                      valueListenable: _controlsShown,
-                      builder: (context, up, _) => WaitCard(shown: waitDesign == WaitDesign.c || up),
-                    ),
-                  ),
+                Positioned.fill(child: _waitCard()),
                 RadialLayer(controller: _radial),
               ] else
                 _miniOverlay(),
@@ -708,6 +702,19 @@ class _SessionPlayerState extends State<SessionPlayer> {
       );
 
   /// The volume flash after a wheel or key step: a pill under the top bar.
+  /// The waiting card (Waiting display): none for the pill; the fading
+  /// card follows the controls. Live.
+  Widget _waitCard() => SignalBuilder(
+        builder: (context) => switch (_settings.waitDisplay.value) {
+          WaitDisplay.pill => const SizedBox.shrink(),
+          WaitDisplay.card => const WaitCard(),
+          WaitDisplay.fadingCard => ValueListenableBuilder<bool>(
+              valueListenable: _controlsShown,
+              builder: (context, up, _) => WaitCard(shown: up),
+            ),
+        },
+      );
+
   Widget _volumeReadout() => Positioned(
         left: 0,
         right: 0,

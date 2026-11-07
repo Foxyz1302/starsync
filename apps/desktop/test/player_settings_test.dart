@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemChannels;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hive_ce/hive.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:starsync/src/controls/model/controls_prefs.dart';
 import 'package:starsync/src/controls/player_panel.dart';
@@ -62,6 +63,12 @@ void main() {
     s.hwdecMode.value = HwdecMode.auto;
     s.liftSubtitles.value = false;
     s.notifyStyle.value = NotifyStyle.toasts;
+    s.avatarCircle.value = false;
+    s.waitDisplay.value = WaitDisplay.pill;
+    s.badgeStyle.value = BadgeStyle.icons;
+    s.avatarOverlap.value = null;
+    s.brbHoldMs.value = brbHoldRange.initial;
+    s.continueHoldMs.value = continueHoldRange.initial;
     coord.playback.tracks.value = const [];
     coord.serverState.value = null;
     coord.hostFile = null;
@@ -263,6 +270,7 @@ void main() {
       ]) {
         expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
       }
+      expect(find.byKey(const ValueKey('brb-hold')), findsNothing, reason: 'the hold times are under More');
       // Dropped for their defaults: no time display or hide delay rows.
       expect(find.text('Time display'), findsNothing);
       expect(find.text('Hide the controls after'), findsNothing);
@@ -275,9 +283,28 @@ void main() {
         await tester.tap(find.byWidget(more.widget));
         await tester.pumpAndSettle();
       }
-      for (final key in ['hwdec', 'screen-res-video', 'add-shaders', for (final c in OptionalControl.values) 'bar-${c.name}']) {
+      for (final key in [
+        'hwdec',
+        'screen-res-video',
+        'add-shaders',
+        for (final c in OptionalControl.values) 'bar-${c.name}',
+        'brb-hold',
+        'continue-hold',
+      ]) {
         expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
       }
+      // The hold times: 0.6 s and 2.0 s, to the ends of their ranges.
+      expect(find.text('0.6 s'), findsOneWidget);
+      expect(find.text('2.0 s'), findsOneWidget);
+      await tester.ensureVisible(find.byKey(const ValueKey('brb-hold')));
+      await tester.drag(find.byKey(const ValueKey('brb-hold')), const Offset(400, 0));
+      await tester.pumpAndSettle();
+      expect(s.brbHoldMs.value, 800);
+      expect(find.text('0.8 s'), findsOneWidget);
+      await tester.drag(find.byKey(const ValueKey('continue-hold')), const Offset(-400, 0));
+      await tester.pumpAndSettle();
+      expect(s.continueHoldMs.value, 1500);
+      expect(find.text('1.5 s'), findsOneWidget);
       expect(find.text('Standard'), findsOneWidget);
       await pick(tester, 'player-design', 'Minimal');
       expect(s.controlsSkin.value, ControlsSkin.minimal);
@@ -306,11 +333,28 @@ void main() {
       await tester.enterText(find.byKey(const ValueKey('party-name')), 'Hana');
       expect(profile.name.peek(), 'Hana');
       expect(find.byKey(const ValueKey('auto-sit-out')), findsNothing, reason: 'AFK has no switch');
-      // The avatar shape lives under More.
-      expect(find.byKey(const ValueKey('avatar-shape')), findsNothing);
+      // How people look lives under More: the shape, the waiting display,
+      // the badges, the top bar's row.
+      const look = ['avatar-shape', 'wait-display', 'badge-style', 'avatar-row'];
+      for (final key in look) {
+        expect(find.byKey(ValueKey(key)), findsNothing, reason: key);
+      }
       await tester.tap(find.descendant(of: you, matching: find.text('More')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('avatar-shape')), findsOneWidget);
+      expect(find.text('How people look'), findsOneWidget);
+      for (final key in look) {
+        expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
+      }
+      expect(find.text('Pill'), findsOneWidget);
+      expect(find.text('Icons'), findsOneWidget);
+      expect(find.text('Side by side'), findsOneWidget, reason: 'rounded squares: side by side until picked');
+      await pick(tester, 'wait-display', 'Card that fades with the controls');
+      expect(s.waitDisplay.value, WaitDisplay.fadingCard);
+      await pick(tester, 'badge-style', 'Words (BRB, AFK, Out)');
+      expect(s.badgeStyle.value, BadgeStyle.words);
+      await pick(tester, 'avatar-row', 'Overlap');
+      expect(s.avatarOverlap.value, isTrue);
+      expect(tester.takeException(), isNull);
       expect(find.text('Your server'), findsOneWidget);
       expect(find.text('Port'), findsOneWidget);
       expect(find.text('vps.example:8080'), findsOneWidget);
@@ -535,6 +579,121 @@ void main() {
       expect(find.textContaining("Couldn't find your internet address"), findsOneWidget);
       expect(_graph.notifier.toasts.peek().map((t) => t.text), contains('Invite link copied'));
       await tester.pump(const Duration(seconds: 6)); // the toasts go
+    });
+  });
+
+  group('how people look', () {
+    AvatarInfo person(String id, String name, [Presence presence = Presence.watching]) =>
+        AvatarInfo(id: id, name: name, color: Colors.teal, presence: presence);
+
+    testWidgets('badges: icons by default, words when picked, live', (tester) async {
+      await tester.pumpWidget(scoped(
+          _graph,
+          app(Center(
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              StatusAvatar(info: person('a', 'Ann', Presence.brb), size: 42),
+              StatusAvatar(info: person('b', 'Bob', Presence.afk), size: 42),
+              StatusAvatar(info: person('c', 'Cy', Presence.out), size: 42),
+            ]),
+          ))));
+      expect(find.byIcon(Icons.coffee_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.visibility_off_rounded), findsOneWidget);
+      expect(find.byKey(const ValueKey('badge-words')), findsNothing);
+      s.setBadgeStyle(BadgeStyle.words);
+      await tester.pump();
+      expect(find.byIcon(Icons.coffee_rounded), findsNothing);
+      expect(find.byKey(const ValueKey('badge-words')), findsNWidgets(3));
+      for (final word in ['BRB', 'AFK', 'Out']) {
+        expect(find.descendant(of: find.byKey(const ValueKey('badge-words')), matching: find.text(word)),
+            findsOneWidget, reason: word);
+      }
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the top bar row: side by side or overlapping (with a halo), the shape deciding until picked',
+        (tester) async {
+      const size = 40.0;
+      await tester.pumpWidget(scoped(
+          _graph,
+          app(Align(
+            alignment: Alignment.topLeft,
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: AvatarStack(
+                members: [person('a', 'Ann'), person('b', 'Bob'), person('c', 'Cy')],
+                size: size,
+                people: false,
+              ),
+            ),
+          ))));
+      double step() =>
+          tester.getTopLeft(find.byType(StatusAvatar).at(1)).dx - tester.getTopLeft(find.byType(StatusAvatar).at(2)).dx;
+      List<bool> halos() => [for (final a in tester.widgetList<StatusAvatar>(find.byType(StatusAvatar))) a.edge];
+      // Never picked, rounded squares: side by side, a small gap, no halo.
+      expect(s.avatarOverlap.value, isNull);
+      expect(step(), size + 8);
+      expect(halos(), everyElement(isFalse));
+      // Never picked, circles: they overlap.
+      s.setAvatarCircle(true);
+      await tester.pumpAndSettle();
+      expect(step(), (size * 0.62).roundToDouble());
+      expect(halos(), everyElement(isTrue));
+      // Picked: side by side whatever the shape, live.
+      s.setAvatarOverlap(false);
+      await tester.pumpAndSettle();
+      expect(step(), size + 8);
+      expect(halos(), everyElement(isFalse));
+      // Picked: rounded squares overlap too.
+      s.setAvatarCircle(false);
+      s.setAvatarOverlap(true);
+      await tester.pumpAndSettle();
+      expect(step(), (size * 0.62).roundToDouble());
+      expect(halos(), everyElement(isTrue));
+      expect(tester.takeException(), isNull);
+    });
+
+    test('defaults, kept across a reload, out-of-range hold times clamped', () async {
+      final dir = Directory.systemTemp.createTempSync('people_look_hive');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      Hive.init(dir.path);
+      final a = AppSettings();
+      await a.ensureLoaded();
+      expect(a.waitDisplay.value, WaitDisplay.pill);
+      expect(a.badgeStyle.value, BadgeStyle.icons);
+      expect(a.avatarOverlap.value, isNull);
+      expect(a.overlapAvatars.value, isFalse, reason: 'rounded squares sit side by side');
+      expect(a.brbHoldMs.value, 600);
+      expect(a.continueHoldMs.value, 2000);
+      a.setWaitDisplay(WaitDisplay.card);
+      a.setBadgeStyle(BadgeStyle.words);
+      a.setAvatarOverlap(true);
+      a.setBrbHold(400);
+      a.setContinueHold(3000);
+      await Future.delayed(const Duration(milliseconds: 100));
+      await Hive.close();
+
+      final b = AppSettings();
+      await b.ensureLoaded();
+      expect(b.waitDisplay.value, WaitDisplay.card);
+      expect(b.badgeStyle.value, BadgeStyle.words);
+      expect(b.avatarOverlap.value, isTrue);
+      expect(b.overlapAvatars.value, isTrue);
+      expect(b.brbHoldMs.value, 400);
+      expect(b.continueHoldMs.value, 3000);
+      b.setAvatarOverlap(false);
+      final box = Hive.box(settingsBoxName);
+      await box.put('brbHoldMs', 5000);
+      await box.put('continueHoldMs', 10);
+      await box.put('waitDisplay', 'nonsense');
+      await Hive.close();
+
+      final c = AppSettings();
+      await c.ensureLoaded();
+      expect(c.avatarOverlap.value, isFalse);
+      expect(c.brbHoldMs.value, 800);
+      expect(c.continueHoldMs.value, 1500);
+      expect(c.waitDisplay.value, WaitDisplay.pill);
+      await Hive.close();
     });
   });
 }

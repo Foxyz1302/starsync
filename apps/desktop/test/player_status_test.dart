@@ -14,6 +14,7 @@ import 'package:starsync/src/session/now_playing.dart';
 import 'package:starsync/src/shell/now_playing_title.dart';
 import 'package:starsync/src/shell/session_player.dart';
 import 'package:starsync/src/shell/start_banner.dart';
+import 'package:starsync/src/state/settings.dart' show WaitDisplay;
 
 import 'test_graph.dart';
 
@@ -456,6 +457,77 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text("You're out"), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('waiting display: the pill, the centre card, the card that fades with the controls; live',
+      (tester) async {
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final settings = coord.settings;
+    addTearDown(() => settings.waitDisplay.value = WaitDisplay.pill);
+    coord.connection.client.memberId = 'me';
+    addTearDown(() => coord.connection.client.memberId = '');
+    coord.playback.alive.value = true;
+    coord.serverState.value =
+        held([mv('me', 'Me'), mv('b', 'Bob', presence: Presence.brb)], wants: true, hold: const HoldInfo(brb: ['b']));
+    final controls = ValueNotifier(true);
+    addTearDown(controls.dispose);
+    Widget player() => scoped(
+        _graph,
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: SessionPlayer(
+              mode: PlayerMode.full,
+              fullscreen: false,
+              controlsShown: controls,
+              onExpand: () {},
+              onCollapse: () {},
+              onClose: () {},
+              onToggleFullscreen: () {},
+              onToggleChat: () {},
+              onChangeVideo: () {},
+              onOpenAccounts: () {},
+              onLeave: () {},
+              windowControls: false,
+              videoBuilder: (context, controls) => const ColoredBox(color: Colors.black),
+            ),
+          ),
+        ));
+    final card = find.byKey(const ValueKey('wait-card'));
+    final pillText = find.byKey(const ValueKey('player-status-text'));
+    // The pill (the default): it says it, no card.
+    expect(settings.waitDisplay.value, WaitDisplay.pill);
+    await tester.pumpWidget(player());
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(tester.widget<Text>(pillText).data, 'Waiting for Bob');
+    expect(card, findsNothing);
+    // Picked in Settings while it shows: the card comes at once.
+    settings.setWaitDisplay(WaitDisplay.card);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(card, findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('Waiting for Bob')), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('BRB · now')), findsOneWidget);
+    // The centre card stays with the controls hidden; the pill leaves it the waiting.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(player());
+    controls.value = false;
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(card, findsOneWidget);
+    expect(pillText, findsNothing);
+    // The fading card: up with the controls, gone without them.
+    settings.setWaitDisplay(WaitDisplay.fadingCard);
+    controls.value = true;
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(card, findsOneWidget);
+    controls.value = false;
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(card, findsNothing);
+    expect(pillText, findsNothing, reason: 'the pill does not take it back');
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
 

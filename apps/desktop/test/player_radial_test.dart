@@ -9,10 +9,12 @@ import 'package:sync_relay_core/core.dart';
 import 'package:starsync/src/controls/controls_probe.dart' show ControlsHold;
 import 'package:starsync/src/controls/model/controls_model.dart';
 import 'package:starsync/src/session/navigation.dart' show Place;
+import 'package:starsync/src/session/space_gesture.dart' show HoldKind;
 import 'package:starsync/src/shell/player_radial.dart';
 import 'package:starsync/src/shell/player_status.dart';
 import 'package:starsync/src/widgets/app_keys.dart';
 import 'package:starsync/src/shell/radial_menu.dart';
+import 'package:starsync/src/state/settings.dart' show brbHoldRange, continueHoldRange;
 
 import 'test_graph.dart';
 
@@ -202,5 +204,54 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+  });
+
+  test('the hold times are the settings\', read at each key-down', () {
+    final settings = coord.settings;
+    addTearDown(() {
+      settings.brbHoldMs.value = brbHoldRange.initial;
+      settings.continueHoldMs.value = continueHoldRange.initial;
+      coord.space.cancel();
+    });
+    final space = coord.space;
+    Duration ms(int n) => Duration(milliseconds: n);
+    // The default: 0.6 s is BRB.
+    state(Presence.watching);
+    space.keyDown();
+    space.tick(ms(300));
+    expect(space.hold.value?.progress, closeTo(0.5, 1e-9));
+    space.tick(ms(600));
+    expect(space.hold.value, isNull, reason: 'BRB at 0.6 s');
+    space.keyUp(ms(650));
+    // 0.8 s: still a hold at 0.7 s.
+    settings.setBrbHold(800);
+    state(Presence.watching);
+    space.keyDown();
+    space.tick(ms(700));
+    expect(space.hold.value?.kind, HoldKind.brb);
+    expect(space.hold.value?.progress, closeTo(700 / 800, 1e-9));
+    space.tick(ms(800));
+    expect(space.hold.value, isNull, reason: 'BRB at 0.8 s');
+    space.keyUp(ms(850));
+    // While Bob is BRB: continuing without him takes the set 3 s.
+    settings.setContinueHold(3000);
+    coord.serverState.value = StateBroadcast(
+      eventId: 2,
+      transport: 'held',
+      position: 0,
+      serverTime: DateTime.now().toUtc(),
+      mediaId: 1,
+      media: const {'name': 'Ep.mkv', 'size': 1, 'duration': 0},
+      members: const [MemberView(id: 'me', name: 'Me'), MemberView(id: 'b', name: 'Bob', presence: Presence.brb)],
+      wantsPlay: true,
+      hold: const HoldInfo(brb: ['b']),
+    );
+    space.keyDown();
+    space.tick(ms(2000));
+    expect(space.hold.value?.kind, HoldKind.continueWithout, reason: 'not yet at 2 s');
+    expect(space.hold.value?.progress, closeTo(2000 / 3000, 1e-9));
+    space.tick(ms(3000));
+    expect(space.hold.value, isNull, reason: 'continued at 3 s');
+    space.keyUp(ms(3050));
   });
 }

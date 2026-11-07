@@ -26,6 +26,11 @@ const _keyShaderPreset = 'shaderPreset';
 const _keyShaderQuality = 'shaderQuality';
 const _keyCustomShaders = 'customShaders';
 const _keyAvatarShape = 'avatarShape';
+const _keyWaitDisplay = 'waitDisplay';
+const _keyBadgeStyle = 'badgeStyle';
+const _keyAvatarRow = 'avatarRow';
+const _keyBrbHold = 'brbHoldMs';
+const _keyContinueHold = 'continueHoldMs';
 const _keyAutoAdvance = 'autoAdvance';
 /// Legacy: true was the uosc design (now [ControlsSkin.minimal]); read
 /// once when [_keyControlsSkin] is missing.
@@ -71,6 +76,41 @@ enum NotifyStyle {
   final String label;
   const NotifyStyle(this.label);
 }
+
+/// How the group waiting for someone's BRB (or yours) shows over the
+/// paused picture ([AppSettings.waitDisplay]).
+enum WaitDisplay {
+  /// The status pill at the bottom says it (the default).
+  pill('Pill'),
+
+  /// A card in the middle of the picture (`WaitCard`).
+  card('Centre card'),
+
+  /// The card, fading with the controls (a Space hold always shows it).
+  fadingCard('Card that fades with the controls');
+
+  final String label;
+  const WaitDisplay(this.label);
+}
+
+/// How an avatar's standing badge shows ([AppSettings.badgeStyle]).
+enum BadgeStyle {
+  /// A cup, "Zz", a crossed eye (the default).
+  icons('Icons'),
+
+  /// "BRB", "AFK", "Out".
+  words('Words');
+
+  final String label;
+  const BadgeStyle(this.label);
+}
+
+/// The Space hold to BRB ([AppSettings.brbHoldMs]): its range and default, ms.
+const brbHoldRange = (min: 400, max: 800, initial: 600);
+
+/// The Space hold to continue without whoever is BRB
+/// ([AppSettings.continueHoldMs]): its range and default, ms.
+const continueHoldRange = (min: 1500, max: 3000, initial: 2000);
 
 /// The mpv `hwdec` of [HwdecMode.auto]. Windows: 'auto-copy' (decoded on
 /// the GPU, frames copied back): media_kit renders through ANGLE, where
@@ -120,6 +160,25 @@ class AppSettings {
   /// People's pictures as circles instead of rounded squares (Settings →
   /// Party → More: "Avatar shape").
   final avatarCircle = signal(false);
+  /// How the group waiting for someone's BRB shows (Settings → Party →
+  /// More: "Waiting display").
+  final waitDisplay = signal(WaitDisplay.pill);
+  /// Standing badges as icons or words (Settings → Party → More: "Badges").
+  final badgeStyle = signal(BadgeStyle.icons);
+  /// A row of avatars (the top bar, the fullscreen row) overlapping or
+  /// side by side (Settings → Party → More: "Avatars in the top bar").
+  /// Null until picked: the row follows the shape (circles overlap,
+  /// rounded squares sit side by side); see [overlapAvatars].
+  final avatarOverlap = signal<bool?>(null);
+  /// Whether a row of avatars overlaps: [avatarOverlap], else the shape's.
+  late final overlapAvatars = computed(() => avatarOverlap.value ?? avatarCircle.value);
+  /// Held this long, Space is BRB (Settings → Player → More: "BRB
+  /// hold"; [brbHoldRange]).
+  final brbHoldMs = signal(brbHoldRange.initial);
+  /// Held this long while someone else is BRB, Space continues without
+  /// them (Settings → Player → More: "Continue-without hold";
+  /// [continueHoldRange]).
+  final continueHoldMs = signal(continueHoldRange.initial);
   /// The player controls' skin (`controls/`). Applies live.
   final controlsSkin = signal(ControlsSkin.standard);
   /// The bar's clock: elapsed / total or the time left (a click on the
@@ -231,6 +290,19 @@ class AppSettings {
       final advance = box.get(_keyAutoAdvance);
       if (advance is bool) autoAdvance.value = advance;
       avatarCircle.value = box.get(_keyAvatarShape) == 'circle';
+      final wait = box.get(_keyWaitDisplay);
+      waitDisplay.value = WaitDisplay.values.where((w) => w.name == wait).firstOrNull ?? WaitDisplay.pill;
+      final badges = box.get(_keyBadgeStyle);
+      badgeStyle.value = BadgeStyle.values.where((b) => b.name == badges).firstOrNull ?? BadgeStyle.icons;
+      avatarOverlap.value = switch (box.get(_keyAvatarRow)) {
+        'overlap' => true,
+        'side' => false,
+        _ => null,
+      };
+      final brbMs = box.get(_keyBrbHold);
+      if (brbMs is int) brbHoldMs.value = brbMs.clamp(brbHoldRange.min, brbHoldRange.max);
+      final continueMs = box.get(_keyContinueHold);
+      if (continueMs is int) continueHoldMs.value = continueMs.clamp(continueHoldRange.min, continueHoldRange.max);
       controlsSkin.value =
           ControlsSkin.fromStored(box.get(_keyControlsSkin), legacyMpvControls: box.get(_keyMpvControls));
       final time = box.get(_keyTimeDisplay);
@@ -355,6 +427,31 @@ class AppSettings {
   void setAvatarCircle(bool on) {
     avatarCircle.value = on;
     _put(_keyAvatarShape, on ? 'circle' : 'rounded');
+  }
+
+  void setWaitDisplay(WaitDisplay d) {
+    waitDisplay.value = d;
+    _put(_keyWaitDisplay, d.name);
+  }
+
+  void setBadgeStyle(BadgeStyle b) {
+    badgeStyle.value = b;
+    _put(_keyBadgeStyle, b.name);
+  }
+
+  void setAvatarOverlap(bool on) {
+    avatarOverlap.value = on;
+    _put(_keyAvatarRow, on ? 'overlap' : 'side');
+  }
+
+  void setBrbHold(int ms) {
+    brbHoldMs.value = ms.clamp(brbHoldRange.min, brbHoldRange.max);
+    _put(_keyBrbHold, brbHoldMs.value);
+  }
+
+  void setContinueHold(int ms) {
+    continueHoldMs.value = ms.clamp(continueHoldRange.min, continueHoldRange.max);
+    _put(_keyContinueHold, continueHoldMs.value);
   }
 
   void setControlsSkin(ControlsSkin skin) {

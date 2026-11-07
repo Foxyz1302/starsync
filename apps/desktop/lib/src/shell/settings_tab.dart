@@ -17,6 +17,7 @@ import '../screens/home/about_page.dart';
 import '../screens/home/settings_page.dart';
 import '../screens/home/ui.dart' show appName, devTools, displayVersion;
 import '../session/identity.dart' show Profile;
+import '../state/settings.dart' show BadgeStyle, WaitDisplay;
 import '../sfx/sfx.dart';
 import '../sfx/sound_bank.dart';
 import '../app/app_graph.dart';
@@ -117,7 +118,16 @@ class SettingsTab extends StatelessWidget {
               ],
             ),
           ),
-          const SettingsPanel(title: 'Playback', child: AutoAdvanceSetting()),
+          const SettingsPanel(
+            title: 'Playback',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                AutoAdvanceSetting(),
+                SettingFold(children: [BrbHoldSetting(), ContinueHoldSetting()]),
+              ],
+            ),
+          ),
         ];
       case SettingsSection.party:
         return [
@@ -325,7 +335,7 @@ class _YouPanelState extends State<YouPanel> {
                       ],
                     ),
                   ),
-                  const SettingFold(children: [AvatarShapeSetting()]),
+                  const SettingFold(children: [PeopleLookSettings()]),
                 ],
               ),
             ),
@@ -993,6 +1003,101 @@ class AvatarShapeSetting extends StatelessWidget {
           value: s.avatarCircle.value,
           items: const [(false, 'Rounded square'), (true, 'Circle')],
           onChanged: s.setAvatarCircle,
+        ),
+      ),
+    );
+  }
+}
+
+/// "How people look" (Settings → Party → More): the avatar shape, the
+/// waiting display, the badges and the top bar's row. All live.
+class PeopleLookSettings extends StatelessWidget {
+  const PeopleLookSettings({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 2, bottom: 2),
+          child: Text('How people look', style: TextStyle(color: muted, fontSize: 12, fontWeight: FontWeight.w600)),
+        ),
+        const AvatarShapeSetting(),
+        const WaitDisplaySetting(),
+        const BadgeStyleSetting(),
+        const AvatarRowSetting(),
+      ],
+    );
+  }
+}
+
+/// "Waiting display": how the group waiting for someone's BRB shows over
+/// the paused picture: the pill (the default), a card in the middle, or
+/// that card fading with the controls. Settings → Party → More only.
+class WaitDisplaySetting extends StatelessWidget {
+  const WaitDisplaySetting({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context).coordinator.settings;
+    return SignalBuilder(
+      builder: (context) => SettingRow(
+        label: 'Waiting display',
+        help: 'How waiting for someone who is BRB shows over the paused video',
+        control: AppSelect<WaitDisplay>(
+          key: const ValueKey('wait-display'),
+          value: s.waitDisplay.value,
+          items: [for (final d in WaitDisplay.values) (d, d.label)],
+          onChanged: s.setWaitDisplay,
+        ),
+      ),
+    );
+  }
+}
+
+/// "Badges": where people stand as icons (the default) or words.
+/// Settings → Party → More only.
+class BadgeStyleSetting extends StatelessWidget {
+  const BadgeStyleSetting({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context).coordinator.settings;
+    return SignalBuilder(
+      builder: (context) => SettingRow(
+        label: 'Badges',
+        help: 'BRB, AFK and out on pictures: a cup, Zz and a crossed eye, or the words',
+        control: AppSelect<BadgeStyle>(
+          key: const ValueKey('badge-style'),
+          value: s.badgeStyle.value,
+          items: const [(BadgeStyle.icons, 'Icons'), (BadgeStyle.words, 'Words (BRB, AFK, Out)')],
+          onChanged: s.setBadgeStyle,
+        ),
+      ),
+    );
+  }
+}
+
+/// "Avatars in the top bar": overlapping or side by side (also the
+/// fullscreen row); until picked, as the shape has it (circles overlap).
+/// Settings → Party → More only.
+class AvatarRowSetting extends StatelessWidget {
+  const AvatarRowSetting({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context).coordinator.settings;
+    return SignalBuilder(
+      builder: (context) => SettingRow(
+        label: 'Avatars in the top bar',
+        help: 'Also in fullscreen; they spread apart when you point at them',
+        control: AppSelect<bool>(
+          key: const ValueKey('avatar-row'),
+          value: s.overlapAvatars.value,
+          items: const [(true, 'Overlap'), (false, 'Side by side')],
+          onChanged: s.setAvatarOverlap,
         ),
       ),
     );
