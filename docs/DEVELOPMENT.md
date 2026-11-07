@@ -479,7 +479,10 @@ the switch:
   workflow (any branch) builds both and publishes nothing; the archives
   are the run's artifacts `starsync-linux-x64` and
   `starsync-windows-x64` (kept 14 days; GitHub hands each out zipped),
-  named with the pubspec's version.
+  named and stamped with the run's `version` input (e.g. `1.5.0-dev.7`,
+  so a test build's diagnostics never read as a release), else the
+  pubspec's version (`gh workflow run release.yml -f version=…`). Both
+  packagers take it as `VERSION` from the environment.
 - `.github/actions/setup-flutter`: Flutter at `FLUTTER_REF` on PATH, the
   SDK cached per commit of that ref, the pub cache per lockfiles. On
   Windows it runs `tool/setup_flutter_windows.ps1 -Ref … -Dir …`, whose

@@ -20,6 +20,8 @@ $Arch = 'x64'
 
 $Version = (Select-String -Path "$App/pubspec.yaml" -Pattern '^version: ([0-9.]+)').Matches[0].Groups[1].Value
 if (-not $Version) { throw "version not found in $App/pubspec.yaml" }
+# VERSION in the environment overrides it (a test build's label, e.g. 1.5.0-dev.7).
+if ($env:VERSION) { $Version = $env:VERSION }
 
 function Invoke-Checked([string]$What, [scriptblock]$Cmd) {
   & $Cmd

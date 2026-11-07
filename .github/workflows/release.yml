@@ -6,6 +6,11 @@ on:
   # A test build of the chosen branch: both platforms built, nothing
   # published; the archives are this run's artifacts.
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Label for the test build (e.g. 1.5.0-dev.7); empty: the pubspec's version"
+        required: false
+        default: ""
 
 env:
   # The Flutter both builds use: a branch of github.com/flutter/flutter
@@ -42,6 +47,7 @@ jobs:
           # Optional: set, a release's tarball is also posted to Discord.
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
+          if [ -n "${{ inputs.version }}" ]; then export VERSION="${{ inputs.version }}"; fi
           if [ "$GITHUB_EVENT_NAME" = push ]; then
             tool/package_linux.sh
           else
@@ -67,6 +73,8 @@ jobs:
 
       - name: Build zip
         shell: powershell
+        env:
+          VERSION: ${{ inputs.version }}
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tool/package_windows.ps1
 
       - uses: actions/upload-artifact@v7
