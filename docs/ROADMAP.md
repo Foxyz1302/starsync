@@ -377,6 +377,14 @@ machines and his Gitea becomes optional.
      h264 warnings cost frames; split the open time into open to first
      byte and first byte to first frame (first frames up to 74 s lined up
      with relay or link waits).
+   - Avatar pictures' rounded corners look jagged on Linux, and turn
+     smooth while any blur is on screen (the frosted person card). Likely
+     Impeller relying on MSAA for clip edges while GTK's onscreen GL
+     surface has none; a backdrop blur forces an offscreen MSAA pass for
+     the frame. Try painting pictures as filled rounded shapes (an
+     `ImageShader` on `drawRRect`) instead of clipping them; the
+     runner-side MSAA surface and the Skia renderer are the heavier
+     options.
    - One open made two session players (#1 and #2) in a diagnostics
      test run: find out why.
    - The video freeze after GPU idle: next suspect is media_kit's context
