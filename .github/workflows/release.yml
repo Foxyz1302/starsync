@@ -85,7 +85,9 @@ jobs:
           retention-days: 14
 
   # One job publishes once both archives exist: no create race, and the
-  # release never shows only one platform. The manifest goes up last.
+  # release never shows only one platform. No manifest: the one in the tree
+  # is still the previous release's; the owner signs this one's afterwards
+  # (tool/sign_release.sh), on main.
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [linux, windows]
@@ -108,5 +110,4 @@ jobs:
         run: |
           VER="${GITHUB_REF_NAME#v}"
           dart tool/publish_github.dart "$GITHUB_REF_NAME" \
-            "dist/starsync-$VER-linux-x64.tar.gz" "dist/starsync-$VER-windows-x64.zip" \
-            updates/manifest.json
+            "dist/starsync-$VER-linux-x64.tar.gz" "dist/starsync-$VER-windows-x64.zip"

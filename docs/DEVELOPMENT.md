@@ -347,41 +347,53 @@ Traps:
 
 ## Releasing
 
-The owner tags and signs; CI builds and publishes the archives in
-between. CI has no signing key ([Signing](#signing)), so the manifest
-that makes a release visible to the apps is written and signed on the
-owner's machine from the archives CI published, after checking them.
+The owner tags and signs; GitHub Actions builds and publishes the
+archives in between. CI has no signing key ([Signing](#signing)), so the
+manifest that makes a release visible to the apps is written and signed
+on the owner's machine from the archives CI published, after checking
+them. The steps, on `main`:
 
-1. `tool/release.sh [patch|minor|major] [--dry-run]`: derives the next
-   version from the latest tag, refuses when the [changelog](#changelog)'s
-   Unreleased has no items (warns when it has no Highlights or no summary)
-   and prints it; `--dry-run` stops there. Then it checks the signing
-   key is there (stops without one), renames Unreleased to `X.Y.Z` under
-   a fresh empty Unreleased, bumps the three pubspecs in lockstep, signs
-   the config when it changed (`tool/sign_config.dart`), commits
-   `Release vX.Y.Z` (with `CHANGELOG.md`) and makes an annotated tag. It
-   does not touch `updates/manifest.json`: apps keep seeing the previous
-   release until step 5.
-2. Review, then `git push --follow-tags`.
-3. `.gitea/workflows/release.yml` runs one job per platform: Linux builds
-   with `tool/package_linux.sh`, Windows (runner `yuuka-windows`, host mode,
-   PowerShell only; `tool/setup_flutter_windows.ps1` also adds Visual
-   Studio's C++ ATL component once, which the notifications plugin needs) with `tool/package_windows.ps1`. Each then runs
-   `dart tool/release_publish.dart vX.Y.Z <archive>`, which creates the
-   release if the other job hasn't yet (its text: the version's changelog
-   section) and uploads (or replaces) its asset.
-   By hand: package, then the same `dart tool/release_publish.dart` line.
-4. Once both jobs are green: `tool/sign_release.sh X.Y.Z` downloads both
-   archives from the release, checks each is the bundle of that version
-   (`starsync-X.Y.Z/starsync`, `.exe` on Windows), writes
-   `updates/manifest.json` (per-platform `assets` URLs and their sha256
-   in `assetSha256`; `url` stays the Linux tarball for builds <= 0.2.1;
-   `notes` is the section's summary, `highlights` and `changes` its
-   lists, `protocol` the tagged code's), signs it (`manifest.json.sig`)
-   and the config when it changed, and commits `Publish vX.Y.Z: signed
-   manifest`. A test run of the downloaded archive before this step is
-   the check that what gets signed is the build.
-5. `git push` (on `main`): apps see the release.
+1. `tool/release.sh minor` (or `patch`, `major`).
+2. `git push github --follow-tags`.
+3. Wait for the `release` run on GitHub (Actions) to go green.
+4. `tool/sign_release.sh 1.5.0 --push` (the new version).
+
+What each does:
+
+- **`tool/release.sh [patch|minor|major] [--dry-run]`** derives the next
+  version from the latest tag, refuses when the [changelog](#changelog)'s
+  Unreleased has no items (warns when it has no Highlights or no summary)
+  and prints it; `--dry-run` stops there. Then it checks the signing
+  key is there (stops without one), renames Unreleased to `X.Y.Z` under
+  a fresh empty Unreleased, bumps the three pubspecs in lockstep, signs
+  the config when it changed (`tool/sign_config.dart`), commits
+  `Release vX.Y.Z` (with `CHANGELOG.md`) and makes an annotated tag. It
+  does not touch `updates/manifest.json`: apps keep seeing the previous
+  release until step 4.
+- **The push** names `github`: `main`'s upstream may still be the Gitea
+  (`origin`), whose `main` is another history.
+- **GitHub's `release.yml`** ([CI on GitHub](#ci-on-github)) builds both
+  archives on the tag and publishes the release `vX.Y.Z` with them (its
+  text: the version's changelog section). By hand: package, then `dart
+  tool/publish_github.dart vX.Y.Z <tarball> <zip>`.
+- **`tool/sign_release.sh X.Y.Z [--push] [--no-bridge] [--dry-run]`**
+  downloads both archives from the GitHub release (`STARSYNC_GITHUB_REPO`,
+  default `Foxyz1302/starsync`), checks each is the bundle of that version
+  (`starsync-X.Y.Z/starsync`, `.exe` on Windows), writes
+  `updates/manifest.json` (per-platform `assets` URLs on GitHub and their
+  sha256 in `assetSha256`; `url` stays the Linux tarball for builds <=
+  0.2.1; `notes` is the section's summary, `highlights` and `changes` its
+  lists, `protocol` the tagged code's), signs it (`manifest.json.sig`) and
+  the config when it changed, commits `Publish vX.Y.Z: signed manifest`
+  and builds the [1.4 bridge](#the-14-bridge) commit. Then it prints the
+  two pushes, or with `--push` runs them: `git push github main` (remote
+  `STARSYNC_GITHUB_REMOTE`), then the bridge to the Gitea. Apps see the
+  release once the manifest is on GitHub's `main`. `--dry-run` does it all
+  in a temporary folder: the manifest and its signature compared with the
+  committed ones, the signature checked, the bridge commit built on no
+  branch; nothing committed or pushed. A test run of the downloaded
+  archive before this step is the check that what gets signed is the
+  build.
 
 Signing before the tag cannot work: the archives' sha256 is only known
 once CI built them, and a manifest without it is refused.
@@ -409,22 +421,40 @@ once (run with the app open: it finds the install from the running
 process, copies the new files over it and writes the `update-channel`
 file that sets Dev).
 
-Tokens come from the environment (`RELEASE_TOKEN`, or Actions-provided
-`GITHUB_TOKEN`/`GITEA_TOKEN`). Gitea runs `.gitea/workflows` (it reads
-`.gitea` before `.github`, so it ignores the other); GitHub runs
-`.github/workflows` ([CI on GitHub](#ci-on-github)).
+Tokens come from the environment (`RELEASE_TOKEN` for the Gitea, GitHub's
+`GH_TOKEN`/`GITHUB_TOKEN` or `gh auth token`, the Actions-provided
+`GITHUB_TOKEN`).
 
-The repo and its releases still live on a Gitea (`origin`), with GitHub,
-`https://github.com/Foxyz1302/starsync`, as the public home (it feeds
-the website's downloads). Apps read their config and manifests from
-GitHub only (the signed config, else `distribution.dart`:
-[Signing](#signing)). `tool/dev_release.sh` publishes dev builds to GitHub;
-`tool/sign_release.sh` and `tool/release_publish.dart` still publish to
-and download from the Gitea of `origin`, or of `RELEASE_REPO_URL` when
-set (the repo's https address); no Gitea address is written in the tree. Apps up to 1.4.x have the
-Gitea's address built in and check no signature: they update through
-the Gitea's copy of `updates/manifest.json` on `main` (they ignore the
-`.sig` and `assetSha256`), so that file stays.
+GitHub, `https://github.com/Foxyz1302/starsync`, is the public home:
+releases, dev builds, the website's downloads. Apps from 1.5.0 on read
+their config and manifests from GitHub only (the signed config, else
+`distribution.dart`: [Signing](#signing)). The Gitea (`origin`) keeps the
+old history and serves 1.4.x through the [bridge](#the-14-bridge). It
+runs its own `.gitea/workflows` (it reads `.gitea` before `.github`):
+`ci.yml` on branch pushes, and `release.yml` only builds when run by hand,
+on no tag, so a tag that reaches the Gitea publishes nothing there. GitHub
+runs `.github/workflows` ([CI on GitHub](#ci-on-github)).
+
+#### The 1.4 bridge
+
+Apps up to 1.4.x have the Gitea's address built in (its
+`updates/manifest.json` on `main`, under the Gitea's old name) and check
+no signature. So `tool/sign_release.sh` puts the same `manifest.json` and
+`.sig`, byte for byte, as one commit (`[skip ci]`) on top of the Gitea's
+`main`, which is the old, pre-cleanup history: fetched, committed in a
+temporary worktree, kept on the local branch `gitea-bridge`, pushed to
+the Gitea's `main` over https with a token header (`RELEASE_TOKEN`, else
+`~/.config/watch-together-release-token`; ssh to the Gitea is blocked).
+The Gitea is `RELEASE_REPO_URL`, else `origin`'s https address; no Gitea
+address is written in the tree. The manifest suits them: they read
+`version`, `protocol`, `assets` (so they download from GitHub) and the
+one-line `notes`, and ignore `assetSha256` and the `.sig`; it has no
+string `sha256`, which they would check against whichever archive they
+download. It reaches them only while the Gitea answers at that old name.
+
+Once nobody runs 1.4.x: pass `--no-bridge`, then delete the bridge part
+of `tool/sign_release.sh` and this section; the Gitea then serves nothing
+the apps read.
 
 ### Signing
 
@@ -472,15 +502,16 @@ on the app installs nothing else.
 ### CI on GitHub
 
 `.github/workflows` is CI for `Foxyz1302/starsync` on GitHub-hosted
-runners (`ubuntu-latest`, `windows-latest`), next to the Gitea set until
-the switch:
+runners (`ubuntu-latest`, `windows-latest`); it builds and publishes
+every release ([Releasing](#releasing)):
 
 - `ci.yml`: as on Gitea (core, server, `updater-windows` with the build
   and the smoke run); a newer push to a branch cancels its running check.
 - `release.yml`: on a `v*` tag, `linux` and `windows` build the archives
   and keep them as run artifacts, then `publish`, only once both built,
-  runs `dart tool/publish_github.dart vX.Y.Z <tarball> <zip>
-  updates/manifest.json`. **Test builds**: Actions → release → Run
+  runs `dart tool/publish_github.dart vX.Y.Z <tarball> <zip>` (no
+  manifest: the tree's is still the previous release's until
+  `tool/sign_release.sh`). **Test builds**: Actions → release → Run
   workflow (any branch) builds both and publishes nothing; the archives
   are the run's artifacts `starsync-linux-x64` and
   `starsync-windows-x64` (kept 14 days; GitHub hands each out zipped),
@@ -496,9 +527,8 @@ the switch:
   Flutter branch (`stable`, `beta`) or release tag (`3.48.0-0.5.pre`).
   `stable`, as on Gitea, until the owner picks.
 
-`tool/publish_github.dart` is `release_publish.dart` for GitHub, with the
-same arguments (`vX.Y.Z <file>...`, `dev <file>... <manifest.json>`): it
-creates the release or refreshes its text, replaces each file and a
+`tool/publish_github.dart` (`vX.Y.Z <file>...`, `dev <file>...
+<manifest.json>`) creates the release or refreshes its text, replaces each file and a
 `<file>.sig` beside it, `.json` files last, and for `dev` deletes the
 prerelease's other assets. `--dry-run` prints the plan without a token or
 network; `--repo owner/name` outside Actions; token `GITHUB_TOKEN` or
@@ -509,12 +539,8 @@ Secrets: `GITHUB_TOKEN` (built in; `publish` asks for `contents: write`)
 and, optionally, `DISCORD_WEBHOOK_URL` (set, `tool/package_linux.sh` also
 posts a release's tarball to Discord; Gitea's CI never did). No other.
 
-Left to switch: Actions on for the repo (if Gitea push-mirrors to it, the
-workflows run from the next mirrored push: `ci.yml` on every push,
-publishing on the next tag); `tool/release.sh` and
-`tool/sign_release.sh` pointed at GitHub (manifest URLs,
-`publish_github.dart`); then `.gitea/workflows` removed. Dev builds,
-`fox_utils` and `leaf_widgets` are on GitHub already.
+`.gitea/workflows` go with the Gitea, once the
+[1.4 bridge](#the-14-bridge) is dropped.
 
 ### Changelog
 

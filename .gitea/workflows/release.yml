@@ -1,7 +1,8 @@
 name: release
+# Releases are built and published on GitHub (.github/workflows/release.yml;
+# DEVELOPMENT "Releasing"). This one only builds both archives when run by
+# hand, publishing nothing: a `v*` tag that reaches the Gitea starts nothing.
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
 
 jobs:
@@ -28,17 +29,7 @@ jobs:
           echo "$HOME/flutter/bin" >> $GITHUB_PATH
 
       - name: Build tarball
-        run: tool/package_linux.sh
-
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-        run: |
-          VER="${GITHUB_REF_NAME#v}"
-          dart tool/release_publish.dart "$GITHUB_REF_NAME" "dist/starsync-$VER-linux-x64.tar.gz"
+        run: tool/package_linux.sh --no-upload
 
   windows:
     # yuuka-windows: host-mode runner (no containers), runs as SYSTEM, has
@@ -63,15 +54,3 @@ jobs:
       - name: Build zip
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tool/package_windows.ps1
-
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: powershell
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-        run: |
-          $Ver = $env:GITHUB_REF_NAME.TrimStart('v')
-          dart tool/release_publish.dart $env:GITHUB_REF_NAME "dist/starsync-$Ver-windows-x64.zip"
-          if ($LASTEXITCODE) { exit 1 }

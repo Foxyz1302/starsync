@@ -12,7 +12,7 @@
 //        dart tool/changelog.dart markdown <X.Y.Z|unreleased> [X.Y.Z]
 //          (the release page's body; the last argument names the version
 //          when it is not the section's own)
-// dart: imports only — runs without `pub get` (tool/release_publish.dart
+// dart: imports only — runs without `pub get` (tool/publish_github.dart
 // imports it).
 import 'dart:convert';
 import 'dart:io';

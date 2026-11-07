@@ -3,10 +3,11 @@
 # version (patch by default), turns CHANGELOG.md's Unreleased into that
 # version (refuses when it has no items, warns when it has no Highlights),
 # bumps all three pubspecs in lockstep, signs the config when it changed,
-# commits and tags. Review, then `git push --follow-tags`: CI builds and
-# publishes the archives (it has no signing key). Then
-# `tool/sign_release.sh X.Y.Z` writes and signs updates/manifest.json from
-# the published archives, and `git push` shows the release to the apps.
+# commits and tags. Review, then `git push github --follow-tags`: GitHub
+# Actions builds both archives and publishes the release (it has no signing
+# key). Then `tool/sign_release.sh X.Y.Z --push` writes and signs
+# updates/manifest.json from the published archives and pushes it, which
+# shows the release to the apps (DEVELOPMENT "Releasing").
 # Needs the signing key (DEVELOPMENT "Signing").
 # Usage: tool/release.sh [patch|minor|major] [--dry-run]
 set -euo pipefail
@@ -87,5 +88,7 @@ else
   git -C "$ROOT" commit -m "Release v$VER" -- $PUBSPECS CHANGELOG.md "$CONFIG" "$CONFIG.sig"
 fi
 git -C "$ROOT" tag -a -m "Release v$VER" "v$VER"
-echo "review with: git show v$VER — then: git push --follow-tags"
-echo "once CI has published both archives: tool/sign_release.sh $VER, then git push"
+# To GitHub by name: main's upstream may still be the Gitea (origin),
+# whose main is another history (DEVELOPMENT "Releasing").
+echo "review with: git show v$VER — then: git push github --follow-tags"
+echo "once GitHub's release run has published both archives: tool/sign_release.sh $VER --push"

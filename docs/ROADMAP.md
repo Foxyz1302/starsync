@@ -220,13 +220,6 @@ Next, before 1.5.0 is cut (playback and presence is in; protocol 17):
   (`shell/wait_design.dart`, DEVELOPMENT "Dev tools").
 - **The name "Out"**: fits next to BRB and AFK, but may not be clear
   enough; settle it from the same evenings.
-- **GitHub as the public home** (needs the owner's go): apps already
-  read their config and manifests only from `Foxyz1302/starsync`; each
-  release's archives (CI), its signed manifest and the `dev` prerelease
-  (`tool/sign_release.sh`, `tool/dev_release.sh`, still publishing to
-  the Gitea) go there too, the manifests' asset URLs with them. Mirror
-  `fox_utils` and `leaf_widgets` there so builds do not depend on pol's
-  server (the desktop pubspec still names it).
 
 **Open source** (decided, after 1.5.0; as portfolio, foxyz-presence
 DECISIONS.md; the license is MIT: DEVELOPMENT "Third-party
@@ -239,7 +232,8 @@ next to Sonarr later (today only a server's config offers it); a gitleaks run
 over what is pushed (`main` and the release tags only). Then publish the
 source on GitHub; public repos
 get free GitHub Actions with Windows runners, so CI can leave pol's
-machines and his Gitea becomes optional.
+machines. His Gitea then serves only 1.4.x, until the 1.4 bridge is
+dropped (DEVELOPMENT "The 1.4 bridge").
 
 0. **After the move to the owner's media_kit fork** (for 1.5.0; the app
    is on it, DEVELOPMENT "Build"):

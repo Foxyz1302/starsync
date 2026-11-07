@@ -2,12 +2,12 @@
 // a tag or update its text, then upload (or replace) the given files. Each
 // file's `<file>.sig` beside it goes up right after it when there is one;
 // `.json` files (the manifest, a config) go up last, so they never point at
-// an archive that is not there yet. The GitHub counterpart of
-// tool/release_publish.dart (Gitea), same arguments:
+// an archive that is not there yet.
 //   dart tool/publish_github.dart vX.Y.Z <file>...
 //     a release: its text is the version's CHANGELOG.md section; the tag
 //     must match the desktop pubspec. .github/workflows/release.yml passes
-//     both archives and updates/manifest.json.
+//     both archives (the signed manifest comes after, on main:
+//     tool/sign_release.sh).
 //   dart tool/publish_github.dart dev <file>... <manifest.json>
 //     the `dev` prerelease (created at main on first use): the files
 //     uploaded, every other asset deleted, its text the changelog's

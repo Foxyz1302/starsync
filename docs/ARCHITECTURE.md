@@ -3469,8 +3469,10 @@ start and every 4 hours while running (`updateCheckEvery`), always (D8:
 nothing installs without asking); a re-check never touches an install
 under way. Settings → Updates has Check now. The manifest is `updates/manifest.json` in
 this repo, written and signed by `tool/sign_release.sh` once CI published
-the archives ([Releasing](DEVELOPMENT.md#releasing)). Each manifest
-address is a list tried in order (`fetchManifest`).
+the archives ([Releasing](DEVELOPMENT.md#releasing)); apps up to 1.4.x
+read only a copy on the Gitea ([the 1.4
+bridge](DEVELOPMENT.md#the-14-bridge)). Each manifest address is a list
+tried in order (`fetchManifest`).
 
 **Signing and the config.** Ed25519 (the pure-Dart `DartEd25519` of the
 `cryptography` package, `signing.dart` in core). A file `X` is signed by
