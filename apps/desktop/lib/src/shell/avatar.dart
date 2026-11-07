@@ -673,7 +673,9 @@ class _AvatarStackState extends State<AvatarStack> {
     final visible = sorted.take(widget.shown).toList();
     final extra = sorted.length - visible.length;
     final overlap = shape.circle;
-    final step = !overlap || _hover ? size + 8 : size * 0.62;
+    // Whole pixels: at a fractional offset Impeller smooths the rounded clip
+    // on a half-pixel grid and the corners look jagged.
+    final step = !overlap || _hover ? size + 8 : (size * 0.62).roundToDouble();
     final count = visible.length + (extra > 0 ? 1 : 0);
     final width = count == 0 ? 0.0 : step * (count - 1) + size;
     Widget avatar(AvatarInfo i) => StatusAvatar(info: i, size: size, edge: overlap && count > 1);
