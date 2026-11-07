@@ -424,11 +424,20 @@ whenever each person joined.
 
 - It always goes up as a link everyone opens themselves, whichever way
   you picked; each app needs to be able to open it (cookies and so on).
-- The player shows a red **LIVE** badge where the time would be, and no
-  timeline, chapters or skips.
-- Pause is yours only: Space or the play button pauses your player
-  ("Paused here only"); playing again, or a click on LIVE, goes back to
-  the live moment. Nobody waits for anyone during a live stream.
+- The player shows **LIVE** where the time would be, and no chapters or
+  skips. When the stream lets everyone go back (YouTube Live keeps 15
+  minutes, Twitch nothing), the usual timeline covers what can be
+  rewound, live at its right end: click or drag it, or use the arrow
+  keys, and everyone goes there. The time then says how far behind live
+  everyone is ("−2:30"), and **Go live** brings everyone back.
+- Pause is everyone's, as for any video: the stream goes on meanwhile,
+  so play goes on from the paused moment, behind live. Paused for longer
+  than the stream keeps, it goes on from the oldest moment everyone
+  still has. A stream that can't be rewound (Twitch) goes back to live
+  when you play again ("This stream can't rewind: back at live").
+- BRB, waiting for someone's video and going on without them work as
+  for any video on a stream that can be rewound; on one that can't,
+  nobody waits for anyone and Space just pauses and plays.
 - When the stream ends, Up next's first item goes up at once.
 - Live streams are not tracked as watched.
 

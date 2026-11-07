@@ -135,6 +135,17 @@ abstract class RelayConstants {
   static const double liveMinWindowSecs = 60.0;
   static const double liveSeekSettleSecs = 15.0;
 
+  /// The buffer a watching member needs on a live stream everyone can
+  /// rewind (the gate holds and resumes on it): a player at the live point
+  /// has only a few seconds ahead of it (up to its edge), so this is a
+  /// player actually running dry.
+  static const double liveMinBufferSecs = 1.0;
+
+  /// A paused live stream whose paused moment fell out of what everyone
+  /// reaches resumes this far inside it (the window moves on while the
+  /// players load there).
+  static const double liveResumeMarginSecs = 10.0;
+
   /// Diagnostics sharing (`/l/...`, ARCHITECTURE "Logging"): a member's
   /// batch carries at most [diagBatchBytes] of lines (gzip on the wire, at
   /// most [diagBatchBytes] compressed and [diagDecodedBytes] unpacked); it

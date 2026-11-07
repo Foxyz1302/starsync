@@ -38,9 +38,9 @@ class SpaceKey {
   /// Space went down (not a repeat).
   void keyDown() {
     if (gesture.down) return;
-    // Live: Space pauses and plays this player only (nobody waits, so no
-    // BRB hold); out, it joins.
-    if (coord.live.peek()) {
+    // A live stream nobody can rewind: nobody waits for anyone, so Space
+    // only pauses and plays (no BRB hold); out, it joins.
+    if (coord.live.peek() && (coord.serverState.peek()?.liveFrom ?? 0) <= 0) {
       coord.togglePlay();
       return;
     }

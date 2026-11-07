@@ -2,17 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 import 'package:sync_relay_core/core.dart' show JellyfinStreamType;
 
+import '../../playback/media_marks.dart' show CachedRanges;
 import '../../queue/queue_ui.dart';
 import '../../shell/now_playing_title.dart';
 import '../../state/settings.dart';
 import '../control_menus.dart';
 import '../controls_probe.dart' show ControlsHold;
 import '../frame.dart';
-import '../live_badge.dart';
 import '../model/controls_layout.dart';
 import '../model/controls_model.dart';
 import '../model/controls_prefs.dart';
-import '../standard/seek_bar.dart' show ChapterSeekBar;
 import '../volume.dart';
 import 'style.dart';
 import 'timeline.dart';
@@ -22,6 +21,17 @@ import 'timeline.dart';
 // capsules, in the layout's order. Top: what plays, Up next and the window
 // controls. Hidden, the band shrinks to a thin progress line (unless
 // switched off).
+
+/// The Go live button's width at [scale] (icon, label, padding).
+double goLiveWidth(double scale) {
+  final p = TextPainter(
+    text: TextSpan(text: goLiveLabel, style: TextStyle(fontSize: MinimalStyle.fontSize * scale)),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  final w = p.width;
+  p.dispose();
+  return w + 22 * scale + 6 * scale + 20 * scale + 2 * scale + 2;
+}
 
 class MinimalControls extends StatelessWidget {
   final PlayerControlsModel model;
@@ -99,15 +109,19 @@ class MinimalControls extends StatelessWidget {
                         builder: (context) {
                           final s = model.snapshot.value;
                           final layout = model.bar.value;
-                          // The clock lives on the timeline.
-                          final buttons = [...layout.left, ...layout.right].where((c) => c != BarControl.time).length;
+                          // The clock lives on the timeline; Go live is a
+                          // labelled button.
+                          final goLive = layout.left.contains(BarControl.goLive);
+                          final buttons = [...layout.left, ...layout.right]
+                              .where((c) => c != BarControl.time && c != BarControl.goLive)
+                              .length;
                           // The volume slider stays out where the row has
                           // room for it (two capsules, a gap between).
                           final slider = volumeSliderRoom(
                             width: box.maxWidth,
                             buttons: buttons,
                             button: MinimalStyle.button * scale,
-                            fixed: 4 * MinimalStyle.capsulePad + 4 * scale + 24,
+                            fixed: 4 * MinimalStyle.capsulePad + 4 * scale + 24 + (goLive ? goLiveWidth(scale) : 0),
                           );
                           List<Widget> cluster(List<BarControl> cs) => [
                             for (final c in cs)
@@ -129,37 +143,31 @@ class MinimalControls extends StatelessWidget {
               SignalBuilder(
                 builder: (context) {
                   final line = AppSettings.instance.progressLine.value;
-                  // Live: LIVE where its clock is; a bar over what everyone
-                  // can rewind to beside it when they can.
+                  // Live: the same band over what everyone can rewind to,
+                  // the live edge at its right end, LIVE or how far behind
+                  // it where the time is; without a window the band only
+                  // carries LIVE.
                   if (model.live.value) {
                     final bar = model.liveBar.value;
-                    final badge = LiveBadge(
-                        paused: model.livePaused.value,
-                        behind: model.liveBehind.value,
-                        scale: scale,
-                        onBackToLive: model.togglePlay,
-                        onGoLive: model.goLive);
+                    final behind = model.liveBehind.value;
                     return AnimatedOpacity(
                       key: const ValueKey('minimal-timeline-wrap'),
                       duration: fade,
                       opacity: visible ? 1 : 0,
-                      child: SizedBox(
-                        height: MinimalTimeline.heightFor(scale),
-                        child: bar == null
-                            ? Align(alignment: AlignmentDirectional.centerEnd, child: badge)
-                            : Row(children: [
-                                Expanded(
-                                  child: ChapterSeekBar(
-                                    key: const ValueKey('live-seek-bar'),
-                                    position: bar.position,
-                                    duration: bar.length,
-                                    cached: bar.cached,
-                                    height: MinimalTimeline.heightFor(scale),
-                                    onSeek: model.seekLive,
-                                  ),
-                                ),
-                                badge,
-                              ]),
+                      child: IgnorePointer(
+                        ignoring: !visible,
+                        child: MinimalTimeline(
+                          key: bar == null ? const ValueKey('live-band') : const ValueKey('live-seek-bar'),
+                          position: bar?.position ?? Duration.zero,
+                          duration: bar?.length ?? Duration.zero,
+                          buffered: bar?.position ?? Duration.zero,
+                          cached: bar?.cached ?? CachedRanges.none,
+                          expanded: true,
+                          scale: scale,
+                          onSeek: model.seekLive,
+                          liveText: liveTimeText(behind),
+                          liveDot: behind < atLiveSecs,
+                        ),
                       ),
                     );
                   }
@@ -266,6 +274,18 @@ class MinimalControls extends StatelessWidget {
         );
       case BarControl.time:
         return const SizedBox.shrink();
+      case BarControl.goLive:
+        return Padding(
+          padding: EdgeInsets.only(left: 2 * scale),
+          child: MinimalButton(
+            key: key,
+            icon: controlIcon(c, s),
+            label: goLiveLabel,
+            tooltip: controlTooltip(c, s),
+            scale: scale,
+            onPressed: m.goLive,
+          ),
+        );
       case BarControl.subtitles || BarControl.audio:
         final type = c == BarControl.audio ? JellyfinStreamType.audio : JellyfinStreamType.subtitle;
         return SignalBuilder(

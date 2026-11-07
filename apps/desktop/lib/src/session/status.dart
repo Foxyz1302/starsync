@@ -35,6 +35,12 @@ enum StatusKind {
   cannotPlay,
   waiting,
   paused,
+
+  /// A live stream: this player opens it again at a seek's moment.
+  seeking,
+
+  /// A short note that needs no answer.
+  note,
 }
 
 /// The pill's button: stop reconnecting, retry (reconnect), reload the
@@ -104,11 +110,15 @@ class StatusFacts {
   /// Who paused, for a plain pause ("Paused by Bob"): the member id of the
   /// last `pause` line; null when unknown.
   final String? pausedBy;
-  /// This member paused the live stream (only here).
-  final bool livePaused;
+  /// This player opens the live stream again at a seek's moment.
+  final bool liveLoading;
+  /// A paused live stream that cannot be rewound just went on at the live
+  /// point.
+  final bool liveBackAtLive;
   final DateTime now;
   const StatusFacts({
-    this.livePaused = false,
+    this.liveLoading = false,
+    this.liveBackAtLive = false,
     this.conn = const ConnClosed(),
     this.state,
     this.selfId = '',
@@ -272,15 +282,14 @@ StatusLine? _line(StatusFacts f, StateBroadcast? r, MemberView? self, SourceTrou
     return StatusLine(StatusKind.problem, "Can't play this: ${f.playerError}",
         level: StatusLevel.error, action: StatusAction.reload, short: "Can't play this");
   }
-  // Live: nobody waits for anyone; only a pause here is worth a line.
-  if (r.media?['live'] == true && r.transport != 'finished') {
-    return f.livePaused
-        ? StatusLine(StatusKind.paused, 'Paused here only',
-            detail: 'The stream goes on for everyone',
-            keys: [('Space', r.behind > 0 ? 'back to the others' : 'back to live')],
-            short: 'Paused here only')
-        : null;
+  final live = r.media?['live'] == true && r.transport != 'finished';
+  if (live && f.liveLoading) return const StatusLine(StatusKind.seeking, 'Loading the stream there…', short: 'Loading…');
+  if (live && f.liveBackAtLive) {
+    return const StatusLine(StatusKind.note, "This stream can't rewind: back at live", short: 'Back at live');
   }
+  // Held at 0: the first player's report sets the live point (it starts
+  // by itself).
+  if (live && r.transport == 'held' && r.position <= 0) return null;
   // The server holds everyone for the relay's source (D6): a viewer's
   // buffer ran dry while it is gone.
   if (r.transport == 'held' && (r.hold?.source ?? false)) {
@@ -374,6 +383,8 @@ StatusLine? _line(StatusFacts f, StateBroadcast? r, MemberView? self, SourceTrou
             ? 'you'
             : byId(by)?.name ?? f.names?[by];
     return StatusLine(StatusKind.paused, name == null ? 'Paused' : 'Paused by $name',
+        // A live stream that cannot be rewound goes on at live.
+        detail: live && r.liveFrom <= 0 ? "This stream can't rewind: play goes back to live" : null,
         who: whoIsIn(r.members, f.selfId), short: 'Paused');
   }
   return null;

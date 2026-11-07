@@ -210,13 +210,16 @@ what played back at its position, a link everyone opens and a file
 passed on, nothing reopened, the watch and Up next carrying on), `video_reload_e2e` (a fresh player from the
 host, the old one retired, leave releases them all),
 `seek_drag_e2e`, `end_of_file_e2e`, `readahead_e2e`, `chapters_mpv_e2e`,
-`live_e2e` (three players on a local ffmpeg live HLS stream with a 90 s
+`live_e2e` (three players on a local ffmpeg live HLS stream with a 180 s
 window, one on a CDN edge 3 s late: their spread in the stream's time
-printed, a pause here only, a live screenshot, rewinds inside every
-cache and to the window's start, a pause while rewound, Go live, the
-stream's end; `WT_LIVE_URL=<a live page>` adds two players on a real
-one through a downloaded yt-dlp, rewound 300 s and back when it allows,
-network needed, no sign-in),
+printed, a pause for everyone and play behind live, Go live, a live
+screenshot, rewinds inside every cache (a click and a drag) and to the
+window's start with how long until each picture is there, a pause that
+falls out of the window and resumes inside it, the stream's end; a
+second stream of six segments: a pause for everyone, play back at live,
+BRB holding nothing; `WT_LIVE_URL=<a live page>` adds two players on a
+real one through a downloaded yt-dlp, rewound 300 s and back when it
+allows, network needed, no sign-in),
 `screenshot_e2e` (ARCHITECTURE "Screenshots"),
 `ytdl_headers_e2e` (a page through the app's own resolve against a
 stand-in yt-dlp and a Referer-checking CDN: the EDL, the headers and

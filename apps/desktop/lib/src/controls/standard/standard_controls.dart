@@ -8,7 +8,6 @@ import '../../state/settings.dart';
 import '../control_menus.dart';
 import '../controls_probe.dart' show ControlsHold;
 import '../frame.dart';
-import '../live_badge.dart';
 import '../model/controls_layout.dart';
 import '../model/controls_model.dart';
 import '../volume.dart';
@@ -110,6 +109,7 @@ class StandardControls extends StatelessWidget {
                                       cached: bar.cached,
                                       height: ChapterSeekBar.defaultHeight * scale,
                                       onSeek: model.seekLive,
+                                      hoverText: (at) => liveTimeText((bar.length - at).inMilliseconds / 1000),
                                     ),
                                   null => SizedBox(height: ChapterSeekBar.defaultHeight * scale),
                                 }
@@ -137,15 +137,17 @@ class StandardControls extends StatelessWidget {
                                   // row has room for it beside the buttons
                                   // and the clock (at its widest).
                                   final d = model.duration.value;
-                                  // Live behind live: the badge and Go live.
-                                  final clock = model.liveBehind.value >= LiveBadge.atLive
-                                      ? 170 * scale
+                                  // Live: its time at its widest, and Go
+                                  // live (wider than a button) when shown.
+                                  final clock = s.live
+                                      ? _Clock.widthOf(liveTimeText(35999), scale, dot: true)
                                       : _Clock.widthOf(clockText(d, d, model.settings.timeDisplay.value), scale);
+                                  final goLive = layout.left.contains(BarControl.goLive);
                                   final slider = volumeSliderRoom(
                                     width: box.maxWidth,
-                                    buttons: layout.left.length + layout.right.length - 1,
+                                    buttons: layout.left.length + layout.right.length - 1 - (goLive ? 1 : 0),
                                     button: 48 * scale,
-                                    fixed: clock + 24,
+                                    fixed: clock + 24 + (goLive ? _GoLive.widthOf(scale) : 0),
                                   );
                                   return Row(
                                     key: const ValueKey('standard-buttons'),
@@ -270,20 +272,29 @@ class StandardControls extends StatelessWidget {
       case BarControl.time:
         return SignalBuilder(
           key: key,
-          builder: (context) => m.live.value
-              ? LiveBadge(
-                  paused: m.livePaused.value,
-                  behind: m.liveBehind.value,
-                  scale: scale,
-                  onBackToLive: m.togglePlay,
-                  onGoLive: m.goLive)
-              : _Clock(
-            text: clockText(m.position.value, m.duration.value, m.settings.timeDisplay.value),
-            tooltip: controlTooltip(c, s),
-            scale: scale,
-            onPressed: m.toggleTimeDisplay,
-          ),
+          builder: (context) {
+            // Live: LIVE, or how far behind it, in the clock's place and
+            // look (nothing to switch).
+            if (m.live.value) {
+              final behind = m.liveBehind.value;
+              return _Clock(
+                key: const ValueKey('live-time'),
+                text: liveTimeText(behind),
+                tooltip: controlTooltip(c, s),
+                scale: scale,
+                dot: behind < atLiveSecs,
+              );
+            }
+            return _Clock(
+              text: clockText(m.position.value, m.duration.value, m.settings.timeDisplay.value),
+              tooltip: controlTooltip(c, s),
+              scale: scale,
+              onPressed: m.toggleTimeDisplay,
+            );
+          },
         );
+      case BarControl.goLive:
+        return _GoLive(key: key, tooltip: controlTooltip(c, s), icon: controlIcon(c, s), scale: scale, onPressed: m.goLive);
       case BarControl.subtitles || BarControl.audio:
         final type = c == BarControl.audio ? JellyfinStreamType.audio : JellyfinStreamType.subtitle;
         return SignalBuilder(
@@ -362,38 +373,100 @@ class _IconButton extends StatelessWidget {
   }
 }
 
-/// The clock: "6:00 / 24:00" or "-18:00"; a click switches.
+/// The clock: "6:00 / 24:00" or "-18:00"; a click switches. A live
+/// stream's time ("LIVE", "−2:30") in the same look: [dot] the live dot,
+/// no [onPressed].
 class _Clock extends StatelessWidget {
   final String text;
   final String tooltip;
   final double scale;
-  final VoidCallback onPressed;
-  const _Clock({required this.text, required this.tooltip, required this.scale, required this.onPressed});
+  final VoidCallback? onPressed;
+  final bool dot;
+  const _Clock({
+    super.key,
+    required this.text,
+    required this.tooltip,
+    required this.scale,
+    this.onPressed,
+    this.dot = false,
+  });
 
   static TextStyle _style(double scale) =>
       TextStyle(fontSize: 14 * scale, fontFeatures: const [FontFeature.tabularFigures()]);
 
+  static double _dot(double scale) => 8 * scale;
+  static double _dotGap(double scale) => 7 * scale;
+
   /// The clock's width showing [text] (its padding included).
-  static double widthOf(String text, double scale) {
+  static double widthOf(String text, double scale, {bool dot = false}) {
     final p = TextPainter(text: TextSpan(text: text, style: _style(scale)), textDirection: TextDirection.ltr)..layout();
     final w = p.width;
     p.dispose();
-    return w + 20 * scale;
+    return w + 20 * scale + (dot ? _dot(scale) + _dotGap(scale) : 0);
   }
 
   @override
   Widget build(BuildContext context) {
+    final label = Text(text, style: _style(scale));
     return Tooltip(
       message: tooltip,
       waitDuration: const Duration(milliseconds: 500),
       child: TextButton(
         style: TextButton.styleFrom(
           foregroundColor: Colors.white,
+          disabledForegroundColor: Colors.white,
           padding: EdgeInsets.symmetric(horizontal: 10 * scale),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
         onPressed: onPressed,
-        child: Text(text, style: _style(scale)),
+        child: dot
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: _dot(scale),
+                    height: _dot(scale),
+                    decoration: const BoxDecoration(color: liveDotColor, shape: BoxShape.circle),
+                  ),
+                  SizedBox(width: _dotGap(scale)),
+                  label,
+                ],
+              )
+            : label,
+      ),
+    );
+  }
+}
+
+/// Go live, in the clock's look with the skin's icon.
+class _GoLive extends StatelessWidget {
+  final String tooltip;
+  final IconData icon;
+  final double scale;
+  final VoidCallback onPressed;
+  const _GoLive(
+      {super.key, required this.tooltip, required this.icon, required this.scale, required this.onPressed});
+
+  static double _icon(double scale) => 20 * scale;
+
+  /// Its width (padding included).
+  static double widthOf(double scale) => _Clock.widthOf(goLiveLabel, scale) + _icon(scale) + 6 * scale;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 500),
+      child: TextButton.icon(
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.white,
+          padding: EdgeInsets.symmetric(horizontal: 10 * scale),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          iconSize: _icon(scale),
+        ),
+        onPressed: onPressed,
+        icon: Icon(icon),
+        label: Text(goLiveLabel, style: _Clock._style(scale)),
       ),
     );
   }

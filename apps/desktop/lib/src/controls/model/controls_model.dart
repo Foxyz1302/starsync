@@ -78,22 +78,19 @@ class PlayerControlsModel {
   /// ([liveBar]).
   ReadonlySignal<bool> get live => coord.live;
 
-  /// The live stream is paused here only.
-  ReadonlySignal<bool> get livePaused => coord.livePaused;
-
-  /// How far everyone watches the live stream behind live (a rewind), s.
+  /// How far everyone watches the live stream behind live (a rewind, a
+  /// pause), s.
   ReadonlySignal<double> get liveBehind => coord.liveBehind;
+
+  /// A live stream watched behind live (Go live shows).
+  late final Computed<bool> behindLive = computed(() => coord.live.value && coord.liveBehind.value >= atLiveSecs);
 
   /// The live stream's seek bar; null when it cannot be rewound.
   ReadonlySignal<LiveBar?> get liveBar => coord.liveBar;
 
-  /// Play / pause as the session sees it ([PlayState]); live, this
-  /// player's own.
+  /// Play / pause as the session sees it ([PlayState]).
   late final Computed<PlayState> play = computed(() {
     final r = coord.serverState.value;
-    if (coord.live.value && r?.transport != 'finished') {
-      return coord.livePaused.value ? PlayState.paused : PlayState.playing;
-    }
     return switch (r?.transport) {
       'playing' => PlayState.playing,
       'finished' => PlayState.finished,
@@ -117,6 +114,7 @@ class PlayerControlsModel {
       hasChapters: chapters.value.isNotEmpty,
       hasDuration: duration.value > Duration.zero,
       live: coord.live.value,
+      behindLive: behindLive.value,
       alone: coord.alone.value,
       // Not a signal: read again whenever the state changes.
       hasLink: coord.serverState.value != null && coord.currentLink() != null,
@@ -157,7 +155,8 @@ class PlayerControlsModel {
   /// path, so everyone follows.
   void seek(Duration to) => playback.userSeek(to);
 
-  /// The live seek bar's release: everyone rewinds there ([LiveBar]).
+  /// The live seek bar's press and drag: everyone rewinds there
+  /// ([LiveBar]); this player at once.
   void seekLive(Duration to) {
     final bar = coord.liveBar.peek();
     if (bar != null) coord.seekLive(bar.streamTime(to));

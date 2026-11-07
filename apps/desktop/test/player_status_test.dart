@@ -123,16 +123,36 @@ void main() {
       expect(st(r, self: me).party, '1 watching · 1 BRB · 1 out', reason: 'gone is not counted');
     });
 
-    test('live: nothing to say before the live point, BRB or not; a pause here only says so', () {
-      final r = held([me, bob]);
-      final live = StateBroadcast.fromJson({
-        ...r.toJson(),
-        'media': {...r.media!, 'live': true},
-      });
-      expect(line(live, self: me), isNull, reason: 'nobody is waited for');
-      final paused = statusOf(StatusFacts(conn: const ConnOnline(), state: live, selfId: 'me', livePaused: true, now: _now));
-      expect(paused.line!.text, 'Paused here only');
-      expect(paused.line!.keys, [('Space', 'back to live')]);
+    test('live: nothing to say before the live point; a pause is everyone\'s; a seek loading; back at live', () {
+      StateBroadcast live(StateBroadcast r, {double liveFrom = 0}) => StateBroadcast.fromJson({
+            ...r.toJson(),
+            'media': {...r.media!, 'live': true},
+            if (liveFrom > 0) 'liveFrom': liveFrom,
+          });
+      expect(line(live(held([me, bob])), self: me), isNull, reason: 'the first report starts it');
+      // Paused: as for any media; one that cannot be rewound says where
+      // play goes.
+      final paused = st(live(held([me, mv('c', 'Cleo')], position: 4000)), self: me, pausedBy: 'c').line!;
+      expect(paused.text, 'Paused by Cleo');
+      expect(paused.detail, "This stream can't rewind: play goes back to live");
+      final rewindable = st(live(held([me, mv('c', 'Cleo')], position: 4000), liveFrom: 3000), self: me).line!;
+      expect(rewindable.text, 'Paused');
+      expect(rewindable.detail, isNull);
+      // With a window the group waits for BRB.
+      final brb = live(held([me, bob], position: 4000, wants: true, hold: HoldInfo(brb: [bob.id])), liveFrom: 3000);
+      expect(line(brb, self: me)!.text, 'Waiting for Bob');
+      final playing = live(held([me], transport: 'playing', position: 4000));
+      StatusLine? facts({bool loading = false, bool backAtLive = false}) => statusOf(StatusFacts(
+          conn: const ConnOnline(),
+          state: playing,
+          selfId: 'me',
+          liveLoading: loading,
+          liveBackAtLive: backAtLive,
+          now: _now)).line;
+      expect(facts(), isNull);
+      expect(facts(loading: true)!.text, 'Loading the stream there…');
+      expect(facts(loading: true)!.kind, StatusKind.seeking);
+      expect(facts(backAtLive: true)!.text, "This stream can't rewind: back at live");
     });
 
     test('nothing to say: playing, about to play, nothing up', () {

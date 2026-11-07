@@ -283,7 +283,7 @@ class StatusPill extends StatelessWidget {
             size: 20,
             color: view.level == StatusLevel.error ? Colors.redAccent.shade100 : Colors.amber),
         StatusKind.reconnecting => const _Spinner(color: Colors.amber),
-        StatusKind.connecting || StatusKind.fetching => const _Spinner(color: Colors.white70),
+        StatusKind.connecting || StatusKind.fetching || StatusKind.seeking => const _Spinner(color: Colors.white70),
         StatusKind.out || StatusKind.afk || StatusKind.paused => null,
         _ => null,
       };

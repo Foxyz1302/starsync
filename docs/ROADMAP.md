@@ -271,7 +271,15 @@ dropped (DEVELOPMENT "The 1.4 bridge").
      media, so an EVENT playlist (growing from its start) offers what it
      had then; YouTube's whole broadcast (`--live-from-start`, DASH) is
      not used, the 15 min HLS window is; no preview thumbnails on the
-     live timeline.
+     live timeline. The shared pause and the waiting rules over a live
+     stream are measured locally only (a real server's round trip and a
+     real CDN untried); a drag sends its last seek 300 ms after it stops,
+     so the others follow a drag that late.
+   - A live stream once froze the app's window in a nested-session test
+     (the main thread blocked on a lock about 40 s after a rewind that
+     opened the stream again, a window resize and Go live; the server
+     then saw the member `gone`); not seen again in two runs of the same
+     steps. Catch it with a native stack if it shows up again.
    - `tool/relay_e2e.dart`: a two-track case (bytes and pieces) over a
      shaped source link. Pieces on a slow source: a cold piece can take
      longer than media_kit's 5 s `network-timeout`; if it does, fetch the

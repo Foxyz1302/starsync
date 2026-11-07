@@ -42,6 +42,20 @@ void main() {
     expect(w.edgeAt(110), 5022, reason: 'the furthest seen, on with the clock');
   });
 
+  test('paused: the window runs on with the clock, so a long pause falls out of it', () {
+    final w = LiveWindow();
+    w.noteEdge(edge: 5012, own: 5000, at: 100);
+    // A 120 s window of 60 segments; paused at 5000 for five minutes, the
+    // player's cache stays where it stopped (no edge from it).
+    w.debugPlaylist = (secs: 120.0, count: 60);
+    final from = w.fromAt(100)!;
+    expect(from, lessThan(5000));
+    w.noteEdge(edge: 5150, own: 5000, at: 400);
+    expect(w.fromAt(400), from + 300, reason: 'the edge on with the clock, the window with it');
+    expect(w.fromAt(400)!, greaterThan(5000), reason: 'the paused moment is out of reach');
+    expect(w.segmentsBack(5000, 400), 59, reason: 'an open as far back as the window allows');
+  });
+
   test('segments back to open a little before a point, within the window', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((req) async {

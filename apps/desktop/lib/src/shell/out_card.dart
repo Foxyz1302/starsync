@@ -6,6 +6,7 @@ import 'package:sync_relay_core/core.dart' show Presence;
 
 import '../app/app_graph.dart';
 import '../controls/controls_probe.dart';
+import '../controls/model/controls_layout.dart' show liveTimeText;
 import '../playback/media_marks.dart' show formatClock;
 import '../sync/state_diff.dart' show serverPositionAt;
 import '../widgets/app_menu.dart' show AppGlass, AppMenuStyle;
@@ -99,9 +100,11 @@ class _OutCardState extends State<OutCard> {
     final duration = (media?['duration'] as num?)?.toDouble() ?? 0;
     Duration secs(double s) => Duration(milliseconds: (s * 1000).round());
     final at = r == null ? 0.0 : serverPositionAt(r, coord.connection.serverNow());
-    final where = duration > 0
-        ? '${formatClock(secs(at.clamp(0, duration)))} / ${formatClock(secs(duration))}'
-        : formatClock(secs(at));
+    final where = media?['live'] == true && r != null
+        ? liveTimeText(r.liveBehindAt(coord.connection.serverNow()))
+        : duration > 0
+            ? '${formatClock(secs(at.clamp(0, duration)))} / ${formatClock(secs(duration))}'
+            : formatClock(secs(at));
     final (IconData icon, String state) = switch (r?.transport) {
       'playing' => (Icons.play_arrow_rounded, 'playing'),
       'finished' => (Icons.stop_rounded, 'finished'),

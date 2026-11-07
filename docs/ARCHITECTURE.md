@@ -405,10 +405,10 @@ people say on purpose (BRB); nothing starts because time passed.
   for attention when its window is not focused: the runners' `starsync/window`
   channel (`attention`), the urgency hint on Linux (GTK, cleared on focus)
   and `FlashWindowEx` until foreground on Windows.
-- **Live streams**: no length; the clock is the group's live point in
-  the stream's own time, a seek moves it back only within what every
-  member can rewind to, nobody waits for anyone and pause is each
-  member's own (see "Live streams").
+- **Live streams**: no length; the clock is the group's point in the
+  stream's own time, a seek moves it back only within what every member
+  can rewind to, pause is everyone's, and the group waits for anyone
+  only on a stream it can rewind (see "Live streams").
 - **Deviations from Syncplay**: clock never follows the slowest watcher; no
   pause-on-leave; no ready flags (play and pause are anyone's, BRB holds
   everyone, anyone continues without anyone); the clock is server time
@@ -1477,7 +1477,10 @@ end) plays for everyone at the same moment of the stream. Wire:
   where it is (a late edge), or, 20 s or more behind, opens afresh
   (Reload video, at most every 30 s). Twitch's preroll ad stalls mpv at
   the ad's end (the timestamps jump); the seek to the live point
-  unsticks it.
+  unsticks it. Paused (the group's point held) the player pauses there
+  and only seeks, past a quarter second. A new point of someone else's
+  (a seek, a pause, a play: a new `eventId` not `seekBy` this member) is
+  followed at once, whatever an earlier seek still had to land.
 - **Rewinding** (a stream whose playlist keeps a window: YouTube Live
   keeps 15 min, `playlist_type/DVR`, 450 segments of 2 s; an HLS
   playlist with a long list): each player reads its playlist once per
@@ -1494,41 +1497,63 @@ end) plays for everyone at the same moment of the stream. Wire:
   anyone (the timeline, the arrow keys) moves the group's point there,
   clamped to it, and it runs on at 1x `state.behind` seconds behind the
   live point. Go live (or a seek at or past the live point, which needs
-  no window) sets it back to 0. A player whose cache does not hold the
-  new point opens the stream again in the same player at it
-  (`PlaybackController.reopenLive`: `live_start_index` that many
-  segments back plus two, no new resolve, the window kept; once per
-  point, then every 30 s at most), then seeks in its cache as above. A
+  no window) sets it back to 0 and plays. The seeker's own player goes
+  there at once (`SessionCoordinator.seekLive`, ahead of the server): a
+  seek in its cache when that holds the moment, else it opens the
+  stream again there at once (the pill: "Loading the stream there…");
+  the bar and the time show the target meanwhile, and the state's old
+  point does not pull it back. The server hears the seek at once and,
+  while seeks keep coming (a drag), the last once they stop for 300 ms
+  (the moment run on since while the group plays). A player whose cache
+  does not hold the group's new point opens the stream again in the
+  same player at it (`PlaybackController.reopenLive`: `live_start_index`
+  that many segments back plus two, no new resolve, the window kept;
+  once per point, then every 30 s at most), then seeks in its cache as
+  above; while it loads the group waits for it, as for any seek. A
   player that cannot reach it (a shorter window than it said, nothing
-  read) plays as near as it can, like a late edge; nobody waits. A
-  stream whose playlist keeps less, or a member without a window: no
-  rewinding, LIVE only. The hidden screenshot player opens as far back
-  as the moment needs.
+  read) plays as near as it can, like a late edge. A stream whose
+  playlist keeps less, or a member without a window: no rewinding, LIVE
+  only. The hidden screenshot player opens as far back as the moment
+  needs.
+- **Pause is shared** (`play` / `pause` as for any media): everyone
+  pauses, the group's point holds and the live point runs on, so the
+  time shows how far behind live the group falls ("−1:40"). Play goes on
+  from the paused moment, behind live (Go live catches up); paused
+  longer than the window keeps, from the oldest moment everyone still
+  reaches (10 s inside it, everyone loading there first). A stream
+  nobody can rewind (no `liveFrom`: Twitch) cannot go on from the paused
+  moment: play goes back to live, the paused pill says so beforehand and
+  for 5 s after "This stream can't rewind: back at live". With a window
+  BRB, Space's hold, "Waiting for", "continue without", AFK and the
+  buffers work as for any media; a player runs short only with under
+  1 s ahead while another member's edge shows the stream has more, so
+  the live edge, a stalled stream or its end hold nobody. Without a
+  window they hold nothing and Space only pauses and plays. No time, no
+  skips or chapters, a timeline only when it can be rewound (see
+  "Desktop UI"); the watch is not tracked.
 - **Measured** (`live_e2e`, three app players against a real server, a
   local ffmpeg HLS stream with 2 s segments, one player on a CDN edge
   whose playlist runs 3 s late): the players' stream positions within
-  1-24 ms of each other (median 1-21 ms over runs, max 24 ms); back from
-  a 4 s pause here only, 2-22 ms. Against the real thing
-  (`WT_LIVE_URL`, two players, each its own resolve): YouTube (5 s
-  segments, video and audio apart) median 0 ms, max 7 ms, about 9 s
-  behind the edge; Twitch with its preroll ad median 21 ms, max 87 ms,
-  about 5 s behind the edge. Rewinding (the local stream with a 90 s
-  window, 2 s segments): 15 s back inside every cache median 1-8 ms,
-  max 23 ms; to the window's start (each player opens it again there)
-  median 4-11 ms, max 25 ms; a 3 s pause here only while rewound, 1-9
-  ms; Go live median 0-4 ms, max 21 ms. YouTube (2 s segments, 15 min
-  window, 883 s offered): 300 s back (every player opened 158 segments
-  back) median 1 ms, max 22 ms; Go live (opened 8 segments back) median
-  0 ms, max 27 ms.
-- **Pause is local**: play and pause (the button, Space, the LIVE badge)
-  only pause this player (`livePaused`; the pill: "Paused here
-  only", Space back to live, or to the others when rewound); playing
-  again, or a rewind of your own, seeks back to the group's point. The server ignores `play` and
-  `pause`, and a `seek` without a window unless it goes live; BRB,
-  buffers and loaders hold nothing, so there is no Space hold, no
-  "Waiting for", no AFK while it plays and no "continue without". No
-  time, no skips or chapters, a timeline only when it can be rewound
-  (see "Desktop UI"); the watch is not tracked.
+  1-26 ms of each other (median 0-21 ms over runs, max 26 ms); paused
+  for everyone 3-17 ms apart; played on from a 4 s pause, behind live,
+  median 3-21 ms, max 30 ms. Against the real thing (`WT_LIVE_URL`, two
+  players, each its own resolve): YouTube (5 s segments, video and
+  audio apart) median 0 ms, max 7 ms, about 9 s behind the edge; Twitch
+  with its preroll ad median 21 ms, max 87 ms, about 5 s behind the
+  edge. Rewinding (the local stream with a 180 s window, 2 s segments;
+  "there" is mpv's position within a second of the target, read every
+  10 ms, on a server on the same machine): 15 s back inside every cache,
+  every player there 10-11 ms after the click, then median 3-20 ms
+  apart, max 25 ms; a drag (a seek every 60 ms), the seeker there 11 ms
+  after its last move, the others 308 ms (the seek sent once the drag
+  stops); to the window's start (each player opens it again there),
+  everyone there after 225-248 ms, then median 2-7 ms, max 21 ms; paused at
+  the window's start until it fell out, resumed 10 s inside it, median
+  0-2 ms, max 12 ms; Go live median 0-19 ms, max 21 ms. A stream
+  without a window, back at live after a 6 s pause, median 1-4 ms, max
+  17 ms. YouTube (2 s segments, 15 min window, 883 s offered): 300 s back
+  (every player opened 158 segments back) median 1 ms, max 22 ms; Go
+  live (opened 8 segments back) median 0 ms, max 27 ms.
 - **The end**: a player at the stream's end says so (its report's
   `duration`); once nobody else still sees the stream go on past there
   the server finishes it and Up next's first item goes up at once (no
@@ -1973,7 +1998,12 @@ when the group plays once they are back, "Paused · waiting for …" when
 not; you BRB: "Waiting for you", `[Space] I'm back`, the pill brings you
 back; else `[Space] BRB too  [Hold Space] continue without`), a video
 the group waits for (loading, with its share), someone who cannot play
-it, a plain pause ("Paused by Bob"); nothing while it plays), each with
+it, a plain pause ("Paused by Bob"; on a live stream nobody can rewind
+with the detail "This stream can't rewind: play goes back to live");
+nothing while it plays; on a live stream also this player opening it
+again at a seek's moment ("Loading the stream there…", a spinner) and,
+for 5 s after a paused one went on at live, "This stream can't rewind:
+back at live"), each with
 its `keys` (`KeyHint`s) or a detail and a `StatusLevel` (ok and info
 never colour anything, warn amber, error red). Names past three read
 "Bob, Chiyo and 2 more". `Status.party` is the strip's line
@@ -2620,7 +2650,9 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   shows the title with expand and ×, the status line, the full player's
   play button (`controlIcon`/`togglePlay`: the group's play or pause, Join
   while out) with the time, and a 4 px bar (track, cached, played) that
-  seeks; otherwise a 3 px played line along the bottom edge. A tab sends
+  seeks; otherwise a 3 px played line along the bottom edge. A live
+  stream: its time (`liveTimeText`: LIVE, "−2:30") and no bar or line
+  (the full controls rewind it). A tab sends
   the full player to mini; × on the mini sets you out (reason `closed`:
   nobody waits for you, your player keeps its spot) and closes the
   player; the strip brings it back, and joining with it closed shows the
@@ -2629,7 +2661,8 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   in the middle, full and mini alike: "You're out", what the others are
   watching ("The others are watching Frieren · S1 E5"; the mini leaves
   the title to its hover bar) and where ("12:34 / 24:00 · playing",
-  ticking), and one Join with a Space keycap (Space joins too); the
+  ticking; a live stream "LIVE" or "−2:30"), and one Join with a Space
+  keycap (Space joins too); the
   status pill and the mini's line leave it to the card. AFK keeps the
   pill: any input brings it back. Fullscreen
   is `windowManager.setFullScreen` with the strip hidden (party avatars in
@@ -3150,15 +3183,21 @@ Player controls (`lib/src/controls/`): one controls model, two skins.
   1:30 (with a duration), chapters (with chapters), the hidden track
   lists and chat, mark a problem, leave. Icons, tooltips (with keys) and the clock text (`clockText`)
   are defined there too, once. A live stream (`ControlsSnapshot.live`)
-  has no chapter buttons, Skip 1:30 or chapters, and its play button
-  pauses this player only ("Pause here only", "Back to live"); both
-  skins show `LiveBadge` (`live_badge.dart`: LIVE, red, grey while
-  paused here, a click goes back to live; behind live "−2:30" and a Go
-  live button) where the clock is, and no progress line. The timeline
-  is there only when everyone can rewind it (`liveBar`, a
-  `ChapterSeekBar` over the window, live at its right end, in the
-  Minimal skin too); its release and the arrow keys rewind for everyone
-  (see "Live streams").
+  has no chapter buttons, Skip 1:30 or chapters, and no progress line.
+  Its time (`liveTimeText`) is LIVE (after a small red dot) or how far
+  everyone is behind live ("−2:30", a rewind or a pause), in the skin's
+  own clock look and place: the Standard clock, the right end of the
+  Minimal band. Behind live, `BarControl.goLive` (after the time, shown
+  only then: `ControlsSnapshot.behindLive`) is Go live in the skin's
+  button look (the Standard clock's text button with an icon; a labelled
+  `MinimalButton` in the left capsule), counted in the volume slider's
+  room. The timeline is the skin's own (`ChapterSeekBar`,
+  `MinimalTimeline` with `liveText`) over the window everyone can rewind
+  (`liveBar`), live at its right end, its hover tip how far behind live
+  a moment is; without a window the Standard row has none and the
+  Minimal band carries LIVE only (no position, no seek). A press, every
+  drag move and the arrow keys rewind for everyone (see "Live
+  streams").
 - **Shared pieces**: `ControlsFrame` (`frame.dart`): when the controls
   are up (real mouse movement shows them, see "Quick chat"; `suppress`
   holds them hidden; 3 s without movement, `hideAfter`, or the

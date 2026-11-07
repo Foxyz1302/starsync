@@ -52,6 +52,28 @@ void main() {
         reason: 'in its cache: a seek');
   });
 
+  test('paused: no rate, a seek to the held point past a quarter second, an open when out of the cache', () {
+    final f = LiveFollow();
+    LiveStep paused(double group, double own, {bool rewind = true}) =>
+        f.step(group: group, own: own, start: 1000, cached: cache, now: t0, rewind: rewind, paused: true);
+    expect(paused(1020, 1020.2).actions, isEmpty, reason: 'close enough to show the same picture');
+    final s = paused(1020, 1020.6).actions.whereType<SeekAction>().single;
+    expect(s.position, 20, reason: 'within a second: a seek, not a rate (nothing plays)');
+    f.reset();
+    expect(paused(900, 1020).reload, isTrue, reason: 'held before its cache');
+  });
+
+  test("this member's own seek lands first; the cache check", () {
+    final f = LiveFollow();
+    f.noteSeek(t0);
+    expect(step(f, 1030, 1010, at: t0.add(const Duration(seconds: 1))).actions, isEmpty,
+        reason: "the server's state has the old point for a moment");
+    expect(step(f, 1030, 1010, at: t0.add(const Duration(seconds: 3))).actions.whereType<SeekAction>(), isNotEmpty);
+    expect(LiveFollow.holds(cache, 39), isTrue);
+    expect(LiveFollow.holds(cache, 39.8), isFalse, reason: 'too near its end for a seek to land');
+    expect(LiveFollow.holds(cache, -1), isFalse);
+  });
+
   test("the live seek bar: the window from its start, this player and its cache in it", () {
     final bar = LiveBar.of(from: 400, top: 1000, own: 950, start: 900, cached: cache);
     expect(bar.length, const Duration(seconds: 600));

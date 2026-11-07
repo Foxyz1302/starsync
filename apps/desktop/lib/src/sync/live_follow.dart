@@ -18,11 +18,14 @@ typedef LiveStep = ({List<PlayerAction> actions, bool reload});
 /// it is (a CDN edge a little late), or, more than [reloadOver] behind,
 /// asks for a fresh open. A point before its cache (a rewind) it asks to
 /// open at when the stream lets it rewind (`rewind`), else it plays on.
+/// Paused (the group's point held), it only seeks, past [pausedSeekOver]
+/// (a seek there shows nothing moving), so it plays on in step.
 class LiveFollow {
   static const deadBand = 0.08;
   static const seekOver = 1.0;
   static const rateStep = 0.03;
   static const reloadOver = 20.0;
+  static const pausedSeekOver = 0.25;
   static const settle = Duration(seconds: 2);
   // Seeks keep this far inside the cached range's end (mpv stalls on a
   // seek to the very last cached frame).
@@ -40,11 +43,24 @@ class LiveFollow {
     _seekAt = null;
   }
 
+  /// This member seeked its player itself at [now] (ahead of the server's
+  /// state, which still has the old point for a moment): it lands first.
+  void noteSeek(DateTime now) => _seekAt = now;
+
+  /// The group's point moved (someone else's seek, a pause, a play): no
+  /// waiting for an earlier seek to land, the new point counts at once.
+  void moved() => _seekAt = null;
+
+  /// Whether mpv's cache ([cached], player time) holds [at] (player
+  /// time), far enough inside its end for a seek to land.
+  static bool holds(CachedRanges cached, double at) => cached.ranges
+      .any((r) => at >= r.start.inMicroseconds / 1e6 && at <= r.end.inMicroseconds / 1e6 - _endGuard);
+
   /// [group]: the live point now (stream time; null while the server has
   /// none). [own]: this player's position in stream time; [start]: the
   /// stream time of the player's 0 ([own] minus `time-pos`). [cached]:
   /// what mpv holds, in player time. [rewind]: the stream can be opened
-  /// further back.
+  /// further back. [paused]: the group's point is held there.
   LiveStep step({
     required double? group,
     required double own,
@@ -52,6 +68,7 @@ class LiveFollow {
     required CachedRanges cached,
     required DateTime now,
     bool rewind = false,
+    bool paused = false,
   }) {
     final out = <PlayerAction>[];
     void setRate(double r) {
@@ -67,14 +84,13 @@ class LiveFollow {
     final seekAt = _seekAt;
     if (seekAt != null && now.difference(seekAt) < settle) return (actions: out, reload: false);
     final err = own - group;
-    if (err.abs() <= deadBand) {
+    if (err.abs() <= deadBand || (paused && err.abs() <= pausedSeekOver)) {
       setRate(1.0);
-    } else if (err.abs() <= seekOver) {
+    } else if (!paused && err.abs() <= seekOver) {
       setRate(err > 0 ? 1.0 - rateStep : 1.0 + rateStep);
     } else {
       final target = group - start;
-      final reachable = cached.ranges.any((r) =>
-          target >= r.start.inMicroseconds / 1e6 && target <= r.end.inMicroseconds / 1e6 - _endGuard);
+      final reachable = holds(cached, target);
       setRate(1.0);
       if (reachable) {
         _seekAt = now;

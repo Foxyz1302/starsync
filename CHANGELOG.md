@@ -23,6 +23,10 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 - Live streams can be watched together: everyone sees the same moment
 - Live streams that allow it can be rewound together, with Go live to catch up
+- Pausing a live stream pauses it for everyone, like any video: play goes on from where you paused (behind live, Go live catches up). A stream that can't be rewound, like Twitch, goes back to live when you play again
+- On a live stream that can be rewound, BRB and waiting for someone's video work as for any video
+- Seeking back in a live stream moves your picture at once
+- Live streams look like the rest of the player in both designs: the usual timeline, LIVE or how far behind live where the time is, and a Go live button
 - The video's volume is remembered: the next start begins where you left it
 - M mutes and unmutes the video
 - When Starsync crashes or freezes, it now notes it in the diagnostics it shares by itself (on Windows with the system's crash report from the next start), so a problem can be tracked down without you sending anything

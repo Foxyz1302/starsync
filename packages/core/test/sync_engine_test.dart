@@ -950,7 +950,7 @@ void main() {
         engine.applyReport(token, pos, 6, engine.eventId, mediaId: engine.mediaId, edge: edge, duration: ended);
     void step(double secs) => t = t.add(Duration(milliseconds: (secs * 1000).round()));
 
-    test('the first report sets the live point; nobody waits, pause and BRB are local, no seek', () {
+    test('the first report sets the live point; without a window nobody waits, pause is shared, play is at live', () {
       join('a', 'alice');
       join('b', 'bob');
       engine.applySwap('a', stream);
@@ -967,7 +967,7 @@ void main() {
       live('b', 990, 1007);
       expect(engine.positionAt(), closeTo(999, 1e-9), reason: 'a later report does not move it');
       expect(engine.media!.duration, 0, reason: 'a live stream has no length');
-      pause('b');
+      // Nobody can rewind it: BRB, short buffers and seeks hold nothing.
       brb('a');
       engine.applySeek('b', 10);
       buffer('b', 0);
@@ -977,6 +977,27 @@ void main() {
       expect(actions(), isNot(contains('pause')));
       engine.tick();
       expect(engine.transport, Transport.playing);
+      back('a');
+      // A pause is everyone's: the point stops, the stream goes on.
+      pause('b');
+      expect(engine.transport, Transport.held);
+      expect(engine.wantsPlay, isFalse);
+      expect(actions(), contains('pause'));
+      step(30);
+      engine.tick();
+      expect(engine.positionAt(), closeTo(999, 1e-9));
+      expect(engine.liveTop(), closeTo(1029, 1e-9), reason: 'the live point runs on');
+      expect(engine.broadcast().hold, isNull, reason: 'nobody is waited for without a window');
+      final paused = engine.broadcast();
+      expect(paused.behind, 0, reason: 'paused at live');
+      expect(paused.liveBehindAt(t), closeTo(30, 1e-9), reason: 'and falling behind since');
+      // Play: it cannot go on from the paused moment, so back at live.
+      final before = engine.eventId;
+      play('a');
+      expect(engine.transport, Transport.playing);
+      expect(engine.eventId, greaterThan(before));
+      expect(engine.positionAt(), closeTo(1029, 1e-9));
+      expect(engine.behind, 0);
     });
 
     test('a player far from its edge (a stitched ad) sets it behind the edge instead', () {
@@ -1083,9 +1104,6 @@ void main() {
       dvr('a', 445, 595, 245);
       expect(engine.positionAt(), closeTo(445, 1e-9));
       expect(engine.behind, closeTo(597, 1e-9));
-      // Pause is still local.
-      pause('b');
-      expect(engine.transport, Transport.playing);
       // A seek past the live point: back to live.
       engine.applySeek('b', 99999);
       expect(engine.behind, 0);
@@ -1140,6 +1158,129 @@ void main() {
       step(14);
       dvr('a', 530, 530, 244);
       expect(engine.eventId, greaterThan(seeked), reason: 'the point ran past every edge');
+      expect(engine.behind, 0);
+    });
+
+    test('with a window pause is shared: play goes on from the paused moment, behind live', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applySwap('a', stream);
+      dvr('a', 994, 1006, 200);
+      dvr('b', 994, 1006, 300);
+      // The point: 997.
+      step(10);
+      actions();
+      pause('a');
+      expect(engine.transport, Transport.held);
+      expect(engine.position, closeTo(1007, 1e-9));
+      expect(actions(), ['pause']);
+      step(100);
+      // The stream goes on: the window moves on with it.
+      expect(engine.broadcast().liveBehindAt(t), closeTo(100, 1e-9));
+      dvr('a', 1007, 1027, 300);
+      dvr('b', 1007, 1027, 400);
+      expect(engine.broadcast().liveFrom, 400);
+      expect(engine.transport, Transport.held);
+      play('b');
+      expect(engine.transport, Transport.playing, reason: 'every player holds the paused moment');
+      expect(actions(), ['play']);
+      expect(engine.position, closeTo(1007, 1e-9), reason: 'from the paused moment');
+      expect(engine.behind, closeTo(100, 1e-9));
+      // Go live catches up.
+      engine.applySeek('a', 99999);
+      expect(engine.behind, 0);
+      expect(engine.positionAt(), closeTo(1107, 1e-9));
+    });
+
+    test('with a window BRB and short buffers hold the point, as for any media', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applySwap('a', stream);
+      dvr('a', 994, 1006, 200);
+      dvr('b', 994, 1006, 300);
+      actions();
+      step(5);
+      brb('b');
+      expect(engine.transport, Transport.held);
+      expect(engine.position, closeTo(1002, 1e-9));
+      expect(engine.broadcast().hold?.brb, [m('b').id]);
+      step(20);
+      back('b');
+      expect(engine.transport, Transport.playing, reason: 'it wanted to play');
+      expect(engine.position, closeTo(1002, 1e-9));
+      expect(engine.behind, closeTo(20, 1e-9));
+      // A player running dry holds everyone; with its buffer back it goes on.
+      engine.applyReport('b', 1003, 0.2, engine.eventId, mediaId: engine.mediaId, edge: 1027, from: 300);
+      expect(engine.transport, Transport.held);
+      expect(actions(), contains('pause'));
+      step(3);
+      dvr('b', 1003, 1030, 300);
+      expect(engine.transport, Transport.playing);
+      expect(engine.behind, closeTo(23, 1e-9));
+    });
+
+    test('paused past the window: play resumes at the oldest moment everyone still reaches', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applySwap('a', stream);
+      dvr('a', 994, 1006, 900);
+      dvr('b', 994, 1006, 920);
+      pause('a');
+      final at = engine.position;
+      step(300);
+      // Both windows moved on past the paused moment.
+      dvr('a', at, 1306, 1200);
+      dvr('b', at, 1306, 1220);
+      final before = engine.eventId;
+      play('b');
+      const resume = 1220 + RelayConstants.liveResumeMarginSecs;
+      expect(engine.position, resume, reason: "bob's window starts later; a little inside it");
+      expect(engine.transport, Transport.held, reason: 'everyone loads there first');
+      expect(engine.eventId, greaterThan(before));
+      expect(m('a').buffered, 0);
+      final moved = engine.eventId;
+      // A report from before the move says nothing about the buffer there.
+      engine.applyReport('a', at, 6, before, mediaId: engine.mediaId, edge: 1306, from: 1200);
+      // The window moves on while they load; the point stays inside it.
+      step(3);
+      dvr('b', resume, 1309, 1223);
+      engine.tick();
+      expect(engine.transport, Transport.held);
+      expect(engine.eventId, moved, reason: 'not moved again');
+      dvr('a', resume, 1309, 1203);
+      expect(engine.transport, Transport.playing);
+      expect(engine.position, resume);
+      expect(engine.behind, closeTo(engine.liveTop() - resume, 1e-9));
+    });
+
+    test('with a window, at the edge or at the end nobody is waited for: the stream has no more', () {
+      join('a', 'alice');
+      join('b', 'bob');
+      engine.applySwap('a', stream);
+      dvr('a', 994, 1006, 200);
+      dvr('b', 994, 1006, 300);
+      step(9);
+      // The stream stopped growing: both players hold up to 1006 only.
+      engine.applyReport('a', 1005.5, 0.5, engine.eventId, mediaId: engine.mediaId, edge: 1006, from: 200);
+      engine.applyReport('b', 1005.5, 0.5, engine.eventId, mediaId: engine.mediaId, edge: 1006, from: 300);
+      expect(engine.transport, Transport.playing, reason: 'nobody has more to wait for');
+      step(1);
+      engine.applyReport('a', 1006, 0, engine.eventId, mediaId: engine.mediaId, duration: 1006);
+      engine.applyReport('b', 1006, 0, engine.eventId, mediaId: engine.mediaId, duration: 1006);
+      expect(engine.transport, Transport.finished);
+    });
+
+    test('Go live while paused plays at the live point', () {
+      join('a', 'alice');
+      engine.applySwap('a', stream);
+      dvr('a', 994, 1006, 200);
+      pause('a');
+      step(40);
+      engine.applySeek('a', engine.liveTop() + 60);
+      expect(engine.wantsPlay, isTrue);
+      expect(engine.positionAt(), closeTo(1037, 1e-9));
+      dvr('a', 1037, 1046, 240);
+      expect(engine.transport, Transport.playing);
       expect(engine.behind, 0);
     });
 

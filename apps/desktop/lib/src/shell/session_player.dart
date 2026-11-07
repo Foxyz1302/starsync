@@ -1000,7 +1000,12 @@ class _SessionPlayerState extends State<SessionPlayer> {
                                   onPressed: _model.togglePlay,
                                 ),
                                 const SizedBox(width: 8),
-                                Text('${formatClock(pos)} / ${formatClock(dur)}',
+                                // Live: LIVE or how far behind it, as the
+                                // controls say.
+                                Text(
+                                    _model.live.value
+                                        ? liveTimeText(_model.liveBehind.value)
+                                        : '${formatClock(pos)} / ${formatClock(dur)}',
                                     style: const TextStyle(
                                         color: MinimalStyle.dim,
                                         fontSize: 12,
@@ -1161,9 +1166,12 @@ class _MiniSeekBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final playback = AppScope.of(context).coordinator.playback;
+    final coord = AppScope.of(context).coordinator;
+    final playback = coord.playback;
     final accent = Theme.of(context).colorScheme.primary;
     return SignalBuilder(builder: (context) {
+      // A live stream's length is no timeline (the full controls rewind it).
+      if (coord.live.value) return const SizedBox.shrink();
       final d = playback.duration.value;
       double f(Duration x) => d.inMilliseconds == 0 ? 0.0 : (x.inMilliseconds / d.inMilliseconds).clamp(0.0, 1.0);
       final bar = SizedBox(

@@ -26,6 +26,10 @@ class ChapterSeekBar extends StatefulWidget {
 
   /// The bar's height (its hit area); the track is centred in it.
   final double height;
+
+  /// The hover tip's time for a moment on the bar (a live stream: how far
+  /// behind live); the clock by default.
+  final String Function(Duration at)? hoverText;
   const ChapterSeekBar({
     super.key,
     required this.position,
@@ -35,6 +39,7 @@ class ChapterSeekBar extends StatefulWidget {
     this.chapters = const [],
     required this.onSeek,
     this.height = ChapterSeekBar.defaultHeight,
+    this.hoverText,
   });
 
   static const defaultHeight = 28.0;
@@ -192,7 +197,7 @@ class _ChapterSeekBarState extends State<ChapterSeekBar> {
                       child: IgnorePointer(
                         child: FractionalTranslation(
                           translation: const Offset(-0.5, 0),
-                          child: _HoverTip(title: hoverTitle, time: formatClock(hoverAt)),
+                          child: _HoverTip(title: hoverTitle, time: widget.hoverText?.call(hoverAt) ?? formatClock(hoverAt)),
                         ),
                       ),
                     ),

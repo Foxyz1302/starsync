@@ -1262,6 +1262,7 @@ class StateBroadcast {
   /// [serverTime] (the local clock is close enough for this).
   double bufferNeedAt(DateTime now) {
     if (transport == 'finished') return 0;
+    if (media?['live'] == true) return RelayConstants.liveMinBufferSecs;
     final d = (media?['duration'] as num?)?.toDouble() ?? 0;
     const full = RelayConstants.minBufferSecs;
     if (d <= 0) return full;
@@ -1307,9 +1308,19 @@ class StateBroadcast {
   /// all reach, in stream time (PROTOCOL.md "Live"); 0 when it cannot be
   /// rewound.
   final double liveFrom;
-  /// How far the group's point of a live stream is behind its live point,
-  /// in seconds; 0 at live.
+  /// How far the group's point of a live stream is behind its live point
+  /// at [serverTime], in seconds (a rewind, a pause); 0 at live. While held
+  /// the live point runs on: see [liveBehindAt].
   final double behind;
+
+  /// A live stream: how far the group's point is behind its live point at
+  /// [now] (paused, it falls further behind as the stream goes on; held at
+  /// 0 there is no live point yet).
+  double liveBehindAt(DateTime now) {
+    if (transport != 'held' || position <= 0) return behind;
+    final since = now.difference(serverTime).inMilliseconds / 1000;
+    return behind + (since > 0 ? since : 0);
+  }
   const StateBroadcast({
     required this.eventId,
     required this.transport,

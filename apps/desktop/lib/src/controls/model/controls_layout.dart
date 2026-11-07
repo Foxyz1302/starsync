@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart' show IconData, Icons;
+import 'package:flutter/material.dart' show Color, IconData, Icons;
 
 import '../../playback/media_marks.dart' show formatClock;
 import 'controls_prefs.dart';
@@ -39,6 +39,9 @@ enum BarControl {
   chapterNext,
   volume,
   time,
+
+  /// A live stream behind live: everyone back to live.
+  goLive,
   subtitles,
   audio,
 
@@ -81,6 +84,7 @@ abstract final class ControlsLayout {
     BarControl.chapterNext,
     BarControl.volume,
     BarControl.time,
+    BarControl.goLive,
   ];
   static const right = [
     BarControl.subtitles,
@@ -112,9 +116,13 @@ class ControlsSnapshot {
   /// The media's length is known (seeks and skips make sense).
   final bool hasDuration;
 
-  /// A live stream: no skips or chapters; play and pause are
-  /// this player's own.
+  /// A live stream: no skips or chapters; LIVE or how far behind it
+  /// instead of the time.
   final bool live;
+
+  /// A live stream the group watches behind live (a rewind, a pause): Go
+  /// live.
+  final bool behindLive;
 
   /// Watching alone (no one to mark ready).
   final bool alone;
@@ -134,6 +142,7 @@ class ControlsSnapshot {
     this.hasChapters = false,
     this.hasDuration = false,
     this.live = false,
+    this.behindLive = false,
     this.alone = false,
     this.hasLink = false,
     this.fullscreen = false,
@@ -152,6 +161,7 @@ class ControlsSnapshot {
     BarControl.subtitles => !hidden.contains(OptionalControl.subtitles),
     BarControl.audio => !hidden.contains(OptionalControl.audio),
     BarControl.chat => !hidden.contains(OptionalControl.chat),
+    BarControl.goLive => s.live && s.behindLive,
     _ => true,
   };
   return (
@@ -205,6 +215,7 @@ IconData controlIcon(BarControl c, ControlsSnapshot s) => switch (c) {
   BarControl.chapterNext => Icons.chevron_right_rounded,
   BarControl.volume => Icons.volume_up_rounded,
   BarControl.time => Icons.schedule_rounded,
+  BarControl.goLive => Icons.fast_forward_rounded,
   BarControl.subtitles => Icons.subtitles_outlined,
   BarControl.audio => Icons.graphic_eq_rounded,
   BarControl.settings => s.panelOpen ? Icons.settings_rounded : Icons.settings_outlined,
@@ -214,8 +225,6 @@ IconData controlIcon(BarControl c, ControlsSnapshot s) => switch (c) {
 
 /// The tooltip of a bar control, with its key.
 String controlTooltip(BarControl c, ControlsSnapshot s) => switch (c) {
-  BarControl.playPause when s.live && s.play != PlayState.finished =>
-    s.play == PlayState.playing ? 'Pause here only (Space)' : 'Back to live (Space)',
   BarControl.playPause => switch (s.play) {
     PlayState.playing => 'Pause for everyone (Space)',
     PlayState.waiting => 'Waiting for the others; pause for everyone (Space)',
@@ -227,7 +236,9 @@ String controlTooltip(BarControl c, ControlsSnapshot s) => switch (c) {
   BarControl.chapterPrevious => 'Previous chapter (PgDn)',
   BarControl.chapterNext => 'Next chapter (PgUp)',
   BarControl.volume => 'Volume (M mutes, scroll, ↑ / ↓)',
+  BarControl.time when s.live => s.behindLive ? 'How far everyone is behind live' : 'Everyone sees the same moment',
   BarControl.time => 'Elapsed / remaining (click to switch)',
+  BarControl.goLive => 'Everyone back to live',
   BarControl.subtitles => 'Subtitles',
   BarControl.audio => 'Audio',
   BarControl.settings => 'Player settings',
@@ -238,6 +249,19 @@ String controlTooltip(BarControl c, ControlsSnapshot s) => switch (c) {
 /// The top bar's ⋯: the [ControlAction] menu.
 const moreIcon = Icons.more_horiz_rounded;
 const moreTooltip = 'Video and session';
+
+/// The Go live button's label.
+const goLiveLabel = 'Go live';
+
+/// Behind live by less than this is at live.
+const atLiveSecs = 1.0;
+
+/// A live stream's time: LIVE at live, else how far behind it ("−2:30").
+String liveTimeText(double behind) =>
+    behind < atLiveSecs ? 'LIVE' : '−${formatClock(Duration(milliseconds: (behind * 1000).round()))}';
+
+/// The live dot beside LIVE.
+const liveDotColor = Color(0xFFE53935);
 
 /// The bar's clock: "6:00 / 24:00", or the time left ("-18:00"); "0:00"
 /// parts while the length is unknown.

@@ -173,7 +173,8 @@ class SessionCoordinator {
       names: memberNames,
       restarts: restarts.value,
       pausedBy: pausedBy.value,
-      livePaused: livePaused.value,
+      liveLoading: liveLoading.value,
+      liveBackAtLive: liveBackAtLive.value,
       now: _clock.value,
     ));
   });
@@ -244,39 +245,80 @@ class SessionCoordinator {
   late final Computed<bool> selfBrb = computed(() => selfMember.value?.brb ?? false);
 
   /// What plays is a live stream (`media.live`, ARCHITECTURE "Live
-  /// streams"): no time, a timeline only to rewind; pause is this member's
-  /// own ([livePaused]) and playing again goes back to the group's live
-  /// point.
+  /// streams"): no time, a timeline only to rewind; play and pause are the
+  /// group's, as for any media.
   late final Computed<bool> live = computed(() => _isLive(serverState.value));
 
-  /// This member paused the live stream (only here); playing again goes
-  /// back to the group's live point. A new media clears it.
-  final livePaused = signal(false);
   final LiveFollow _liveFollow = LiveFollow();
-  int _livePausedFor = -1;
+  int _liveFor = -1;
+  int _liveEventSeen = -1;
   DateTime? _liveReloadAt;
   // The last time the live stream was opened again at the group's point.
   ({int mediaId, int eventId, DateTime at})? _liveReopen;
+  // Ticks every second while a live stream is paused: its live point runs
+  // on, so how far behind it the group is grows.
+  final _liveClock = signal(DateTime.now().toUtc());
+  // This member's seek on the live stream until its player is there
+  // (stream time [at] when it was made, running on while the group
+  // plays): the bar and the time show it at once.
+  final _liveSeekTarget = signal<({double at, DateTime since, bool running, int eventId})?>(null);
+  // The live seek the server has not heard yet (sent at once, then once
+  // the user stops for [_liveSeekGap]).
+  Timer? _liveSeekTimer;
+  ({double at, DateTime since, bool running})? _liveSeekNext;
+  DateTime? _liveSeekSentAt;
+  static const _liveSeekGap = Duration(milliseconds: RelayConstants.seekDebounceMs);
+  Timer? _liveNoteTimer;
+  DateTime? _liveLoadingSince;
+  StateBroadcast? _liveBefore;
+
+  /// This player opens the live stream again at a seek's moment: a brief
+  /// loading state (the pill) until it plays there.
+  final liveLoading = signal(false);
+
+  /// A paused live stream that cannot be rewound went on at the live
+  /// point (the pill says so for a few seconds).
+  final liveBackAtLive = signal(false);
+
+  /// Stream time of [_liveSeekTarget] now, null without one.
+  double? _liveSeekNow() {
+    final s = _liveSeekTarget.peek();
+    if (s == null) return null;
+    return s.running ? s.at + DateTime.now().toUtc().difference(s.since).inMicroseconds / 1e6 : s.at;
+  }
+
+  /// The live point of [r] at [now] (server clock): where the group would
+  /// be without a rewind or a pause.
+  static double _liveTopOf(StateBroadcast r, DateTime now) => serverPositionAt(r, now) + r.liveBehindAt(now);
 
   /// How far the group watches the live stream behind its live point (a
-  /// rewind), seconds; 0 at live.
+  /// rewind, a pause), seconds; 0 at live. A seek of this member counts
+  /// at once.
   late final Computed<double> liveBehind = computed(() {
     final r = serverState.value;
-    return _isLive(r) && r!.transport == 'playing' ? r.behind : 0;
+    _liveClock.value;
+    final pending = _liveSeekTarget.value;
+    if (!_isLive(r) || r!.transport == 'finished') return 0;
+    final now = connection.serverNow();
+    if (pending == null) return r.liveBehindAt(now);
+    return max(0, _liveTopOf(r, now) - _liveSeekNow()!);
   });
 
   /// The live stream's seek bar now ([LiveBar]); null unless every
   /// member can rewind it (`state.liveFrom`). Follows the player's
-  /// position.
+  /// position (a seek of this member at once).
   late final Computed<LiveBar?> liveBar = computed(() {
     final r = serverState.value;
     final pos = playback.position.value;
     final cached = playback.cached.value;
-    if (!_isLive(r) || r!.transport != 'playing' || r.liveFrom <= 0) return null;
+    _liveClock.value;
+    final pending = _liveSeekTarget.value;
+    if (!_isLive(r) || r!.transport == 'finished' || r.liveFrom <= 0) return null;
     final start = playback.knownStreamStart;
     if (start == null) return null;
-    final top = serverPositionAt(r, connection.serverNow()) + r.behind;
-    return LiveBar.of(from: r.liveFrom, top: top, own: pos.inMicroseconds / 1e6 + start, start: start, cached: cached);
+    final top = _liveTopOf(r, connection.serverNow());
+    final own = pending == null ? pos.inMicroseconds / 1e6 + start : _liveSeekNow()!;
+    return LiveBar.of(from: r.liveFrom, top: top, own: own, start: start, cached: cached);
   });
 
   static bool _isLive(StateBroadcast? r) => r?.media?['live'] == true;
@@ -715,10 +757,12 @@ class SessionCoordinator {
   void _onState(StateBroadcast r) {
     final hold = _restore;
     if (hold != null && r.media != null) _landRestore(hold, r);
+    _liveBefore = serverState.peek();
     serverState.value = r;
     media.feeder.onState(r);
     _stateSelf = connection.memberId;
     if (r.transport == 'playing') switchTrace.mark(r.mediaId, SwitchTrace.playing);
+    _noteLiveResume(_liveBefore, r);
     _toastMemberErrors(r);
     _warnSlowSource(r);
     _checkPlayerError(r.mediaId);
@@ -838,20 +882,21 @@ class SessionCoordinator {
     await playback.apply(actions);
   }
 
-  /// A live stream ([live]): no diff, no seeks from the server; the player
-  /// plays unless this member paused it, kept on the group's live point
-  /// in stream time ([LiveFollow]); at `finished` it stops where it is.
+  /// A live stream ([live]): no diff; the player plays or pauses with the
+  /// group, kept on the group's point in stream time ([LiveFollow]); at
+  /// `finished` it stops where it is.
   Future<void> _applyLive(StateBroadcast r) async {
     // Whatever comes after it starts from a fresh diff.
     diff.reset();
     _wasPlayAllowed = false;
-    if (_livePausedFor != r.mediaId) {
-      _livePausedFor = r.mediaId;
-      livePaused.value = false;
+    if (_liveFor != r.mediaId) {
+      _liveFor = r.mediaId;
       _liveFollow.reset();
+      _liveSeekTarget.value = null;
+      _setLiveLoading(false);
     }
     if (playback.switching || media.playerMediaId != r.mediaId) return;
-    if (livePaused.peek() || r.transport == 'finished') {
+    if (r.transport == 'finished') {
       if (playback.playing) await playback.apply(const [TransportAction(false)]);
       return;
     }
@@ -859,7 +904,26 @@ class SessionCoordinator {
     // play would start the now finished playlist over).
     if (playback.completed) return;
     final start = await playback.streamStart();
-    final group = r.transport == 'playing' ? serverPositionAt(r, connection.serverNow()) : null;
+    // Not read yet (an open just loaded): nothing to compare.
+    if (playback.knownStreamStart == null) return;
+    final playing = r.transport == 'playing';
+    // Held at 0: no live point yet (the first report sets it), so it plays
+    // to report one.
+    final noPoint = !playing && r.position <= 0;
+    // This member's own seek the server has not echoed yet: the player
+    // stays where it went.
+    final own = _liveSeekTarget.peek();
+    final group = own != null && r.eventId <= own.eventId
+        ? _liveSeekNow()
+        : playing
+            ? serverPositionAt(r, connection.serverNow())
+            : (noPoint ? null : r.position);
+    // A new point that is not this member's own seek (its player is there
+    // already): followed at once, whatever an earlier seek still settles.
+    if (r.eventId != _liveEventSeen) {
+      _liveEventSeen = r.eventId;
+      if (r.seekBy != connection.memberId) _liveFollow.moved();
+    }
     final window = playback.liveWindow;
     if (playback.current?.opened case final o?) unawaited(window.read(o.url, o.headers));
     final clock = LiveWindow.clock();
@@ -870,7 +934,8 @@ class SessionCoordinator {
         start: start,
         cached: playback.cached.peek(),
         now: DateTime.now().toUtc(),
-        rewind: rewind);
+        rewind: rewind,
+        paused: !playing && !noPoint);
     // Out of what mpv holds, and the stream can be rewound: opened again
     // at the group's point in this player (no new resolve), once per
     // point, then every 30 s at most.
@@ -887,8 +952,13 @@ class SessionCoordinator {
           _log.info('live: the group\'s point is out of what this player holds; '
               'opening the stream again $back segments back');
           _liveFollow.reset();
+          _setLiveLoading(true);
           await playback.reopenLive(back);
         }
+      } else {
+        // Opened again for this point already (this member's own seek):
+        // the seek there once it loads need not wait.
+        _liveFollow.moved();
       }
       return;
     }
@@ -902,20 +972,51 @@ class SessionCoordinator {
         return;
       }
     }
+    final play = playing || noPoint;
     await playback.apply([
-      if (!playback.playing) const TransportAction(true),
+      if (playback.playing != play) TransportAction(play),
       ...step.actions,
     ]);
   }
 
-  /// Pauses or plays the live stream here only; playing again goes back to
-  /// the group's live point.
-  void _setLivePaused(bool paused) {
-    if (livePaused.peek() == paused) return;
-    livePaused.value = paused;
-    _liveFollow.reset();
-    final r = serverState.peek();
-    if (r != null) _enqueueApply(r);
+  void _setLiveLoading(bool on) {
+    _liveLoadingSince = on ? DateTime.now().toUtc() : null;
+    liveLoading.value = on;
+  }
+
+  /// Every second on a live stream: the paused live point runs on (the
+  /// time and the bar follow it); this member's seek and the loading state
+  /// end once the player is there (or after a while).
+  void _tickLive(StateBroadcast r, DateTime now) {
+    if (!_isLive(r)) return;
+    if (r.transport == 'held') _liveClock.value = now;
+    final start = playback.knownStreamStart;
+    final own = start == null || playback.switching ? null : playback.positionSecs + start;
+    final pending = _liveSeekNow();
+    final since = _liveSeekTarget.peek()?.since;
+    if (pending != null &&
+        ((own != null && (own - pending).abs() < 1.5) || now.difference(since!) > const Duration(seconds: 15))) {
+      _liveSeekTarget.value = null;
+    }
+    final loading = _liveLoadingSince;
+    if (loading != null && _liveSeekTarget.peek() == null) {
+      final group = r.transport == 'playing' ? serverPositionAt(r, connection.serverNow()) : r.position;
+      if ((own != null && (own - group).abs() < 1.5) || now.difference(loading) > const Duration(seconds: 15)) {
+        _setLiveLoading(false);
+      }
+    }
+  }
+
+  /// A paused live stream nobody can rewind went on at the live point:
+  /// the pill says so for a few seconds.
+  void _noteLiveResume(StateBroadcast? before, StateBroadcast r) {
+    if (before == null || !_isLive(r) || before.mediaId != r.mediaId) return;
+    if (before.transport != 'held' || before.position <= 0 || r.transport != 'playing') return;
+    if (r.liveFrom > 0 || r.behind > 0) return;
+    if (before.liveBehindAt(connection.serverNow()) < 2) return;
+    liveBackAtLive.value = true;
+    _liveNoteTimer?.cancel();
+    _liveNoteTimer = Timer(const Duration(seconds: 5), () => liveBackAtLive.value = false);
   }
 
   /// Mirrors self's standing in the server into [_lastPresence] (set by
@@ -1050,6 +1151,7 @@ class SessionCoordinator {
     _stepStatus(status.peek());
     final r = serverState.peek();
     final online = connection.state.peek().online;
+    if (r != null) _tickLive(r, now);
     if (online && connection.token.isNotEmpty && r != null && _playerReady) {
       _sendReport(r);
       if (!_lastOut) _checkSeekLanded(r);
@@ -1191,36 +1293,23 @@ class SessionCoordinator {
   }
 
   /// The group wants to play (anyone's): it plays once nobody is waited
-  /// for.
+  /// for (a live stream: from the paused moment, or back at live when it
+  /// cannot be rewound).
   void play() {
     markInput();
-    if (live.peek()) {
-      _setLivePaused(false);
-      return;
-    }
     connection.sendTransport(true);
   }
 
-  /// The group pauses (anyone's); it lasts until someone plays. Live: only
-  /// here.
+  /// The group pauses (anyone's); it lasts until someone plays.
   void pause() {
     markInput();
-    if (live.peek()) {
-      _setLivePaused(true);
-      return;
-    }
     connection.sendTransport(false);
   }
 
-  /// The play button: out, it joins; else play or pause the group's wish
-  /// (live: this player only).
+  /// The play button: out, it joins; else play or pause the group's wish.
   void togglePlay() {
     if (selfOut.peek()) {
       join();
-      return;
-    }
-    if (live.peek()) {
-      livePaused.peek() ? play() : pause();
       return;
     }
     if (serverState.peek()?.wantsPlay ?? false) {
@@ -1276,22 +1365,87 @@ class SessionCoordinator {
 
   void seekTo(double position) => _userSeek(position);
 
-  /// Rewinds the live stream for everyone to [streamTime] (the stream's
-  /// own time, within `state.liveFrom` and the live point); at or past the
-  /// live point the group goes back to live. This player follows with the
-  /// state, as everyone does.
+  /// Seeks the live stream for everyone to [streamTime] (the stream's own
+  /// time, within `state.liveFrom` and the live point; at or past the live
+  /// point the group goes back to live, and plays). This player goes there
+  /// at once when its cache holds that moment, else it opens the stream
+  /// again there at once (a brief loading state); the server hears it at
+  /// once, and while it keeps moving (a drag) once it stops. The others
+  /// follow the state.
   void seekLive(double streamTime) {
-    if (!live.peek() || !streamTime.isFinite || streamTime <= 0) return;
+    final r = serverState.peek();
+    if (r == null || !_isLive(r) || r.transport == 'finished' || !streamTime.isFinite || streamTime <= 0) return;
+    final top = _liveTopOf(r, connection.serverNow());
+    final toLive = streamTime >= top - 1;
+    // Without a window only Go live moves anyone.
+    if (!toLive && r.liveFrom <= 0) return;
     markInput();
-    if (livePaused.peek()) _setLivePaused(false);
-    connection.sendSeek(streamTime);
+    _seekLiveHere(r, toLive ? top : max(streamTime, r.liveFrom));
+    _sendLiveSeek(streamTime, running: toLive || r.transport == 'playing');
   }
 
-  /// Go live: the group back to the live point.
+  /// This player to [target] (stream time) now, ahead of the server.
+  void _seekLiveHere(StateBroadcast r, double target) {
+    final start = playback.knownStreamStart;
+    if (start == null || playback.switching || media.playerMediaId != r.mediaId || playback.completed) return;
+    final now = DateTime.now().toUtc();
+    final toLive = target >= _liveTopOf(r, connection.serverNow()) - 1;
+    // Go live plays; a seek keeps the group's play or pause.
+    _liveSeekTarget.value =
+        (at: target, since: now, running: toLive || r.transport == 'playing', eventId: r.eventId);
+    final at = target - start;
+    if (LiveFollow.holds(playback.cached.peek(), at)) {
+      _liveFollow.noteSeek(now);
+      unawaited(playback.apply([SeekAction(at)]));
+      return;
+    }
+    final back = playback.liveWindow.segmentsBack(target, LiveWindow.clock());
+    if (back == null) return;
+    // The state that follows (this seek's) finds the cache holding it.
+    _liveReopen = (mediaId: r.mediaId, eventId: r.eventId + 1, at: now);
+    _liveFollow.reset();
+    _setLiveLoading(true);
+    _log.info('live: a seek out of what this player holds; opening the stream again $back segments back');
+    unawaited(playback.reopenLive(back).then((_) async {
+      // Once it is loaded, at the moment itself (the open starts at a
+      // segment's start).
+      for (var i = 0; i < 100 && playback.switching; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      final s = serverState.peek();
+      if (s != null) _enqueueApply(s);
+    }));
+  }
+
+  /// [streamTime] to the server: at once, or, while seeks keep coming (a
+  /// drag), the last once they stop for [_liveSeekGap]; [running]: the
+  /// moment runs on since (the group plays), as this player's does.
+  void _sendLiveSeek(double streamTime, {required bool running}) {
+    final now = DateTime.now();
+    final last = _liveSeekSentAt;
+    if (_liveSeekTimer == null && (last == null || now.difference(last) >= _liveSeekGap)) {
+      _liveSeekSentAt = now;
+      connection.sendSeek(streamTime);
+      return;
+    }
+    _liveSeekNext = (at: streamTime, since: now, running: running);
+    _liveSeekTimer?.cancel();
+    _liveSeekTimer = Timer(_liveSeekGap, () {
+      _liveSeekTimer = null;
+      final next = _liveSeekNext;
+      _liveSeekNext = null;
+      if (next == null) return;
+      final sent = DateTime.now();
+      _liveSeekSentAt = sent;
+      connection.sendSeek(next.running ? next.at + sent.difference(next.since).inMicroseconds / 1e6 : next.at);
+    });
+  }
+
+  /// Go live: the group back to the live point (and playing).
   void goLive() {
     final r = serverState.peek();
-    if (r == null || !_isLive(r) || r.transport != 'playing') return;
-    seekLive(serverPositionAt(r, connection.serverNow()) + r.behind + 60);
+    if (r == null || !_isLive(r) || r.transport == 'finished') return;
+    seekLive(_liveTopOf(r, connection.serverNow()) + 60);
   }
 
   /// Arrow keys: relative to a seek still in flight, so repeated presses
@@ -1300,8 +1454,10 @@ class SessionCoordinator {
     final r = serverState.peek();
     if (r == null || _openUrl == null) return;
     if (_isLive(r)) {
-      if (r.liveFrom > 0 && r.transport == 'playing') {
-        final target = serverPositionAt(r, connection.serverNow()) + deltaSecs;
+      if (r.liveFrom > 0 && r.transport != 'finished') {
+        final now = connection.serverNow();
+        final base = _liveSeekNow() ?? serverPositionAt(r, now);
+        final target = base + deltaSecs;
         seekLive(target < r.liveFrom ? r.liveFrom : target);
       }
       return;
@@ -2184,6 +2340,8 @@ class SessionCoordinator {
     await _feedSub?.cancel();
     await _nudgeSub?.cancel();
     await _errSub?.cancel();
+    _liveSeekTimer?.cancel();
+    _liveNoteTimer?.cancel();
     _statusEffect?.call();
     _bufferSub?.call();
     _aniList?.close();

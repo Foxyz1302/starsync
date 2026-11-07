@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart' show JellyfinStreamType;
 import 'package:starsync/src/controls/control_menus.dart';
-import 'package:starsync/src/controls/live_badge.dart';
+import 'package:starsync/src/controls/model/controls_layout.dart' show liveTimeText;
 import 'package:starsync/src/controls/standard/seek_bar.dart';
 import 'package:starsync/src/jellyfin/track_prefs.dart';
 import 'package:starsync/src/playback/media_marks.dart';
@@ -177,19 +177,31 @@ void main() {
     });
   });
 
-  testWidgets('the live badge: LIVE at live; behind it how far, and Go live', (tester) async {
-    var goLive = 0;
-    Widget badge(double behind) => MaterialApp(
+  testWidgets('the live seek bar: the window, live at its end, the hover tip says how far behind live',
+      (tester) async {
+    final seeks = <Duration>[];
+    const window = Duration(minutes: 10);
+    await tester.pumpWidget(MaterialApp(
         home: Scaffold(
-            body: LiveBadge(
-                paused: false, behind: behind, scale: 1, onBackToLive: () {}, onGoLive: () => goLive++)));
-    await tester.pumpWidget(badge(0.4));
+            body: Center(
+                child: SizedBox(
+                    width: 600,
+                    child: ChapterSeekBar(
+                      position: window,
+                      duration: window,
+                      onSeek: seeks.add,
+                      hoverText: (at) => liveTimeText((window - at).inMilliseconds / 1000),
+                    ))))));
+    final bar = tester.getRect(find.byKey(const ValueKey('seek-bar')));
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: bar.center);
+    addTearDown(mouse.removePointer);
+    await tester.pump();
+    expect(find.text('−5:00'), findsOneWidget);
+    await mouse.moveTo(bar.centerRight - const Offset(0.2, 0));
+    await tester.pump();
     expect(find.text('LIVE'), findsOneWidget);
-    expect(find.text('Go live'), findsNothing);
-    await tester.pumpWidget(badge(150));
-    expect(find.text('LIVE'), findsNothing);
-    expect(find.text('−2:30'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('go-live')));
-    expect(goLive, 1);
+    await tester.tapAt(bar.center);
+    expect(seeks.last, const Duration(minutes: 5));
   });
 }

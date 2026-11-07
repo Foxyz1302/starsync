@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../playback/media_marks.dart';
 import '../frame.dart';
+import '../model/controls_layout.dart' show liveDotColor, liveTimeText;
 import 'style.dart';
 
 // The Minimal skin's timeline: a band across the bottom with the played
@@ -110,6 +111,15 @@ class MinimalTimeline extends StatefulWidget {
   final double scale;
   final ValueChanged<Duration> onSeek;
   final VoidCallback? onToggleTime;
+
+  /// A live stream: this time (LIVE, "−2:30") at the right end, where the
+  /// live edge is, instead of the times, no cache label, and the hover tip
+  /// says how far behind live a moment is. Without a [duration] (it cannot
+  /// be rewound) the band only carries it.
+  final String? liveText;
+
+  /// The live dot before [liveText] (at live).
+  final bool liveDot;
   const MinimalTimeline({
     super.key,
     required this.position,
@@ -122,6 +132,8 @@ class MinimalTimeline extends StatefulWidget {
     this.scale = 1,
     required this.onSeek,
     this.onToggleTime,
+    this.liveText,
+    this.liveDot = false,
   });
 
   static double heightFor(double scale) => MinimalTimelineSpec.size * scale;
@@ -206,6 +218,7 @@ class _MinimalTimelineState extends State<MinimalTimeline> {
   }
 
   String? _rightText(Duration shown) {
+    if (widget.liveText case final live?) return live;
     final d = widget.duration;
     if (d <= Duration.zero) return null;
     if (!widget.remaining) return formatClock(d);
@@ -230,7 +243,7 @@ class _MinimalTimelineState extends State<MinimalTimeline> {
   /// it (a press there switches it; anywhere else on the band seeks, the
   /// band's end too).
   bool _onRightTime(Offset at, double width, double height, String? text) {
-    if (text == null || widget.onToggleTime == null) return false;
+    if (text == null || widget.onToggleTime == null || widget.liveText != null) return false;
     final tp = TextPainter(
       text: TextSpan(text: text, style: _timeStyle),
       textDirection: TextDirection.ltr,
@@ -266,6 +279,7 @@ class _MinimalTimelineState extends State<MinimalTimeline> {
         ? timelineFraction(marks[hovered].start, duration)
         : (hover == null || duration <= Duration.zero || width <= 0 ? null : (hover.dx / width).clamp(0.0, 1.0));
     final hoverAt = hoverFraction == null ? null : _at(hoverFraction);
+    final live = widget.liveText != null;
     final cursorX = hoverFraction == null ? null : width * hoverFraction;
     final hoverChapter = hoverAt == null ? null : chapterIndexAt(widget.chapters, hoverAt);
     final hoverTitle = hoverChapter == null ? '' : widget.chapters[hoverChapter].title;
@@ -289,9 +303,12 @@ class _MinimalTimelineState extends State<MinimalTimeline> {
       hoveredChapter: hovered,
       hoverX: hovered == null ? cursorX : null,
       textOpacity: textOpacity,
-      elapsed: duration > Duration.zero ? formatClock(shown) : null,
+      elapsed: duration > Duration.zero && !live ? formatClock(shown) : null,
       right: right,
-      cache: cacheLabel(position: widget.position, buffered: widget.buffered, duration: duration),
+      rightDot: widget.liveDot,
+      // A live stream that cannot be rewound has no position on it.
+      line: !live || duration > Duration.zero,
+      cache: live ? null : cacheLabel(position: widget.position, buffered: widget.buffered, duration: duration),
       timeStyle: _timeStyle,
     );
     final bar = SizedBox(
@@ -316,7 +333,11 @@ class _MinimalTimelineState extends State<MinimalTimeline> {
                   children: [
                     LayoutId(
                       id: #tip,
-                      child: _HoverTip(time: formatClock(hoverAt), chapter: hoverTitle, scale: _scale),
+                      child: _HoverTip(
+                        time: live ? liveTimeText((duration - hoverAt).inMilliseconds / 1000) : formatClock(hoverAt),
+                        chapter: hoverTitle,
+                        scale: _scale,
+                      ),
                     ),
                   ],
                 ),
@@ -328,7 +349,7 @@ class _MinimalTimelineState extends State<MinimalTimeline> {
     if (!expanded) return IgnorePointer(child: bar);
     Offset clampTo(Offset p) => Offset(p.dx.clamp(0.0, width), p.dy);
     return MouseRegion(
-      cursor: SystemMouseCursors.click,
+      cursor: duration > Duration.zero ? SystemMouseCursors.click : MouseCursor.defer,
       onEnter: (e) => setState(() => _hover = clampTo(e.localPosition)),
       onHover: (e) => setState(() => _hover = clampTo(e.localPosition)),
       onExit: (_) {
@@ -462,6 +483,12 @@ class MinimalTimelinePainter extends CustomPainter {
   final double textOpacity;
   final String? elapsed;
   final String? right;
+
+  /// The live dot before [right].
+  final bool rightDot;
+
+  /// The position line.
+  final bool line;
   final String? cache;
   final TextStyle timeStyle;
   const MinimalTimelinePainter({
@@ -476,6 +503,8 @@ class MinimalTimelinePainter extends CustomPainter {
     this.textOpacity = 1,
     this.elapsed,
     this.right,
+    this.rightDot = false,
+    this.line = true,
     this.cache,
     this.timeStyle = const TextStyle(fontSize: MinimalTimelineSpec.fontSize),
   });
@@ -497,7 +526,7 @@ class MinimalTimelinePainter extends CustomPainter {
     canvas.drawRect(Rect.fromLTRB(0, 0, x, h), Paint()..color = accent.withValues(alpha: MinimalTimelineSpec.played));
     _stripes(canvas, w, h);
     _chapters(canvas, w, h);
-    if (visibility > 0) {
+    if (visibility > 0 && line) {
       final lw = MinimalTimelineSpec.lineWidth * scale;
       canvas.drawRect(
         Rect.fromLTRB(x - lw / 2, 0, x + lw / 2, h),
@@ -594,7 +623,15 @@ class MinimalTimelinePainter extends CustomPainter {
       _label(canvas, c, cs, Offset(x, cy - fs * 0.4));
     }
     if (e != null) _label(canvas, e, timeStyle, Offset(inset, cy - fs / 2));
-    if (r != null) _label(canvas, r, timeStyle, Offset(w - inset - rw, cy - fs / 2));
+    if (r != null) {
+      final rx = w - inset - rw;
+      _label(canvas, r, timeStyle, Offset(rx, cy - fs / 2));
+      if (rightDot) {
+        final d = 8.0 * scale;
+        canvas.drawCircle(
+            Offset(rx - 7 * scale - d / 2, cy), d / 2, Paint()..color = liveDotColor.withValues(alpha: textOpacity));
+      }
+    }
   }
 
   @override

@@ -44,14 +44,19 @@ void main() {
           [BarControl.playPause, BarControl.next, BarControl.volume, BarControl.time]);
     });
 
-    test('live: no chapters or skips; play and pause are your own', () {
+    test('live: no chapters or skips; pause is everyone\'s; Go live after the time while behind', () {
       const s = ControlsSnapshot(hasChapters: true, hasDuration: true, live: true, play: PlayState.playing);
       expect(barControls(s, none).left, [BarControl.playPause, BarControl.volume, BarControl.time]);
       expect(menuActions(s, none), isNot(contains(ControlAction.skipForward)));
       expect(menuActions(s, none), isNot(contains(ControlAction.chapters)));
-      expect(controlTooltip(BarControl.playPause, s), 'Pause here only (Space)');
-      const paused = ControlsSnapshot(live: true, play: PlayState.paused);
-      expect(controlTooltip(BarControl.playPause, paused), 'Back to live (Space)');
+      expect(controlTooltip(BarControl.playPause, s), 'Pause for everyone (Space)');
+      const behind = ControlsSnapshot(live: true, behindLive: true, play: PlayState.paused);
+      expect(barControls(behind, none).left, [BarControl.playPause, BarControl.volume, BarControl.time, BarControl.goLive]);
+      expect(controlTooltip(BarControl.goLive, behind), 'Everyone back to live');
+      expect(barControls(const ControlsSnapshot(behindLive: true), none).left, isNot(contains(BarControl.goLive)));
+      expect(liveTimeText(0.4), 'LIVE');
+      expect(liveTimeText(150), '−2:30');
+      expect(liveTimeText(3725), '−1:02:05');
     });
 
     test('hidden optional buttons leave the bar and show in ⋯', () {

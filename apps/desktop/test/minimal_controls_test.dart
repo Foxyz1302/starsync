@@ -132,6 +132,47 @@ void main() {
       expect(p.textOpacity, 1);
     });
 
+    testWidgets('live: the window with the live edge at its end, how far behind live at the right, no cache label',
+        (tester) async {
+      final seeks = <Duration>[];
+      await tester.pumpWidget(scoped(_graph, host(MinimalTimeline(
+          position: m(7, 30), duration: m(10), buffered: m(7, 30), onSeek: seeks.add, liveText: '−2:30'))));
+      var p = painter(tester);
+      expect(p.progress, 0.75);
+      expect(p.elapsed, isNull);
+      expect(p.right, '−2:30');
+      expect(p.rightDot, isFalse);
+      expect(p.cache, isNull, reason: 'a live stream is never buffered to its end');
+      expect(p.line, isTrue);
+      final bar = tester.getRect(find.byKey(const ValueKey('minimal-timeline')));
+      final mouse = await mouseAt(tester, bar.center);
+      await tester.pump();
+      expect(text(tester, 'minimal-hover-time'), '−5:00');
+      await mouse.down(Offset(bar.right - 1, bar.center.dy));
+      await mouse.up();
+      expect(seeks.last.inSeconds, greaterThanOrEqualTo(599), reason: "its end seeks too (Go live)");
+      // At live: the dot and LIVE.
+      await tester.pumpWidget(scoped(_graph, host(MinimalTimeline(
+          position: m(10), duration: m(10), onSeek: seeks.add, liveText: 'LIVE', liveDot: true))));
+      p = painter(tester);
+      expect((p.right, p.rightDot), ('LIVE', true));
+    });
+
+    testWidgets('live without a window: the band carries LIVE only, no position, no seek', (tester) async {
+      final seeks = <Duration>[];
+      await tester.pumpWidget(scoped(_graph, host(MinimalTimeline(
+          position: Duration.zero, duration: Duration.zero, onSeek: seeks.add, liveText: 'LIVE', liveDot: true))));
+      final p = painter(tester);
+      expect((p.elapsed, p.right, p.line), (null, 'LIVE', false));
+      expect(p.uncached, isEmpty);
+      final bar = tester.getRect(find.byKey(const ValueKey('minimal-timeline')));
+      await mouseAt(tester, bar.center);
+      await tester.pump();
+      expect(find.byKey(const ValueKey('minimal-hover-time')), findsNothing);
+      await tester.tapAt(bar.center);
+      expect(seeks, isEmpty);
+    });
+
     testWidgets('the total instead of the time left', (tester) async {
       await tester.pumpWidget(scoped(_graph, host(MinimalTimeline(
           position: m(6), duration: m(24), remaining: false, onSeek: (_) {}))));

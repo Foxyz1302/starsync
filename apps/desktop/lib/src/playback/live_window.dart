@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:sync_relay_core/core.dart' show createLogger;
 
 import '../platform/ports/player_host.dart' show liveOpenSegments;
@@ -34,6 +35,9 @@ class LiveWindow {
 
   /// The playlist's window; null until read, or when the stream has none.
   HlsWindow? get playlist => _playlist;
+
+  @visibleForTesting
+  set debugPlaylist(HlsWindow? w) => _playlist = w;
 
   /// This machine's clock in seconds (the edge runs on with it).
   static double clock() => DateTime.now().microsecondsSinceEpoch / 1e6;
