@@ -3518,7 +3518,8 @@ application id is `dev.foxyz.starsync` (also the X11 `WM_CLASS`, from
 `g_set_prgname`), which Wayland uses as the window's `app_id`; compositors
 take the icon from the `.desktop` file of that id. A tarball install has
 none, so on start a Linux release build (`platform/desktop_entry.dart`,
-skipped in debug) writes
+skipped in debug and under `STARSYNC_PROFILE`, so a test or second copy
+never takes the entry or the link handler) writes
 `~/.local/share/applications/dev.foxyz.starsync.desktop` (Exec = the
 running binary with `%u`, `StartupWMClass` and `Icon` = the id,
 `StartupNotify`, the `starsync://` link type: "Link handler" under "App

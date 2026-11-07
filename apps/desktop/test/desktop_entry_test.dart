@@ -24,6 +24,7 @@ void main() {
           executable: '$root/starsync',
           dataHome: share,
           force: true,
+          environment: const {},
           registerScheme: (file, dir) async => registered.add('$file in $dir'));
 
       expect(oldEntry.existsSync(), isFalse);
@@ -39,6 +40,26 @@ void main() {
       expect(entry, contains('StartupNotify=true'));
       expect(registered, ['dev.foxyz.starsync.desktop in ${apps.path}']);
       expect(File('$share/icons/hicolor/48x48/apps/dev.foxyz.starsync.png').existsSync(), isTrue);
+    } finally {
+      await tmp.delete(recursive: true);
+    }
+  }, skip: Platform.isLinux ? null : 'Linux launcher entry');
+
+  test('a separate profile (a test or second copy) leaves the entry and the link handler alone', () async {
+    final tmp = await Directory.systemTemp.createTemp('starsync-entry');
+    try {
+      final root = '${tmp.path}/install';
+      await Directory('$root/lib').create(recursive: true);
+      final share = '${tmp.path}/share';
+      final registered = <String>[];
+      await installDesktopEntry(
+          executable: '$root/starsync',
+          dataHome: share,
+          force: true,
+          environment: const {'STARSYNC_PROFILE': 'test'},
+          registerScheme: (file, dir) async => registered.add(file));
+      expect(File('$share/applications/dev.foxyz.starsync.desktop').existsSync(), isFalse);
+      expect(registered, isEmpty);
     } finally {
       await tmp.delete(recursive: true);
     }

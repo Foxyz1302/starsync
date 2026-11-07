@@ -70,7 +70,9 @@ profile, connect form, window bounds, folders, Jellyfin sign-ins, the
 client id: without it a second start is the same install, so it hands
 its arguments to the running app and ends; each profile is its own
 instance) and logs under
-`<app support>/profiles/<name>/`, and ` [<name>]` in the window title;
+`<app support>/profiles/<name>/`, and ` [<name>]` in the window title
+(it never writes the launcher entry or claims `starsync://` links: only
+the normal profile does);
 yt-dlp, shaders and caches stay shared (`AppDirs`, ARCHITECTURE "Desktop
 UI"). Without it nothing changes. Run one plain instance and one with
 `STARSYNC_PROFILE=b` (`flutter run -d linux` passes the environment on, or

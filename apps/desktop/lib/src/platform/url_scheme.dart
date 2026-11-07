@@ -41,6 +41,8 @@ List<(String, String, String)> windowsSchemeValues(String exe) => [
 /// name). Release installs only (never a debug run); failures only log.
 Future<void> registerWindowsScheme({String? executable}) async {
   if (!Platform.isWindows || kDebugMode) return;
+  // Only the normal profile claims the link handler (see installDesktopEntry).
+  if (Platform.environment['STARSYNC_PROFILE']?.isNotEmpty ?? false) return;
   try {
     final exe = schemeExecutable(executable ?? Platform.resolvedExecutable);
     if (findInstallRoot(exe, windows: true) == null) return;

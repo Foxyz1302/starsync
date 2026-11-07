@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:sync_relay_core/core.dart' show findInstallRoot;
 
+import 'ports/app_dirs.dart' show profileEnv;
 import 'url_scheme.dart';
 
 /// The app's id: GTK's application id, so the Wayland `app_id` the
@@ -23,15 +24,21 @@ const _iconSizes = [16, 32, 48, 64, 128, 256, 512];
 /// icon). The entry and icons of [legacyAppId] go. The entry also takes
 /// `starsync://` links ([schemeMimeType], %u) and the app becomes their
 /// default handler ([registerScheme], default [registerLinuxScheme]).
-/// Never in debug runs (unless [force], for tests); failures only log.
+/// Never in debug runs (unless [force], for tests), and never from a
+/// separate profile (`STARSYNC_PROFILE`, a test or second copy): only the
+/// normal profile claims the launcher entry and the link handler, so a
+/// copy run from a temporary folder cannot leave them pointing at it.
+/// Failures only log.
 Future<void> installDesktopEntry({
   String? executable,
   String? dataHome,
   String? home,
   @visibleForTesting bool force = false,
+  @visibleForTesting Map<String, String>? environment,
   Future<void> Function(String desktopFile, String applicationsDir)? registerScheme,
 }) async {
   if (!Platform.isLinux || (kDebugMode && !force)) return;
+  if ((environment ?? Platform.environment)[profileEnv]?.isNotEmpty ?? false) return;
   try {
     final exe = executable ?? Platform.resolvedExecutable;
     final root = findInstallRoot(exe, windows: false);
