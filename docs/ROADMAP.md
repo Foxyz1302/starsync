@@ -212,26 +212,8 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
 
 ## Backlog
 
-Next, before 1.5.0 is cut (playback and presence is in; protocol 17):
-- **The name "Out"**: fits next to BRB and AFK, but may not be clear
-  enough; settle it from real evenings with friends.
-
-**Open source** (decided, after 1.5.0; as portfolio, foxyz-presence
-DECISIONS.md; the license is MIT: DEVELOPMENT "Third-party
-licenses"). Left: the libmpv sources uploaded to their release; real
-licenses in `fox_utils` and `leaf_widgets` (MIT, plus Apache-2.0 for
-fox_utils' vendored MixinNetwork code) and ANGLE's license files copied
-by the media_kit fork; pol's OK for his server names in the history;
-AnimeFlow as a request backend the user adds, like a Jellyfin server,
-next to Sonarr later (today only a server's config offers it); a gitleaks run
-over what is pushed (`main` and the release tags only). Then publish the
-source on GitHub; public repos
-get free GitHub Actions with Windows runners, so CI can leave pol's
-machines. His Gitea then serves only 1.4.x, until the 1.4 bridge is
-dropped (DEVELOPMENT "The 1.4 bridge").
-
-0. **After the move to the owner's media_kit fork** (for 1.5.0; the app
-   is on it, DEVELOPMENT "Build"):
+0. **After the move to the owner's media_kit fork** (the app is on it,
+   DEVELOPMENT "Build"):
    - A Windows test run of a build: the crashes about once per 5–6 opens
      or switches in the shared logs (bundled libmpv 0.36, ANGLE/D3D11,
      d3d11va-copy, "Failed to create EGL surface" at every player
@@ -395,6 +377,8 @@ dropped (DEVELOPMENT "The 1.4 bridge").
      h264 warnings cost frames; split the open time into open to first
      byte and first byte to first frame (first frames up to 74 s lined up
      with relay or link waits).
+   - The name "Out" (next to BRB and AFK): a string; change it if friends
+     find it unclear.
    - One open made two session players (#1 and #2) in a diagnostics
      test run: find out why.
    - The video freeze after GPU idle: next suspect is media_kit's context

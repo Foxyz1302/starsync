@@ -44,7 +44,7 @@ yet; the restructure step named next to them does.
 ## Errors and close codes
 
 ```
-{"t":"err","code":"version","min":17,"max":17,"server":"1.5.0","for":"hello",
+{"t":"err","code":"version","min":17,"max":17,"server":"2.0.0","for":"hello",
  "message":"proto mismatch: got 16, want 17..17"}
 {"t":"err","code":"bad","for":"seek","message":"bad message: position must be finite"}
 ```

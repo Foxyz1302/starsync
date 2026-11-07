@@ -7,17 +7,20 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ## Unreleased
 
+Starsync 2.0: BRB instead of the ready system, live streams together, screenshots, people cards, any colour, and Starsync is now open source.
+
 ### Highlights
 
 - BRB instead of ready: hold Space and everyone waits for you, and nothing starts by itself any more
+- Live streams together, everyone on the same moment, and rewound together where the stream allows it
 - A round menu on a right-click hold: BRB, skip the OP or go to the next episode, step out or join
 - Screenshots: S picks an area (with or without subtitles), Shift+S takes the whole picture
-- People cards: point at someone's avatar or name to see their card
+- People cards: point at anyone to see their card; pick any colour you like and everyone sees it
 - Jellyfin: right-click has everything, and a whole show or season can be marked watched
 - Smoother on Linux at your monitor's refresh rate, and crashes on Windows should be rarer
+- Open source (MIT), with signed updates from GitHub
 - Joining without a name just asks what to call you, and settings live in six tidy pages
 - Closing the window really closes Starsync, and memory no longer grows with every video
-- Your volume is remembered, and M mutes
 
 ### Added
 

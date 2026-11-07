@@ -356,10 +356,13 @@ manifest that makes a release visible to the apps is written and signed
 on the owner's machine from the archives CI published, after checking
 them. The steps, on `main`:
 
-1. `tool/release.sh minor` (or `patch`, `major`).
+1. `tool/release.sh major|minor|patch`: **major** when old and new apps
+   cannot talk to each other (a protocol break: everyone updates
+   together, as 2.0.0), **minor** for new features that stay compatible,
+   **patch** for fixes.
 2. `git push github --follow-tags`.
 3. Wait for the `release` run on GitHub (Actions) to go green.
-4. `tool/sign_release.sh 1.5.0 --push` (the new version).
+4. `tool/sign_release.sh X.Y.Z --push` (the new version).
 
 What each does:
 
@@ -429,7 +432,7 @@ Tokens come from the environment (`RELEASE_TOKEN` for the Gitea, GitHub's
 `GITHUB_TOKEN`).
 
 GitHub, `https://github.com/Foxyz1302/starsync`, is the public home:
-releases, dev builds, the website's downloads. Apps from 1.5.0 on read
+releases, dev builds, the website's downloads. Apps from 2.0.0 on read
 their config and manifests from GitHub only (the signed config, else
 `distribution.dart`: [Signing](#signing)). The Gitea (`origin`) keeps the
 old history and serves 1.4.x through the [bridge](#the-14-bridge). It
@@ -462,7 +465,7 @@ the apps read.
 ### Signing
 
 Every manifest and the config are signed with the owner's Ed25519 key
-([Updater](ARCHITECTURE.md#updater), Signing and the config); from 1.5.0
+([Updater](ARCHITECTURE.md#updater), Signing and the config); from 2.0.0
 on the app installs nothing else.
 
 - **The key.** The private key is the 32-byte seed, base64, in
