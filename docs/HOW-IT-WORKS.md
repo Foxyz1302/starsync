@@ -79,8 +79,8 @@ brings you back.
    (or brings you back), and a long hold goes on without them. Out means
    nobody waits for you (closing the player, the menu, being gone on
    without, or AFK: a while without input with nothing playing); Space
-   brings you in at the current moment, and the others get a "Rewind for
-   you" offer for half a minute.
+   brings you in at the current moment. Someone back from a dropped
+   connection or a crash shows as "Bob is back (missed 1:42)".
 5. **Play.** The server owns the clock. Each app compares its mpv position
    to the clock: a small lead slows mpv a little (0.95x), a big gap (over 5 s)
    jumps. If someone's buffer runs dry the server waits for them and goes

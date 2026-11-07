@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:signals/signals_flutter.dart';
-import 'package:sync_relay_core/core.dart' show RewindOffer;
 
 import '../controls/controls_probe.dart';
 import '../controls/minimal/style.dart';
@@ -34,6 +33,7 @@ import '../widgets/window_buttons.dart';
 import 'avatar.dart';
 import 'motion.dart';
 import 'now_playing_title.dart';
+import 'out_card.dart';
 import 'party_strip.dart' show showMembersCard, stripAvatarSize;
 import 'person_card.dart' show DanmakuPersonTaps, PersonRef, showPersonCard;
 import 'player_status.dart';
@@ -458,7 +458,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
     }
     if (key == LogicalKeyboardKey.escape) {
       _lastKeyAt = now;
-      if (_radial.isOpen) {
+      if (_radial.isShown) {
         _radial.close();
       } else if (_model.panelOpen.peek()) {
         _model.panelOpen.value = false;
@@ -506,37 +506,41 @@ class _SessionPlayerState extends State<SessionPlayer> {
           final VideoControlsBuilder controls = _isFull ? _sessionControls : _noControls;
           final raw = widget.videoBuilder?.call(context, controls) ?? _video(controls);
           // Always wrapped (the mini and the full player share one video).
-          final video = RadialListener(controller: _radial, enabled: _isFull, child: raw);
-          // The wheel anywhere on the full player steps the volume
-          // (lists, menus and popovers under the mouse scroll instead).
-          return VolumeWheel(
+          // The wheel over the video itself (and its controls) steps the
+          // volume; never over what floats on it (the player panel, the
+          // pills, the quick chat box): those sit above it in the stack,
+          // so their wheel never reaches it, not even past a list's end,
+          // where the list lets the wheel go.
+          final video = VolumeWheel(
             enabled: _isFull,
             onStep: _model.stepVolume,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                video,
-                SubtitleLifter(playback: _coord.playback, lift: _lift, active: _isFull),
-                if (_isFull) ...[
-                  _blockedCard(),
-                  _actionArea(),
-                  if (widget.fullscreen) ...[if (!_coord.alone.value) _fullscreenParty(), _unreadChip()],
-                  _volumeReadout(),
-                  _quickChatBox(),
-                  _playerPanel(),
-                  if (widget.danmaku case final d?) _danmakuPanel(d),
-                  if (waitDesign != WaitDesign.a)
-                    Positioned.fill(
-                      child: ValueListenableBuilder<bool>(
-                        valueListenable: _controlsShown,
-                        builder: (context, up, _) => WaitCard(shown: waitDesign == WaitDesign.c || up),
-                      ),
+            child: RadialListener(controller: _radial, enabled: _isFull, child: raw),
+          );
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              video,
+              SubtitleLifter(playback: _coord.playback, lift: _lift, active: _isFull),
+              if (_isFull) ...[
+                _blockedCard(),
+                Positioned.fill(child: OutCard(hold: _hold)),
+                _actionArea(),
+                if (widget.fullscreen) ...[if (!_coord.alone.value) _fullscreenParty(), _unreadChip()],
+                _volumeReadout(),
+                _quickChatBox(),
+                _playerPanel(),
+                if (widget.danmaku case final d?) _danmakuPanel(d),
+                if (waitDesign != WaitDesign.a)
+                  Positioned.fill(
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: _controlsShown,
+                      builder: (context, up, _) => WaitCard(shown: waitDesign == WaitDesign.c || up),
                     ),
-                  RadialLayer(controller: _radial),
-                ] else
-                  _miniOverlay(),
-              ],
-            ),
+                  ),
+                RadialLayer(controller: _radial),
+              ] else
+                _miniOverlay(),
+            ],
           );
         }),
       ),
@@ -630,6 +634,8 @@ class _SessionPlayerState extends State<SessionPlayer> {
       fit: StackFit.expand,
       children: [
         const StartBanner(),
+        // Out: your spot's picture dimmed under the controls.
+        const OutScrim(),
         // Under the controls, over the picture.
         SignalBuilder(
           builder: (context) => _danmakuOn.value
@@ -770,27 +776,12 @@ class _SessionPlayerState extends State<SessionPlayer> {
         if (upNext != null && (finished || r?.advance != null)) {
           return ControlsHoldRegion(hold: _hold, child: UpNextCard(queue: coord.queue, countdown: upNext));
         }
-        // Someone came back from behind: a rewind to where they were, for
-        // everyone, about 30 s (`state.rewind`).
-        final rewinds = [
-          for (final o in r?.rewind ?? const <RewindOffer>[])
-            if (r!.members.where((m) => m.id == o.id).firstOrNull case final m?) (o, m.name),
-        ];
-        if (!showNext && skip == null && rewinds.isEmpty) return const SizedBox.shrink();
+        if (!showNext && skip == null) return const SizedBox.shrink();
         return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           spacing: 8,
           children: [
-            for (final (o, name) in rewinds)
-              FloatingPill(
-                key: ValueKey('rewind-${o.id}'),
-                label: 'Rewind for $name (${formatClock(Duration(milliseconds: (o.position * 1000).round()))})',
-                tooltip: 'Everyone back to where $name was',
-                icon: Icons.replay_rounded,
-                tapKey: ValueKey('rewind-pill-${o.id}'),
-                onPressed: () => coord.seekTo(o.position),
-              ),
             if (skip != null)
               PillGate(
                 key: const ValueKey('skip-gate'),
@@ -931,6 +922,7 @@ class _SessionPlayerState extends State<SessionPlayer> {
       child: Stack(
         fit: StackFit.expand,
         children: [
+          const OutScrim(),
           AnimatedOpacity(
             duration: const Duration(milliseconds: 160),
             opacity: _miniHover ? 1 : 0,
@@ -975,7 +967,9 @@ class _SessionPlayerState extends State<SessionPlayer> {
                     SignalBuilder(builder: (context) {
                       final snap = _model.snapshot.value;
                       final pos = playback.position.value, dur = playback.duration.value;
-                      final status = playerStatusNow(coord)?.short;
+                      final line = playerStatusNow(coord);
+                      // Out: the card says it.
+                      final status = line?.kind == StatusKind.out ? null : line?.short;
                       return Padding(
                         padding: const EdgeInsets.fromLTRB(8, 0, 12, 2),
                         child: Column(
@@ -1018,6 +1012,8 @@ class _SessionPlayerState extends State<SessionPlayer> {
           ),
           if (!_miniHover)
             const Positioned(left: 0, right: 0, bottom: 0, child: _MiniSeekBar(thin: true)),
+          // Over the hover bar, inside its hover: Join stays a click away.
+          const OutCard(compact: true),
         ],
       ),
     );

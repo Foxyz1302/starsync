@@ -279,8 +279,49 @@ void main() {
     });
   });
 
-  group('rewind', () {
-    test('back with the group from further behind: a rewind for everyone, about 30 s; a seek ends it', () {
+  group('back from a drop', () {
+    /// bob drops for [away] while it [plays], then its app takes the member
+    /// over again; the `return` line.
+    FeedMessage dropAndReturn(Duration away, {bool plays = true}) {
+      playing();
+      if (!plays) pause('a');
+      t = t.add(const Duration(seconds: 100));
+      buffer('a', 6);
+      buffer('b', 6);
+      engine.applyGone('b');
+      t = t.add(away);
+      buffer('a', 6);
+      engine.tick();
+      engine.feed.drain();
+      engine.applyTakeover('b', seq: 3);
+      return engine.feed.drain().singleWhere((f) => f.action == 'return');
+    }
+
+    test('it says how much of the video was missed', () {
+      final line = dropAndReturn(const Duration(seconds: 102));
+      expect([line.actorId, line.missed], ['m2', 102]);
+      expect(FeedMessage.fromJson(line.toJson()).missed, 102, reason: 'on the wire');
+    });
+
+    test('paused meanwhile: nothing missed', () {
+      expect(dropAndReturn(const Duration(seconds: 60), plays: false).missed, 0);
+    });
+
+    test('a seek meanwhile: nothing to say', () {
+      playing();
+      t = t.add(const Duration(seconds: 100));
+      buffer('a', 6);
+      buffer('b', 6);
+      engine.applyGone('b');
+      engine.applySeek('a', 10);
+      t = t.add(const Duration(seconds: 60));
+      buffer('a', 6);
+      engine.tick();
+      engine.applyTakeover('b', seq: 3);
+      expect(engine.feed.drain().singleWhere((f) => f.action == 'return').missed, 0);
+    });
+
+    test('out and back in is no drop: no return line, nothing missed', () {
       playing();
       t = t.add(const Duration(seconds: 100));
       buffer('a', 6);
@@ -289,39 +330,8 @@ void main() {
       t = t.add(const Duration(seconds: 60));
       back('b');
       buffer('b', 6);
-      final offer = engine.broadcast().rewind.single;
-      expect([offer.id, offer.position], ['m2', 100.0]);
-      t = t.add(const Duration(seconds: RelayConstants.rewindSecs));
-      buffer('a', 6);
-      buffer('b', 6);
-      engine.tick();
-      expect(engine.broadcast().rewind, isEmpty, reason: 'ran out');
-      engine.applyPresence('b', '', Presence.out);
-      t = t.add(const Duration(seconds: 60));
-      back('b');
-      buffer('b', 6);
-      expect(engine.broadcast().rewind, hasLength(1));
-      engine.applySeek('a', offer.position);
-      expect(engine.broadcast().rewind, isEmpty);
-    });
-
-    test('a short step back offers nothing; a crash and return does', () {
-      playing();
-      t = t.add(const Duration(seconds: 50));
-      buffer('a', 6);
-      buffer('b', 6);
-      engine.applyPresence('b', '', Presence.out);
-      t = t.add(const Duration(seconds: 5));
-      back('b');
-      buffer('b', 6);
-      expect(engine.broadcast().rewind, isEmpty);
-      engine.applyGone('b');
-      t = t.add(const Duration(seconds: 40));
-      buffer('a', 6);
-      engine.applyTakeover('b', seq: 3);
-      expect(m('b').loading, isTrue);
-      buffer('b', 6);
-      expect(engine.broadcast().rewind.single.position, closeTo(55, 0.01));
+      expect(engine.feed.drain().map((f) => f.action), isNot(contains('return')));
+      expect(engine.broadcast().toJson().containsKey('rewind'), isFalse);
     });
   });
 

@@ -19,7 +19,8 @@ enum AvatarActivity {
   none,
 
   /// Its video is loading (joining, catching up, or the group waits for
-  /// its buffer): a white run growing round the edge.
+  /// its buffer): a white run round the edge, as long as its buffer is
+  /// along ([AvatarInfo.progress]), else a short arc going round.
   loading,
 
   /// Disconnected, in its grace: an amber stretch going round.
@@ -39,6 +40,9 @@ class AvatarInfo {
   final Presence presence;
   /// Loading or reconnecting: drawn on the edge while it lasts.
   final AvatarActivity activity;
+  /// Loading: how far its buffer is towards what the group needs (0..1);
+  /// null when not known.
+  final double? progress;
   /// Since when they are gone; null otherwise.
   final DateTime? goneSince;
   /// Since when they stand where they do (BRB, AFK, Out); null for in.
@@ -59,6 +63,7 @@ class AvatarInfo {
     this.relaying = false,
     this.presence = Presence.watching,
     this.activity = AvatarActivity.none,
+    this.progress,
     this.goneSince,
     this.since,
     this.host = false,
@@ -77,6 +82,7 @@ class AvatarInfo {
         relaying: relaying,
         presence: presence,
         activity: activity,
+        progress: progress,
         goneSince: goneSince,
         since: since,
         host: host,
@@ -164,6 +170,15 @@ AvatarActivity activityOf(MemberView m, StateBroadcast? r) {
   return AvatarActivity.none;
 }
 
+/// While [m] loads: its buffer against what the group needs now (0..1);
+/// null when that is not known (nothing needed, not loading).
+double? loadProgressOf(MemberView m, StateBroadcast? r) {
+  if (r == null || activityOf(m, r) != AvatarActivity.loading) return null;
+  final need = r.bufferNeed;
+  if (need <= 0) return null;
+  return (m.buffered / need).clamp(0.0, 1.0);
+}
+
 /// [m] as the party strip, toasts and the chat show it.
 AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator coord) {
   final self = m.id.isNotEmpty && m.id == coord.connection.memberId;
@@ -177,6 +192,7 @@ AvatarInfo memberAvatarInfo(MemberView m, StateBroadcast? r, SessionCoordinator 
     relaying: relay != null && relay.source.isNotEmpty && relay.source == m.id,
     presence: m.presence,
     activity: activityOf(m, r),
+    progress: loadProgressOf(m, r),
     goneSince: m.goneSince,
     since: m.since,
     // The state marks the host (`members[].host`); your own app also
@@ -247,24 +263,50 @@ class StatusAvatar extends StatelessWidget {
     final mark = (size * 0.42).clamp(10.0, 24.0);
     final darken = marks && info.isOut ? 0.62 : (dim ? 0.38 : 0.0);
     // Dimmed by darkening, not transparency: an overlapping neighbour must
-    // not show through.
-    final picture = ClipRRect(
-      borderRadius: shape.radius(size),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: info.color,
-              image: info.image == null ? null : DecorationImage(image: info.image!, fit: BoxFit.cover),
+    // not show through. The picture is one draw clipped to the shape, its
+    // darkening a filter on it: anything drawn under it to the same edge
+    // (the person's colour, a black layer) bleeds through the edge's
+    // anti-aliased pixels as a thin frame. The colour stays only for a
+    // picture with transparent parts, a pixel inside the edge.
+    final image = info.image;
+    final picture = TweenAnimationBuilder<double>(
+      tween: Tween(end: darken),
+      duration: easeTime,
+      curve: ease,
+      builder: (context, d, _) {
+        final shade = Colors.black.withValues(alpha: d);
+        final color = Color.alphaBlend(shade, info.color);
+        if (image == null) {
+          return DecoratedBox(
+            decoration: BoxDecoration(color: color, borderRadius: shape.radius(size)),
+            child: Center(
+              child: Text(initial,
+                  style: TextStyle(fontSize: size * 0.42, color: Color.alphaBlend(shade, Colors.white))),
             ),
-            child: info.image != null
-                ? null
-                : Center(child: Text(initial, style: TextStyle(fontSize: size * 0.42, color: Colors.white))),
-          ),
-          AnimatedContainer(duration: easeTime, curve: ease, color: Colors.black.withValues(alpha: darken)),
-        ],
-      ),
+          );
+        }
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(1),
+              child: DecoratedBox(
+                decoration: BoxDecoration(color: color, borderRadius: shape.radius(size - 2)),
+              ),
+            ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: shape.radius(size),
+                image: DecorationImage(
+                  image: image,
+                  fit: BoxFit.cover,
+                  colorFilter: d > 0 ? ColorFilter.mode(shade, BlendMode.srcATop) : null,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
     final activity = marks ? info.activity : AvatarActivity.none;
     final tile = badgeSize(size);
@@ -277,7 +319,8 @@ class StatusAvatar extends StatelessWidget {
           Positioned.fill(child: picture),
           if (edge || activity != AvatarActivity.none)
             Positioned.fill(
-              child: AvatarEdge(shape: shape.at(size), edge: edge ? bg : null, activity: activity),
+              child: AvatarEdge(
+                  shape: shape.at(size), edge: edge ? bg : null, activity: activity, progress: info.progress),
             ),
           if (badges && info.host)
             Positioned(
@@ -399,15 +442,21 @@ class _Zz extends StatelessWidget {
 }
 
 /// Over the picture's edge: the background-colour outline that parts
-/// overlapping shapes, then loading (a white run growing round the shape
-/// from the top) or reconnecting (an amber stretch going round), each on
-/// a thin dark line so it shows on light pictures. Follows the shape: an
-/// arc on a circle, a stretch of outline on a rounded square.
+/// overlapping shapes, then loading (a white run from the top as long as
+/// the buffer is along, gliding to each new value; with nothing known
+/// yet, a short white arc going round) or reconnecting (an amber stretch
+/// going round), each on a thin dark line so it shows on light pictures.
+/// Nothing ever jumps back: the arcs turn on, the run only follows the
+/// buffer. Follows the shape: an arc on a circle, a stretch of outline on
+/// a rounded square.
 class AvatarEdge extends StatefulWidget {
   final RRect shape;
   final Color? edge;
   final AvatarActivity activity;
-  const AvatarEdge({super.key, required this.shape, this.edge, this.activity = AvatarActivity.none});
+
+  /// Loading: the share of the buffer the group needs (null: unknown).
+  final double? progress;
+  const AvatarEdge({super.key, required this.shape, this.edge, this.activity = AvatarActivity.none, this.progress});
 
   /// The edge moves; still under `flutter test` (a loop never settles).
   static final bool motion = !Platform.environment.containsKey('FLUTTER_TEST');
@@ -416,30 +465,49 @@ class AvatarEdge extends StatefulWidget {
   State<AvatarEdge> createState() => _AvatarEdgeState();
 }
 
-class _AvatarEdgeState extends State<AvatarEdge> with SingleTickerProviderStateMixin {
+class _AvatarEdgeState extends State<AvatarEdge> with TickerProviderStateMixin {
+  /// Where the arcs are round the outline (0..1, wrapping).
   late final AnimationController _spin = AnimationController(vsync: this);
+
+  /// The loading run's length (0..1), gliding to the latest buffer.
+  late final AnimationController _fill = AnimationController(vsync: this);
+
+  /// A known share is drawn as the run, else the arc.
+  bool get _known => widget.progress != null && widget.progress! > 0;
 
   @override
   void initState() {
     super.initState();
+    _fill.value = widget.progress ?? 0;
     _sync();
   }
 
   @override
   void didUpdateWidget(AvatarEdge old) {
     super.didUpdateWidget(old);
-    if (old.activity != widget.activity) _sync();
+    if (old.activity != widget.activity || old.progress != widget.progress) _sync(from: old);
   }
 
-  void _sync() {
-    if (widget.activity == AvatarActivity.none) {
+  void _sync({AvatarEdge? from}) {
+    final a = widget.activity;
+    // The run follows the buffer.
+    final p = widget.progress;
+    if (p != null && p != from?.progress) {
+      if (AvatarEdge.motion && from?.progress != null) {
+        _fill.animateTo(p, duration: const Duration(milliseconds: 600), curve: Curves.easeOutCubic);
+      } else {
+        _fill.value = p;
+      }
+    }
+    final turning = a == AvatarActivity.reconnecting || (a == AvatarActivity.loading && !_known);
+    if (!turning) {
       _spin.stop();
       return;
     }
-    _spin.duration = widget.activity == AvatarActivity.loading
-        ? const Duration(seconds: 4)
-        : const Duration(milliseconds: 1400);
+    if (_spin.isAnimating) return;
+    _spin.duration = a == AvatarActivity.loading ? const Duration(milliseconds: 1600) : const Duration(milliseconds: 1400);
     if (AvatarEdge.motion) {
+      // Linear and wrapping: one turn runs on into the next.
       _spin.repeat();
     } else {
       _spin.value = 0.6;
@@ -449,12 +517,20 @@ class _AvatarEdgeState extends State<AvatarEdge> with SingleTickerProviderStateM
   @override
   void dispose() {
     _spin.dispose();
+    _fill.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => CustomPaint(
-        painter: _EdgePainter(shape: widget.shape, edge: widget.edge, activity: widget.activity, clock: _spin),
+        painter: _EdgePainter(
+          shape: widget.shape,
+          edge: widget.edge,
+          activity: widget.activity,
+          known: _known,
+          spin: _spin,
+          fill: _fill,
+        ),
       );
 }
 
@@ -462,9 +538,17 @@ class _EdgePainter extends CustomPainter {
   final RRect shape;
   final Color? edge;
   final AvatarActivity activity;
-  final Animation<double> clock;
-  _EdgePainter({required this.shape, required this.edge, required this.activity, required this.clock})
-      : super(repaint: clock);
+  final bool known;
+  final Animation<double> spin;
+  final Animation<double> fill;
+  _EdgePainter({
+    required this.shape,
+    required this.edge,
+    required this.activity,
+    required this.known,
+    required this.spin,
+    required this.fill,
+  }) : super(repaint: Listenable.merge([spin, fill]));
 
   static const _stroke = 2.5;
 
@@ -483,17 +567,19 @@ class _EdgePainter extends CustomPainter {
     final r = shape.deflate(_stroke / 2 + (edge == null ? 0 : 2));
     final metric = _fromTop(r).computeMetrics().first;
     final len = metric.length;
-    final t = clock.value;
     final Path run;
     final Color color;
-    if (activity == AvatarActivity.loading) {
-      run = metric.extractPath(0, len * Curves.easeInOut.transform(t));
+    if (activity == AvatarActivity.loading && known) {
+      final f = fill.value.clamp(0.0, 1.0);
+      if (f <= 0) return;
+      run = metric.extractPath(0, len * f);
       color = Colors.white;
     } else {
-      final a = len * t, b = a + len * 0.28;
+      // An arc going round; it wraps past the top without a seam.
+      final a = len * spin.value, b = a + len * (activity == AvatarActivity.loading ? 0.22 : 0.28);
       run = metric.extractPath(a, math.min(b, len));
       if (b > len) run.addPath(metric.extractPath(0, b - len), Offset.zero);
-      color = Colors.amber;
+      color = activity == AvatarActivity.loading ? Colors.white : Colors.amber;
     }
     canvas.drawPath(
         run,
@@ -529,7 +615,12 @@ class _EdgePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_EdgePainter old) =>
-      old.shape != shape || old.edge != edge || old.activity != activity || old.clock != clock;
+      old.shape != shape ||
+      old.edge != edge ||
+      old.activity != activity ||
+      old.known != known ||
+      old.spin != spin ||
+      old.fill != fill;
 }
 
 /// A row of people, host first, then watching, BRB, out, gone. Rounded

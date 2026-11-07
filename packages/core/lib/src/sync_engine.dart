@@ -112,10 +112,9 @@ class EngineMember {
   bool goneNoticed = false;
   /// Its last reported position in the current media (null before one).
   double? spot;
-  /// Where it fell behind the group (went out, dropped, was continued
-  /// without); coming back with the group from further back than
-  /// [RelayConstants.rewindBehindSecs] offers everyone a rewind there.
-  double? behind;
+  /// Where it was in the video when it dropped (`gone` while in): its
+  /// `return` line says how much it missed.
+  double? droppedAt;
   DateTime lastSeen;
   EngineMember({
     required this.id,
@@ -226,14 +225,6 @@ class EngineFeed {
 }
 
 
-/// A rewind offered to everyone ([RewindOffer]) until [until].
-class _Rewind {
-  final String id;
-  final double position;
-  final DateTime until;
-  const _Rewind(this.id, this.position, this.until);
-}
-
 class SyncEngine {
   final SyncClock clock;
   final Liveness liveness;
@@ -278,7 +269,6 @@ class SyncEngine {
   final List<String> _pass = [];
   String? _passFor;
   bool _reasked = false;
-  final List<_Rewind> _rewinds = [];
   /// A member went `gone` (its socket closed or fell silent): the server
   /// closes the socket and marks a relay it serves.
   void Function(EngineMember member)? onGone;
@@ -350,13 +340,11 @@ class SyncEngine {
       reason: reason,
       at: now);
 
-  /// Heartbeat (1 s): silence, gone notices, grace, rewinds running out,
-  /// a play request nobody acted on, end of media, what's next.
+  /// Heartbeat (1 s): silence, gone notices, grace, a play request nobody
+  /// acted on, end of media, what's next.
   void tick() {
     sweepSilent();
     sweepPresence();
-    final t = now;
-    _rewinds.removeWhere((r) => !t.isBefore(r.until));
     _askAgain();
     evaluate();
     whatsNext();
@@ -566,7 +554,18 @@ class SyncEngine {
       ..goneAt = null
       ..goneNoticed = false
       ..loading = media != null;
-    if (noticed) feed.add(_line('return', actor: m));
+    final at = m.droppedAt;
+    m.droppedAt = null;
+    if (noticed) {
+      // How much of the video it missed (a pause meanwhile: nothing).
+      final missed = at == null ? 0 : (positionAt() - at).floor();
+      feed.add(FeedMessage(
+          actor: m.name,
+          actorId: m.id,
+          action: 'return',
+          at: now,
+          missed: missed >= RelayConstants.missedNoticeSecs ? missed : 0));
+    }
     evaluate();
     return true;
   }
@@ -577,7 +576,7 @@ class SyncEngine {
   void applyGone(String token) {
     final m = members[token];
     if (m == null || m.gone) return;
-    if (m.presence == Presence.watching) _markBehind(m, m.spot);
+    if (m.presence == Presence.watching && media != null) m.droppedAt = m.spot ?? positionAt();
     m
       ..gone = true
       ..goneAt = now
@@ -616,25 +615,11 @@ class SyncEngine {
     }
   }
 
-  /// [m] falls behind the group at [at] (default: the group's position
-  /// now), unless it already was.
-  void _markBehind(EngineMember m, [double? at]) {
-    if (media == null) return;
-    m.behind ??= at ?? positionAt();
-  }
-
-  /// [m] is with the group again (loading over): a rewind to where it fell
-  /// behind is offered to everyone when that is far enough back.
+  /// [m] is with the group again (loading over).
   void _caughtUp(EngineMember m) {
     m
       ..loading = false
       ..skipped = false;
-    final b = m.behind;
-    m.behind = null;
-    if (b == null || positionAt() - b < RelayConstants.rewindBehindSecs) return;
-    _rewinds
-      ..removeWhere((r) => r.id == m.id)
-      ..add(_Rewind(m.id, b, now.add(const Duration(seconds: RelayConstants.rewindSecs))));
   }
 
   /// Name and/or picture change ([ProfileIntent]); null leaves it, an
@@ -703,7 +688,6 @@ class SyncEngine {
     final removed = members.remove(token);
     if (removed == null) return null;
     if (removed.presence == Presence.brb && brbs.isEmpty) wantsPlay = false;
-    _rewinds.removeWhere((r) => r.id == removed.id);
     feed.add(_line('leave', actor: removed, reason: reason));
     evaluate();
     onLeft?.call(removed);
@@ -778,15 +762,10 @@ class SyncEngine {
         _holdNow();
         feed.add(_line('brb', actor: actor, target: self ? null : target));
       case Presence.out:
-        // Left behind where it is (a BRB member: where the group held).
-        if (was == Presence.watching || was == Presence.brb) {
-          _markBehind(target, target.loading ? target.spot : null);
-        }
         _set(target, Presence.out);
         feed.add(_line('out', actor: actor, target: self ? null : target, reason: _why(reason)));
       case Presence.afk:
         if (was != Presence.watching || transport == Transport.playing) return null;
-        _markBehind(target, target.loading ? target.spot : null);
         _set(target, Presence.afk);
         feed.add(_line('afk', actor: actor));
       case Presence.watching:
@@ -828,10 +807,8 @@ class SyncEngine {
           _set(m, Presence.watching);
           return;
         }
-        _markBehind(m);
         _set(m, Presence.out);
       } else if (videoWaited(m)) {
-        _markBehind(m, m.spot);
         m
           ..skipped = true
           ..loading = true;
@@ -864,9 +841,9 @@ class SyncEngine {
     _seekBy = member.id;
     _seekSeq = seq;
     _seekEventId = eventId;
-    _rewinds.clear();
+    // Where a dropped member was says nothing about what it missed now.
     for (final m in members.values) {
-      m.behind = null;
+      m.droppedAt = null;
     }
     feed.add(_line('seek', actor: member));
     // A seek stops the countdown to Up next.
@@ -900,14 +877,13 @@ class SyncEngine {
     serverTime = now;
     eventId++;
     transport = Transport.held;
-    _rewinds.clear();
     for (final member in members.values) {
       member
         ..error = ''
         ..buffered = 0
         ..skipped = false
         ..spot = null
-        ..behind = null;
+        ..droppedAt = null;
     }
     if (restore != null) {
       final d = next.duration;
@@ -951,7 +927,7 @@ class SyncEngine {
         member
           ..loading = false
           ..skipped = false
-          ..behind = null;
+          ..droppedAt = null;
       } else if (!earlier &&
           reportEventId >= eventId &&
           (reportPosition - positionAt(t)).abs() <= RelayConstants.driftSeekThresholdSecs &&
@@ -1065,7 +1041,6 @@ class SyncEngine {
       hold: holdInfo(sourceGone: sourceGone),
       advance: advance,
       wantsPlay: wantsPlay,
-      rewind: [for (final r in _rewinds) RewindOffer(id: r.id, position: r.position)],
       queuePass: queuePass,
     );
   }

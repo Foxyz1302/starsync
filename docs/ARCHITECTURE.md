@@ -144,7 +144,7 @@ attach and detach the network listener (below).
   closing), your server stops (`stop`, then killed after 3 s).
 
 `SyncServer` runs a 1 s heartbeat (`ServerHub.heartbeat`): closed-socket
-sweep, the engine's sweep (silence, gone notices, grace, rewinds, a play
+sweep, the engine's sweep (silence, gone notices, grace, a play
 request asked again),
 relay source state, warm relay, rates, state + feed broadcast. There is
 one session, id `default`.
@@ -241,12 +241,13 @@ people say on purpose (BRB); nothing starts because time passed.
   (`skipped`: not waited for until its loading ends), the sender is back
   from its own BRB, and the wish becomes play; `continue` with a target
   ("Don't wait for Bob") does it for that one and leaves the wish.
-- **Rewind** (`state.rewind`): a member who fell behind (went out or
-  AFK, dropped, was continued without) records where (`behind`: its last
-  reported spot, else the group's position then); coming back with the
-  group (its loading over) from more than 10 s back
-  (`rewindBehindSecs`) offers everyone a rewind there for 30 s
-  (`rewindSecs`). Any seek and any swap end the offers.
+- **Missed** (`feed.missed`): a member that drops while in records
+  where it was (`droppedAt`: its last reported spot, else the group's
+  position then); its `return` line says how much of the video played
+  since when that is 10 s or more (`missedNoticeSecs`), and the app's
+  toast says "Bob is back (missed 1:42)". A seek or a swap meanwhile
+  drops it. Going out, AFK or being continued without is a choice, not
+  a drop: nothing is said, nothing is offered.
 - **Identity**: an install sends a random client id (`hello.client`,
   private: never broadcast, never logged) and a `seq` that rises with
   every connection. The server maps the client id to one member for its
@@ -279,7 +280,7 @@ people say on purpose (BRB); nothing starts because time passed.
   - `out`: anyone sets anyone out (the host included); only the member
     itself comes back (`in`, through loading at the current moment). Not
     waited for, not counted as watched; the app keeps its player at its
-    spot (its reports say where, for the rewind). Never stops it passing
+    spot. Never stops it passing
     the video on. Kept across a drop and a swap.
   - Disconnected: its socket closed or fell silent. Kept for the grace
     (`Liveness.grace`, 10 min) with everything it had, its token working
@@ -2104,15 +2105,21 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   is a notice pointing at Settings. The server name and its line (a
   click; a ▾ after the name, a hover tint and an "Everyone in the server"
   tooltip say so), "+N" and a people card's "Everyone in the server" open the
-  members card (the server's version under its title: yours is
-  this app's, a joined one's from `/health.version`; the source
-  line, then per member status, route and buffer dot (see "Relay",
-  Stats), their Starsync version (`members[].app`, amber when it is not
-  this app's; also on their people card), host / relay pills; "watching",
-  "loading", "BRB", "AFK", "out", or for a `gone` member "reconnecting… (2
-  min)" with how long; per member the people card's actions (Wait for /
-  Don't wait for, Nudge, Out: anyone, the host too), your own row Out /
-  Join; at the
+  members card (`MembersCard`, 360 px, one 16 px inset for the header,
+  the rows and the invite): the header is the server's name
+  (`serverName`), `Status.party` under it, then a quiet line with a
+  friend's address and the server's version (yours is this app's, a
+  joined one's from `/health.version`); the source line; then everyone in
+  the strip's order (host, watching, BRB, out, gone; you first among
+  equals), one row each: the strip's 40 px `StatusAvatar` (standing
+  badge, crown, tower, loading edge), the name ("you" after yours), a
+  host pill and their Starsync version (`members[].app`, amber when it is
+  not this app's; also on their people card), and under it the standing
+  in its badge's colour ("watching", "loading · 75%", "BRB", "AFK",
+  "out", "reconnecting… (2 min)" in amber, "can't play this: …" in red),
+  the route ("via server · 3.2 MB/s", see "Relay", Stats) and a buffer
+  dot; the row's ⋮ has the people card's actions (Wait for / Don't wait
+  for, Nudge, Out: anyone, the host too; your own row Out / Join); at the
   bottom, on yours: not shared, "Only you can reach it" and Invite;
   shared (`YourInvite`), Copy invite link (filled; the address the app
   picks, `InviteReach.best`, in its tooltip) and Stop sharing; one line
@@ -2129,7 +2136,11 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
 - **Avatars** (`avatar.dart`): `StatusAvatar`'s picture fills its shape
   (no ring): a rounded square (22 % corner) or, with Settings → Party →
   More "Avatar shape: Circle" (`AppSettings.avatarCircle`, the one
-  setting of the redesign), a circle (`AvatarShape`). The standing is a
+  setting of the redesign), a circle (`AvatarShape`). The picture is one
+  draw clipped to the shape and darkened by a filter on it; the person's
+  colour sits a pixel inside the edge (for pictures with transparent
+  parts): drawn to the same edge it bled through the anti-aliased rim
+  as a thin coloured frame. The standing is a
   badge (`StateBadge`): a small dark tile with a thin dark outline a third
   over the bottom-right corner, a muted glyph in its colour: a cup for
   BRB, "Zz" for AFK, an eye with a line through it for Out; AFK and Out
@@ -2137,10 +2148,14 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   neighbour never shows through). What happens to their player runs
   along the shape's edge only while it lasts (`AvatarEdge`, an arc on a
   circle, a stretch of outline on a rounded square, over a thin dark
-  line): Loading a white run growing round from the top (joining,
-  catching up, or the group waits for its video), Reconnecting an amber
-  stretch going round (disconnected; last in the stack); still under
-  `flutter test` (a loop never settles). A crown for the host
+  line): Loading (joining, catching up, or the group waits for its
+  video) a white run from the top as long as its buffer is along
+  towards what the group needs (`AvatarInfo.progress`,
+  `loadProgressOf`), gliding to each new value, or while nothing is
+  known yet a short white arc going round; Reconnecting an amber
+  stretch going round (disconnected; last in the stack). The arcs turn
+  continuously and the run only follows the buffer: nothing loops back
+  to empty. Still under `flutter test` (a loop never settles). A crown for the host
   (`members[].host` in the state; your own app also knows before the
   first state), a tower at the bottom-left for the member passing the
   video on, a red "!" when their player cannot open the media. In a row
@@ -2420,7 +2435,14 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   the full player to mini; × on the mini sets you out (reason `closed`:
   nobody waits for you, your player keeps its spot) and closes the
   player; the strip brings it back, and joining with it closed shows the
-  mini. Fullscreen
+  mini. While you are out (`Presence.out`, `out_card.dart`) your spot's
+  picture is dimmed (`OutScrim`, under the controls) and `OutCard` sits
+  in the middle, full and mini alike: "You're out", what the others are
+  watching ("The others are watching Frieren · S1 E5"; the mini leaves
+  the title to its hover bar) and where ("12:34 / 24:00 · playing",
+  ticking), and one Join with a Space keycap (Space joins too); the
+  status pill and the mini's line leave it to the card. AFK keeps the
+  pill: any input brings it back. Fullscreen
   is `windowManager.setFullScreen` with the strip hidden (party avatars in
   a corner while paused); F, Esc and double-click on the picture toggle it.
   The player keys (Settings → Help & about → Keyboard shortcuts) work while the player is
@@ -2456,13 +2478,16 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   keycaps (`KeyHints`: `[Space] BRB too  [Hold Space] continue
   without`) or a muted detail. It shows `Status.line` (see "App events
   and platform ports"), connecting only after 2 s: reconnecting (Cancel),
-  refused or replaced (Retry), out or AFK (a click joins or brings you
-  back), your player's problem (Reload), the relay, finished, BRB ("Waiting
+  refused or replaced (Retry), AFK (a click brings you back; out is the
+  card in the middle, above), your player's problem (Reload), the relay, finished, BRB ("Waiting
   for Bob and Chiyo", "Paused · waiting for …", "Waiting for you": a click
   brings you back), a video the group waits for (below
   `StateBroadcast.bufferNeed`, the group's own need at the current
   position: less near the end, none at finished), someone who cannot play
-  it, a plain pause ("Paused by Bob"); nothing while it plays. Your own
+  it, a plain pause ("Paused by Bob", with everyone else there, watching
+  first, then BRB, AFK and out, each with its badge, at most five:
+  `whoIsIn`, so the group sees who is in before someone plays); nothing
+  while it plays. Your own
   `playerError` comes right after reconnecting ("Can't play this: ...",
   Retry reloads the video); members with `members[].error` show as "Bob
   can't play this: ..." and are never waited for. A member's new error
@@ -2503,9 +2528,11 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   BRB / I'm back (greyed "you're out" while out), → skip ahead (Skip OP
   in the opening, Next episode through the ending: the ED, else the last
   90 s, greyed without anything next; else Skip 1:30), ↓ Out / Join, ←
-  empty (a darker quarter, so the slots never move). Press, drag and let
-  go picks; a plain right-click leaves it open for a click; Esc, the
-  centre or a click outside cancels; it scales with the video's shorter
+  empty (a darker quarter, so the slots never move). Hold only: it shows
+  while the button is held (from 150 ms, or at once once the pointer
+  leaves the centre, so a quick flick still picks), and letting go
+  always closes it, picking the slot under the pointer, nothing in the
+  centre; a plain right-click shows nothing; Esc closes it too; it scales with the video's shorter
   side (up to 1.6×) and holds the controls up while open. ⚙ in
   the bar (both skins, "Player settings") toggles the player panel
   (`controls/player_panel.dart`, `PlayerControlsModel.panelOpen`): a
@@ -2558,9 +2585,8 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   the shell's `ease` / `easeTime`); in it the status pill centred
   (moved left only as far as it must to clear the right end, never
   overlapping it) and at the right end the end card (`UpNextCard`, over
-  the last 10 s and once it ended) or the action pills ("Rewind for
-  Alice (1:42)" while `state.rewind` offers one, a seek there for
-  everyone; Skip OP / ED / 1:30 over Next episode, `PillGate`). The
+  the last 10 s and once it ended) or the action pills (Skip OP / ED /
+  1:30 over Next episode, `PillGate`). The
   radial (`RadialLayer`) is over all of it. The Jellyfin blocked card sits in
   the middle. Two surfaces: cards and popovers use `AppGlass`
   (`widgets/app_menu.dart`, the menus' recipe: blur, dark tint, hairline
@@ -2973,8 +2999,12 @@ parts not downloaded still read; chapter cuts are a light dark line.
   and the controls' `setVolume` (bar, panel, wheel, keys, mute, M)
   stores it there (written 400 ms after the last change); `VolumeBar` runs 0..150 with a tick at 100 and the
   part above in amber; the wheel and ↑ / ↓ step 5 % (`volumeStep`),
-  clamped. The wheel works anywhere on the full player (`VolumeWheel`
-  around the player's stack): `WheelSteps` makes a mouse notch one step
+  clamped. The wheel works over the video itself and its controls
+  (`VolumeWheel` around the `Video` only): what floats over it (the
+  player panel, the pills, the status pill, the quick chat box, the
+  fullscreen avatars) sits above it in the player's stack, so its wheel
+  never reaches the video's, not even past a list's end, where Flutter's
+  lists let the wheel go. `WheelSteps` makes a mouse notch one step
   and adds up small smooth-scroll deltas, ignores mostly-horizontal
   scrolls, and claims the event through `pointerSignalResolver`, so
   anything under the mouse that scrolls (lists, menus, popovers in their

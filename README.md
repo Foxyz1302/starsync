@@ -183,7 +183,7 @@ for one Play. Hold Space (about half a second; the pill fills and says
 Bob"), and when you are back (Space again) it plays on if it was
 playing. While someone is BRB, Space makes you BRB too or brings you
 back, and holding it for 2 seconds goes on without them. Right-click
-and hold on the video (or right-click and click) for the same and more:
+and hold on the video for the same and more, then let go on your pick:
 ↑ BRB / I'm back, → Skip OP, Skip 1:30 or Next episode (in the ending),
 ↓ Out / Join. A friend who ran off without pressing anything can be
 waited for from their card ("Wait for Bob"), and anyone waited for can be
@@ -191,12 +191,13 @@ gone on without ("Don't wait for Bob").
 
 **Out.** Step away without leaving: Out (your profile, your row in the
 member list, the right-click menu, or × on the player) means nobody waits
-for you any more; you stay in chat and your player stays where you were.
+for you any more; you stay in chat and your player stays where you were,
+dimmed, with a small card saying where the others are and a Join button.
 Anyone can set anyone out, the host too ("Alice set you out" tells you
 who). Space or Join brings you in at the current moment, loading in the
-background while the others play on, and everyone gets "Rewind for
-you (1:42)" for half a minute in case they want to watch it again with
-you. No input for 10 minutes while nothing plays makes you AFK, which
+background while the others play on. If your connection drops or the
+app crashes, the others see "Bob is back (missed 1:42)" when you
+return. No input for 10 minutes while nothing plays makes you AFK, which
 is the same as out with its own badge; any key or the mouse brings you
 back. The window minimised for 10 minutes while the video plays sets you
 out. Nothing of this happens when you are alone.

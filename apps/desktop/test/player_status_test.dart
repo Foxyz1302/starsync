@@ -137,6 +137,20 @@ void main() {
       expect(mine.keys, isEmpty);
     });
 
+    test('paused: who is in, watching first, then BRB, AFK and out; not you, not the gone', () {
+      final r = held([
+        mv('o', 'Olga', presence: Presence.out),
+        me,
+        mv('k', 'Kai', presence: Presence.afk),
+        mv('c', 'Cleo'),
+        mv('z', 'Zed', gone: true),
+        mv('d', 'Dan'),
+      ]);
+      expect([for (final m in st(r, self: me).line!.who) m.id], ['c', 'd', 'k', 'o']);
+      expect(line(held([me], transport: 'playing'), self: me), isNull, reason: 'gone once it plays');
+      expect(st(held([me]), self: me).line!.who, isEmpty, reason: 'alone: nobody to show');
+    });
+
     test('BRB: "Waiting for Bob" when it plays once they are back, "Paused · waiting for" when not; the keys', () {
       var v = line(held([me, bob], wants: true, hold: const HoldInfo(brb: ['b'])), self: me)!;
       expect((v.kind, v.text), (StatusKind.waiting, 'Waiting for Bob'));
@@ -354,6 +368,83 @@ void main() {
     coord.serverState.value = held([mv('a', 'Alex')], mediaId: 3, position: 600);
     await tester.pumpAndSettle();
     expect(card, findsNothing);
+  });
+
+  testWidgets("out: the card says so, where the others are, and Join; the pill leaves it to the card", (tester) async {
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    coord.connection.client.memberId = 'me';
+    addTearDown(() => coord.connection.client.memberId = '');
+    coord.playback.alive.value = true;
+    final out = mv('me', 'Me', presence: Presence.out);
+    coord.serverState.value = StateBroadcast(
+      eventId: 1,
+      transport: 'playing',
+      position: 754,
+      serverTime: coord.connection.serverNow(),
+      mediaId: 1,
+      media: const {'name': 'Frieren - 05.mkv', 'size': 1, 'duration': 1440},
+      members: [out, mv('b', 'Bob')],
+      wantsPlay: true,
+    );
+    Widget player(PlayerMode mode) => scoped(
+        _graph,
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: mode == PlayerMode.full ? 1280 : 384,
+                height: mode == PlayerMode.full ? 720 : 216,
+                child: SessionPlayer(
+                  mode: mode,
+                  fullscreen: false,
+                  onExpand: () {},
+                  onCollapse: () {},
+                  onClose: () {},
+                  onToggleFullscreen: () {},
+                  onToggleChat: () {},
+                  onChangeVideo: () {},
+                  onOpenAccounts: () {},
+                  onLeave: () {},
+                  windowControls: false,
+                  videoBuilder: (context, controls) => const ColoredBox(color: Colors.black),
+                ),
+              ),
+            ),
+          ),
+        ));
+    await tester.pumpWidget(player(PlayerMode.full));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text("You're out"), findsOneWidget);
+    expect(find.byKey(const ValueKey('out-title')), findsOneWidget);
+    expect(tester.widget<Text>(find.byKey(const ValueKey('out-where'))).data, startsWith('12:3'));
+    expect(tester.widget<Text>(find.byKey(const ValueKey('out-where'))).data, endsWith('/ 24:00 · playing'));
+    expect(find.byKey(const ValueKey('out-join')), findsOneWidget);
+    expect(find.text('Space'), findsOneWidget, reason: 'Space works too');
+    expect(find.byKey(const ValueKey('player-status-text')), findsNothing, reason: 'the card says it, not the pill');
+    // The mini: the same card, smaller, without the title.
+    await tester.pumpWidget(player(PlayerMode.mini));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text("You're out"), findsOneWidget);
+    expect(find.byKey(const ValueKey('out-title')), findsNothing);
+    expect(find.byKey(const ValueKey('out-join')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    // Back in: gone.
+    coord.serverState.value = StateBroadcast(
+      eventId: 2,
+      transport: 'playing',
+      position: 760,
+      serverTime: coord.connection.serverNow(),
+      mediaId: 1,
+      media: const {'name': 'Frieren - 05.mkv', 'size': 1, 'duration': 1440},
+      members: [mv('me', 'Me'), mv('b', 'Bob')],
+      wantsPlay: true,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text("You're out"), findsNothing);
+    await tester.pumpWidget(const SizedBox());
   });
 
   group('no overflow', () {

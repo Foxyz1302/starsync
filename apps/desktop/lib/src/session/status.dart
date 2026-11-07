@@ -21,7 +21,7 @@ enum StatusLevel { ok, info, warn, error }
 /// What the player's status pill says, most pressing first. [you]: you
 /// are BRB (the group waits for you); [out] / [afk]: you are out;
 /// [waiting]: the group waits for someone's BRB or video; [paused]: a
-/// plain pause.
+/// plain pause (with everyone else there and their standing).
 enum StatusKind {
   reconnecting,
   problem,
@@ -226,6 +226,14 @@ String partyLine(List<MemberView> members) {
   ].join(' · ');
 }
 
+/// Everyone else connected, watching first, then BRB, AFK and out (the
+/// paused pill shows them with their standing before someone plays).
+List<MemberView> whoIsIn(List<MemberView> members, String selfId) => [
+      for (final p in const [Presence.watching, Presence.brb, Presence.afk, Presence.out])
+        for (final m in members)
+          if (m.presence == p && !m.gone && m.id != selfId) m,
+    ];
+
 /// The keys while someone else is BRB.
 const _brbKeys = <KeyHint>[('Space', 'BRB too'), ('Hold Space', 'continue without')];
 
@@ -353,7 +361,8 @@ StatusLine? _line(StatusFacts f, StateBroadcast? r, MemberView? self, SourceTrou
         : by == f.selfId
             ? 'you'
             : byId(by)?.name ?? f.names?[by];
-    return StatusLine(StatusKind.paused, name == null ? 'Paused' : 'Paused by $name', short: 'Paused');
+    return StatusLine(StatusKind.paused, name == null ? 'Paused' : 'Paused by $name',
+        who: whoIsIn(r.members, f.selfId), short: 'Paused');
   }
   return null;
 }

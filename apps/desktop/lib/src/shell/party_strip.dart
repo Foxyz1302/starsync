@@ -451,17 +451,27 @@ class StripTab extends StatelessWidget {
   }
 }
 
-/// Who is in the server, from the avatars: status, host / relay pills,
-/// per member force ready, nudge and sit out, and the invite (yours) or
-/// the address (a friend's).
+/// Who is in the server: the server (its name, who stands where, its
+/// address and version), where the media comes from, everyone (standing,
+/// route, buffer, actions) and the invite (yours) or its link (a
+/// friend's).
 Future<void> showMembersCard(BuildContext context) => showPopover<void>(
   context,
   at: const Alignment(0.7, -0.84),
   child: const MembersCard(),
 );
 
+/// The members card's side inset: the header, the rows and the invite
+/// line up on it.
+const _cardInset = 16.0;
+
 class MembersCard extends StatelessWidget {
   const MembersCard({super.key});
+
+  /// The rows' order, as the strip's avatars: host, watching, BRB, out,
+  /// gone; you first among equals.
+  static int _rank(AvatarInfo m) =>
+      (m.host ? 0 : (m.gone ? 8 : m.isOut ? 6 : m.brb ? 4 : 2)) + (m.self ? 0 : 1);
 
   @override
   Widget build(BuildContext context) {
@@ -470,8 +480,9 @@ class MembersCard extends StatelessWidget {
       key: const ValueKey('members-card'),
       elevation: 12,
       borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
       child: SizedBox(
-        width: 340,
+        width: 360,
         child: PartyWatch(
           builder: (context) {
             final graph = AppScope.of(context);
@@ -480,54 +491,72 @@ class MembersCard extends StatelessWidget {
             final r = coord.serverState.value;
             final home = nav.home.value;
             final address = home ? null : nav.address.value;
-            final delivery = coord.status.value.delivery;
+            final status = coord.status.value;
+            final delivery = status.delivery;
             final server = nav.serverVersion.value;
+            final rows = [
+              for (final m in r?.members ?? const <MemberView>[]) (m, memberAvatarInfo(m, r, coord)),
+            ]..sort((a, b) => _rank(a.$2) - _rank(b.$2));
+            final muted = TextStyle(color: scheme.onSurfaceVariant, fontSize: 12, height: 1.3);
             return Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // The server: its name, who stands where, then where it is.
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                  padding: const EdgeInsets.fromLTRB(_cardInset + 4, 16, _cardInset + 4, 12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        home ? 'Your server' : ['In the server', ?address].join(' · '),
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                        serverName(graph),
+                        key: const ValueKey('members-title'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, height: 1.2),
                       ),
-                      if (server.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: VersionText(
-                            key: const ValueKey('server-version'),
-                            label: 'Server',
-                            version: server,
-                          ),
+                      if (status.party.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(status.party, style: muted.copyWith(fontSize: 13, color: scheme.onSurface.withValues(alpha: 0.8))),
+                      ],
+                      if ((address != null && address.isNotEmpty) || server.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            if (address != null && address.isNotEmpty)
+                              Flexible(
+                                child: Text(address, maxLines: 1, overflow: TextOverflow.ellipsis, style: muted),
+                              ),
+                            if (address != null && address.isNotEmpty && server.isNotEmpty)
+                              Text(' · ', style: muted),
+                            if (server.isNotEmpty)
+                              VersionText(key: const ValueKey('server-version'), label: 'Server', version: server),
+                          ],
                         ),
+                      ],
                     ],
                   ),
                 ),
                 if (delivery != null) SourceLine(delivery: delivery),
-                for (final m in r?.members ?? const <MemberView>[])
+                const SizedBox(height: 4),
+                for (final (m, info) in rows)
                   _MemberTile(
                     member: m,
-                    info: memberAvatarInfo(m, r, coord),
+                    info: info,
                     delivery: delivery == null ? null : memberDeliveryOf(m, r!, delivery),
                   ),
                 if (r == null)
                   Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Text(
-                      'connecting…',
-                      style: TextStyle(color: scheme.onSurfaceVariant),
-                    ),
+                    padding: const EdgeInsets.fromLTRB(_cardInset + 4, 8, _cardInset + 4, 16),
+                    child: Text('connecting…', style: TextStyle(color: scheme.onSurfaceVariant)),
                   ),
-                const Divider(),
+                const SizedBox(height: 4),
+                Divider(height: 1, indent: _cardInset, endIndent: _cardInset, color: scheme.outlineVariant.withValues(alpha: 0.5)),
                 if (home)
                   const YourInvite()
                 else if (address != null && address.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    padding: const EdgeInsets.fromLTRB(_cardInset - 4, 6, _cardInset, 8),
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
@@ -551,6 +580,10 @@ class MembersCard extends StatelessWidget {
   }
 }
 
+/// One person: their picture (the strip's: standing badge, crown,
+/// tower), name with "you", host and their version, then their standing
+/// in its badge's colour with how the media reaches them and a buffer dot;
+/// the ⋮ has their card's actions.
 class _MemberTile extends StatelessWidget {
   final MemberView member;
   final AvatarInfo info;
@@ -562,56 +595,120 @@ class _MemberTile extends StatelessWidget {
     this.delivery,
   });
 
+  static const _avatar = 40.0;
+
   @override
   Widget build(BuildContext context) {
     final coord = AppScope.of(context).coordinator;
+    final scheme = Theme.of(context).colorScheme;
     final m = member;
     final since = m.goneSince;
-    final status = m.gone
-        ? 'reconnecting…${since == null ? '' : ' (${sinceText(since, DateTime.now().toUtc())})'}'
+    final (String standing, Color tone) = m.gone
+        ? ('reconnecting…${since == null ? '' : ' (${sinceText(since, DateTime.now().toUtc())})'}', Colors.amber)
         : m.presence == Presence.brb
-        ? 'BRB'
+        ? ('BRB', StateBadge.glyphColor(Presence.brb))
         : m.presence == Presence.afk
-        ? 'AFK'
+        ? ('AFK', StateBadge.glyphColor(Presence.afk))
         : m.presence == Presence.out
-        ? 'out'
+        ? ('out', StateBadge.glyphColor(Presence.out))
         : m.error.isNotEmpty
-        ? "can't play this: ${m.error}"
+        ? ("can't play this: ${m.error}", Colors.redAccent.shade100)
         : info.activity == AvatarActivity.loading
-        ? 'loading ${m.buffered.toStringAsFixed(1)} s'
-        : 'watching';
-    return ListTile(
+        ? (info.progress == null ? 'loading…' : 'loading · ${(info.progress! * 100).round()}%', scheme.onSurface)
+        : ('watching', scheme.onSurfaceVariant);
+    final d = delivery;
+    final route = d == null || d.route == DeliveryRoute.source || m.gone || m.isOut ? '' : d.short;
+    final health = d?.health;
+    final muted = TextStyle(color: scheme.onSurfaceVariant, fontSize: 12, height: 1.3);
+    final person = PersonRef.of(info);
+    return Padding(
       key: ValueKey('member-${m.id}'),
-      dense: true,
-      contentPadding: const EdgeInsets.only(left: 20, right: 8),
-      // The person's card, without the link back to this card.
-      leading: PersonHover(
-        person: PersonRef.of(info),
-        everyone: false,
-        child: StatusAvatar(info: info, size: 36, badges: false),
-      ),
-      title: Wrap(
-        spacing: 6,
-        crossAxisAlignment: WrapCrossAlignment.center,
+      padding: const EdgeInsets.fromLTRB(_cardInset, 5, _cardInset - 8, 5),
+      child: Row(
         children: [
+          // The person's card, without the link back to this card.
           PersonHover(
-            person: PersonRef.of(info),
+            person: person,
             everyone: false,
-            child: Text(info.self ? '${m.name} (you)' : m.name),
+            child: StatusAvatar(info: info, size: _avatar),
           ),
-          if (m.app.isNotEmpty) VersionText(key: ValueKey('version-${m.id}'), version: m.app),
-          if (info.host) const Pill('host', Colors.amber),
-          if (info.relaying)
-            const Pill('passing the video on', Colors.lightBlueAccent),
-        ],
-      ),
-      subtitle: DeliveryStatus(status: status, delivery: delivery),
-      // The same actions as the person's card.
-      trailing: AppMenuButton<MemberAction>(
-        tooltip: 'More',
-        onSelected: (a) => runMemberAction(coord, m.id, a),
-        items: () => [
-          for (final a in memberActions(info)) AppMenuItem(value: a.action, label: a.label, icon: a.icon),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: PersonHover(
+                        person: person,
+                        everyone: false,
+                        child: Text.rich(
+                          TextSpan(children: [
+                            TextSpan(text: m.name),
+                            if (info.self)
+                              TextSpan(text: '  you', style: muted.copyWith(fontWeight: FontWeight.w500)),
+                          ]),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, height: 1.25),
+                        ),
+                      ),
+                    ),
+                    if (info.host) ...[const SizedBox(width: 8), const Pill('host', Colors.amber)],
+                    if (m.app.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      VersionText(key: ValueKey('version-${m.id}'), version: m.app),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Tooltip(
+                  message: d?.detail ?? '',
+                  waitDuration: const Duration(milliseconds: 400),
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text.rich(
+                          TextSpan(children: [
+                            TextSpan(
+                                text: standing,
+                                style: TextStyle(
+                                    color: tone,
+                                    fontWeight: tone == scheme.onSurfaceVariant ? FontWeight.w400 : FontWeight.w500)),
+                            if (route.isNotEmpty) TextSpan(text: ' · $route'),
+                          ]),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: muted,
+                        ),
+                      ),
+                      if (health != null) ...[
+                        const SizedBox(width: 8),
+                        AnimatedContainer(
+                          key: const ValueKey('health-dot'),
+                          duration: easeTime,
+                          curve: ease,
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(color: healthColor(health), shape: BoxShape.circle),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // The same actions as the person's card.
+          AppMenuButton<MemberAction>(
+            tooltip: 'More',
+            onSelected: (a) => runMemberAction(coord, m.id, a),
+            items: () => [
+              for (final a in memberActions(info)) AppMenuItem(value: a.action, label: a.label, icon: a.icon),
+            ],
+          ),
         ],
       ),
     );

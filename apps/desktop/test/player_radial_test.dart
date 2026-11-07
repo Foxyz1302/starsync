@@ -103,22 +103,41 @@ void main() {
     expect(menu, findsNothing);
   });
 
-  testWidgets('a plain right-click stays open for a click; a click outside closes it', (tester) async {
+  testWidgets('hold only: a plain right-click shows nothing; letting go anywhere closes it', (tester) async {
     state(Presence.watching);
     final radial = await pump(tester);
-    final g = await rightDown(tester, const Offset(640, 360));
+    // A quick right-click: nothing shows, nothing is picked.
+    var g = await rightDown(tester, const Offset(640, 360));
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(menu, findsNothing);
     await g.up();
+    await tester.pumpAndSettle();
+    expect((radial.isOpen, menu.evaluate().isEmpty), (false, true), reason: 'a tap does nothing special');
+    expect(coord.selfMember.value?.presence, Presence.watching);
+    // Held in the centre: it shows, and letting go there closes it.
+    g = await rightDown(tester, const Offset(640, 360));
     await tester.pump(const Duration(milliseconds: 200));
-    expect(radial.isOpen, isTrue, reason: 'click mode');
-    await tester.tapAt(const Offset(40, 40));
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(radial.isOpen, isFalse);
+    expect(menu, findsOneWidget);
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(radial.isOpen, isFalse, reason: 'no click mode');
+    expect(menu, findsNothing);
     // Dragged out and back to the centre: letting go cancels.
-    final again = await rightDown(tester, const Offset(640, 360));
-    await again.moveTo(const Offset(640, 270));
-    await again.moveTo(const Offset(640, 360));
-    await again.up();
-    await tester.pump(const Duration(milliseconds: 300));
+    g = await rightDown(tester, const Offset(640, 360));
+    await g.moveTo(const Offset(640, 270));
+    await tester.pump();
+    expect(menu, findsOneWidget, reason: 'leaving the centre shows it at once');
+    await g.moveTo(const Offset(640, 360));
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(radial.isOpen, isFalse);
+    // A quick flick onto a slot: shown at once, and letting go closes it.
+    g = await rightDown(tester, const Offset(640, 360));
+    await g.moveTo(const Offset(640, 450));
+    await tester.pump();
+    expect(tester.widget<RadialMenuView>(menu).hot, 2, reason: 'Out, below');
+    await g.up();
+    await tester.pumpAndSettle();
     expect(radial.isOpen, isFalse);
   });
 
@@ -129,11 +148,12 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
     var items = tester.widget<RadialMenuView>(menu).items;
     expect([items[0].label, items[0].enabled, items[0].why, items[2].label], ['BRB', false, "you're out", 'Join']);
-    await g.up();
     state(Presence.brb);
     await tester.pump();
     items = tester.widget<RadialMenuView>(menu).items;
     expect(items[0].label, "I'm back");
+    await g.up();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(tester.takeException(), isNull);
   });
 

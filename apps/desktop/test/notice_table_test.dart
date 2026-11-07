@@ -20,7 +20,7 @@ final _at = DateTime.utc(2026, 1, 1);
 /// A feed line; people are named and identified (Ann is m1, Bob m2, this
 /// member, Me, m9).
 FeedMessage _feed(String action,
-        {String actor = 'Ann', String? target, String reason = '', bool replayed = false}) =>
+        {String actor = 'Ann', String? target, String reason = '', bool replayed = false, int missed = 0}) =>
     FeedMessage(
         actor: actor,
         actorId: _ids[actor] ?? '',
@@ -29,7 +29,8 @@ FeedMessage _feed(String action,
         targetId: _ids[target] ?? '',
         reason: reason,
         at: _at,
-        replayed: replayed);
+        replayed: replayed,
+        missed: missed);
 
 const _ids = {'Ann': 'm1', 'Bob': 'm2', 'Me': 'm9', 'server': 'server'};
 
@@ -85,6 +86,8 @@ final _rows = <_Row>[
   _Row('gone (after the delayed notice)', _of(_feed('gone')), MemberGone,
       toast: 'Ann lost connection', actor: 'Ann', logged: true),
   _Row('return', _of(_feed('return')), MemberReturned, toast: 'Ann is back', actor: 'Ann', logged: true),
+  _Row('return, after missing some of the video', _of(_feed('return', missed: 102)), MemberReturned,
+      toast: 'Ann is back (missed 1:42)', actor: 'Ann', logged: true),
   _Row('out, someone went out', _of(_feed('out')), MemberOut, logged: true),
   _Row('afk, someone else went AFK', _of(_feed('afk')), MemberOut, logged: true),
   _Row('out, someone set someone else out', _of(_feed('out', target: 'Bob')), MemberOut, logged: true),

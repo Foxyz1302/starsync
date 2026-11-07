@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
@@ -12,29 +14,27 @@ import 'radial_menu.dart';
 // The player's radial (right button on the video): ↑ BRB / I'm back, →
 // skip ahead (Skip OP in the opening, Next episode through the ending,
 // else Skip 1:30), ↓ Out / Join, ← empty (a darker quarter, so the slots
-// never move). Actions that do not apply grey out in place. A press, a
-// drag and letting go picks; a plain right-click leaves it open for a
-// click; Esc, the centre or a click outside cancels.
+// never move). Actions that do not apply grey out in place. Hold only:
+// it is there while the button is held, and letting go always closes it,
+// picking the slot under the pointer (nothing in the centre). A plain
+// right-click (let go before [RadialController.revealAfter] without
+// leaving the centre) shows nothing. Esc closes it too.
 
-/// The menu open: where, whether the button is still down (drag to pick;
-/// false: click mode), the slot pointed at, the pointer from the centre,
-/// and whether the pointer has left the centre since the button went down.
+/// The menu while the button is held: where, the slot pointed at, the
+/// pointer from the centre, and whether it shows yet.
 class _Open {
   final Offset centre;
-  final bool drag;
   final int? hot;
   final Offset? pointer;
-  final bool left;
   final int pointerId;
-  const _Open(this.centre, {required this.drag, this.hot, this.pointer, this.left = false, this.pointerId = 0});
+  final bool shown;
+  const _Open(this.centre, {this.hot, this.pointer, this.pointerId = 0, this.shown = false});
 
-  _Open copy({bool? drag, int? hot, bool clearHot = false, Offset? pointer, bool clearPointer = false, bool? left}) =>
-      _Open(centre,
-          drag: drag ?? this.drag,
-          hot: clearHot ? null : (hot ?? this.hot),
-          pointer: clearPointer ? null : (pointer ?? this.pointer),
-          left: left ?? this.left,
-          pointerId: pointerId);
+  _Open copy({int? hot, bool clearHot = false, Offset? pointer, bool? shown}) => _Open(centre,
+      hot: clearHot ? null : (hot ?? this.hot),
+      pointer: pointer ?? this.pointer,
+      pointerId: pointerId,
+      shown: shown ?? this.shown);
 }
 
 /// The radial's state, shared by the listener on the video
@@ -44,20 +44,41 @@ class RadialController extends ChangeNotifier {
   final ControlsHold hold;
   RadialController(this.model, this.hold);
 
+  /// A press shorter than this that stays in the centre is a plain
+  /// right-click: the menu never shows. Leaving the centre shows it at
+  /// once (a quick flick still picks).
+  static const revealAfter = Duration(milliseconds: 150);
+
   _Open? _open;
   Size _area = Size.zero;
+  Timer? _reveal;
 
+  /// The button is held on the video (the menu may not show yet).
   bool get isOpen => _open != null;
+
+  /// The menu shows.
+  bool get isShown => _open?.shown ?? false;
 
   void _set(_Open? o) {
     _open = o;
-    hold.set(#radial, o != null);
+    if (o == null || o.shown) {
+      _reveal?.cancel();
+      _reveal = null;
+    }
+    // The controls stay up while it shows.
+    hold.set(#radial, o?.shown ?? false);
     notifyListeners();
   }
 
-  /// Esc, a pick, a click outside.
+  /// Esc, a pick, letting go.
   void close() {
     if (_open != null) _set(null);
+  }
+
+  @override
+  void dispose() {
+    _reveal?.cancel();
+    super.dispose();
   }
 
   /// The menu grows with the video's shorter side: its base size at 720
@@ -115,55 +136,32 @@ class RadialController extends ChangeNotifier {
     if (e.kind != PointerDeviceKind.mouse || e.buttons & kSecondaryMouseButton == 0) return;
     _area = area;
     final c = _clampCentre(e.localPosition);
-    _set(_Open(c, drag: true, pointer: e.localPosition - c, pointerId: e.pointer));
+    _set(_Open(c, pointer: e.localPosition - c, pointerId: e.pointer));
+    _reveal = Timer(revealAfter, () {
+      final o = _open;
+      if (o != null && !o.shown) _set(o.copy(shown: true));
+    });
   }
 
   void _move(PointerMoveEvent e) {
     final o = _open;
-    if (o == null || !o.drag || e.pointer != o.pointerId) return;
+    if (o == null || e.pointer != o.pointerId) return;
     final d = e.localPosition - o.centre;
     final hot = _slotAt(d);
-    _set(o.copy(hot: hot, clearHot: hot == null, pointer: d, left: o.left || hot != null));
+    _set(o.copy(hot: hot, clearHot: hot == null, pointer: d, shown: o.shown || hot != null));
   }
 
+  /// Letting go: the slot under the pointer, or nothing.
   void _up(PointerUpEvent e) {
     final o = _open;
-    if (o == null || !o.drag || e.pointer != o.pointerId) return;
-    // A plain right-click: the menu stays for a click.
-    if (!o.left) {
-      _set(o.copy(drag: false, clearPointer: true));
-      return;
-    }
+    if (o == null || e.pointer != o.pointerId) return;
     final hot = o.hot;
     hot == null ? close() : _pick(hot);
   }
 
   void _cancel(PointerCancelEvent e) {
     final o = _open;
-    if (o != null && o.drag && e.pointer == o.pointerId) close();
-  }
-
-  /// Click mode: the hover points; further out than [RadialSize.reach]
-  /// nothing is.
-  void _hover(Offset local) {
-    final o = _open;
-    if (o == null || o.drag) return;
-    final d = local - o.centre;
-    final hot = d.distance > RadialSize.reach * scale ? null : _slotAt(d);
-    if (hot != o.hot) _set(o.copy(hot: hot, clearHot: hot == null));
-  }
-
-  void _click(PointerDownEvent e) {
-    final o = _open;
-    if (o == null) return;
-    if (e.buttons & kSecondaryMouseButton != 0) {
-      // Another right button: the menu moves there.
-      _down(e, _area);
-      return;
-    }
-    _hover(e.localPosition);
-    final hot = _open?.hot;
-    hot == null ? close() : _pick(hot);
+    if (o != null && e.pointer == o.pointerId) close();
   }
 
   void _pick(int slot) {
@@ -214,46 +212,43 @@ class RadialListener extends StatelessWidget {
       );
 }
 
-/// The menu, over everything on the video. In click mode the whole area
-/// takes the next click.
+/// The menu, over everything on the video; it never takes the pointer
+/// (the held button's moves and its release reach [RadialListener]).
 class RadialLayer extends StatelessWidget {
   final RadialController controller;
   const RadialLayer({super.key, required this.controller});
 
   @override
   Widget build(BuildContext context) => Positioned.fill(
-        child: ListenableBuilder(
-          listenable: controller,
-          builder: (context, _) {
-            final o = controller._open;
-            final menu = o == null
-                ? const SizedBox.shrink(key: ValueKey('radial-none'))
-                : SignalBuilder(
-                    key: const ValueKey('radial'),
-                    builder: (context) => Stack(children: [
-                      Positioned(
-                        left: o.centre.dx - RadialSize.outer,
-                        top: o.centre.dy - RadialSize.outer,
-                        child: RadialMenuView(
-                          items: controller.items(),
-                          hot: o.hot,
-                          pointer: o.drag && o.pointer != null ? o.pointer! / controller.scale : null,
-                          scale: controller.scale,
+        child: IgnorePointer(
+          child: ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) {
+              final o = controller._open;
+              final menu = o == null || !o.shown
+                  ? const SizedBox.shrink(key: ValueKey('radial-none'))
+                  : SignalBuilder(
+                      key: const ValueKey('radial'),
+                      builder: (context) => Stack(children: [
+                        Positioned(
+                          left: o.centre.dx - RadialSize.outer,
+                          top: o.centre.dy - RadialSize.outer,
+                          child: RadialMenuView(
+                            items: controller.items(),
+                            hot: o.hot,
+                            pointer: o.pointer == null ? null : o.pointer! / controller.scale,
+                            scale: controller.scale,
+                          ),
                         ),
-                      ),
-                    ]),
-                  );
-            final shown = AnimatedSwitcher(
-              duration: const Duration(milliseconds: 110),
-              switchOutCurve: Curves.easeIn,
-              child: menu,
-            );
-            if (o == null || o.drag) return IgnorePointer(child: shown);
-            return MouseRegion(
-              onHover: (e) => controller._hover(e.localPosition),
-              child: Listener(behavior: HitTestBehavior.opaque, onPointerDown: controller._click, child: shown),
-            );
-          },
+                      ]),
+                    );
+              return AnimatedSwitcher(
+                duration: const Duration(milliseconds: 110),
+                switchOutCurve: Curves.easeIn,
+                child: menu,
+              );
+            },
+          ),
         ),
       );
 }

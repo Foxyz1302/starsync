@@ -25,7 +25,8 @@ StatusLine? playerStatusNow(SessionCoordinator coord, {bool slowConnect = false}
 
 /// The player's one status pill (bottom centre, design A): a rounded
 /// rectangle of the app's glass with the people it is about (36 px, side
-/// by side, at most three then "+N"), one line, and under it the keys
+/// by side, at most three then "+N"; while paused everyone else there with
+/// their BRB / AFK / Out badge, at most five), one line, and under it the keys
 /// that act now or a muted detail; at most one button. A Space hold fills
 /// it from the left, fading in with an ease-in so a tap barely shows, and
 /// from 150 ms on its words say what keeping on and letting go do. Fades in
@@ -103,6 +104,8 @@ class _PlayerStatusState extends State<PlayerStatus> {
       builder: (context, holdLine, _) => PartyWatch(builder: (context) {
         _trackConnecting(coord.status.value.line);
         var view = holdLine ?? playerStatusNow(coord, slowConnect: _slow);
+        // Out: the card in the middle says it ([OutCard]).
+        if (view?.kind == StatusKind.out) view = null;
         // The dev-only centre card shows the waiting itself.
         if (holdLine == null && view != null && waitDesign != WaitDesign.a && isWaitLine(view)) view = null;
         if (view != null) _last = view;
@@ -263,8 +266,10 @@ class StatusPill extends StatelessWidget {
 
   /// As tall as the two lines of text beside them.
   static const avatar = 36.0;
-  static const _gap = 4.0;
+  // Room for the standing badge that sits a third over the corner.
+  static const _gap = 6.0;
   static const _most = 3;
+  static const _mostPaused = 5;
 
   Widget? _lead() => switch (view.kind) {
         StatusKind.problem => Icon(
@@ -281,7 +286,8 @@ class StatusPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final v = view;
     final r = coord.serverState.value;
-    final who = v.who.take(_most).toList();
+    // A pause shows everyone there; the other lines the few they are about.
+    final who = v.who.take(v.kind == StatusKind.paused ? _mostPaused : _most).toList();
     final more = v.who.length - who.length;
     final shape = AvatarShape.of(context);
     final lead = who.isEmpty ? _lead() : null;
@@ -365,21 +371,35 @@ class KeyHints extends StatelessWidget {
       children: [
         for (var i = 0; i < keys.length; i++) ...[
           if (i > 0) const SizedBox(width: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.13),
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.16), width: 0.5),
-            ),
-            child: Text(keys[i].$1,
-                style: const TextStyle(
-                    color: Colors.white70, fontSize: 10.5, fontWeight: FontWeight.w600, height: 1.25, letterSpacing: 0.2)),
-          ),
+          Keycap(keys[i].$1),
           const SizedBox(width: 5),
           Flexible(child: Text(keys[i].$2, maxLines: 1, overflow: TextOverflow.ellipsis, style: action)),
         ],
       ],
+    );
+  }
+}
+
+/// One key as a small keycap, a little lighter than what it sits on
+/// ([ink]: its letters, and a tint of it under them; white by default).
+class Keycap extends StatelessWidget {
+  final String label;
+  final Color? ink;
+  const Keycap(this.label, {super.key, this.ink});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = ink ?? Colors.white;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: c.withValues(alpha: 0.16), width: 0.5),
+      ),
+      child: Text(label,
+          style: TextStyle(
+              color: c.withValues(alpha: 0.7), fontSize: 10.5, fontWeight: FontWeight.w600, height: 1.25, letterSpacing: 0.2)),
     );
   }
 }

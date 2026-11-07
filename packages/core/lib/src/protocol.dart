@@ -1175,25 +1175,6 @@ class HoldInfo {
   }
 }
 
-/// `state.rewind`: someone came back with the group from further behind
-/// than [RelayConstants.rewindBehindSecs]: a rewind to [position], where
-/// they were, offered to everyone for [RelayConstants.rewindSecs].
-class RewindOffer {
-  /// The member who came back.
-  final String id;
-  final double position;
-  const RewindOffer({required this.id, required this.position});
-
-  Map<String, Object?> toJson() => {'id': id, 'position': position};
-
-  static RewindOffer? fromJson(Object? j) {
-    if (j is! Map || j['id'] is! String) return null;
-    final p = j['position'];
-    if (p is! num || !p.isFinite || p < 0) return null;
-    return RewindOffer(id: j['id'] as String, position: p.toDouble());
-  }
-}
-
 /// `state.advance`: the shared countdown to Up next's first item over the
 /// media's last [secs] (or from an item coming first once it finished).
 /// At [at] + [secs] (server clock; the media's end while it plays) the
@@ -1263,8 +1244,6 @@ class StateBroadcast {
   /// The group's wish: play (true) or pause. It plays when it wants to
   /// and nobody is waited for.
   final bool wantsPlay;
-  /// Rewinds offered for whoever came back from behind ([RewindOffer]).
-  final List<RewindOffer> rewind;
   /// Members passed over for the current play request (`queuePlay`): they
   /// did not put it up in time, so [queuePerformer] asks someone else.
   final List<String> queuePass;
@@ -1287,7 +1266,6 @@ class StateBroadcast {
     this.hold,
     this.advance,
     this.wantsPlay = false,
-    this.rewind = const [],
     this.queuePass = const [],
   });
 
@@ -1309,7 +1287,6 @@ class StateBroadcast {
         if (hold != null) 'hold': hold!.toJson(),
         if (advance != null) 'advance': advance!.toJson(),
         'wish': wantsPlay ? 'play' : 'pause',
-        if (rewind.isNotEmpty) 'rewind': [for (final o in rewind) o.toJson()],
         if (queuePass.isNotEmpty) 'queuePass': queuePass,
       };
 
@@ -1341,9 +1318,6 @@ class StateBroadcast {
       hold: HoldInfo.fromJson(json['hold']),
       advance: QueueAdvance.fromJson(json['advance']),
       wantsPlay: json['wish'] == 'play',
-      rewind: json['rewind'] is List
-          ? (json['rewind'] as List).map(RewindOffer.fromJson).whereType<RewindOffer>().toList()
-          : const [],
       queuePass: json['queuePass'] is List ? (json['queuePass'] as List).whereType<String>().toList() : const [],
     );
   }
@@ -1365,6 +1339,9 @@ class FeedMessage {
   final String targetId;
   final int seq;
   final bool replayed;
+  /// `return`: seconds of the video the member missed while it was away
+  /// (at least [RelayConstants.missedNoticeSecs]); 0 otherwise.
+  final int missed;
   const FeedMessage({
     required this.actor,
     required this.action,
@@ -1375,6 +1352,7 @@ class FeedMessage {
     this.targetId = '',
     this.seq = 0,
     this.replayed = false,
+    this.missed = 0,
   });
 
   FeedMessage copyWith({int? seq, bool? replayed}) => FeedMessage(
@@ -1386,7 +1364,8 @@ class FeedMessage {
       actorId: actorId,
       targetId: targetId,
       seq: seq ?? this.seq,
-      replayed: replayed ?? this.replayed);
+      replayed: replayed ?? this.replayed,
+      missed: missed);
 
   Map<String, Object?> toJson() => {
         't': 'feed',
@@ -1399,6 +1378,7 @@ class FeedMessage {
         'reason': reason,
         'at': at.toIso8601String(),
         if (replayed) 'replayed': true,
+        if (missed > 0) 'missed': missed,
       };
 
   factory FeedMessage.fromJson(Map<String, Object?> json) {
@@ -1413,6 +1393,9 @@ class FeedMessage {
       targetId: json['targetId'] is String ? json['targetId'] as String : '',
       seq: finiteInt(json['seq'], 'seq'),
       replayed: json['replayed'] == true,
+      missed: json['missed'] is num && (json['missed'] as num).isFinite && (json['missed'] as num) > 0
+          ? (json['missed'] as num).toInt()
+          : 0,
     );
   }
 }

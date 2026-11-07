@@ -71,9 +71,6 @@ abstract final class RadialSize {
   static TextStyle label(bool hot) =>
       TextStyle(fontSize: 12, fontWeight: hot ? FontWeight.w700 : FontWeight.w500, height: 1.15);
   static const sub = TextStyle(fontSize: 9.5, height: 1.15);
-
-  /// Click mode: further out than this a click cancels.
-  static const reach = outer + 48;
 }
 
 class RadialMenuView extends StatefulWidget {
@@ -82,8 +79,7 @@ class RadialMenuView extends StatefulWidget {
   /// The slot pointed at, or null (the centre).
   final int? hot;
 
-  /// The pointer from the centre while the button is held (the dot); null
-  /// in click mode.
+  /// The pointer from the centre while the button is held (the dot).
   final Offset? pointer;
 
   /// Drawn this many times its base size ([RadialSize]), about its centre

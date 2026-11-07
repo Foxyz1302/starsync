@@ -797,8 +797,7 @@ class SessionCoordinator {
     _lastOut = self.isOut;
   }
 
-  /// Out: the player stays at its spot, paused, following nothing (its
-  /// reports say where it is, for the rewind offer when it comes back). A
+  /// Out: the player stays at its spot, paused, following nothing. A
   /// relay this member serves goes on (it does not use the player). A
   /// new media while out: nothing to stay at, so nothing open; [join]
   /// opens it as new.

@@ -98,4 +98,56 @@ void main() {
     await tester.pumpWidget(scoped(_graph, const SizedBox()));
     await tester.pump(const Duration(seconds: 5));
   });
+
+  testWidgets('the wheel over the player panel never reaches the volume, also past its list\'s ends',
+      (tester) async {
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(scoped(_graph, MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(
+        body: SessionPlayer(
+          mode: PlayerMode.full,
+          fullscreen: false,
+          onExpand: () {},
+          onCollapse: () {},
+          onClose: () {},
+          onToggleFullscreen: () {},
+          onToggleChat: () {},
+          onChangeVideo: () {},
+          onOpenAccounts: () {},
+          onLeave: () {},
+          windowControls: false,
+          videoBuilder: (context, controls) => Stack(fit: StackFit.expand, children: [
+            const ColoredBox(color: Colors.black),
+            if (controls != null) controls(VideoState()),
+          ]),
+        ),
+      ),
+    )));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Player settings').first);
+    await tester.pump(const Duration(milliseconds: 400));
+    final panel = find.byKey(const ValueKey('player-panel'));
+    expect(panel, findsOneWidget);
+    final readout = find.byKey(const ValueKey('volume-readout'));
+    final at = tester.getCenter(panel);
+    final volume = coord.playback.volume.value;
+    // Up at the top, then far down past the end: the list lets these go.
+    for (final dy in [-60.0, -60.0, ...List.filled(40, 120.0)]) {
+      await tester.sendEventToBinding(
+          PointerScrollEvent(kind: PointerDeviceKind.mouse, position: at, scrollDelta: Offset(0, dy)));
+      await tester.pump();
+    }
+    expect(readout, findsNothing, reason: 'no volume step over the panel');
+    expect(coord.playback.volume.value, volume);
+    // Over the picture it still steps.
+    await tester.sendEventToBinding(PointerScrollEvent(
+        kind: PointerDeviceKind.mouse, position: const Offset(300, 300), scrollDelta: const Offset(0, -60)));
+    await tester.pump();
+    expect(readout, findsOneWidget);
+    await tester.pumpWidget(scoped(_graph, const SizedBox()));
+    await tester.pump(const Duration(seconds: 5));
+  });
 }

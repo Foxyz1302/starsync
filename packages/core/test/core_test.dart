@@ -326,7 +326,7 @@ void main() {
       expect(r.copyWith(sourceGone: false).toJson().containsKey('sourceGoneSince'), isFalse);
     });
 
-    test('state carries hold, advance, the wish, rewinds and passed-over members', () {
+    test('state carries hold, advance, the wish and passed-over members', () {
       final at = DateTime.utc(2026);
       final s = StateBroadcast(
           eventId: 1,
@@ -338,7 +338,6 @@ void main() {
           hold: const HoldInfo(brb: ['m2'], video: ['m3'], source: true),
           advance: QueueAdvance(id: 'q3', at: at, secs: 10),
           wantsPlay: true,
-          rewind: const [RewindOffer(id: 'm4', position: 102.5)],
           queuePass: const ['m1']);
       final json = s.toJson();
       expect(json['wish'], 'play');
@@ -346,7 +345,7 @@ void main() {
       expect([back.hold!.brb, back.hold!.video, back.hold!.source, back.hold!.members],
           [['m2'], ['m3'], true, ['m2', 'm3']]);
       expect([back.advance!.id, back.advance!.secs], ['q3', 10]);
-      expect([back.wantsPlay, back.rewind.single.id, back.rewind.single.position, back.queuePass], [true, 'm4', 102.5, ['m1']]);
+      expect([back.wantsPlay, back.queuePass], [true, ['m1']]);
       expect(HoldInfo.fromJson(const {}), isNull, reason: 'nobody waited for: no hold');
       expect(StateBroadcast.fromJson(rt({...json, 'wish': 'pause'})).wantsPlay, isFalse);
     });

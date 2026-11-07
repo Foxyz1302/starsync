@@ -71,11 +71,10 @@ abstract class RelayConstants {
   static const int silenceSecs = 15;
   static const int graceSecs = 600;
   static const int goneNoticeSecs = 10;
-  /// Someone back with the group from further behind than
-  /// [rewindBehindSecs] (out, a crash, a stalled stream) gives everyone a
-  /// rewind to where they were (`state.rewind`) for [rewindSecs].
-  static const int rewindBehindSecs = 10;
-  static const int rewindSecs = 30;
+  /// Someone back from a drop (a lost connection, a crash) that missed
+  /// at least this much of the video: the feed's `return` line says how
+  /// much (`feed.missed`).
+  static const int missedNoticeSecs = 10;
   /// Feed lines the server keeps for `hello.feedAfter` (the replay in
   /// `welcome.feed`).
   static const int feedReplayLines = 50;

@@ -27,9 +27,9 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - Mark a whole Jellyfin show or season watched (or unwatched) from its page or its right-click menu; a whole show asks first
 - People cards: rest the mouse on someone (their avatar in the top bar or in fullscreen, a member's row, a chat line, a toast, or click a danmaku line's name) for a card with a bigger picture (click it to see it full size), whether they are watching, BRB, AFK, out or reconnecting, their Starsync version and what they pass on, plus Wait for / Don't wait for, Nudge and Out. A click keeps it open
 - BRB: hold Space for half a second and everyone waits for you ("Waiting for Bob"); when you are back it plays on if it was playing. While someone is BRB, Space makes you BRB too or brings you back, and holding it for 2 seconds goes on without them
-- Right-click and hold on the video (or right-click, then click) for a round menu: BRB or I'm back, Skip OP, Skip 1:30 or Next episode, Out or Join
+- Right-click and hold on the video for a round menu: BRB or I'm back, Skip OP, Skip 1:30 or Next episode, Out or Join. Let go on a choice to pick it, anywhere else to close it
 - "Wait for Bob" on someone's card when they ran off without pressing anything, and "Don't wait for Bob" to go on without whoever everyone waits for
-- Someone who comes back from further behind (out, a crash, a stalled video) gives everyone "Rewind for Alice (1:42)" for half a minute
+- Someone back from a dropped connection or a crash shows how much they missed: "Bob is back (missed 1:42)"
 - Up next counts down over the last 10 seconds of a video and the next one starts the moment it ends; a pause or Cancel stops it at the end. Clips under a minute just say what is up next
 - Avatar shape: everyone's picture as a rounded square, or as a circle (Settings → Party → More)
 - Screenshots: S freezes the picture for you alone (the video keeps playing for everyone) so you can drag over the part you want, or click for all of it, with or without subtitles (T); Shift+S takes the whole picture at once. Each lands in Pictures/Starsync, named after the show, episode and moment, and is copied to paste anywhere; click the little preview to crop it again
@@ -43,9 +43,12 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - Play and pause are everyone's: one press of Space or the play button plays or pauses for the whole group, and nobody presses "ready" any more (the ready count, Force ready and Mark everyone ready are gone). A new video waits for one Play, and putting something up keeps it playing or paused
 - Nothing starts by itself because time passed: the group waits for a video that is still loading until it is there or someone goes on without it
 - The pill at the bottom says who everyone waits for, with their pictures and the keys that do something now ("Space: BRB too · Hold Space: continue without"); holding Space fills it, and subtitles move up out of its way
-- Out replaces sitting out: nobody waits for you, your player stays where you were, and Space or Join brings you in at the current moment. Closing the player, or the window minimised for 10 minutes while it plays, sets you out
+- Out replaces sitting out: nobody waits for you, your player stays where you were, and Space or Join brings you in at the current moment. Closing the player, or the window minimised for 10 minutes while it plays, sets you out. While you are out, a small card over the dimmed picture says so, shows what the others are watching and where they are, and has one Join button
 - AFK replaces auto sit-out: 10 minutes without input while nothing plays; any key or the mouse brings you back. It has no switch any more
 - Pictures fill their shape, with a small badge for BRB (a cup), AFK (Zz) and out (a crossed eye) instead of a coloured ring; loading and reconnecting run round the edge, and the pictures in the top bar are bigger
+- Someone's loading edge grows as their video loads, or circles smoothly while that is not known, instead of filling up and starting over
+- While the video is paused, the pill shows everyone who is in, with their BRB, AFK or out badge, so you see who is there before pressing play
+- The list of everyone in the server is easier to read: the server's name and who stands where on top, then one tidy row per person with their picture, standing (in its badge's colour), how the video reaches them and the ⋮ menu
 - "Next episode" shows through the ending, or the last 90 seconds when the ending is not known
 - An Up next item that does not come up in time is asked of someone else who can put it up (or once more) instead of quietly stopping
 - Everyone needs this version: an older app is told to update before it joins
@@ -76,6 +79,8 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ### Fixed
 
+- Scrolling a list over the player (the player settings panel, for example) past its end no longer changes the volume; only the wheel over the video itself does
+- A thin rim of a person's colour could show round their picture
 - Closing the window could leave Starsync running unseen in the background, with its players, for hours; it now ends within a few seconds (and always within 20)
 - A video could take seconds to show, or Up next could stop getting ready, when it was started while nothing on screen moved
 - Video memory no longer grows with every video played (about 10 MB more per video at 2560×1080 until the app was closed)

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:signals/signals_core.dart';
 import 'package:sync_relay_core/core.dart' show FeedMessage, Presence;
 
+import '../playback/media_marks.dart' show formatClock;
 import '../platform/ports/system_notifications.dart';
 import '../platform/ports/window_activity.dart';
 import '../sfx/sfx.dart';
@@ -282,8 +283,15 @@ Notice _plain(AppEvent e) => switch (e) {
       // nothing), and back after it.
       MemberGone(:final feed) => Notice(
           category: NoticeCategory.people, log: feed, toast: '${feed.actor} lost connection', actor: feed.actor),
-      MemberReturned(:final feed) =>
-        Notice(category: NoticeCategory.people, log: feed, toast: '${feed.actor} is back', actor: feed.actor),
+      // Back from a drop or a crash; what it missed of the video, when
+      // that is worth saying (`feed.missed`).
+      MemberReturned(:final feed) => Notice(
+          category: NoticeCategory.people,
+          log: feed,
+          toast: feed.missed > 0
+              ? '${feed.actor} is back (missed ${formatClock(Duration(seconds: feed.missed))})'
+              : '${feed.actor} is back',
+          actor: feed.actor),
       // Put back after a server restart: news, but not a change.
       MediaSwapped(:final feed) when feed.reason == 'restore' => Notice(
           category: NoticeCategory.upNext,

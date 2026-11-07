@@ -159,8 +159,7 @@ Field notes:
   `mediaId` names an earlier media as `buffered` 0. A `loading` member's
   report ends its loading once it holds the current media at the server
   position (within 5 s) with the buffer the group needs (see "Presence");
-  its position is where its player is (an `out` member's spot, for the
-  rewind offer).
+  its position is where its player is (an `out` member's spot).
 - `report.jf` (optional): Jellyfin access per `ServerId`, `true` = this
   client plays the item with its own account, `false` = through the relay.
   Sticky: a report without `jf` keeps the last one. At most 8 entries, keys
@@ -249,11 +248,10 @@ Field notes:
  "seekBy":"m1","seekSeq":3,"relay":true,"relayNext":true,"queue":[<item>]?,
  "queuePlay":"q3"?,"queuePass":["m2"]?,"wish":"play"|"pause",
  "hold":{"brb":["m2"],"video":["m3"],"source":true}?,
- "rewind":[{"id":"m4","position":102.0}]?,
  "advance":{"id":"q3","at":"<ISO>","secs":10}?}
 {"t":"pong","c":1767225600000,"s":1767225600012}
 {"t":"feed","seq":12,"actor":"","actorId":"m2","action":"","target":"","targetId":"m3",
- "reason":"","at":"<ISO-8601>"}
+ "reason":"","at":"<ISO-8601>","missed":102?}
 {"t":"chat","text":"...","from":"<name>","fromId":"m2"}
 {"t":"nudge","from":"m2","name":"Alice"}
 {"t":"err","code":"...","message":"...","for":"..."}
@@ -310,11 +308,6 @@ Field notes:
   (only while the wish is `play`: still `loading`, or a buffer short of
   `bufferNeed`), `source` (true: a relayed media's source is `gone`, the
   short buffers are its doing). Each list is omitted when empty.
-- `state.rewind` (omitted when none): someone came back with the group
-  from further back than 10 s (out, a drop, a stalled stream someone
-  continued without): `id` the member, `position` where it fell behind.
-  Each stays about 30 s; any seek and any swap end them all. A client
-  offers "Rewind for Alice (1:42)", a seek to `position`.
 - `state.advance` (omitted when none runs): the shared countdown to Up
   next's first item over the media's last 10 s (see "Queue").
 - `pong.c` echoes the ping's `c`; `pong.s` is the server's clock in epoch ms
@@ -333,7 +326,9 @@ Field notes:
   `join` (a new member only), `leave` (for
   good: `reason` `bye`, `grace` or `closed`), `gone` (10 s after the member went
   `gone`; a quicker return says nothing), `return` (back within the grace
-  after a `gone` line), `swap`, `seek`, `finished`, `chat`, `rename`,
+  after a `gone` line; `missed`, omitted when under 10 s: the seconds of
+  the video that played since it dropped while it was in, none after a
+  seek meanwhile), `swap`, `seek`, `finished`, `chat`, `rename`,
   `avatar`, `queue-add`, `queue-remove`,
   `queue-skip` (actor `server` when the server skipped it), `advance-cancel`
   (`target` the dropped continuation's title, if any), `fetch-fail` (the server could not fetch the current
