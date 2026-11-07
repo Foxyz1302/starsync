@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Build a Linux test build here and publish it to the `dev` prerelease on
-# the Gitea of `origin` (or RELEASE_REPO_URL, e.g. https://gitea.example.org/owner/repo),
-# where dev builds update from (see Updater in docs/ARCHITECTURE.md).
+# Build a Linux test build here and publish it to the `dev` prerelease of
+# the GitHub repo (STARSYNC_GITHUB_REPO, default Foxyz1302/starsync), where
+# dev builds update from (see Updater in docs/ARCHITECTURE.md).
 # No tag push, no CI, no commit: the working tree is built as it is.
 # Usage: tool/dev_release.sh [--minor|--major] [--no-publish]
 # Version: `<next>-dev.N`, N one past the published dev build of that
@@ -9,8 +9,7 @@
 # or with --minor / --major the next minor / major (1.2.0 / 2.0.0); once a
 # dev line is published past the pubspec's next patch, later runs keep
 # following it (1.2.0-dev.2, ...) until the release moves the pubspec.
-# Token: RELEASE_TOKEN, else the file ~/.config/watch-together-release-token
-# (a Gitea access token with repository read/write; keep the file 0600).
+# Token: GH_TOKEN / GITHUB_TOKEN, else `gh auth token` (tool/publish_github.dart).
 # The manifest's `highlights` and `changes` (What's new) and the dev
 # release's page are CHANGELOG.md's Unreleased. The manifest is signed
 # (manifest.json.sig, uploaded next to it) with STARSYNC_SIGNING_KEY or
@@ -30,13 +29,6 @@ for arg in "$@"; do
     *) echo "usage: $0 [--minor|--major] [--no-publish]" >&2; exit 1 ;;
   esac
 done
-TOKEN_FILE="$HOME/.config/watch-together-release-token"
-if [[ -z "${RELEASE_TOKEN:-}" && -f "$TOKEN_FILE" ]]; then
-  RELEASE_TOKEN="$(tr -d '[:space:]' <"$TOKEN_FILE")"; export RELEASE_TOKEN
-fi
-if [[ "$PUBLISH" == "1" && -z "${RELEASE_TOKEN:-}" ]]; then
-  echo "error: set RELEASE_TOKEN or write $TOKEN_FILE (or pass --no-publish)" >&2; exit 1
-fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # The manifest goes out signed (DEVELOPMENT "Signing"): no key, no publish,
@@ -51,13 +43,9 @@ fi
 if [[ -n "$(git -C "$ROOT" status --porcelain -- updates/starsync-config.json)" ]]; then
   echo "warning: updates/starsync-config.json has changes that are not published: dart tool/sign_config.dart, commit and push" >&2
 fi
-# The repo the dev prerelease lives in: RELEASE_REPO_URL, else origin (an
-# ssh origin needs RELEASE_REPO_URL: downloads are https).
-REPO_URL="${RELEASE_REPO_URL:-$(git -C "$ROOT" remote get-url origin)}"
-REPO_URL="${REPO_URL%.git}"
-[[ "$REPO_URL" =~ ^https?:// ]] ||
-  { echo "error: $REPO_URL is not an https repo address: set RELEASE_REPO_URL" >&2; exit 1; }
-BASE_URL="$REPO_URL/releases/download/dev"
+# The GitHub repo the dev prerelease lives in.
+GH_REPO="${STARSYNC_GITHUB_REPO:-Foxyz1302/starsync}"
+BASE_URL="https://github.com/$GH_REPO/releases/download/dev"
 
 PUB="$(sed -n 's/^version: \([0-9.]*\).*/\1/p' "$ROOT/apps/desktop/pubspec.yaml")"
 IFS=. read -r MA MI PA <<<"$PUB"
@@ -68,6 +56,16 @@ case "$BUMP" in
 esac
 LAST="$(curl -fsSL "$BASE_URL/manifest.json" 2>/dev/null |
   python3 -I -c 'import json,sys; print(json.load(sys.stdin)["version"])' 2>/dev/null || true)"
+# Before the first dev build on GitHub, the numbering carries on from the
+# last one published on the old host (RELEASE_REPO_URL, else origin's https
+# address), so installed dev builds see the new one as newer.
+if [[ -z "$LAST" ]]; then
+  OLD="${RELEASE_REPO_URL:-$(git -C "$ROOT" remote get-url origin)}"; OLD="${OLD%.git}"
+  if [[ "$OLD" =~ ^https?:// ]]; then
+    LAST="$(curl -fsSL "$OLD/releases/download/dev/manifest.json" 2>/dev/null |
+      python3 -I -c 'import json,sys; print(json.load(sys.stdin)["version"])' 2>/dev/null || true)"
+  fi
+fi
 # A published dev line past <next> (started with --minor/--major) wins.
 LAST_BASE="${LAST%%-dev.*}"
 if [[ -n "$LAST" && "$LAST_BASE" != "$NEXT" &&
@@ -117,12 +115,9 @@ if [[ "$SIGN" == "1" ]]; then dart "$ROOT/tool/sign.dart" "$MANIFEST"; fi
 if [[ "$PUBLISH" != "1" ]]; then
   echo "built $TARBALL (not published)"; exit 0
 fi
-# Gitea sometimes resets the upload; the previous build stays up meanwhile.
-for try in 1 2 3; do
-  dart "$ROOT/tool/release_publish.dart" dev "$TARBALL" "$MANIFEST" && break
-  [[ "$try" == 3 ]] && { echo "error: upload failed 3 times" >&2; exit 1; }
-  echo "upload failed, retrying ($try/3) ..."; sleep 3
-done
+# The publisher retries failed uploads itself and puts the manifest (and
+# its .sig) up last, so the previous build stays current until then.
+dart "$ROOT/tool/publish_github.dart" --repo "$GH_REPO" dev "$TARBALL" "$MANIFEST"
 
 cat <<EOF
 

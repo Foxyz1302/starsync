@@ -382,18 +382,19 @@ Signing before the tag cannot work: the archives' sha256 is only known
 once CI built them, and a manifest without it is refused.
 
 Test builds (Linux, no tag, no CI): `tool/dev_release.sh [--minor|--major]
-[--no-publish]` (token: `RELEASE_TOKEN` or
-`~/.config/watch-together-release-token`, a Gitea access token with
-repository read/write) builds the working tree here as `<next>-dev.N` (N
+[--no-publish]` (token: `GH_TOKEN`/`GITHUB_TOKEN`, else `gh auth token`)
+builds the working tree here as `<next>-dev.N` (N
 one past the published one; `<next>` the pubspec's next patch, or next
 minor / major when asked, and once such a line is published later runs
-follow it until a release moves the pubspec), writes its `manifest.json`
+follow it until a release moves the pubspec; before the first dev build
+on GitHub the numbering carries on from the old host's dev manifest,
+`RELEASE_REPO_URL` or `origin`), writes its `manifest.json`
 (`assetSha256` and, for test builds older than signing, a string
 `sha256`; `highlights` and `changes`: the changelog's Unreleased, which
 also becomes the prerelease's text), signs it and replaces the assets of
-the `dev` prerelease with the tarball, `manifest.json.sig` and
-`manifest.json` (`release_publish.dart dev` refuses a manifest without
-its `.sig`). Without a signing key it stops before building;
+the `dev` prerelease of `STARSYNC_GITHUB_REPO` (default
+`Foxyz1302/starsync`) with the tarball, `manifest.json.sig` and
+`manifest.json` (`publish_github.dart dev`, manifest last). Without a signing key it stops before building;
 `--no-publish` then builds and leaves the manifest unsigned. Dev builds
 update from it on the Dev update channel, which a test build starts on
 and keeps after a release ([Updater](ARCHITECTURE.md#updater)). Any
@@ -412,10 +413,10 @@ The repo and its releases still live on a Gitea (`origin`), with GitHub,
 `https://github.com/Foxyz1302/starsync`, as the public home (it feeds
 the website's downloads). Apps read their config and manifests from
 GitHub only (the signed config, else `distribution.dart`:
-[Signing](#signing)). `tool/dev_release.sh`, `tool/sign_release.sh` and
-`tool/release_publish.dart` publish to and download from the Gitea of
-`origin`, or of `RELEASE_REPO_URL` when set (the repo's https address);
-no Gitea address is written in the tree. Apps up to 1.4.x have the
+[Signing](#signing)). `tool/dev_release.sh` publishes dev builds to GitHub;
+`tool/sign_release.sh` and `tool/release_publish.dart` still publish to
+and download from the Gitea of `origin`, or of `RELEASE_REPO_URL` when
+set (the repo's https address); no Gitea address is written in the tree. Apps up to 1.4.x have the
 Gitea's address built in and check no signature: they update through
 the Gitea's copy of `updates/manifest.json` on `main` (they ignore the
 `.sig` and `assetSha256`), so that file stays.
@@ -502,11 +503,10 @@ posts a release's tarball to Discord; Gitea's CI never did). No other.
 
 Left to switch: Actions on for the repo (if Gitea push-mirrors to it, the
 workflows run from the next mirrored push: `ci.yml` on every push,
-publishing on the next tag); `tool/release.sh`, `tool/sign_release.sh`
-and `tool/dev_release.sh` pointed at GitHub (manifest URLs,
-`publish_github.dart`; ROADMAP "GitHub as the public home"); `fox_utils`
-and `leaf_widgets`, git dependencies on the Gitea, mirrored there; then
-`.gitea/workflows` removed.
+publishing on the next tag); `tool/release.sh` and
+`tool/sign_release.sh` pointed at GitHub (manifest URLs,
+`publish_github.dart`); then `.gitea/workflows` removed. Dev builds,
+`fox_utils` and `leaf_widgets` are on GitHub already.
 
 ### Changelog
 
