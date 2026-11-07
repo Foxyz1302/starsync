@@ -1,0 +1,2 @@
+# Signed files are checked byte for byte: never convert their line endings.
+updates/** -text
