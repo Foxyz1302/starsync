@@ -316,6 +316,19 @@ class StatusAvatar extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
+          // Overlapping shapes are parted by a background-coloured halo
+          // behind the picture, not an outline over its edge: two
+          // anti-aliased edges on top of each other let the picture show
+          // through at the corners (jagged at rest, smooth once spread).
+          if (edge)
+            Positioned(
+              left: -2,
+              top: -2,
+              right: -2,
+              bottom: -2,
+              child: DecoratedBox(
+                  decoration: BoxDecoration(color: bg, borderRadius: shape.radius(size + 4))),
+            ),
           Positioned.fill(child: picture),
           if (edge || activity != AvatarActivity.none)
             Positioned.fill(
@@ -441,8 +454,7 @@ class _Zz extends StatelessWidget {
   }
 }
 
-/// Over the picture's edge: the background-colour outline that parts
-/// overlapping shapes, then loading (a white run from the top as long as
+/// Over the picture's edge: loading (a white run from the top as long as
 /// the buffer is along, gliding to each new value; with nothing known
 /// yet, a short white arc going round) or reconnecting (an amber stretch
 /// going round), each on a thin dark line so it shows on light pictures.
@@ -554,14 +566,8 @@ class _EdgePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (edge case final e?) {
-      canvas.drawRRect(
-          shape.deflate(1),
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2
-            ..color = e);
-    }
+    // The parting edge itself is a halo behind the picture (StatusAvatar);
+    // [edge] here only keeps the activity runs clear of it.
     if (activity == AvatarActivity.none) return;
     // The outline, starting at the top middle and going clockwise.
     final r = shape.deflate(_stroke / 2 + (edge == null ? 0 : 2));
