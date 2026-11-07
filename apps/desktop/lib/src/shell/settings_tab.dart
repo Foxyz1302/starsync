@@ -16,17 +16,15 @@ import '../schedule/animeflow.dart';
 import '../screens/home/about_page.dart';
 import '../screens/home/settings_page.dart';
 import '../screens/home/ui.dart' show appName, devTools, displayVersion;
-import '../session/identity.dart' show Profile;
 import '../state/settings.dart' show BadgeStyle;
 import '../sfx/sfx.dart';
 import '../sfx/sound_bank.dart';
 import '../app/app_graph.dart';
 import '../update/update_controller.dart';
 import '../widgets/app_menu.dart';
-import 'avatar.dart';
 import 'motion.dart';
 import 'notice_settings.dart';
-import 'profile_card.dart' show ProfileColors, ProfilePicture;
+import 'person_card.dart' show PersonCard;
 
 /// The Settings tab's pages, in nav order. Ctrl+, opens the one last
 /// shown, Player at first.
@@ -271,79 +269,23 @@ class SettingsTab extends StatelessWidget {
   }
 }
 
-/// Party → You: your picture, name and colour, edited here as on the
-/// profile card (your avatar in the strip), with the same widgets.
-class YouPanel extends StatefulWidget {
+/// Party → You: your own person card in edit mode, the same card as the
+/// profile card's (your avatar in the strip) and everyone else's.
+class YouPanel extends StatelessWidget {
   const YouPanel({super.key});
 
   @override
-  State<YouPanel> createState() => _YouPanelState();
-}
-
-class _YouPanelState extends State<YouPanel> {
-  late final Profile _p = AppScope.of(context).profile;
-  late final _name = TextEditingController(text: _p.name.peek());
-
-  @override
-  void dispose() {
-    _name.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final small = TextStyle(color: scheme.onSurfaceVariant, fontSize: 12);
-    return SettingsPanel(
-      key: const ValueKey('party-you'),
-      title: 'You',
-      child: SignalBuilder(builder: (context) {
-        final png = _p.picture.value;
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ProfilePicture(profile: _p, info: selfAvatarInfo()),
-            const SizedBox(width: 20),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  TextField(
-                    key: const ValueKey('party-name'),
-                    controller: _name,
-                    maxLength: 32,
-                    decoration: const InputDecoration(isDense: true, counterText: '', labelText: 'Name'),
-                    onChanged: _p.setName,
-                  ),
-                  const SizedBox(height: 14),
-                  ProfileColors(profile: _p),
-                  if (_p.error.value case final err?)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Text(err, style: TextStyle(color: scheme.error, fontSize: 12)),
-                    ),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                              'Others see your name, picture and colour. Click the picture to change it.',
-                              style: small),
-                        ),
-                        if (png != null)
-                          TextButton(onPressed: () => _p.setPicture(null), child: const Text('Remove picture')),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        );
-      }),
-    );
-  }
+  Widget build(BuildContext context) => const SettingsPanel(
+        key: ValueKey('party-you'),
+        title: 'You',
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Padding(
+            padding: EdgeInsets.only(top: 4, bottom: 4),
+            child: PersonCard.you(glass: false, nameKey: ValueKey('party-name')),
+          ),
+        ),
+      );
 }
 
 /// Party: your server's port and password, used when you

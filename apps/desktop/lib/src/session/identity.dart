@@ -79,7 +79,8 @@ class ClientIdentity {
   }
 }
 
-/// Colours offered in the profile card; the first is the default.
+/// The swatches offered on your card (any other colour through
+/// "Custom…"); the first is the default.
 const profileColors = <Color>[
   Colors.deepPurple,
   Colors.indigo,
@@ -135,7 +136,7 @@ class Profile {
   ProfilePush push = ({String? name, String? avatar, String? color}) {};
   ConnectStore forms = ConnectStore();
   bool _loaded = false;
-  Timer? _nameTimer;
+  Timer? _nameTimer, _colorTimer;
 
   /// Reads the stored profile once (the app shell starts it). Old installs
   /// stored a picture path: it is shrunk through [encodeAvatar] once and
@@ -200,11 +201,21 @@ class Profile {
     }
   }
 
-  Future<void> setColor(Color c) async {
-    color.value = c;
-    push(color: colorToWire(c));
-    await _save();
+  /// Shows at once; goes out (and is stored) once it settles, so a drag
+  /// through the custom picker sends one change, not one per move.
+  void setColor(Color c) {
+    final picked = c.withValues(alpha: 1);
+    if (picked.toARGB32() == color.peek().toARGB32()) return;
+    color.value = picked;
+    _colorTimer?.cancel();
+    _colorTimer = Timer(colorSettle, () {
+      push(color: colorToWire(color.peek()));
+      unawaited(_save());
+    });
   }
+
+  /// How long a colour change waits for the next one before it is sent.
+  static const colorSettle = Duration(milliseconds: 250);
 
   Future<void> _save() async {
     try {

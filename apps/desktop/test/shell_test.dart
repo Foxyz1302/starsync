@@ -310,7 +310,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('strip-profile')));
       await tester.pumpAndSettle();
       expect(find.byType(ProfileCard), findsOneWidget);
-      expect(find.text('just you'), findsOneWidget);
+      expect(find.text('Just you'), findsOneWidget);
       await tester.tap(find.text('Help & about'));
       await tester.pumpAndSettle();
       expect(find.byType(ProfileCard), findsNothing);

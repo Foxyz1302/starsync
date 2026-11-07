@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../shell/avatar.dart' show AvatarInfo, LineAvatar;
+import '../widgets/contrast.dart' show readableOn;
 
 // Danmaku (Bilibili / niconico style): short lines that fly right to left
 // across the upper part of the picture. Each line takes a free lane (no
@@ -485,7 +486,8 @@ class _DanmakuLayerState extends State<DanmakuLayer> with SingleTickerProviderSt
             text: item.kind == DanmakuKind.chat ? '$name  ' : '$name ',
             style: TextStyle(
               fontWeight: s.nameWeight,
-              color: stroke == null ? (item.senderColor ?? Colors.white) : null,
+              // Too dark a colour is lifted to read over its dark outline.
+              color: stroke == null ? readableOn(item.senderColor ?? Colors.white, Colors.black, min: 3) : null,
             ),
           ),
         TextSpan(text: item.text, style: accent == null ? null : TextStyle(color: accent)),

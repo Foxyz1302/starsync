@@ -12,6 +12,7 @@ import '../session/delivery.dart';
 import '../session/session_coordinator.dart';
 import '../app/app_graph.dart';
 import '../state/settings.dart' show BadgeStyle;
+import '../widgets/contrast.dart' show textOn;
 import 'motion.dart';
 import 'person_card.dart' show PersonHover, PersonRef;
 
@@ -300,7 +301,8 @@ class StatusAvatar extends StatelessWidget {
             decoration: BoxDecoration(color: color, borderRadius: shape.radius(size)),
             child: Center(
               child: Text(initial,
-                  style: TextStyle(fontSize: size * 0.42, color: Color.alphaBlend(shade, Colors.white))),
+                  // Light or dark by contrast: any colour can be picked.
+                  style: TextStyle(fontSize: size * 0.42, color: Color.alphaBlend(shade, textOn(info.color)))),
             ),
           );
         }

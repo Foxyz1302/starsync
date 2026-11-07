@@ -186,7 +186,9 @@ Three suites, run from each package's folder:
   lanes, style, the toasts that fly and an idle layer
   (`danmaku_test`), the quick chat box over the player (`quick_chat_test`),
   a picture and its loading edge read back as pixels (`avatar_test`),
-  the player panel and the danmaku settings card (`player_settings_test`)),
+  the player panel and the danmaku settings card (`player_settings_test`),
+  any colour through "Custom…" and kept readable where it is used
+  (`color_picker_test`)),
   `singletons_test` (the `.instance` count, see
   ARCHITECTURE "Composition root"; lower its baseline when a use goes) and the real-mpv `*_e2e`
   tests plus `coord_presence`. The whole suite takes a couple of minutes;

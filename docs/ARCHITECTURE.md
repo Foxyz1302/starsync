@@ -2289,7 +2289,13 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   profile at once, anyone else's from the state (`memberColor`), from
   their name (`colorForName`) when they sent none;
   `memberAvatarInfo` carries it to the letter avatars, chat lines,
-  toasts, danmaku, people cards, the members card and the pill. A toast's or danmaku line's avatar (`LineAvatar`) is
+  toasts, danmaku, people cards, the members card and the pill. Any
+  colour can be picked, so each use keeps it readable on its own copy
+  (`widgets/contrast.dart`; the stored colour stays as picked): a letter
+  avatar's initial is white while it reaches 3:1 on the colour, else
+  dark (`textOn`); a chat line's name (on the chat panel's background,
+  4.5:1) and a danmaku line's name (on black, its outline, 3:1) are
+  lifted in lightness, hue kept, when too dark (`readableOn`). A toast's or danmaku line's avatar (`LineAvatar`) is
   looked up again while its picture is missing, so a picture that lands
   after the line (fetched from `/a/` once the member is seen; a failed
   fetch retries) still shows on it.
@@ -2307,7 +2313,9 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   layer where each line's sender is now (`DanmakuController.senderAt`,
   from the flow's own positions) and pins the card on a click there,
   while the controls still get the click. The card is frosted glass
-  (`AppGlass`, 312 px) read live from the state by member id (else by
+  (`AppGlass`, 328 px; `PersonCardFrame`) tinted with the person's colour
+  fading down from its top (`personTint`; the same for everyone, you
+  included) and read live from the state by member id (else by
   name; the place's own `AvatarInfo` once they left: "Not in the
   server"): a 64 px `StatusAvatar` (with a picture, a click shows it full
   size, `showPictureView`), name ("you"), standing (Watching, Loading…,
@@ -2321,7 +2329,10 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   without it; their own Space clears it), Nudge, Out; for you Out, or
   Join while out; the members card's ⋮ shows the same list) and
   "Everyone in the server". In fullscreen an open card
-  holds the controls up. The status pill's avatars keep a plain name
+  holds the controls up. Your own card is the same card
+  (`PersonCardView`): pinned (a hover only shows it), as the profile card
+  and in Settings → Party → You, its picture, name and colour are edited
+  in place (see "Profile"). The status pill's avatars keep a plain name
   tooltip (a click there is the pill's).
 - **Join card** (`connect_cards.dart`): recent servers as one-click rows
   that poll `GET /health` every 10 s while the card is open
@@ -2337,15 +2348,26 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   server stays as it is. A join with no profile name (any way in: the
   Join card, a link or the clipboard's invite) first asks for one
   (`ConnectFlow.askName`, the shell's `askYourName`): `NameCard`, "Wait,
-  what do we call you?", with the profile card's picture and colours
-  (`ProfilePicture`, `ProfileColors`) and a name field prefilled with
+  what do we call you?", on a person card's frame and tint with its
+  editable picture and colours (`ProfilePicture`, `ProfileColors`) and a
+  plain name field prefilled with
   `suggestedName` (the OS user name), focused; OK saves the name and the
   same join goes on, Cancel (Esc, a click outside) drops it.
-- **Profile** (`profile_card.dart`, `session/identity.dart`): a card
-  tinted with your colour: picture (a click opens the app's own
+- **Profile** (`profile_card.dart`, `profile_edit.dart`,
+  `session/identity.dart`): your own people card (`PersonCard.you`: the
+  standing, host, route, version and actions as on anyone's; alone "Just
+  you") with the editable parts in place, then links to the Settings
+  pages: picture (`ProfilePicture`; a click opens the app's own
   `CropPicker`, `picture_picker.dart`; without a picture a camera badge on
-  its corner says one can be added), name edited in place, colour
-  swatches, links to the Settings pages. The picker opens at once and
+  its corner says one can be added; Remove picture under the header),
+  name edited in place (`ProfileName`: reads as the name, a pencil and an
+  underline on hover; Enter or Esc close a popup card), colour
+  (`ProfileColors`, where the card shows the colour: the swatches,
+  your own colour as one more when it is none of them, and "Custom…",
+  which opens `ColorPicker` (`color_picker.dart`) in place: hue across
+  and saturation down in one area, a brightness bar, the hex code; a
+  colour shows at once and goes out once it settles, 250 ms, so a drag
+  sends one change). The picture picker opens at once and
   never the system's file chooser by itself: a picture comes from the
   clipboard (Ctrl+V or Shift+Insert, or Paste: `ShellPort.readImage`, an
   image or a copied image file), a drop on it, or Browse… (the file
@@ -2505,9 +2527,9 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
     0.4–0.8 s and Continue-without hold 1.5–3 s, see "Space and the
     radial"). A line says the
     player's ⚙ opens these while watching.
-  - **Party**: You (picture, name and colour edited in place with the
-    profile card's `ProfilePicture` / `ProfileColors`; the profile card's
-    Settings link opens this page), How people look, its own card: Avatar
+  - **Party**: You (your own person card in edit mode, the profile
+    card's without its links; the profile card's Settings link opens this
+    page), How people look, its own card: Avatar
     shape (Rounded square or Circle), Badges (Icons or Words), Avatars in
     the top bar (Overlap or Side by side; see "Avatars"), Your server (port and password, used the next time it is
     shared, in the connect form), Recent servers (Forget, as on the Join

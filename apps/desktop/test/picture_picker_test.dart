@@ -9,7 +9,7 @@ import 'package:starsync/src/files/scanner.dart' show FolderScan;
 import 'package:starsync/src/platform/ports/folder_access.dart';
 import 'package:starsync/src/shell/avatar.dart';
 import 'package:starsync/src/shell/picture_picker.dart';
-import 'package:starsync/src/shell/profile_card.dart';
+import 'package:starsync/src/shell/profile_edit.dart';
 
 import 'test_graph.dart';
 

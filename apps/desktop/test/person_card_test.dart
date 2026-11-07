@@ -7,11 +7,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_relay_core/core.dart';
 import 'package:starsync/src/danmaku/danmaku.dart';
 import 'package:starsync/src/session/app_events.dart' show ChatPosted, MemberJoined;
+import 'package:starsync/src/session/identity.dart' show ProfilePush;
 import 'package:starsync/src/shell/avatar.dart';
 import 'package:starsync/src/shell/chat_panel.dart' show ActivityRow;
 import 'package:starsync/src/shell/party_strip.dart' show MembersCard;
 import 'package:starsync/src/shell/person_card.dart';
 import 'package:starsync/src/shell/toasts.dart';
+import 'package:starsync/src/widgets/contrast.dart' show contrastRatio;
 
 import 'test_graph.dart';
 
@@ -335,6 +337,119 @@ void main() {
     expect(avatarForName('pol', coord, 'p').color, purple);
     expect(avatarForName('Bob', coord, 'b').color, colorForName('Bob'));
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets("one card for everyone: each person's colour tints theirs; a dark one still reads in chat", (tester) async {
+    coord.serverState.value = StateBroadcast(
+      eventId: 1,
+      transport: 'held',
+      position: 0,
+      serverTime: DateTime.now().toUtc(),
+      mediaId: 1,
+      members: const [
+        MemberView(id: 'p', name: 'pol', color: '#7e57c2'),
+        MemberView(id: 'n', name: 'Nox', color: '#1a0a40'),
+        MemberView(id: 'b', name: 'Bob'),
+      ],
+    );
+    Color tint() =>
+        ((tester.widget<AnimatedContainer>(inCard(find.byKey(const ValueKey('person-tint')))).decoration!
+                    as BoxDecoration)
+                .gradient! as LinearGradient)
+            .colors
+            .first;
+    await pump(tester, const Center(child: PersonCard(person: PersonRef(id: 'p', name: 'pol'))));
+    expect(tint(), const Color(0xFF7E57C2).withValues(alpha: 0.5), reason: "pol's purple, for everyone");
+    expect(inCard(find.byKey(const ValueKey('profile-picture'))), findsNothing, reason: 'not yours to change');
+    await pump(tester, const Center(child: PersonCard(person: PersonRef(id: 'b', name: 'Bob'))));
+    expect(tint(), colorForName('Bob').withValues(alpha: 0.5));
+
+    // A colour too dark for the chat's background: the name is lifted
+    // there, the picture keeps what was picked.
+    await pump(
+        tester,
+        ActivityRow(
+            item: FeedMessage(actor: 'Nox', actorId: 'n', action: 'chat', reason: 'hi', at: DateTime.now().toUtc())));
+    final name = tester.widget<Text>(find.text('Nox')).style!.color!;
+    expect(contrastRatio(name, ThemeData.dark().colorScheme.surfaceContainerLow), greaterThanOrEqualTo(4.5));
+    expect(tester.widget<StatusAvatar>(find.byType(StatusAvatar)).info.color, const Color(0xFF1A0A40));
+    expect(tester.takeException(), isNull);
+  });
+
+  group('your own card', () {
+    final pushed = <String>[];
+    late ProfilePush push;
+    late String name;
+    setUp(() {
+      final p = _graph.profile;
+      push = p.push;
+      name = p.name.peek();
+      pushed.clear();
+      p.push = ({String? name, String? avatar, String? color}) => pushed.add([?name, ?avatar, ?color].join());
+      coord.connection.client.memberId = 'a';
+    });
+    tearDown(() {
+      final p = _graph.profile;
+      p.push = push;
+      p.name.value = name;
+      p.picture.value = null;
+      coord.connection.client.memberId = '';
+    });
+
+    testWidgets('the same card: a hover shows it, pinned it edits in place', (tester) async {
+      party();
+      await pump(
+          tester,
+          Center(
+            child: PersonHover(
+              person: const PersonRef(id: 'a', name: 'Alex'),
+              child: const SizedBox(key: ValueKey('me'), width: 40, height: 40),
+            ),
+          ));
+      final g = await mouse(tester);
+      await g.moveTo(tester.getCenter(find.byKey(const ValueKey('me'))));
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(card, findsOneWidget);
+      expect(inCard(find.textContaining('Alex')), findsOneWidget);
+      expect(inCard(find.byKey(const ValueKey('profile-picture'))), findsNothing, reason: 'a passing hover only shows it');
+
+      await tester.tap(find.byKey(const ValueKey('me')));
+      await tester.pumpAndSettle();
+      // The person card's facts, as for anyone: standing, host, version,
+      // what you pass on, your actions.
+      expect(inCard(find.text('Watching')), findsOneWidget);
+      expect(inCard(find.text('host')), findsOneWidget);
+      expect(inCard(find.text('1.4.0')), findsOneWidget);
+      expect(inCard(find.textContaining('Passing on Frieren')), findsOneWidget);
+      expect(inCard(find.byKey(const ValueKey('person-action-out'))), findsOneWidget);
+      // And yours to change: the picture (no picture: the camera badge),
+      // the name, the colour.
+      expect(inCard(find.byKey(const ValueKey('profile-picture'))), findsOneWidget);
+      expect(inCard(find.byKey(const ValueKey('profile-picture-add'))), findsOneWidget);
+      expect(inCard(find.byKey(const ValueKey('color-custom'))), findsOneWidget);
+      await tester.enterText(inCard(find.byKey(const ValueKey('profile-name'))), 'Alexa');
+      expect(_graph.profile.name.value, 'Alexa');
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(pushed, ['Alexa'], reason: 'pushed live once typing settles');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(card, findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Remove picture: the picture goes, the camera badge comes back', (tester) async {
+      party();
+      _graph.profile.picture.value = _png;
+      await pump(tester, const Center(child: PersonCard.you()));
+      expect(inCard(find.byKey(const ValueKey('profile-picture-add'))), findsNothing);
+      await tester.tap(inCard(find.byKey(const ValueKey('profile-remove-picture'))));
+      await tester.pumpAndSettle();
+      expect(_graph.profile.picture.value, isNull);
+      expect(pushed, [''], reason: 'an empty avatar: removed for everyone');
+      expect(inCard(find.byKey(const ValueKey('profile-picture-add'))), findsOneWidget);
+      expect(inCard(find.byKey(const ValueKey('profile-remove-picture'))), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
   });
 
   testWidgets("from a danmaku line: a click on its sender, the controls still get it", (tester) async {

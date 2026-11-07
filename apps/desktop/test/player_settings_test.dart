@@ -14,7 +14,7 @@ import 'package:starsync/src/schedule/animeflow.dart';
 import 'package:starsync/src/shaders/shader_presets.dart';
 import 'package:starsync/src/shell/avatar.dart';
 import 'package:starsync/src/shell/party_strip.dart';
-import 'package:starsync/src/shell/profile_card.dart' show ProfileColors, ProfilePicture;
+import 'package:starsync/src/shell/profile_edit.dart' show ProfileColors, ProfilePicture;
 import 'package:starsync/src/shell/settings_tab.dart';
 import 'package:starsync/src/state/settings.dart';
 import 'package:starsync/src/update/update_controller.dart';

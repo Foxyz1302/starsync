@@ -6,6 +6,7 @@ import '../app/app_graph.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/copy_open.dart';
 import '../widgets/text_focus.dart';
+import '../widgets/contrast.dart' show readableOn;
 import 'avatar.dart';
 import 'person_card.dart' show PersonHover, PersonRef;
 
@@ -181,6 +182,7 @@ class ActivityRow extends StatelessWidget {
           ],
         ),
       );
+      final who = avatarForName(item.actor, AppScope.of(context).coordinator, item.actorId);
       return Builder(
         builder: (context) => GestureDetector(
           onSecondaryTap: () => _messageMenu(context, item.reason, link),
@@ -192,10 +194,7 @@ class ActivityRow extends StatelessWidget {
                 // The sender's card on their picture and name.
                 PersonHover(
                   person: PersonRef(id: item.actorId, name: item.actor),
-                  child: StatusAvatar(
-                      info: avatarForName(item.actor, AppScope.of(context).coordinator, item.actorId),
-                      size: 34,
-                      badges: false),
+                  child: StatusAvatar(info: who, size: 34, badges: false),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -210,7 +209,10 @@ class ActivityRow extends StatelessWidget {
                               child: Text(item.actor,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontWeight: FontWeight.w700)),
+                                  // Their colour, lifted when too dark to read here.
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: readableOn(who.color, scheme.surfaceContainerLow))),
                             ),
                           ),
                           const SizedBox(width: 6),

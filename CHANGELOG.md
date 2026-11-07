@@ -70,6 +70,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 - Settings has six pages: Player, Party, Notifications & sounds, Library & accounts, Updates, and Help & about. Each starts with the settings people change and folds the rest under More, and Ctrl+, opens on Player
 - Your picture, name and colour can be changed right in Settings → Party, next to your server and recent servers
 - Everyone now sees the colour each person picked
+- Pick any colour you like; your own card now looks like everyone else's, with editing in place
 - yt-dlp and its cookies are in Settings → Library & accounts → Web links (where a "needs cookies" message now points), and "Play the next episode automatically" is in Settings → Player
 - Diagnostics, sharing them with the server, the keyboard shortcuts (now all of them: M, Ctrl+, Ctrl+V and the library's keys) and About are together in Settings → Help & about
 - A few choices made way for their defaults: the controls always hide after 3 s, and updates are always checked (nothing installs without asking). The time display follows a click on the time, and hiding re-releases is in the Latest row's menu

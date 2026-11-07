@@ -12,10 +12,12 @@ import '../session/delivery.dart';
 import '../session/now_playing.dart' show NowPlaying;
 import '../session/party.dart';
 import '../session/session_coordinator.dart';
-import '../widgets/app_menu.dart' show AppGlass;
+import '../session/identity.dart' show Profile;
+import '../widgets/app_menu.dart' show AppGlass, AppMenuStyle;
 import 'avatar.dart';
 import 'motion.dart';
 import 'party_strip.dart' show VersionText, showMembersCard;
+import 'profile_edit.dart';
 
 // People cards: one card for a person wherever they show (the strip's and
 // the fullscreen avatars, the members card's rows, chat lines, toasts,
@@ -23,7 +25,8 @@ import 'party_strip.dart' show VersionText, showMembersCard;
 // click pins it ([showPersonCard]) until a click outside or Esc. It reads
 // the person live from the state: a larger picture (a click shows it full
 // size), name, standing, app version, what they pass on, the host crown,
-// and their actions (the same as the members card's ⋮).
+// and their actions (the same as the members card's ⋮). Your own card is
+// the same card, its picture, name and colour edited in place.
 
 /// What can be done to a member (the members card's ⋮ and the people
 /// card).
@@ -114,38 +117,97 @@ MemberView? memberOf(PersonRef p, StateBroadcast? r) {
   };
 }
 
-/// The card: its content, live from the state.
+/// The card, live from the state: one design for everyone, you included.
+/// It is tinted with the person's colour ([personTint]); on your
+/// own card ([editable]) the picture, the name and the colour edit in
+/// place.
 class PersonCard extends StatelessWidget {
-  static const width = 312.0;
+  static const width = 328.0;
   static const pictureSize = 64.0;
 
   final PersonRef person;
+
+  /// Your own card whoever the state says is in ([PersonCard.you]): also
+  /// alone or before the first state.
+  final bool you;
+
+  /// Your own card edits in place (pinned, the profile card, Settings); a
+  /// passing hover only shows it.
+  final bool editable;
 
   /// Shows "Everyone in the server" (not in the members card itself);
   /// [onEveryone] opens it (default: [showMembersCard]).
   final bool everyone;
   final VoidCallback? onEveryone;
 
-  /// After an action or a link: the pinned card closes.
+  /// After an action or a link, or Enter in your name: the pinned card
+  /// closes.
   final VoidCallback? onDone;
-  const PersonCard({super.key, required this.person, this.everyone = true, this.onEveryone, this.onDone});
+
+  /// Over the app (frosted glass) or on a page (a plain surface).
+  final bool glass;
+
+  /// Under the card's own rows (the profile card's links).
+  final List<Widget> footer;
+
+  /// Your name field's key.
+  final Key nameKey;
+  const PersonCard({
+    super.key,
+    required this.person,
+    this.everyone = true,
+    this.onEveryone,
+    this.onDone,
+    this.editable = false,
+    this.glass = true,
+    this.footer = const [],
+    this.nameKey = const ValueKey('profile-name'),
+  }) : you = false;
+
+  /// Your own card, editable.
+  const PersonCard.you({
+    super.key,
+    this.everyone = true,
+    this.onEveryone,
+    this.onDone,
+    this.glass = true,
+    this.footer = const [],
+    this.nameKey = const ValueKey('profile-name'),
+  })  : person = const PersonRef(name: ''),
+        you = true,
+        editable = true;
 
   @override
   Widget build(BuildContext context) => PartyWatch(builder: (context) {
-        final coord = AppScope.of(context).coordinator;
+        final graph = AppScope.of(context);
+        final coord = graph.coordinator;
         final r = coord.serverState.value;
-        final m = memberOf(person, r);
-        final info = m == null
-            ? (person.info ?? AvatarInfo(id: person.id, name: person.name, color: colorForName(person.name)))
-            : memberAvatarInfo(m, r, coord);
+        final MemberView? m;
+        final AvatarInfo info;
+        if (you) {
+          // Alone it is a plain player's: just you, no standing.
+          final online = graph.navigation.online.value && !coord.alone.value;
+          m = online ? coord.selfMember.value : null;
+          info = m == null ? selfAvatarInfo() : memberAvatarInfo(m, r, coord);
+        } else {
+          m = memberOf(person, r);
+          info = m == null
+              ? (person.info ?? AvatarInfo(id: person.id, name: person.name, color: colorForName(person.name)))
+              : memberAvatarInfo(m, r, coord);
+        }
         final d = r == null ? null : deliveryOf(r, selfId: coord.connection.memberId, names: coord.memberNames);
         final passes = m != null && d != null && d.sourceId.isNotEmpty && d.sourceId == m.id;
         final now = coord.nowPlaying.value;
-        return _CardBody(
+        return PersonCardView(
           info: info,
           here: m != null,
+          away: you && m == null ? 'Just you' : null,
           passing: passes ? _passing(d, now) : null,
           everyone: everyone && m != null,
+          edit: editable && info.self ? graph.profile : null,
+          glass: glass,
+          footer: footer,
+          nameKey: nameKey,
           onAction: (a) {
             runMemberAction(coord, info.id, a);
             onDone?.call();
@@ -154,6 +216,7 @@ class PersonCard extends StatelessWidget {
             onDone?.call();
             (onEveryone ?? () => showMembersCard(Navigator.of(context, rootNavigator: true).context))();
           },
+          onDone: onDone,
         );
       });
 
@@ -164,22 +227,106 @@ class PersonCard extends StatelessWidget {
   }
 }
 
-class _CardBody extends StatelessWidget {
+/// A card's tint: the person's colour from the top, fading out down the
+/// header; the same on everyone's card, yours included.
+BoxDecoration personTint(Color color) => BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [color.withValues(alpha: 0.5), color.withValues(alpha: 0.2), color.withValues(alpha: 0)],
+        stops: const [0, 0.5, 1],
+      ),
+    );
+
+/// A person card's frame: frosted glass over the app, a plain surface on
+/// a page; [PersonCard.width] wide, [tint] (the person's colour, see
+/// [personTint]) fading down from its top.
+class PersonCardFrame extends StatelessWidget {
+  final bool glass;
+  final Color? tint;
+  final Widget child;
+  const PersonCardFrame({super.key, this.glass = true, this.tint, required this.child});
+
+  /// How far down the tint fades out.
+  static const tintHeight = 190.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = tint;
+    final body = SizedBox(
+      width: PersonCard.width,
+      child: color == null
+          ? child
+          : Stack(
+              children: [
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  right: 0,
+                  height: tintHeight,
+                  child: IgnorePointer(
+                    child: AnimatedContainer(
+                      key: const ValueKey('person-tint'),
+                      duration: easeTime,
+                      curve: ease,
+                      decoration: personTint(color),
+                    ),
+                  ),
+                ),
+                child,
+              ],
+            ),
+    );
+    if (glass) return AppGlass(radius: 16, child: body);
+    return Material(
+      color: AppMenuStyle.solid,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: AppMenuStyle.border, width: 0.5),
+      ),
+      child: body,
+    );
+  }
+}
+
+/// What a person card draws for [info] (see [PersonCard]); with [edit]
+/// (your own card) the picture, name and colour are yours to change.
+class PersonCardView extends StatelessWidget {
   final AvatarInfo info;
+
+  /// In the server; else [away] (default "Not in the server") stands for
+  /// the standing and the facts are left out.
   final bool here;
+  final String? away;
+
   /// What they pass on and how it flows; null when they do not.
   final (String, String)? passing;
   final bool everyone;
+  final Profile? edit;
+  final bool glass;
+  final List<Widget> footer;
+  final Key nameKey;
   final ValueChanged<MemberAction> onAction;
   final VoidCallback onEveryone;
-  const _CardBody({
+  final VoidCallback? onDone;
+  const PersonCardView({
+    super.key,
     required this.info,
     required this.here,
-    required this.passing,
-    required this.everyone,
+    this.away,
+    this.passing,
+    this.everyone = false,
+    this.edit,
+    this.glass = true,
+    this.footer = const [],
+    this.nameKey = const ValueKey('profile-name'),
     required this.onAction,
     required this.onEveryone,
+    this.onDone,
   });
+
+  static const nameStyle = TextStyle(fontSize: 16, fontWeight: FontWeight.w700, height: 1.2);
 
   @override
   Widget build(BuildContext context) {
@@ -187,6 +334,7 @@ class _CardBody extends StatelessWidget {
     final muted = scheme.onSurfaceVariant;
     final (presence, dot) = presenceText(info);
     final image = info.image;
+    final profile = edit;
     Widget fact(Key key, IconData icon, Color color, Widget text) => Padding(
           key: key,
           padding: const EdgeInsets.only(top: 6),
@@ -196,145 +344,210 @@ class _CardBody extends StatelessWidget {
             Expanded(child: DefaultTextStyle.merge(style: TextStyle(fontSize: 12.5, color: scheme.onSurface), child: text)),
           ]),
         );
-    final picture = StatusAvatar(info: info, size: PersonCard.pictureSize);
-    return AppGlass(
-      key: const ValueKey('person-card'),
-      radius: 16,
-      child: SizedBox(
-        width: PersonCard.width,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+    final Widget picture;
+    if (profile != null) {
+      picture = ProfilePicture(profile: profile, info: info, size: PersonCard.pictureSize, ring: here);
+    } else if (image == null) {
+      picture = StatusAvatar(info: info, size: PersonCard.pictureSize);
+    } else {
+      picture = Tooltip(
+        message: 'View picture',
+        waitDuration: const Duration(milliseconds: 500),
+        child: InkWell(
+          key: const ValueKey('person-picture'),
+          borderRadius: AvatarShape.of(context).radius(PersonCard.pictureSize),
+          onTap: () => showPictureView(context, image, info.name),
+          child: MouseRegion(
+              cursor: SystemMouseCursors.zoomIn, child: StatusAvatar(info: info, size: PersonCard.pictureSize)),
+        ),
+      );
+    }
+    final name = profile != null
+        ? ProfileName(key: nameKey, profile: profile, style: nameStyle, onSubmitted: onDone)
+        : Text.rich(
+            TextSpan(children: [
+              TextSpan(text: info.name),
+              if (info.self)
+                TextSpan(text: '  you', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: muted)),
+            ]),
+            key: const ValueKey('person-name'),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: nameStyle,
+          );
+    final png = profile?.picture.value;
+    final header = Padding(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  if (image == null)
-                    picture
-                  else
-                    Tooltip(
-                      message: 'View picture',
-                      waitDuration: const Duration(milliseconds: 500),
-                      child: InkWell(
-                        key: const ValueKey('person-picture'),
-                        borderRadius: AvatarShape.of(context).radius(PersonCard.pictureSize),
-                        onTap: () => showPictureView(context, image, info.name),
-                        child: MouseRegion(cursor: SystemMouseCursors.zoomIn, child: picture),
-                      ),
-                    ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text.rich(
-                          TextSpan(children: [
-                            TextSpan(text: info.name),
-                            if (info.self)
-                              TextSpan(text: '  you', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: muted)),
-                          ]),
-                          key: const ValueKey('person-name'),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, height: 1.2),
-                        ),
-                        const SizedBox(height: 4),
-                        Row(children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(shape: BoxShape.circle, color: here ? dot : Colors.grey.shade700),
-                          ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              here ? presence : 'Not in the server',
-                              key: const ValueKey('person-presence'),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 12.5, color: muted),
-                            ),
-                          ),
-                        ]),
-                        if (here && (info.host || info.relaying)) ...[
-                          const SizedBox(height: 6),
-                          Wrap(spacing: 6, runSpacing: 4, children: [
-                            if (info.host) const Pill('host', Colors.amber),
-                            if (info.relaying) const Pill('passing the video on', Colors.lightBlueAccent),
-                          ]),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              if (here) ...[
-                const SizedBox(height: 10),
-                Divider(height: 1, thickness: 0.5, color: Colors.white.withValues(alpha: 0.08)),
-                const SizedBox(height: 2),
-                if (info.error.isNotEmpty)
-                  fact(const ValueKey('person-error'), Icons.error_outline_rounded, Colors.redAccent.shade100,
-                      Text("Can't play this: ${info.error}")),
-                // How it reaches them (the source's line says it instead).
-                if (info.delivery.isNotEmpty && passing == null)
-                  fact(const ValueKey('person-route'), Icons.alt_route_rounded, muted, Text(info.delivery)),
-                if (passing case (final what, final how))
-                  fact(
-                    const ValueKey('person-passing'),
-                    Icons.cell_tower,
-                    Colors.lightBlueAccent,
-                    Text.rich(TextSpan(children: [
-                      TextSpan(text: what),
-                      if (how.isNotEmpty) TextSpan(text: '\n$how', style: TextStyle(fontSize: 11.5, color: muted)),
-                    ])),
-                  ),
-                if (info.app.isNotEmpty)
-                  fact(
-                    const ValueKey('person-app'),
-                    Icons.info_outline_rounded,
-                    muted,
-                    Row(children: [
-                      Text('Starsync ', style: TextStyle(fontSize: 12.5, color: muted)),
-                      VersionText(version: info.app),
-                    ]),
-                  ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
+              picture,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    for (final a in memberActions(info))
-                      _ActionChip(
-                        key: ValueKey('person-action-${a.action.name}'),
-                        icon: a.icon,
-                        label: a.label,
-                        onTap: () => onAction(a.action),
+                    name,
+                    const SizedBox(height: 4),
+                    Row(children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(shape: BoxShape.circle, color: here ? dot : Colors.grey.shade600),
                       ),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          here ? presence : (away ?? 'Not in the server'),
+                          key: const ValueKey('person-presence'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12.5, color: scheme.onSurface.withValues(alpha: 0.78)),
+                        ),
+                      ),
+                    ]),
+                    if (here && (info.host || info.relaying)) ...[
+                      const SizedBox(height: 6),
+                      Wrap(spacing: 6, runSpacing: 4, children: [
+                        if (info.host) const Pill('host', Colors.amber),
+                        if (info.relaying) const Pill('passing the video on', Colors.lightBlueAccent),
+                      ]),
+                    ],
                   ],
                 ),
-                if (everyone) ...[
-                  const SizedBox(height: 4),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      key: const ValueKey('person-everyone'),
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(fontSize: 12.5),
+              ),
+            ],
+          ),
+          // Where the card shows the colour: yours to pick.
+          if (profile != null) ...[
+            const SizedBox(height: 12),
+            ProfileColors(profile: profile),
+          ],
+        ],
+      ),
+    );
+    return PersonCardFrame(
+      key: const ValueKey('person-card'),
+      glass: glass,
+      tint: info.color,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          header,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (profile != null) ...[
+                  if (png != null)
+                    Row(children: [
+                      Icon(Icons.image_outlined, size: 15, color: muted),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text('Picture · ${(png.length / 1024).toStringAsFixed(0)} KB',
+                            maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: muted)),
                       ),
-                      onPressed: onEveryone,
-                      icon: const Icon(Icons.groups_outlined, size: 16),
-                      label: const Text('Everyone in the server'),
+                      TextButton(
+                        key: const ValueKey('profile-remove-picture'),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(fontSize: 12.5),
+                        ),
+                        onPressed: () => profile.setPicture(null),
+                        child: const Text('Remove picture'),
+                      ),
+                    ]),
+                  if (profile.error.value case final err?)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(err, style: TextStyle(color: scheme.error, fontSize: 12)),
+                    ),
+                  Padding(
+                    padding: EdgeInsets.only(top: png == null ? 2 : 0),
+                    child: Text(
+                      here
+                          ? 'Name, picture and colour update for everyone in the server right away.'
+                          : 'Others see your name, picture and colour when they join you or you join them.',
+                      style: TextStyle(fontSize: 12, color: muted),
                     ),
                   ),
                 ],
-              ] else
-                const SizedBox(height: 4),
-            ],
+                if (here) ...[
+                  const SizedBox(height: 10),
+                  Divider(height: 1, thickness: 0.5, color: Colors.white.withValues(alpha: 0.08)),
+                  const SizedBox(height: 2),
+                  if (info.error.isNotEmpty)
+                    fact(const ValueKey('person-error'), Icons.error_outline_rounded, Colors.redAccent.shade100,
+                        Text("Can't play this: ${info.error}")),
+                  // How it reaches them (the source's line says it instead).
+                  if (info.delivery.isNotEmpty && passing == null)
+                    fact(const ValueKey('person-route'), Icons.alt_route_rounded, muted, Text(info.delivery)),
+                  if (passing case (final what, final how))
+                    fact(
+                      const ValueKey('person-passing'),
+                      Icons.cell_tower,
+                      Colors.lightBlueAccent,
+                      Text.rich(TextSpan(children: [
+                        TextSpan(text: what),
+                        if (how.isNotEmpty) TextSpan(text: '\n$how', style: TextStyle(fontSize: 11.5, color: muted)),
+                      ])),
+                    ),
+                  if (info.app.isNotEmpty)
+                    fact(
+                      const ValueKey('person-app'),
+                      Icons.info_outline_rounded,
+                      muted,
+                      Row(children: [
+                        Text('Starsync ', style: TextStyle(fontSize: 12.5, color: muted)),
+                        VersionText(version: info.app),
+                      ]),
+                    ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final a in memberActions(info))
+                        _ActionChip(
+                          key: ValueKey('person-action-${a.action.name}'),
+                          icon: a.icon,
+                          label: a.label,
+                          onTap: () => onAction(a.action),
+                        ),
+                    ],
+                  ),
+                  if (everyone) ...[
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        key: const ValueKey('person-everyone'),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(fontSize: 12.5),
+                        ),
+                        onPressed: onEveryone,
+                        icon: const Icon(Icons.groups_outlined, size: 16),
+                        label: const Text('Everyone in the server'),
+                      ),
+                    ),
+                  ],
+                ],
+              ],
+            ),
           ),
-        ),
+          if (footer.isNotEmpty) ...[
+            Divider(height: 1, thickness: 0.5, color: Colors.white.withValues(alpha: 0.08)),
+            Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Column(children: footer)),
+          ],
+        ],
       ),
     );
   }
@@ -437,6 +650,7 @@ Future<void> showPersonCard(
       capturedThemes: InheritedTheme.capture(from: context, to: navigator.context),
       builder: (context) => PersonCard(
         person: person,
+        editable: true,
         everyone: everyone,
         onEveryone: onEveryone,
         onDone: () => Navigator.of(context).pop(),

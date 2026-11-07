@@ -162,9 +162,14 @@ from there. Nothing is uploaded or stored anywhere else.
 
 One window. Along the top, the strip:
 
-- **Your avatar**: your profile (name, picture with a crop editor,
-  colour) and links to the settings. Your name, picture and colour change
-  for everyone right away.
+- **Your avatar**: your own card, the same card others see, with
+  everything yours to change right on it: click the picture (a crop
+  editor), click the name to rename, pick a colour or make any colour
+  with **Custom…** (drag over the colours, or type a code like
+  `#9b4dca`). Links to the settings follow. Your name, picture and colour
+  change for everyone right away. A very dark or very light colour stays
+  readable: names in chat and danmaku are lightened where they need it,
+  and the letter on your avatar turns dark on a light colour.
 - **The tabs**: Library, Schedule, Settings.
 - **The party**: alone on your server, Join a friend and Invite (and
   "Sharing" while friends can reach it). With others there, everyone's
@@ -182,7 +187,8 @@ Empty strip space drags the window.
 row, a chat line, a pop-up, or click a danmaku line's name) for a card:
 a bigger picture, whether they are watching, BRB, AFK, out or
 reconnecting, their Starsync version, what they pass on, and Wait for /
-Don't wait for, Nudge and Out. A click keeps it open.
+Don't wait for, Nudge and Out. A click keeps it open. Each card is
+tinted with that person's colour.
 
 **The member list** shows the server and its version at the top, where
 the video comes from (see [Where the video comes from](#where-the-video-comes-from)),
