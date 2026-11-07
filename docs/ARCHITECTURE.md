@@ -32,13 +32,16 @@ sockets and returns, and the isolate exits; `{'t':'file', 'path',
 (`ServerIsolate.setFile`: a File put up here then sends a `swap` with that
 name and size, which the server matches to the file); `{'t':'share',
 'port', 'secret', 'jellyfin', 'reply'}` and `{'t':'unshare', 'reply'}`
-attach and detach the network listener (below).
+attach and detach the network listener (below), the share also
+carrying the AnimeFlow address (`'animeFlow'`).
 
 - **Your server** (`session/your_server.dart`, `YourServer`): every app
   runs one server for its whole life, started when the app starts
   (`Navigation.start`) as a `ServerIsolate` running `serve`: port 0 (a
   free one), loopback only, no password, a random `hostKey` per app run,
-  named "<your name>'s server", its session log in the app's logs folder
+  named "<your name>'s server", offering the AnimeFlow address this app
+  was last offered (`AppSettings.animeFlowAddress`, read again at each
+  share; see "Desktop UI", Schedule), its session log in the app's logs folder
   and its log records in the app's log as `server.<logger>` (see
   "Logging"). Nobody else can reach it. The isolate runs with
   `errorsAreFatal: false`: an uncaught async error is logged and the
@@ -135,7 +138,7 @@ attach and detach the network listener (below).
 - **Dedicated server**: `bin/server.dart` compiled with `dart compile exe`
   and shipped next to the app as `starsync-server`. It parses flags
   (`--port`, `--secret`, `--name`, `--media`, `--advertise-host`,
-  `--jellyfin <file>`, `--[no-]yt-dlp`, `--yt-dlp-dir`, `--yt-dlp-cookies`, `--config`; default port 8080) into the same map and calls `serve`
+  `--jellyfin <file>`, `--[no-]yt-dlp`, `--yt-dlp-dir`, `--yt-dlp-cookies`, `--animeflow`, `--config`; default port 8080) into the same map and calls `serve`
   (`--log-dir` only picks where its log files go, see "Logging")
   (`--upgrade` / `--check-update` run the [updater](#updater) instead);
   SIGINT and SIGTERM stop it. A Flutter binary cannot run without a
@@ -2302,10 +2305,10 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   it. Schedule (`schedule/`) is a week of day columns built
   from AniList's airing schedule (`anilist.dart`: pages cached 10 min in
   memory and 1 h on disk, stale data shown on 429 or failure) matched
-  against AnimeFlow (`animeflow.dart`, app API at
-  `anime.example.org/api/app/v1` with the token of the Jellyfin account
-  on the same parent domain, `tokenFor`, the old `example.org` counting
-  as the same; `/library` marks shows on Jellyfin it doesn't track, through every AniList
+  against AnimeFlow (`animeflow.dart`, its app API at the address the
+  server offers, below, with the token of the Jellyfin account under the
+  same registrable domain, `tokenFor` and `registrableDomain`:
+  `anime.example.org` takes an account on `media.example.org`; `/library` marks shows on Jellyfin it doesn't track, through every AniList
   entry of a season (`anilist_map`: a season AniList splits has several)) into a status per
   episode (`schedule_model.dart`). AnimeFlow's `missing` (aired,
   monitored, no release grabbed yet; AnimeFlow grabs it by itself once
@@ -2334,8 +2337,19 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   it up resolves the Jellyfin episode (`resolveJellyfinEpisode`:
   AnimeFlow's numbering, else the season and offset, else the air day)
   and goes through the shell's put-up; right-click queues it the same
-  way. Requests and the owner's inbox are in `requests_sheet.dart`. The
-  app keeps one `ScheduleRepository` for its run (`AppGraph.schedule`,
+  way. Requests and the owner's inbox are in `requests_sheet.dart`.
+  **AnimeFlow's address** comes from the servers, never from the code: a
+  server's config may name one (`animeFlow`, `--animeflow`), its
+  `welcome.animeFlow` hands it to every member, and the app keeps the
+  last one offered (`SessionCoordinator._onWelcome`,
+  `AppSettings.rememberAnimeFlow`, stored as `animeFlowAddress`; a server
+  without one changes nothing), so the Schedule keeps it outside that
+  server and your server offers it on to whoever joins you. The clients
+  read it on every call (`AnimeFlowClient.fromAccounts(address:)`; a new
+  address drops their ETags and /me). None yet: no AnimeFlow at all
+  (`notConfigured`, no request made), the Schedule is AniList's with no
+  AnimeFlow pill and Requests greyed, and Settings has no AnimeFlow card.
+  The app keeps one `ScheduleRepository` for its run (`AppGraph.schedule`,
   `scheduleRepositoryFor`), so the clients' caches (AniList's pages,
   AnimeFlow's ETags and /me) last across visits, and it keeps the last
   whole schedule (AniList fresh, AnimeFlow answered or not linked) per
@@ -2376,7 +2390,8 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
     Sound set; folded: each sound with a preview, its own set and a
     switch).
   - **Library & accounts**: Jellyfin servers, AnimeFlow (`/me` via
-    `AnimeFlowClient.fromAccounts`), Web links (yt-dlp and its cookies).
+    `AnimeFlowClient.fromAccounts`; only once a server offered it), Web
+    links (yt-dlp and its cookies).
   - **Updates**: status, Check now, Show update; More: the channel, the
     config address.
   - **Help & about**: Something wrong? (Copy diagnostics, Mark a

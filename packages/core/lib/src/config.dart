@@ -115,6 +115,10 @@ class AppConfig {
   /// copied (converted) into [ytDlpDir] at start, so yt-dlp is logged in
   /// (see `YtDlpCookies`); empty: no cookies.
   final String ytDlpCookies;
+  /// The AnimeFlow app API this server offers its members for the
+  /// Schedule (`welcome.animeFlow`, e.g.
+  /// `https://anime.example.org/api/app/v1`); empty: none.
+  final String animeFlow;
 
   const AppConfig({
     required this.port,
@@ -128,6 +132,7 @@ class AppConfig {
     this.ytDlp = true,
     this.ytDlpDir = '',
     this.ytDlpCookies = '',
+    this.animeFlow = '',
   });
 
   factory AppConfig.defaults() =>
@@ -147,6 +152,7 @@ class AppConfig {
         ytDlp: (map['ytDlp'] as bool?) ?? true,
         ytDlpDir: (map['ytDlpDir'] as String?) ?? '',
         ytDlpCookies: (map['ytDlpCookies'] as String?) ?? '',
+        animeFlow: checkAnimeFlowAddress(map['animeFlow'] as String?),
       );
     } on ConfigException {
       rethrow;
@@ -167,6 +173,7 @@ class AppConfig {
         'ytDlp': ytDlp,
         'ytDlpDir': ytDlpDir,
         'ytDlpCookies': ytDlpCookies,
+        'animeFlow': animeFlow,
       };
 
   static Future<AppConfig> loadFile(String path) async =>
@@ -177,6 +184,21 @@ class AppConfig {
         Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
     return p.join(home, '.config', appName, 'config.yaml');
   }
+}
+
+/// [value] as an AnimeFlow address: trimmed, without a trailing `/`;
+/// '' for none. Throws [ConfigException] when it is not an http(s) URL.
+String checkAnimeFlowAddress(String? value) {
+  var v = (value ?? '').trim();
+  while (v.endsWith('/')) {
+    v = v.substring(0, v.length - 1);
+  }
+  if (v.isEmpty) return '';
+  final uri = Uri.tryParse(v);
+  if (uri == null || !(uri.scheme == 'https' || uri.scheme == 'http') || uri.host.isEmpty) {
+    throw ConfigException('animeFlow must be an http(s) address, got $v');
+  }
+  return v;
 }
 
 /// Reads a YAML or JSON (by `.json` extension) file whose root is a map.

@@ -78,7 +78,8 @@ class SyncServer {
         engine: SyncEngine(clock: clock, liveness: liveness),
         hostKey: config.hostKey,
         jellyfin: config.jellyfin,
-        ytDlp: ytDlp ?? YtDlp(serverYtDlpDir(config.ytDlpDir), enabled: config.ytDlp));
+        ytDlp: ytDlp ?? YtDlp(serverYtDlpDir(config.ytDlpDir), enabled: config.ytDlp),
+        animeFlow: config.animeFlow);
   }
 
   bool get isRunning => _server != null;
@@ -191,6 +192,7 @@ class SyncServer {
       _sessionLog?.flush();
     });
     _log.info('server "${config.name}" listening on $boundPort');
+    if (config.animeFlow.isNotEmpty) _log.info('AnimeFlow offered to members: ${config.animeFlow}');
   }
 
   /// A configured credential without a ServerId gets it from
@@ -221,16 +223,18 @@ class SyncServer {
 
   /// Opens the running server to the network: a second listener on
   /// every IPv4 interface at [port] (0: a free one), the password
-  /// [secret] ('' : open) and the Jellyfin relay logins [jellyfin] (one
-  /// per Jellyfin server; null keeps the ones it has). Members
+  /// [secret] ('' : open), the Jellyfin relay logins [jellyfin] (one
+  /// per Jellyfin server; null keeps the ones it has) and the AnimeFlow
+  /// address [animeFlow] (`welcome.animeFlow`; null keeps it). Members
   /// already in (on the first listener) stay connected; nothing restarts.
   /// Shared already: the listener moves to [port] when it differs. Returns
   /// the bound port; throws when it cannot bind.
-  Future<int> share({required int port, required String secret, List<JellyfinCredential>? jellyfin}) async {
+  Future<int> share(
+      {required int port, required String secret, List<JellyfinCredential>? jellyfin, String? animeFlow}) async {
     if (_server == null) throw StateError('the server is not running');
     final was = _shared;
     if (was != null && (port == 0 || port == was.port)) {
-      _applyShareSettings(secret, jellyfin);
+      _applyShareSettings(secret, jellyfin, animeFlow);
       await _resolveJellyfinServerId();
       return was.port;
     }
@@ -248,16 +252,17 @@ class SyncServer {
       rethrow;
     }
     _shared = listener;
-    _applyShareSettings(secret, jellyfin);
+    _applyShareSettings(secret, jellyfin, animeFlow);
     await _resolveJellyfinServerId();
     if (secret.isEmpty) _log.warning('shared without a password: anyone who can reach port ${listener.port} can join');
     _log.info('server "${config.name}" shared on port ${listener.port}');
     return listener.port;
   }
 
-  void _applyShareSettings(String secret, List<JellyfinCredential>? jellyfin) {
+  void _applyShareSettings(String secret, List<JellyfinCredential>? jellyfin, String? animeFlow) {
     session.secret = secret;
     if (jellyfin != null) hub.jellyfinLogins = [...jellyfin];
+    if (animeFlow != null) hub.animeFlow = checkAnimeFlowAddress(animeFlow);
   }
 
   /// Closes the network listener [share] opened: everyone but the host

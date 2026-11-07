@@ -29,6 +29,10 @@ Future<void> main(List<String> args) async {
         defaultsTo: '',
         help: 'cookies.txt or browser-extension JSON export to log that yt-dlp in (sites that refuse guests). '
             'An account login: keep it private. Copied into --yt-dlp-dir at start.')
+    ..addOption('animeflow',
+        defaultsTo: '',
+        help: 'AnimeFlow app API address (https://anime.example.org/api/app/v1) offered to members for the '
+            'Schedule\'s statuses and requests. Default: none.')
     ..addOption('config', help: 'YAML or JSON config file (keys as in AppConfig); overrides the other flags.')
     ..addOption('log-dir',
         help: 'Folder for the rotating log files (server-YYYY-MM-DD.log, and session-YYYY-MM-DD.log with '
@@ -87,6 +91,7 @@ Future<void> main(List<String> args) async {
         ytDlp: parsed['yt-dlp'] as bool,
         ytDlpDir: '${parsed['yt-dlp-dir']}',
         ytDlpCookies: '${parsed['yt-dlp-cookies']}',
+        animeFlow: checkAnimeFlowAddress('${parsed['animeflow']}'),
       );
     }
     final jellyfinPath = parsed['jellyfin'] as String?;
@@ -104,6 +109,7 @@ Future<void> main(List<String> args) async {
         ytDlp: c.ytDlp,
         ytDlpDir: c.ytDlpDir,
         ytDlpCookies: c.ytDlpCookies,
+        animeFlow: c.animeFlow,
       );
     }
     await _setUpCookies(config);

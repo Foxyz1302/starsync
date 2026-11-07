@@ -351,7 +351,8 @@ link the server fetched has to be added again).
 
 The week's airing anime, one column per day (AniList), each episode
 marked with what the Jellyfin server has of it when AnimeFlow is
-connected (Settings → Library & accounts): **on Jellyfin** (Put it
+connected: a server you joined offers it, and Starsync keeps it from
+then on (Settings → Library & accounts shows it): **on Jellyfin** (Put it
 up, right-click to queue), **downloading**, **waiting for release**
 (aired in Japan, AnimeFlow downloads it by itself once a release
 appears; with when AnimeFlow last searched, or **release rejected** when
@@ -379,9 +380,10 @@ then everyone (you included) uses Join.
 | `--advertise-host` | none | host put in file URLs instead of the one each viewer dialled |
 | `--[no-]yt-dlp` | on | read web pages (YouTube, X, …) with yt-dlp when the server fetches a link |
 | `--yt-dlp-dir` | next to the binary | writable folder for the server's yt-dlp (systemd: the unit's `StateDirectory`) |
+| `--animeflow` | none | AnimeFlow app API address (`https://anime.example.org/api/app/v1`) handed to everyone who joins, for the Schedule's statuses and requests |
 | `--yt-dlp-cookies` | none | cookies.txt or cookie-extension JSON export for that yt-dlp (sites that refuse guests); copied into the yt-dlp folder at start, removed from it when not given. **An account login**: keep it private, use a throwaway account for YouTube |
 | `--log-dir` | `logs` next to `--config`, else next to the binary (systemd: the unit's `StateDirectory`) | folder for the log files (`server-YYYY-MM-DD.log` and the session log `session-YYYY-MM-DD.log`, kept 7 days; passwords, tokens and cookies left out) |
-| `--config` | none | YAML or JSON file with the same settings (`port`, `secret`, `name`, `mediaPath`, `advertiseHost`, `ytDlp`, `ytDlpDir`, `ytDlpCookies`); replaces the flags |
+| `--config` | none | YAML or JSON file with the same settings (`port`, `secret`, `name`, `mediaPath`, `advertiseHost`, `ytDlp`, `ytDlpDir`, `ytDlpCookies`, `animeFlow`); replaces the flags |
 | `--upgrade` | | update the install folder to the latest release ([Install and update](#install-and-update)), then exit |
 | `--check-update` | | print whether a newer release exists, then exit |
 
@@ -455,7 +457,8 @@ and the rest folded under More:
   sounds, the sound set; each sound with a preview, its own set and a
   switch folded below).
 - **Library & accounts**: linked Jellyfin servers (below), the AnimeFlow
-  connection ("connected as <name>" with what you may do, or why not)
+  connection once a server offered it ("connected as <name>" with what
+  you may do, or why not)
   and Web links (yt-dlp and its cookies, below).
 - **Updates**: where updates stand and Check now; the update channel
   and a config address (a mirror of where updates are found; leave it

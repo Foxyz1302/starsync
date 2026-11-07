@@ -159,11 +159,12 @@ class ServerIsolate {
 
   /// Opens the server to the network ([SyncServer.share]): a listener on
   /// every interface at [port], the password [secret], the Jellyfin relay
-  /// logins [jellyfin] (one per Jellyfin server). Returns the bound port;
+  /// logins [jellyfin] (one per Jellyfin server), the AnimeFlow address
+  /// [animeFlow] (null keeps it). Returns the bound port;
   /// throws a [StateError] with
   /// the server's reason (a port in use) when it cannot.
   Future<int> share({required int port, required String secret, List<JellyfinCredential>? jellyfin,
-      Duration timeout = const Duration(seconds: 10)}) async {
+      String? animeFlow, Duration timeout = const Duration(seconds: 10)}) async {
     if (_exited.isCompleted) throw StateError('the server is not running');
     final reply = ReceivePort('server share');
     try {
@@ -172,6 +173,7 @@ class ServerIsolate {
         'port': port,
         'secret': secret,
         if (jellyfin != null) 'jellyfin': [for (final c in jellyfin) c.toMap()],
+        'animeFlow': ?animeFlow,
         'reply': reply.sendPort,
       });
       final msg = await reply.first.timeout(timeout);

@@ -239,7 +239,8 @@ Field notes:
 ```
 {"t":"welcome","proto":17,"token":"...","memberId":"m1","resumed":false,
  "instance":"<random per boot>","grace":600,"mediaUrl":"...","relayUrl":"...",
- "state":{<state>},"feed":[<feed with "replayed":true>,...]}
+ "state":{<state>},"feed":[<feed with "replayed":true>,...],
+ "animeFlow":"https://anime.example.org/api/app/v1"?}
 {"t":"state","eventId":7,"transport":"playing"|"held"|"finished","position":12.3,
  "serverTime":"<ISO-8601 UTC>","mediaId":1,
  "media":{name,size,duration,url?,jellyfin?,relay?,ref?,swapBy?,art?}|absent,
@@ -272,6 +273,10 @@ Field notes:
   seconds a `gone` member is kept. `welcome.feed` (omitted when empty):
   the feed lines after `hello.feedAfter`, at most the last 50, oldest
   first, each with `replayed: true` (log them, do not toast them).
+  `welcome.animeFlow` (omitted when the server has none): the AnimeFlow
+  app API address of the server's config (`animeFlow`), for the
+  Schedule's statuses and requests (see ARCHITECTURE "Desktop UI",
+  Schedule).
 - `state` is sent every second and on every change. `position` is the value at
   `serverTime` (server clock); clients extrapolate while `transport` is
   `playing`, on the server's clock (see `pong`). `finished`: the media

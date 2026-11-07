@@ -18,7 +18,7 @@ import 'sync_server.dart';
 /// a file on this machine the hosted file (the hosting app's in-session file
 /// swap; a following `swap` with its name and size puts it up) and answers
 /// `{'ok':true,'name':n,'size':s}` or `{'ok':false}`.
-/// `{'t':'share','port':p,'secret':s,'jellyfin':map?,'reply':SendPort}`
+/// `{'t':'share','port':p,'secret':s,'jellyfin':map?,'animeFlow':s?,'reply':SendPort}`
 /// opens the running server to the network ([SyncServer.share]) and
 /// answers `{'ok':true,'port':p}` or `{'ok':false,'message':m}`;
 /// `{'t':'unshare','reply':SendPort}` closes it again
@@ -66,7 +66,8 @@ Future<void> serve(Map<String, Object?> config, {SendPort? events}) async {
                     for (final c in msg['jellyfin'] as List)
                       if (JellyfinCredential.fromMap(c) case final cred?) cred,
                   ]
-                : null);
+                : null,
+            animeFlow: msg['animeFlow'] as String?);
         reply.send({'ok': true, 'port': port});
       } catch (e) {
         reply.send({'ok': false, 'message': '$e'});

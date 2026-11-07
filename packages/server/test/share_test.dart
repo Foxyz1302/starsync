@@ -11,6 +11,7 @@ class _Raw {
   final WebSocket ws;
   final msgs = <Map<String, Object?>>[];
   final done = Completer<int?>();
+  Map<String, Object?> welcome = const {};
   _Raw(this.ws) {
     ws.listen((m) => msgs.add(Map<String, Object?>.from(jsonDecode('$m') as Map)),
         onDone: () => done.complete(ws.closeCode), onError: (_) {});
@@ -22,7 +23,7 @@ class _Raw {
     r.ws.add(jsonEncode(HelloMessage(
             secret: secret, user: HelloUser(name: name), hostKey: hostKey, client: client, seq: 1)
         .toJson()));
-    await r.next('welcome');
+    r.welcome = await r.next('welcome');
     return r;
   }
 
@@ -120,6 +121,28 @@ void main() {
     } finally {
       await host?.ws.close();
       await guest?.ws.close();
+      await server.stop();
+    }
+  });
+
+  test('welcome.animeFlow: the configured address, replaced by share', () async {
+    final server = SyncServer(
+        const AppConfig(port: 0, secret: '', name: 'own', hostKey: 'HK', animeFlow: 'https://anime.example.org/api'),
+        loopbackOnly: true);
+    await server.start();
+    try {
+      final host = await _Raw.join('127.0.0.1', server.boundPort, 'me', hostKey: 'HK');
+      expect(host.welcome['animeFlow'], 'https://anime.example.org/api');
+      await host.ws.close();
+      await server.share(port: 0, secret: '', animeFlow: 'https://flow.example.net/v1/');
+      final again = await _Raw.join('127.0.0.1', server.boundPort, 'me2');
+      expect(again.welcome['animeFlow'], 'https://flow.example.net/v1');
+      await again.ws.close();
+      await server.share(port: 0, secret: '', animeFlow: '');
+      final none = await _Raw.join('127.0.0.1', server.boundPort, 'me3');
+      expect(none.welcome.containsKey('animeFlow'), isFalse);
+      await none.ws.close();
+    } finally {
       await server.stop();
     }
   });

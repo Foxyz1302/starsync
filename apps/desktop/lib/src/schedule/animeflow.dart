@@ -19,15 +19,23 @@ import '../jellyfin/accounts.dart';
 
 final _log = createLogger('animeflow');
 
-/// pol's server answers under both names (Gitea and AnimeFlow moved to
-/// `example.org`, Jellyfin stayed on `jelly.example.org`): an account
-/// on either name is the same server for AnimeFlow's token.
-const _sameServer = {'example.org', 'example.org'};
+/// The registrable domain of [host] (`anime.example.org` -> `example.org`,
+/// `a.b.example.co.uk` -> `example.co.uk`): the accounts on any name
+/// under it belong to the same server as AnimeFlow ([AnimeFlowClient.tokenFor]).
+/// An IP address or a name of one or two labels is itself.
+String registrableDomain(String host) {
+  final h = host.toLowerCase();
+  if (InternetAddress.tryParse(h) != null) return h;
+  final labels = h.split('.');
+  if (labels.length <= 2) return h;
+  // A country's second-level suffix (co.uk, com.au, ne.jp, ...) keeps
+  // one more label.
+  final tld = labels.last, second = labels[labels.length - 2];
+  final keep = tld.length == 2 && _secondLevel.contains(second) ? 3 : 2;
+  return labels.skip(labels.length - keep).join('.');
+}
 
-/// [domain], or both of pol's names when it is one of them.
-Set<String> sameServerDomains(String domain) => _sameServer.contains(domain) ? _sameServer : {domain};
-
-const animeFlowDefaultBase = 'https://anime.example.org/api/app/v1';
+const _secondLevel = {'co', 'com', 'net', 'org', 'gov', 'edu', 'ac', 'or', 'ne', 'go'};
 
 // ---------------------------------------------------------------- errors
 
@@ -55,6 +63,8 @@ enum AnimeFlowErrorCode {
   rateLimited('rate_limited'),
   /// No answer: DNS, connect, timeout (client side).
   network('network'),
+  /// No AnimeFlow address: no server offered one (client side).
+  notConfigured('not_configured'),
   /// Anything not in this list.
   unknown('unknown');
 
@@ -467,9 +477,12 @@ class _Etagged {
 
 class AnimeFlowClient {
   /// [token] wins over [tokenProvider]; with neither, every call fails with
-  /// [AnimeFlowErrorCode.missingToken].
+  /// [AnimeFlowErrorCode.missingToken]. [address] (read on every call)
+  /// wins over [baseUrl]; with neither, every call fails with
+  /// [AnimeFlowErrorCode.notConfigured].
   AnimeFlowClient({
-    String baseUrl = animeFlowDefaultBase,
+    String baseUrl = '',
+    this._address,
     this._token,
     this._tokenProvider,
     HttpClient? http,
@@ -477,7 +490,7 @@ class AnimeFlowClient {
     DateTime Function()? now,
     this.meTtl = const Duration(seconds: 60),
     String? userAgent,
-  })  : baseUrl = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl,
+  })  : _fixedBase = baseUrl,
         _http = http ?? HttpClient(),
         _ownsHttp = http == null,
         _delay = delay ?? Future<void>.delayed,
@@ -485,22 +498,42 @@ class AnimeFlowClient {
         userAgent = userAgent ?? 'Starsync/$appVersion';
 
   /// Authenticated with the linked Jellyfin account on the same domain
-  /// (see [tokenFor]), looked up on every call so a re-link applies.
+  /// (see [tokenFor]), looked up on every call so a re-link applies; at
+  /// [address], also read on every call (the app's: the last one a server
+  /// offered, `AppSettings.animeFlowAddress`).
   factory AnimeFlowClient.fromAccounts(
     JellyfinAccounts accounts, {
-    String baseUrl = animeFlowDefaultBase,
+    String Function()? address,
+    String baseUrl = '',
     HttpClient? http,
-  }) =>
-      AnimeFlowClient(
-        baseUrl: baseUrl,
-        http: http,
-        tokenProvider: () async {
-          await accounts.ensureLoaded(validate: false);
-          return tokenFor(accounts.accounts, baseUrl);
-        },
-      );
+  }) {
+    late final AnimeFlowClient client;
+    return client = AnimeFlowClient(
+      baseUrl: baseUrl,
+      address: address,
+      http: http,
+      tokenProvider: () async {
+        await accounts.ensureLoaded(validate: false);
+        return tokenFor(accounts.accounts, client.baseUrl);
+      },
+    );
+  }
 
-  final String baseUrl;
+  final String _fixedBase;
+  final String Function()? _address;
+
+  /// The API address calls go to, without a trailing `/`; empty: none
+  /// (every call fails with [AnimeFlowErrorCode.notConfigured]).
+  String get baseUrl {
+    var b = (_address?.call() ?? _fixedBase).trim();
+    while (b.endsWith('/')) {
+      b = b.substring(0, b.length - 1);
+    }
+    return b;
+  }
+
+  /// There is an address to call.
+  bool get configured => baseUrl.isNotEmpty;
   final Duration meTtl;
   final String userAgent;
   final String? _token;
@@ -518,21 +551,21 @@ class AnimeFlowClient {
   static const maxScheduleRange = Duration(days: 45);
 
   String? _lastToken;
+  String? _lastBase;
   final _etags = <String, _Etagged>{};
   ({DateTime at, AnimeFlowMe me})? _me;
 
-  /// The token of the linked Jellyfin account whose host shares
-  /// [animeFlowBase]'s parent domain (anime.example.org -> example.org,
-  /// jellyfin.example.org, ...), or the domain it moved from or to
-  /// ([sameServerDomains]).
+  /// The token of the linked Jellyfin account whose host is under
+  /// [animeFlowBase]'s registrable domain (anime.example.org ->
+  /// example.org: jellyfin.example.org, example.org, ...;
+  /// [registrableDomain]).
   static String? tokenFor(Iterable<JellyfinAccount> accounts, String animeFlowBase) {
     final host = Uri.tryParse(animeFlowBase)?.host.toLowerCase() ?? '';
     if (host.isEmpty) return null;
-    final labels = host.split('.');
-    final parents = sameServerDomains(labels.length > 2 ? labels.skip(1).join('.') : host);
+    final domain = registrableDomain(host);
     bool matches(String url) {
       final h = Uri.tryParse(url)?.host.toLowerCase() ?? '';
-      return h.isNotEmpty && parents.any((p) => h == p || h.endsWith('.$p'));
+      return h.isNotEmpty && (h == domain || h.endsWith('.$domain'));
     }
 
     for (final a in accounts) {
@@ -542,6 +575,16 @@ class AnimeFlowClient {
   }
 
   Future<String> _authToken() async {
+    final base = baseUrl;
+    if (base.isEmpty) {
+      throw const AnimeFlowException(0, AnimeFlowErrorCode.notConfigured, 'No server has offered AnimeFlow');
+    }
+    if (base != _lastBase) {
+      // Another AnimeFlow: nothing cached belongs to it.
+      _lastBase = base;
+      _etags.clear();
+      _me = null;
+    }
     final t = _token ?? await _tokenProvider?.call();
     if (t == null || t.isEmpty) {
       throw const AnimeFlowException(

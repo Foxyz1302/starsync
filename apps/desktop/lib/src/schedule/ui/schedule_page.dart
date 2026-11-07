@@ -6,6 +6,7 @@ import '../../jellyfin/accounts.dart';
 import '../../screens/home/picked_media.dart';
 import '../../shell/avatar.dart';
 import '../../shell/motion.dart';
+import '../../state/settings.dart';
 import '../../widgets/app_menu.dart';
 import '../anilist.dart';
 import '../animeflow.dart';
@@ -126,7 +127,8 @@ class _SchedulePageState extends State<SchedulePage> {
   void initState() {
     super.initState();
     _ownsRepo = widget.repository == null;
-    _repo = widget.repository ?? scheduleRepositoryFor(_accounts);
+    _repo = widget.repository ??
+        scheduleRepositoryFor(_accounts, address: () => AppSettings.instance.animeFlowAddress.peek());
     _showKept();
     _load();
     _timer = Timer.periodic(SchedulePage.refreshEvery, (_) {

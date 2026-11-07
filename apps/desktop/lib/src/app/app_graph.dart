@@ -79,7 +79,8 @@ class AppGraph {
   /// The Schedule tab's data, made on its first visit and kept for the
   /// run: its clients' caches and the last schedule (also on disk) last
   /// across visits.
-  late final ScheduleRepository schedule = scheduleRepositoryFor(coordinator.jellyfin, store: ScheduleStore());
+  late final ScheduleRepository schedule = scheduleRepositoryFor(coordinator.jellyfin,
+      address: () => coordinator.settings.animeFlowAddress.peek(), store: ScheduleStore());
 
   AppGraph._({
     required this.ports,
@@ -143,7 +144,8 @@ class AppGraph {
         ShowMatcher(
           store: HiveLibraryStore(),
           aniList: AniListClient(),
-          flow: AnimeFlowLookup(AnimeFlowClient.fromAccounts(coordinator.jellyfin)),
+          flow: AnimeFlowLookup(
+              AnimeFlowClient.fromAccounts(coordinator.jellyfin, address: () => settings.animeFlowAddress.peek())),
         );
     coordinator
       ..fileRef = matcher.refForPath
@@ -164,6 +166,8 @@ class AppGraph {
       logDir: () => appLogDir,
       starter: serverStarter,
       publicAddress: publicAddress,
+      // Friends in your server get the AnimeFlow you were offered.
+      animeFlow: () => settings.animeFlowAddress.peek(),
     );
     final navigation = Navigation(
       coordinator: coordinator,

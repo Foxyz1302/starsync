@@ -1725,12 +1725,15 @@ class SessionCoordinator {
   }
 
   /// A welcome's part here (see [WelcomeHandler]), before its state is
-  /// applied. The first one and a resumed one need nothing: the member
+  /// applied: any welcome's AnimeFlow address is remembered. The first one and a resumed one need nothing: the member
   /// kept everything (its standing, queue items, relay) and the player
   /// kept the media. A new member after a drop (grace over, or the server
   /// restarted) reports its standing again (BRB, AFK, out), and the media
   /// opens again only if it changed or its URL named the old token.
   void _onWelcome(WelcomeMessage welcome, Rejoin rejoin) {
+    // The server's AnimeFlow (the Schedule's): kept for when no server
+    // says one.
+    if (welcome.animeFlow case final flow?) settings.rememberAnimeFlow(flow);
     if (!rejoin.reconnect) return;
     _log.info('reconnected: ${rejoin.resumed ? 'resumed' : 'a new member'}'
         '${rejoin.sameServer ? '' : ' (the server restarted)'}');

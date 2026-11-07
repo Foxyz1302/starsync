@@ -43,9 +43,12 @@ class ServerHub {
   final YtDlp? ytDlp;
   /// Random per server boot (`welcome.instance`).
   final String instance = _randomId();
+  /// The AnimeFlow address members get in `welcome.animeFlow`
+  /// ([AppConfig.animeFlow]); empty: none.
+  String animeFlow;
 
   ServerHub(this.sessions, this.expectedSecret,
-      {SyncEngine? engine, this.hostKey = '', JellyfinCredential? jellyfin, this.ytDlp})
+      {SyncEngine? engine, this.hostKey = '', JellyfinCredential? jellyfin, this.ytDlp, this.animeFlow = ''})
       : jellyfinLogins = [if (jellyfin != null) jellyfin],
         engine = engine ?? SyncEngine() {
     this.engine
@@ -1103,6 +1106,7 @@ void mountSyncRoute(
             ? relayUrlBuilder('default', activeToken, media!.jellyfin!.itemId, dialledHost)
             : null,
         state: hub.stateBroadcast().toJson(),
+        animeFlow: hub.animeFlow.isEmpty ? null : hub.animeFlow,
       );
       try {
         ws.sendText(jsonEncode(welcome.toJson()));

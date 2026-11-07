@@ -57,8 +57,10 @@ class YourServer {
     ServerStarter? starter,
     Future<List<({String name, InternetAddress address})>> Function()? interfaces,
     Future<String?> Function()? publicAddress,
+    String Function()? animeFlow,
     this.publicWait = const Duration(seconds: 4),
   })  : _ytDlpDir = ytDlpDir ?? (() async => ''),
+        _animeFlow = animeFlow ?? (() => ''),
         _logDir = logDir ?? (() => null),
         _starter = starter ?? _startIsolate,
         _interfaces = interfaces ?? machineInterfaces,
@@ -72,6 +74,9 @@ class YourServer {
   final ServerStarter _starter;
   final Future<List<({String name, InternetAddress address})>> Function() _interfaces;
   final Future<String?> Function() _publicAddress;
+  /// The AnimeFlow address it offers (`welcome.animeFlow`): the app's,
+  /// the last one a server offered; read at start and at each share.
+  final String Function() _animeFlow;
 
   /// How long [invite] waits for the internet address before it hands
   /// out a local one (the lookup goes on; [reach] and [shared] follow).
@@ -139,6 +144,7 @@ class YourServer {
         name: who.isEmpty ? 'server' : _name,
         hostKey: hostKey,
         ytDlpDir: await _ytDlpDir(),
+        animeFlow: _offeredAnimeFlow(),
       ),
       loopbackOnly: true,
       // Its session log (every member's shared diagnostics and its own
@@ -151,6 +157,15 @@ class YourServer {
     _server = server;
     port.value = server.port;
     return server.port;
+  }
+
+  /// [_animeFlow] when it is a usable address, else none.
+  String _offeredAnimeFlow() {
+    try {
+      return checkAnimeFlowAddress(_animeFlow());
+    } on ConfigException {
+      return '';
+    }
   }
 
   void _onCrash(ServerIsolate server, String cause) {
@@ -185,6 +200,7 @@ class YourServer {
         // Guests without an account watch Jellyfin items through the
         // server, with this app's own sign-in on the item's server.
         jellyfin: relayCredentialsFor(_accounts),
+        animeFlow: _offeredAnimeFlow(),
       );
       _secret = secret;
       final local = inviteAddresses(await _interfaces());

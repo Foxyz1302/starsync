@@ -54,6 +54,9 @@ class SettingsTab extends StatelessWidget {
   final JellyfinAccounts? jellyfin;
   /// AnimeFlow's `/me` for the Library & accounts page (tests pass a fake).
   final Future<AnimeFlowMe> Function()? animeFlowMe;
+  /// The AnimeFlow address the card is about; null: the app's
+  /// (`AppSettings.animeFlowAddress`). Empty: no card.
+  final ReadonlySignal<String>? animeFlowAddress;
   /// Dev builds: Help & about → Developer → Danmaku preview.
   final VoidCallback? onDanmakuPreview;
   const SettingsTab({
@@ -63,6 +66,7 @@ class SettingsTab extends StatelessWidget {
     this.updates,
     this.jellyfin,
     this.animeFlowMe,
+    this.animeFlowAddress,
     this.onDanmakuPreview,
   });
 
@@ -125,22 +129,30 @@ class SettingsTab extends StatelessWidget {
         return const [NotificationsInfo()];
       case SettingsSection.library:
         final accounts = jellyfin ?? JellyfinAccounts.instance;
+        final flowAt = animeFlowAddress ?? AppScope.of(context).coordinator.settings.animeFlowAddress;
         return [
           Padding(
             padding: const EdgeInsets.only(bottom: 16),
             child: JellyfinAccountsPanel(accounts: accounts),
           ),
-          AnimeFlowCard(
-            me: animeFlowMe ??
-                () async {
-                  final client = AnimeFlowClient.fromAccounts(accounts);
-                  try {
-                    return await client.me();
-                  } finally {
-                    client.close();
-                  }
-                },
-          ),
+          // Only once a server offered AnimeFlow.
+          SignalBuilder(builder: (context) {
+            final at = flowAt.value;
+            if (at.isEmpty) return const SizedBox.shrink();
+            return AnimeFlowCard(
+              key: ValueKey(at),
+              address: at,
+              me: animeFlowMe ??
+                  () async {
+                    final client = AnimeFlowClient.fromAccounts(accounts, baseUrl: at);
+                    try {
+                      return await client.me();
+                    } finally {
+                      client.close();
+                    }
+                  },
+            );
+          }),
           const SettingsPanel(key: ValueKey('web-links'), title: 'Web links', child: YtDlpSettings()),
         ];
       case SettingsSection.updates:
@@ -742,11 +754,12 @@ class _CookieBrowserDialogState extends State<_CookieBrowserDialog> {
   }
 }
 
-/// AnimeFlow (the Schedule tab's source): connected as whom, with which
-/// rights, or why not.
+/// AnimeFlow (the Schedule tab's source) at [address]: connected as
+/// whom, with which rights, or why not.
 class AnimeFlowCard extends StatefulWidget {
+  final String address;
   final Future<AnimeFlowMe> Function() me;
-  const AnimeFlowCard({super.key, required this.me});
+  const AnimeFlowCard({super.key, required this.address, required this.me});
 
   @override
   State<AnimeFlowCard> createState() => _AnimeFlowCardState();
@@ -791,7 +804,7 @@ class _AnimeFlowCardState extends State<AnimeFlowCard> {
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.downloading_outlined),
-                title: Text(Uri.parse(animeFlowDefaultBase).host),
+                title: Text(Uri.tryParse(widget.address)?.host ?? widget.address),
                 subtitle: Text(status, key: const ValueKey('animeflow-status'), style: TextStyle(color: color)),
                 trailing: TextButton(
                   onPressed: snap.connectionState == ConnectionState.done
@@ -802,7 +815,8 @@ class _AnimeFlowCardState extends State<AnimeFlowCard> {
               ),
               Text(
                 'Powers the Schedule tab: what is downloaded, downloading or missing, and requests. '
-                'Signs in with your Jellyfin account on the same domain.',
+                'Offered by the last server you joined that has it; signs in with your Jellyfin account '
+                'on the same domain.',
                 style: TextStyle(color: muted, fontSize: 12),
               ),
             ],

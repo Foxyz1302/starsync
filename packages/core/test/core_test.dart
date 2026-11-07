@@ -33,6 +33,16 @@ void main() {
       expect(back.mediaPath, 'm');
       expect(back.advertiseHost, '1.2.3.4');
     });
+
+    test('animeFlow: optional, an http(s) address without a trailing slash', () {
+      expect(AppConfig.fromMap({}).animeFlow, isEmpty);
+      final c = AppConfig.fromMap({'animeFlow': ' https://anime.example.org/api/app/v1/ '});
+      expect(c.animeFlow, 'https://anime.example.org/api/app/v1');
+      expect(AppConfig.fromMap(c.toMap()).animeFlow, c.animeFlow);
+      for (final bad in ['anime.example.org', 'ftp://example.org/x', 'https://']) {
+        expect(() => AppConfig.fromMap({'animeFlow': bad}), throwsA(isA<ConfigException>()), reason: bad);
+      }
+    });
   });
 
   group('protocol', () {
@@ -269,6 +279,14 @@ void main() {
       final back = WelcomeMessage.fromJson(rt(w.toJson()));
       expect([back.proto, back.resumed, back.instance, back.grace], [16, true, 'boot1', 600]);
       expect([back.feed.single.seq, back.feed.single.replayed], [3, true]);
+    });
+
+    test('welcome.animeFlow: present only when the server has one', () {
+      const w = WelcomeMessage(token: 't', animeFlow: 'https://anime.example.org/api/app/v1');
+      expect(WelcomeMessage.fromJson(rt(w.toJson())).animeFlow, 'https://anime.example.org/api/app/v1');
+      expect(const WelcomeMessage(token: 't').toJson().containsKey('animeFlow'), isFalse);
+      expect(const WelcomeMessage(token: 't', animeFlow: '').toJson().containsKey('animeFlow'), isFalse);
+      expect(WelcomeMessage.fromJson({'t': 'welcome', 'animeFlow': 7}).animeFlow, isNull);
     });
 
     test('presence, play, pause and continue intents, bye', () {

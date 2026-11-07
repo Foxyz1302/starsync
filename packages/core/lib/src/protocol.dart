@@ -563,6 +563,9 @@ class WelcomeMessage {
   final int grace;
   /// Feed lines after `hello.feedAfter`, oldest first, each `replayed`.
   final List<FeedMessage> feed;
+  /// The AnimeFlow app API the server offers for the Schedule
+  /// ([AppConfig.animeFlow]); null when it has none.
+  final String? animeFlow;
   const WelcomeMessage(
       {required this.token,
       this.memberId = '',
@@ -573,7 +576,8 @@ class WelcomeMessage {
       this.resumed = false,
       this.instance = '',
       this.grace = RelayConstants.graceSecs,
-      this.feed = const []});
+      this.feed = const [],
+      this.animeFlow});
 
   Map<String, Object?> toJson() => {
         't': 'welcome',
@@ -587,12 +591,14 @@ class WelcomeMessage {
         if (relayUrl != null) 'relayUrl': relayUrl,
         if (state != null) 'state': state,
         if (feed.isNotEmpty) 'feed': [for (final f in feed) f.toJson()],
+        if (animeFlow case final a? when a.isNotEmpty) 'animeFlow': a,
       };
 
   factory WelcomeMessage.fromJson(Map<String, Object?> json) {
     if (json['t'] != 'welcome') throw const ProtocolException('not a welcome message');
     final state = json['state'];
     final feed = json['feed'];
+    final animeFlow = json['animeFlow'];
     return WelcomeMessage(
       token: (json['token'] as String?) ?? '',
       memberId: (json['memberId'] as String?) ?? '',
@@ -609,6 +615,7 @@ class WelcomeMessage {
                 if (f is Map && f['t'] == 'feed') FeedMessage.fromJson(Map<String, Object?>.from(f)),
             ]
           : const [],
+      animeFlow: animeFlow is String && animeFlow.isNotEmpty ? animeFlow : null,
     );
   }
 }

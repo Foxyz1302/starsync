@@ -312,22 +312,46 @@ void main() {
         throwsA(isA<AnimeFlowException>().having((e) => e.code, 'code', AnimeFlowErrorCode.network)));
   });
 
-  test('tokenFor picks the account on the same parent domain', () {
+  test('tokenFor picks the account under the same registrable domain', () {
+    const base = 'https://anime.example.org/api/app/v1';
     JellyfinAccount acc(String id, String url) =>
         JellyfinAccount(serverId: id, serverName: id, urls: [url], userId: 'u', userName: 'n', token: 'tok-$id');
     final accounts = [
       acc('a', 'https://jellyfin.other.org'),
       acc('b', 'https://media.example.org:8920'),
     ];
-    expect(AnimeFlowClient.tokenFor(accounts, animeFlowDefaultBase), 'tok-b');
-    expect(AnimeFlowClient.tokenFor([acc('c', 'https://example.org')], animeFlowDefaultBase), 'tok-c');
-    expect(AnimeFlowClient.tokenFor([acc('d', 'https://notexample.org')], animeFlowDefaultBase), isNull);
-    // The old name of the same server (saved before the move) still matches,
-    // both ways.
-    expect(AnimeFlowClient.tokenFor([acc('e', 'https://media.example.org:8920')], animeFlowDefaultBase), 'tok-e');
-    expect(AnimeFlowClient.tokenFor([acc('f', 'https://media.example.org')], 'https://anime.example.org/api/app/v1'),
+    expect(AnimeFlowClient.tokenFor(accounts, base), 'tok-b');
+    expect(AnimeFlowClient.tokenFor([acc('c', 'https://example.org')], base), 'tok-c');
+    expect(AnimeFlowClient.tokenFor([acc('d', 'https://notexample.org')], base), isNull);
+    // Deeper names on either side are the same server.
+    expect(AnimeFlowClient.tokenFor([acc('e', 'https://jf.home.example.org')], base), 'tok-e');
+    expect(AnimeFlowClient.tokenFor([acc('f', 'https://media.example.org')], 'https://api.anime.example.org/v1'),
         'tok-f');
-    expect(AnimeFlowClient.tokenFor([acc('g', 'https://notexample.org')], animeFlowDefaultBase), isNull);
     expect(AnimeFlowClient.tokenFor(accounts, 'https://anime.example.net/api'), isNull);
+    expect(AnimeFlowClient.tokenFor(accounts, ''), isNull);
+  });
+
+  test('registrableDomain', () {
+    expect(registrableDomain('anime.example.org'), 'example.org');
+    expect(registrableDomain('a.b.Example.org'), 'example.org');
+    expect(registrableDomain('example.org'), 'example.org');
+    expect(registrableDomain('anime.example.co.uk'), 'example.co.uk');
+    expect(registrableDomain('flow.example.de'), 'example.de');
+    expect(registrableDomain('192.168.1.5'), '192.168.1.5');
+    expect(registrableDomain('localhost'), 'localhost');
+  });
+
+  test('no address: not_configured without a request; the address is read on every call', () async {
+    var at = '';
+    final c = AnimeFlowClient(address: () => at, token: token, delay: (d) async {}, now: () => now);
+    expect(c.configured, isFalse);
+    await expectLater(c.me(),
+        throwsA(isA<AnimeFlowException>().having((e) => e.code, 'code', AnimeFlowErrorCode.notConfigured)));
+    expect(server.seen, isEmpty);
+    await serve({'GET /me': (req, res) async => json(res, {'user_id': 'u1', 'name': 'Ann', 'scopes': ['view']})});
+    at = '${server.url}/api/app/v1/';
+    expect(c.baseUrl, '${server.url}/api/app/v1');
+    expect((await c.me()).name, 'Ann');
+    c.close();
   });
 }

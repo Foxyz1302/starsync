@@ -54,6 +54,7 @@ const _keyDanmakuStyle = 'danmakuStyle';
 const _keyUpdateChannel = 'updateChannel';
 const _keyConfigAddress = 'configAddress';
 const _keyPlayerVolume = 'playerVolume';
+const _keyAnimeFlowAddress = 'animeFlowAddress';
 
 /// A file next to the binary naming a channel (`dev` / `stable`): the
 /// app takes it as the update channel on its next start and deletes it.
@@ -107,6 +108,11 @@ class AppSettings {
   /// (Settings → Updates → More, "Config address": a mirror). Empty: none.
   /// What it serves still needs the developer's signature.
   final configAddress = signal('');
+  /// The AnimeFlow address the last server that offered one gave
+  /// (`welcome.animeFlow`): the Schedule's statuses and requests use it,
+  /// also outside a server, and your server offers it on. Not a setting
+  /// (nothing shows it to change); empty: none yet.
+  final animeFlowAddress = signal('');
   /// An episode this app puts up (Jellyfin, a file of a local show) is
   /// continued by the next one (Up next's `auto` item, the server's
   /// countdown at its end).
@@ -220,6 +226,8 @@ class AppSettings {
       await _loadUpdateChannel(box);
       final configAt = box.get(_keyConfigAddress);
       if (configAt is String) configAddress.value = configAt;
+      final flowAt = box.get(_keyAnimeFlowAddress);
+      if (flowAt is String) animeFlowAddress.value = flowAt;
       final advance = box.get(_keyAutoAdvance);
       if (advance is bool) autoAdvance.value = advance;
       avatarCircle.value = box.get(_keyAvatarShape) == 'circle';
@@ -328,6 +336,15 @@ class AppSettings {
   void setConfigAddress(String url) {
     configAddress.value = url.trim();
     _put(_keyConfigAddress, url.trim());
+  }
+
+  /// Keeps [url] as [animeFlowAddress] (a server offered it); empty or
+  /// the same changes nothing.
+  void rememberAnimeFlow(String url) {
+    final v = url.trim();
+    if (v.isEmpty || v == animeFlowAddress.peek()) return;
+    animeFlowAddress.value = v;
+    _put(_keyAnimeFlowAddress, v);
   }
 
   void setAutoAdvance(bool on) {

@@ -355,7 +355,8 @@ class ScheduleRepository {
         _key = key ?? (() async => scheduleKeyFor(animeFlow?.baseUrl ?? '-'));
 
   final AniListClient aniList;
-  /// Null = not configured (AniList only).
+  /// Null, or a client without an address ([AnimeFlowClient.configured]):
+  /// no AnimeFlow (AniList only, no error shown).
   final AnimeFlowClient? animeFlow;
   /// Confirms "on Jellyfin" and this user's watched state per episode
   /// ([confirmOnJellyfin]); null = never confirmed (aired entries read
@@ -428,6 +429,7 @@ class ScheduleRepository {
     final now = _now();
     final flow = await flowF;
     final airings = [...ani.airings]..sort((a, b) => a.airingAt.compareTo(b.airingAt));
+    final off = identical(flow.error, _noAnimeFlow);
     final entries = flow.error == null
         ? await _confirm(
             matchSchedule(airings, schedule: flow.schedule, series: flow.series, library: flow.library, now: now))
@@ -437,7 +439,7 @@ class ScheduleRepository {
       to: end,
       entries: entries,
       aniListStaleSince: ani.staleSince,
-      animeFlowError: flow.error == null ? null : _text(flow.error!),
+      animeFlowError: flow.error == null || off ? null : _text(flow.error!),
       animeFlowException: flow.error is AnimeFlowException ? flow.error as AnimeFlowException : null,
       me: flow.me,
     );
@@ -447,7 +449,7 @@ class ScheduleRepository {
     final flowError = flow.error;
     final flowAnswered = flowError == null ||
         (flowError is AnimeFlowException && flowError.code == AnimeFlowErrorCode.missingToken) ||
-        animeFlow == null;
+        off;
     if (ani.staleSince == null && flowAnswered) await _keep(snap);
     return snap;
   }
@@ -476,10 +478,10 @@ class ScheduleRepository {
   Future<({AnimeFlowMe? me, List<AnimeFlowScheduleItem> schedule, List<AnimeFlowSeries> series, List<AnimeFlowLibraryItem> library, Object? error})>
       _animeFlow(DateTime from, DateTime to, bool force) async {
     final c = animeFlow;
-    if (c == null) {
+    if (c == null || !c.configured) {
       return (me: null, schedule: const <AnimeFlowScheduleItem>[], series: const <AnimeFlowSeries>[],
           library: const <AnimeFlowLibraryItem>[],
-          error: 'AnimeFlow is not configured');
+          error: _noAnimeFlow);
     }
     try {
       if (force) c.clearCache();
@@ -505,6 +507,9 @@ class ScheduleRepository {
       return (me: null, schedule: const <AnimeFlowScheduleItem>[], series: const <AnimeFlowSeries>[], library: const <AnimeFlowLibraryItem>[], error: e);
     }
   }
+
+  /// [_animeFlow]'s "error" without an AnimeFlow: nothing to say.
+  static const _noAnimeFlow = 'no AnimeFlow';
 
   static String _text(Object e) => switch (e) {
         AnimeFlowException(:final code, :final detail) => switch (code) {

@@ -108,14 +108,16 @@ JellyfinAccount? jellyfinAccountFor(JellyfinAccounts accounts, AnimeFlowClient? 
   return accounts.defaultAccount;
 }
 
-/// The Schedule's data for [accounts]: AniList, AnimeFlow with the token
+/// The Schedule's data for [accounts]: AniList, AnimeFlow at [address]
+/// (read on every load: the last one a server offered) with the token
 /// of the linked account on its domain, that account's Jellyfin episodes,
 /// and the last schedule kept per account and AnimeFlow address ([store]:
 /// on disk too). The app keeps one for its whole run (`AppGraph.schedule`),
 /// so the clients' own caches (AniList's pages, AnimeFlow's ETags and
 /// /me) last across visits of the tab.
-ScheduleRepository scheduleRepositoryFor(JellyfinAccounts accounts, {ScheduleStore? store}) {
-  final flow = AnimeFlowClient.fromAccounts(accounts);
+ScheduleRepository scheduleRepositoryFor(JellyfinAccounts accounts,
+    {required String Function() address, ScheduleStore? store}) {
+  final flow = AnimeFlowClient.fromAccounts(accounts, address: address);
   return ScheduleRepository(
     aniList: AniListClient(),
     animeFlow: flow,

@@ -234,8 +234,8 @@ licenses"). Left: the libmpv sources uploaded to their release; real
 licenses in `fox_utils` and `leaf_widgets` (MIT, plus Apache-2.0 for
 fox_utils' vendored MixinNetwork code) and ANGLE's license files copied
 by the media_kit fork; pol's OK for his server names in the history;
-pol's services out of the code (AnimeFlow becomes a request backend the
-user adds, like a Jellyfin server, next to Sonarr later); a gitleaks run
+AnimeFlow as a request backend the user adds, like a Jellyfin server,
+next to Sonarr later (today only a server's config offers it); a gitleaks run
 over what is pushed (`main` and the release tags only). Then publish the
 source on GitHub; public repos
 get free GitHub Actions with Windows runners, so CI can leave pol's

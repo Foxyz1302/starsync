@@ -361,10 +361,20 @@ void main() {
       ]);
     });
 
-    test('AnimeFlow not configured', () async {
-      final s = await repo(flow: false).load();
-      expect(s.animeFlowError, isNotNull);
-      expect(s.entries, hasLength(3));
+    test('no AnimeFlow (none, or no address yet): AniList only, nothing to say', () async {
+      for (final r in [
+        repo(flow: false),
+        ScheduleRepository(
+          aniList: AniListClient(url: '${server.url}/anilist', cacheDir: () async => cache, now: () => now),
+          animeFlow: AnimeFlowClient(address: () => '', token: 'tok', now: () => now),
+          now: () => now,
+        ),
+      ]) {
+        final s = await r.load();
+        expect(s.animeFlowError, isNull);
+        expect(s.me, isNull);
+        expect(s.entries, hasLength(3));
+      }
     });
 
     test('AniList failing: stale cache, else an error', () async {
