@@ -25,7 +25,7 @@ import '../ports/player_host.dart' show FrameGrab, RawFrame;
 // the picture before the video output's shaders, never upscaled. On mpv
 // 0.41 that path fails for a GPU decoder's frame (hwdec without -copy:
 // "Input image format cuda not supported"); the caller then decodes the
-// frame again (`decodeStillFrame`).
+// frame again in a hidden player (`StillFrames`), without trying here first.
 
 /// Both copies of the frame on screen from the mpv handle at [ctx]: the
 /// one with subtitles first (when [subtitles]), then the clean one, back

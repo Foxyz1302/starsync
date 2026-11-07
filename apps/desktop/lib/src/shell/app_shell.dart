@@ -145,6 +145,12 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   ({Shot shot, ShotImages images})? _shot;
   bool _shotOpening = false;
 
+  /// A capture under way, shown from the next frame ([ShotPending]):
+  /// true for S (the selection opens once the frame is in), false for
+  /// Shift+S; null: none. A new number per press; Esc meanwhile drops it.
+  bool? _capturing;
+  int _captureSeq = 0;
+
   /// Last pointer position in the window (where a paste's card opens).
   Offset? _pointer;
   bool _dragging = false;
@@ -413,9 +419,17 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   /// whole frame, saved and copied at once). The video keeps playing for
   /// everyone; only this window shows the frozen frame.
   Future<void> _screenshot({required bool area}) async {
-    if (_shot != null || _shotOpening) return;
-    final shot = await _shots.capture();
-    if (!mounted) return;
+    if (_shot != null || _shotOpening || _capturing != null) return;
+    final seq = ++_captureSeq;
+    setState(() => _capturing = area);
+    Shot? shot;
+    try {
+      shot = await _shots.capture();
+    } finally {
+      // An area keeps the dimmed player until the selection replaces it.
+      if (mounted && seq == _captureSeq && (!area || shot == null)) _endCapture();
+    }
+    if (!mounted || seq != _captureSeq) return; // given up (Esc)
     if (shot == null) {
       _graph.notifier.notify(const ActionFailed('No picture to take a screenshot of'));
       return;
@@ -425,24 +439,38 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
       unawaited(_shots.save(shot, subtitles: shot.hasSubs, onEdit: _editShot));
       return;
     }
-    await _openShot(shot, subtitles: shot.hasSubs);
+    await _openShot(shot, subtitles: shot.hasSubs, wanted: () => seq == _captureSeq);
+    if (mounted && seq == _captureSeq) _endCapture();
+  }
+
+  /// The capture's wait goes: done, or given up ([cancel], Esc: its frame
+  /// is then dropped).
+  void _endCapture({bool cancel = false}) {
+    if (_capturing == null) return;
+    if (cancel) _captureSeq++;
+    setState(() => _capturing = null);
+    if (_shot == null) FocusManager.instance.primaryFocus?.unfocus();
   }
 
   /// A click on a screenshot's toast: the same frame again, to crop it
   /// another way or switch the subtitles.
   void _editShot(Shot shot) => unawaited(_openShot(shot, subtitles: shot.hasSubs));
 
-  Future<void> _openShot(Shot shot, {required bool subtitles}) async {
+  /// [wanted]: still wanted once decoded (a capture given up is not).
+  Future<void> _openShot(Shot shot, {required bool subtitles, bool Function()? wanted}) async {
     if (_shot != null || _shotOpening) return;
     _shotOpening = true;
     try {
       final images = await decodeShot(shot);
-      if (!mounted || _shot != null) {
+      if (!mounted || _shot != null || !(wanted?.call() ?? true)) {
         images.clean.dispose();
         images.subs?.dispose();
         return;
       }
       setState(() => _shot = (shot: shot, images: images));
+      // A hidden player (GPU decoding) stays while it is up: the next S is
+      // a seek on it.
+      _shots.stills.hold();
     } finally {
       _shotOpening = false;
     }
@@ -451,6 +479,7 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
   void _closeShot() {
     if (_shot == null) return;
     setState(() => _shot = null);
+    _shots.stills.release();
     FocusManager.instance.primaryFocus?.unfocus();
   }
 
@@ -989,6 +1018,8 @@ class AppShellState extends State<AppShell> with SingleTickerProviderStateMixin 
           ),
           if (online && _shown != PlayerMode.none) _playerLayer(area),
           if (_shot case final s?) _shotOverlay(s),
+          if (_capturing case final area?)
+            Positioned.fill(child: ShotPending(key: const ValueKey('shot-wait'), area: area, onCancel: () => _endCapture(cancel: true))),
           _toasts(full && online),
           Positioned(
             top: 12,

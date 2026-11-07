@@ -292,6 +292,52 @@ void main() {
     });
   });
 
+  test('frames left on the GPU: a decoder without -copy, on mpv 0.41 and before', () {
+    expect(gpuFrames('nvdec', 'mpv v0.41.0-dirty'), isTrue);
+    expect(gpuFrames('vaapi', 'mpv 0.38.0'), isTrue);
+    expect(gpuFrames('nvdec-copy', 'mpv v0.41.0'), isFalse);
+    expect(gpuFrames('', 'mpv v0.41.0'), isFalse);
+    expect(gpuFrames('no', 'mpv v0.41.0'), isFalse);
+    expect(gpuFrames('nvdec', 'mpv v0.42.0'), isFalse, reason: 'mpv after 0.41 reads them back');
+    expect(gpuFrames('nvdec', ''), isFalse, reason: 'unknown: the grab is tried');
+  });
+
+  group('while the frame comes', () {
+    Future<List<String>> pumpPending(WidgetTester tester, {required bool area}) async {
+      final log = <String>[];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Stack(children: [
+            Center(child: TextButton(onPressed: () => log.add('under'), child: const Text('under'))),
+            Positioned.fill(child: ShotPending(area: area, onCancel: () => log.add('cancel'))),
+          ]),
+        ),
+      ));
+      return log;
+    }
+
+    testWidgets('S: the player dimmed under "Capturing…"; it has the keys, Esc gives up', (tester) async {
+      final log = await pumpPending(tester, area: true);
+      expect(find.text('Capturing…'), findsOneWidget);
+      expect(textInputFocused(), isTrue, reason: "the player's keys stay off (Esc no longer shrinks it)");
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.tap(find.text('under'), warnIfMissed: false);
+      expect(log, isEmpty, reason: 'keys and clicks stay on it');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      expect(log, ['cancel']);
+      await tester.tapAt(const Offset(10, 10), buttons: kSecondaryMouseButton);
+      expect(log, ['cancel', 'cancel']);
+    });
+
+    testWidgets('Shift+S: a small pill; clicks go through, keys do not', (tester) async {
+      final log = await pumpPending(tester, area: false);
+      expect(find.text('Taking a screenshot…'), findsOneWidget);
+      expect(textInputFocused(), isTrue);
+      await tester.tap(find.text('under'));
+      expect(log, ['under']);
+    });
+  });
+
   group('S in the player', () {
     tearDown(() {
       _graph.navigation.place.value = Place.none;

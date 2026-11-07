@@ -57,43 +57,65 @@ class Screenshots {
       required this.nowPlaying,
       required this.folders,
       required this.shell,
-      required this.notify});
+      required this.notify})
+      : stills = StillFrames(playback.host);
 
-  bool _capturing = false;
+  /// The hidden player for frames mpv cannot hand over (GPU decoding).
+  final StillFrames stills;
+
+  Future<void>? _under;
 
   /// The frame on screen now, with and (when subtitles are on) without
-  /// subtitles, caught back to back; null when there is no picture (or a
-  /// capture is still under way).
+  /// subtitles, caught back to back; null when there is no picture. A
+  /// capture still under way (one given up) is waited for first.
   Future<Shot?> capture() async {
-    final p = playback.current;
-    if (p == null || p.disposed || _capturing) return null;
-    _capturing = true;
-    try {
-      final at = p.state.position;
-      final sub = playback.tracks.peek().where((t) => t.type == JellyfinStreamType.subtitle && t.selected).firstOrNull;
-      var grab = await p.grabFrame(subtitles: sub != null);
-      if (grab == null) {
-        final source = p.opened;
-        if (source == null) return null;
-        final subScale = await p.getProperty('sub-scale').catchError((Object _) => '1');
-        final sw = Stopwatch()..start();
-        // At the very end a seek finds nothing: the last moment before it.
-        final end = p.state.duration - const Duration(milliseconds: 100);
-        grab = await decodeStillFrame(playback.host,
-            url: source.url,
-            headers: source.headers,
-            at: end > Duration.zero && at > end ? end : at,
-            sid: sub?.id,
-            subScale: subScale);
-        _log.info('decoded the frame at ${at.inMilliseconds} ms again: ${sw.elapsedMilliseconds} ms');
-      }
-      if (grab == null) return null;
-      final now = nowPlaying.peek();
-      return Shot(
-          clean: grab.clean, subs: grab.subs, name: screenshotName(title: now?.title, episode: now?.episode, at: at));
-    } finally {
-      _capturing = false;
+    for (var under = _under; under != null; under = _under) {
+      await under;
     }
+    final done = Completer<void>();
+    _under = done.future;
+    try {
+      return await _capture();
+    } finally {
+      _under = null;
+      done.complete();
+    }
+  }
+
+  Future<Shot?> _capture() async {
+    final p = playback.current;
+    if (p == null || p.disposed) return null;
+    final at = p.state.position;
+    final sub = playback.tracks.peek().where((t) => t.type == JellyfinStreamType.subtitle && t.selected).firstOrNull;
+    final sw = Stopwatch()..start();
+    // A GPU decoder's frame cannot be read back (mpv 0.41): straight to
+    // the hidden player then, without the grab that would fail first.
+    final (hwdec, version, subScale) =
+        await (p.getProperty('hwdec-current'), p.getProperty('mpv-version'), p.getProperty('sub-scale'))
+            .wait
+            .catchError((Object _) => ('', '', '1'));
+    FrameGrab? grab;
+    var how = 'from mpv';
+    if (!gpuFrames(hwdec, version)) grab = await p.grabFrame(subtitles: sub != null);
+    if (grab == null) {
+      final source = p.opened;
+      if (source == null) return null;
+      // At the very end a seek finds nothing: the last moment before it.
+      final end = p.state.duration - const Duration(milliseconds: 100);
+      final still = await stills.frameAt(
+          url: source.url,
+          headers: source.headers,
+          at: end > Duration.zero && at > end ? end : at,
+          sid: sub?.id,
+          subScale: subScale);
+      grab = still?.grab;
+      how = still == null ? 'decoded again, failed' : 'decoded again (${still.warm ? 'warm' : 'opened'})';
+    }
+    _log.info('frame at ${at.inMilliseconds} ms (hwdec ${hwdec.isEmpty ? 'no' : hwdec}), $how: ${sw.elapsedMilliseconds} ms');
+    if (grab == null) return null;
+    final now = nowPlaying.peek();
+    return Shot(
+        clean: grab.clean, subs: grab.subs, name: screenshotName(title: now?.title, episode: now?.episode, at: at));
   }
 
   /// Saves [shot] ([subtitles] on or off, cropped to [crop], whole when
@@ -134,14 +156,159 @@ class Screenshots {
   }
 }
 
-/// The frame at [at] of [url] (opened with [headers]), decoded once more
-/// in software by a hidden player of [host] (no sound, nothing on
-/// screen), and with subtitle track [sid] (at [subScale]) drawn in for
-/// the second copy. For when mpv cannot hand over the frame on screen:
-/// mpv 0.41 cannot read a frame back from the GPU decoder (`hwdec`
-/// without `-copy`: "Input image format cuda not supported"; mpv after
-/// 0.41 can). Both copies are then the very same frame. Slower: the media
-/// is opened and sought again (a moment for a file, longer for a stream).
+/// mpv's `hwdec-current` [hwdec] leaves the frames on the GPU (a decoder
+/// without `-copy`) and mpv [version] (`mpv-version`) cannot hand one
+/// over: 0.41 and before ("Input image format cuda not supported"; mpv
+/// after 0.41 can). An unknown version is tried.
+bool gpuFrames(String hwdec, String version) {
+  if (hwdec.isEmpty || hwdec == 'no' || hwdec.endsWith('-copy')) return false;
+  final m = RegExp(r'(\d+)\.(\d+)').firstMatch(version);
+  if (m == null) return false;
+  return int.parse(m[1]!) == 0 && int.parse(m[2]!) <= 41;
+}
+
+/// Frames of the session's media decoded once more, in software, by a
+/// hidden player of [host] (no sound, nothing on screen): for when mpv
+/// cannot hand over the frame on screen ([gpuFrames]). Its first frame
+/// opens the media at that moment; the player then stays on that media,
+/// paused, for [keep] after the last frame (or while [hold] holds it, the
+/// selection being up), so the next one is only an exact seek. Another
+/// media, or the time out, closes it.
+class StillFrames {
+  final PlayerHost host;
+  final Duration keep;
+  StillFrames(this.host, {this.keep = const Duration(minutes: 2)});
+
+  HostedPlayer? _player;
+  String? _source; // what [_player] has open
+  ({int? sid, String subScale})? _subs;
+  Timer? _idle;
+  int _holds = 0;
+  Future<void> _queue = Future.value();
+
+  /// A hidden player is up.
+  bool get warm => _player != null;
+
+  /// The frame at [at] of [url] (opened with [headers]), and with
+  /// subtitle track [sid] (at [subScale]) drawn in for the second copy;
+  /// both copies are the very same frame. `warm`: the player was already
+  /// on that media. Null when it cannot be had in [timeout].
+  Future<({FrameGrab grab, bool warm})?> frameAt(
+      {required String url,
+      Map<String, String> headers = const {},
+      required Duration at,
+      int? sid,
+      String subScale = '1',
+      Duration timeout = const Duration(seconds: 15)}) {
+    final run = _queue.then((_) => _frameAt(url, headers, at, sid, subScale, timeout));
+    _queue = run.then((_) {}, onError: (Object _) {});
+    return run;
+  }
+
+  Future<({FrameGrab grab, bool warm})?> _frameAt(
+      String url, Map<String, String> headers, Duration at, int? sid, String subScale, Duration timeout) async {
+    _idle?.cancel();
+    final source = [url, for (final e in headers.entries) '${e.key}: ${e.value}'].join('\n');
+    var p = _player;
+    final warm = p != null && !p.disposed && _source == source;
+    try {
+      if (p != null && warm) {
+        if (_subs != (sid: sid, subScale: subScale)) await _setSubs(p, sid, subScale);
+        await p.command(['seek', _secs(at), 'absolute+exact']);
+      } else {
+        await close();
+        final h = p = _player = await host.create(PlayerRole.thumbnail);
+        _source = source;
+        for (final (k, v) in [
+          ('ao', 'null'),
+          ('aid', 'no'),
+          ('vid', 'auto'), // media_kit starts with vid=no
+          ('hwdec', 'no'),
+          ('ytdl', 'no'),
+          ('hr-seek', 'yes'),
+          ('start', _secs(at)),
+          ('sub-ass', 'yes'),
+          ('sub-visibility', 'yes'),
+        ]) {
+          await h.setProperty(k, v);
+        }
+        await _setSubs(h, sid, subScale);
+        await h.open(url, headers: headers);
+      }
+      final grab = await _settled(p, at, timeout, subtitles: sid != null);
+      if (grab == null) {
+        await close();
+        return null;
+      }
+      return (grab: grab, warm: warm);
+    } catch (e) {
+      _log.warning('still frame failed: $e');
+      await close();
+      return null;
+    } finally {
+      _later();
+    }
+  }
+
+  Future<void> _setSubs(HostedPlayer p, int? sid, String subScale) async {
+    await p.setProperty('sid', sid == null ? 'no' : '$sid');
+    await p.setProperty('sub-scale', subScale);
+    _subs = (sid: sid, subScale: subScale);
+  }
+
+  /// The grab once the player shows the frame at [at]: decoded, not
+  /// seeking, on the frame at [at].
+  Future<FrameGrab?> _settled(HostedPlayer p, Duration at, Duration timeout, {required bool subtitles}) async {
+    final deadline = DateTime.now().add(timeout);
+    final target = at.inMicroseconds / 1e6;
+    while (DateTime.now().isBefore(deadline)) {
+      if (await p.getProperty('idle-active') == 'yes') return null;
+      final w = await p.getProperty('video-params/w');
+      if (w.isNotEmpty && w != '0' && await p.getProperty('seeking') != 'yes') {
+        final pos = double.tryParse(await p.getProperty('time-pos'));
+        // An exact seek lands on the first frame at or after the moment (the
+        // session player's position is the pts of the frame on screen).
+        if (pos == null || (pos > target - 0.01 && pos < target + 0.5)) return await p.grabFrame(subtitles: subtitles);
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    _log.warning('still frame: not up in ${timeout.inSeconds} s');
+    return null;
+  }
+
+  /// Keeps the player while held (the selection is up); the time out
+  /// starts again once the last hold lets go ([release]).
+  void hold() {
+    _holds++;
+    _idle?.cancel();
+  }
+
+  void release() {
+    if (_holds > 0) _holds--;
+    _later();
+  }
+
+  void _later() {
+    _idle?.cancel();
+    if (_holds > 0 || _player == null) return;
+    _idle = Timer(keep, () => unawaited(close()));
+  }
+
+  /// The hidden player goes.
+  Future<void> close() async {
+    _idle?.cancel();
+    final p = _player;
+    _player = null;
+    _source = null;
+    _subs = null;
+    if (p != null && !p.disposed) await host.dispose(p);
+  }
+
+  static String _secs(Duration d) => (d.inMicroseconds / 1e6).toStringAsFixed(3);
+}
+
+/// One frame decoded again by a hidden player that goes at once
+/// ([StillFrames] keeping nothing).
 Future<FrameGrab?> decodeStillFrame(PlayerHost host,
     {required String url,
     Map<String, String> headers = const {},
@@ -149,42 +316,12 @@ Future<FrameGrab?> decodeStillFrame(PlayerHost host,
     int? sid,
     String subScale = '1',
     Duration timeout = const Duration(seconds: 15)}) async {
-  HostedPlayer? still;
+  final stills = StillFrames(host);
   try {
-    still = await host.create(PlayerRole.thumbnail);
-    final h = still;
-    for (final (k, v) in [
-      ('ao', 'null'),
-      ('aid', 'no'),
-      ('vid', 'auto'), // media_kit starts with vid=no
-      ('hwdec', 'no'),
-      ('ytdl', 'no'),
-      ('hr-seek', 'yes'),
-      ('start', (at.inMicroseconds / 1e6).toStringAsFixed(3)),
-      ('sid', sid == null ? 'no' : '$sid'),
-      ('sub-ass', 'yes'),
-      ('sub-visibility', 'yes'),
-      ('sub-scale', subScale),
-    ]) {
-      await h.setProperty(k, v);
-    }
-    await h.open(url, headers: headers);
-    final deadline = DateTime.now().add(timeout);
-    while (DateTime.now().isBefore(deadline)) {
-      if (await h.getProperty('idle-active') == 'yes') return null;
-      final w = await h.getProperty('video-params/w');
-      if (w.isNotEmpty && w != '0' && await h.getProperty('seeking') != 'yes') {
-        return await h.grabFrame(subtitles: sid != null);
-      }
-      await Future.delayed(const Duration(milliseconds: 20));
-    }
-    _log.warning('still frame: not up in ${timeout.inSeconds} s');
-    return null;
-  } catch (e) {
-    _log.warning('still frame failed: $e');
-    return null;
+    final still = await stills.frameAt(url: url, headers: headers, at: at, sid: sid, subScale: subScale, timeout: timeout);
+    return still?.grab;
   } finally {
-    if (still != null) unawaited(host.dispose(still));
+    await stills.close();
   }
 }
 

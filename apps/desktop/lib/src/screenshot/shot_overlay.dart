@@ -318,6 +318,92 @@ class _ShotOverlayState extends State<ShotOverlay> {
   }
 }
 
+/// The moment between a screenshot key and its frame (S or Shift+S),
+/// shown from the next frame on. [area] (S): the player dimmed under a
+/// "Capturing…" pill, where the selection will open; clicks stay on it.
+/// Otherwise (Shift+S): only the pill, clicks go through. Either way it
+/// has the keys ([KeyboardClaim]): nothing reaches the player meanwhile,
+/// and Esc gives up the capture ([onCancel]).
+class ShotPending extends StatefulWidget {
+  final bool area;
+  final VoidCallback onCancel;
+  const ShotPending({super.key, required this.area, required this.onCancel});
+
+  @override
+  State<ShotPending> createState() => _ShotPendingState();
+}
+
+class _ShotPendingState extends State<ShotPending> {
+  final _focus = FocusNode(debugLabel: 'screenshot pending');
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.requestFocus();
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  KeyEventResult _key(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.escape) widget.onCancel();
+    return KeyEventResult.handled;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pill = Center(
+      child: AppGlass.pill(
+        key: const ValueKey('shot-pending'),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox.square(
+                  dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+              const SizedBox(width: 10),
+              Text(widget.area ? 'Capturing…' : 'Taking a screenshot…',
+                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+      ),
+    );
+    return KeyboardClaim(
+      child: Focus(
+        focusNode: _focus,
+        autofocus: true,
+        onKeyEvent: _key,
+        child: widget.area
+            ? Listener(
+                key: const ValueKey('shot-pending-area'),
+                behavior: HitTestBehavior.opaque,
+                onPointerDown: (e) {
+                  if (e.buttons & kSecondaryMouseButton != 0) widget.onCancel();
+                },
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    const ColoredBox(color: Color(0x73000000)),
+                    Positioned(top: 16, left: 16, right: 16, child: pill),
+                  ],
+                ),
+              )
+            : IgnorePointer(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: Padding(padding: const EdgeInsets.only(top: 16), child: pill),
+                ),
+              ),
+      ),
+    );
+  }
+}
+
 /// A button of the selection's bar: icon, label and its key.
 class _ToolButton extends StatelessWidget {
   final IconData icon;

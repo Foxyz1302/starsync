@@ -2649,12 +2649,34 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   `glsl-shaders` are never in it, nothing is upscaled). On mpv 0.41 that
   path cannot read a frame from a GPU decoder (`hwdec` without `-copy`,
   Linux's `auto`: "Input image format cuda not supported"; mpv after 0.41
-  can again; Windows' `auto-copy` never hits it): the frame is then
-  decoded once more by a hidden player (`decodeStillFrame`: the same
-  source and headers, `vo=null`, software decoding, an exact seek to the
-  press's position, the same subtitle track and `sub-scale`), which gives
-  both copies from the very same frame; a moment for a file (about
-  0.5 s), longer for a stream. The selection (`ShotOverlay`) shows the
+  can again; Windows' `auto-copy` never hits it). So a press reads
+  `hwdec-current` and `mpv-version` first (`gpuFrames`) and, for a GPU
+  decoder on mpv 0.41 or before, goes straight to a hidden player (`StillFrames`: the same source and
+  headers, `vo=null`, software decoding, an exact seek to the press's
+  position, the same subtitle track and `sub-scale`), which gives both
+  copies from the very same frame. That player stays on the media,
+  paused, 2 min after its last frame and all the while the selection is
+  up (`hold`), so the next press is only a seek; another media or the
+  time out closes it. Measured (GTX 1080, a local 1080p file, then the
+  same over HTTP with 50 / 150 ms per request): opening it 0.2-0.4 s /
+  0.35-0.4 s / 0.65-0.7 s, a seek on the kept one 0.03-0.1 s / 0.08-0.15
+  s / 0.18-0.24 s (a 4K60 HEVC file: 0.55 s to open, a seek back across
+  its long keyframe gap 0.45-0.6 s); real Jellyfin streams took 1.6-2.6 s
+  to open. Copy-back decoding (`nvdec-copy`, mpv's `auto-copy`) would let
+  `screenshot-raw` read every frame (two copies in about 80 ms) but
+  copies every frame to RAM all the time: in a headless libmpv harness
+  rendering like media_kit (EGL, OpenGL ES, an FBO at 2560x1080) the
+  process's CPU went from 3 to 6-8 % of a core at 1080p and from 13 to
+  37 % at 4K60 HEVC (no dropped frames either way; mpv's `auto-copy`
+  picks `vulkan-copy` there, 100 ms more per player to start), so `auto`
+  keeps the GPU frames and the cost falls on screenshots only. Switching
+  `hwdec` for the capture took 0.15-0.5 s and caught a later frame than
+  the one pressed. Between the key and the frame the shell shows
+  `ShotPending` from the next frame on (S: the player dimmed under
+  "Capturing…", where the selection opens; Shift+S: a small "Taking a
+  screenshot…" pill, clicks go through); it holds the keys (an Esc there
+  gives the capture up instead of leaving the full player), and a press
+  while one is under way waits for it. The selection (`ShotOverlay`) shows the
   frame fitted like the video (bars around it) over the player, with the
   live video small in a corner (`LiveVideoTexture`: the output's texture,
   no second `Video`) that moves away from the pointer and the selection
@@ -2675,10 +2697,11 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   the same frame again (both copies stay in memory for the toast's life)
   and picking again saves a new file. No setting: the folder is the
   system's. Tests: `screenshot_test` (names, the folder, the crop with
-  bars, the corner, the selection's keys and clicks, S in the player and
-  in the quick chat box), `screenshot_e2e` (the frame decoded again with
-  real mpv: the subtitles only on the second copy, an anamorphic file at
-  its display size).
+  bars, the corner, the selection's keys and clicks, the wait's keys and
+  clicks, S in the player and in the quick chat box), `screenshot_e2e`
+  (the frame decoded again with real mpv: the subtitles only on the
+  second copy, an anamorphic file at its display size, the kept player:
+  a seek, another media, held and let go).
 - **Quick chat** (`shell/quick_chat.dart`): Enter in the full player
   (not the mini: it is a corner thumbnail while you are elsewhere in the
   app, where Enter belongs to that page; nor while out) opens a

@@ -100,6 +100,36 @@ void main() {
     expect(_px(grab.clean, 0.5, 0.5).r, greaterThan(200));
   });
 
+  test('the hidden player stays on its media: the next frame is a seek, held while the selection is up',
+      timeout: const Timeout(Duration(minutes: 1)), () async {
+    final a = await _media('kept.mkv'), b = await _media('other.mkv');
+    final stills = StillFrames(host, keep: const Duration(milliseconds: 300));
+    final first = await stills.frameAt(url: a, at: const Duration(milliseconds: 2500), sid: 1);
+    expect(first?.warm, isFalse);
+    expect(_px(first!.grab.clean, 0.5, 0.3).g, greaterThan(100));
+    // Back to the red second: a seek on the same player, subtitles off now.
+    final sw = Stopwatch()..start();
+    final second = await stills.frameAt(url: a, at: const Duration(milliseconds: 500));
+    // ignore: avoid_print
+    print('warm still frame in ${sw.elapsedMilliseconds} ms');
+    expect(second?.warm, isTrue);
+    expect(second!.grab.subs, isNull);
+    expect(_px(second.grab.clean, 0.5, 0.3).r, greaterThan(200));
+    expect(host.live, 1);
+    // Another media: opened anew, the old player gone.
+    final third = await stills.frameAt(url: b, at: const Duration(milliseconds: 2500));
+    expect(third?.warm, isFalse);
+    expect(host.live, 1);
+    // Held, it stays past its time; let go, it goes.
+    stills.hold();
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    expect(stills.warm, isTrue);
+    stills.release();
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    expect(stills.warm, isFalse);
+    expect(host.live, 0);
+  });
+
   test('nothing to decode: null, never a throw', timeout: const Timeout(Duration(minutes: 1)), () async {
     expect(await decodeStillFrame(host, url: '${_tmp.path}/missing.mkv', at: Duration.zero), isNull);
     final txt = File('${_tmp.path}/not-video.mkv')..writeAsStringSync('hello');
