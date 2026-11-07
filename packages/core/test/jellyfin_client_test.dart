@@ -32,7 +32,7 @@ String _fixture(String name) => File('test/fixtures/jellyfin/$name.json').readAs
 
 const info = JellyfinClientInfo(
     client: 'Watch Together', device: 'Test PC', deviceId: 'dev-1', version: '1.2.3');
-const uid = 'd4d07ff620068c41c4782dec38e0b17e';
+const uid = '95b50af4ac466551c3887fd2f9f3e785';
 
 void main() {
   late FakeHttp http;
@@ -56,7 +56,7 @@ void main() {
     test('publicInfo', () async {
       http.on('GET', '/System/Info/Public', fixture: 'pub');
       final s = await client.publicInfo();
-      expect(s.id, '2788af836cef7938ab4c41962afac55a');
+      expect(s.id, 'a3c3646f1fc722c7a34e0e47e5450b05');
       expect(s.version, '10.11.11');
       expect(s.name, 'Example Server');
       expect(http.last.headers['Authorization'], isNot(contains('Token=')));
@@ -86,7 +86,7 @@ void main() {
       expect(jsonDecode(http.last.body!), {'Secret': qc.secret});
       expect(result!.accessToken, 'TEST_ACCESS_TOKEN');
       expect(result.user.name, 'testuser');
-      expect(result.serverId, '2788af836cef7938ab4c41962afac55a');
+      expect(result.serverId, 'a3c3646f1fc722c7a34e0e47e5450b05');
       expect(anon.accessToken, 'TEST_ACCESS_TOKEN');
       expect(anon.userId, uid);
     });
@@ -142,14 +142,14 @@ void main() {
       final e = items.first;
       expect(http.last.uri.queryParameters, containsPair('mediaTypes', 'Video'));
       expect(e.kind, JellyfinItemKind.episode);
-      expect(e.seriesName, 'Black Summoner');
+      expect(e.seriesName, 'Copper Warden');
       expect(e.userData.isResumable, isTrue);
       expect(e.userData.position, ticksToDuration(12080340000));
       expect(e.episodeLabel, 'S1E3');
       // Own primary (episode still); backdrop/logo/thumb come from the series.
       expect(e.image(JellyfinImageType.primary)!.itemId, e.id);
       expect(e.image(JellyfinImageType.backdrop)!.itemId, e.seriesId);
-      expect(e.image(JellyfinImageType.logo)!.tag, '12601cf2099bd582789b5b305a6dacc9');
+      expect(e.image(JellyfinImageType.logo)!.tag, '135451bd006549510b37aa74b66da20f');
       expect(e.image(JellyfinImageType.thumb)!.itemId, e.seriesId);
     });
 
@@ -158,10 +158,10 @@ void main() {
       http.on('GET', '/Items/Latest', fixture: 'latest_shows');
       expect((await client.nextUp()).first.kind, JellyfinItemKind.episode);
       expect(http.last.uri.queryParameters['enableResumable'], 'false');
-      final latest = await client.latest('df39dd8262146d0ff7d3c04498a4a6a5', limit: 4);
+      final latest = await client.latest('8047582a00c2f6d3fedf63f4475bc929', limit: 4);
       expect(latest, hasLength(4));
       expect(latest.every((i) => i.kind == JellyfinItemKind.series), isTrue);
-      expect(http.last.uri.queryParameters['parentId'], 'df39dd8262146d0ff7d3c04498a4a6a5');
+      expect(http.last.uri.queryParameters['parentId'], '8047582a00c2f6d3fedf63f4475bc929');
     });
 
     test('latest ungrouped and recently played: query params, dates', () async {
@@ -189,7 +189,7 @@ void main() {
     test('library page: query params and paging', () async {
       http.on('GET', '/Items', fixture: 'series_page');
       const q = JellyfinItemQuery(
-        parentId: 'df39dd8262146d0ff7d3c04498a4a6a5',
+        parentId: '8047582a00c2f6d3fedf63f4475bc929',
         includeItemTypes: [JellyfinItemType.series],
         recursive: true,
         filters: [JellyfinFilter.isUnplayed],
@@ -214,15 +214,15 @@ void main() {
 
     test('search', () async {
       http.on('GET', '/Items', fixture: 'search');
-      final r = await client.search('arifureta');
-      expect(http.last.uri.queryParameters['searchTerm'], 'arifureta');
+      final r = await client.search('lanternfall');
+      expect(http.last.uri.queryParameters['searchTerm'], 'lanternfall');
       expect(http.last.uri.queryParameters['includeItemTypes'], 'Movie,Series,Episode');
-      expect(r.single.name, startsWith('Arifureta'));
+      expect(r.single.name, startsWith('Lanternfall'));
     });
 
     test('item detail: media source and streams', () async {
-      http.on('GET', '/Items/1c67aa9143ebcdcea7953aada4db543a', fixture: 'episode_detail');
-      final e = await client.item('1c67aa9143ebcdcea7953aada4db543a');
+      http.on('GET', '/Items/a43e1cfa5013da4ea9323c2ebdc22c3c', fixture: 'episode_detail');
+      final e = await client.item('a43e1cfa5013da4ea9323c2ebdc22c3c');
       expect(e.runTime, const Duration(seconds: 1420, microseconds: 112000));
       final src = e.mediaSources.single;
       expect(src.supportsDirectPlay, isTrue);
@@ -233,34 +233,34 @@ void main() {
     });
 
     test('seasons and episodes with user data', () async {
-      http.on('GET', '/Shows/57d896451d17d2024129cf237759a491/Seasons', fixture: 'seasons');
-      http.on('GET', '/Shows/57d896451d17d2024129cf237759a491/Episodes', fixture: 'episodes');
-      final seasons = await client.seasons('57d896451d17d2024129cf237759a491');
+      http.on('GET', '/Shows/2e5dd5c4fd13e23e38fe15dec5b36122/Seasons', fixture: 'seasons');
+      http.on('GET', '/Shows/2e5dd5c4fd13e23e38fe15dec5b36122/Episodes', fixture: 'episodes');
+      final seasons = await client.seasons('2e5dd5c4fd13e23e38fe15dec5b36122');
       expect(seasons.map((s) => s.indexNumber), [2, 3]);
       expect(seasons.first.userData.unplayedItemCount, 12);
-      final eps = await client.episodes('57d896451d17d2024129cf237759a491');
+      final eps = await client.episodes('2e5dd5c4fd13e23e38fe15dec5b36122');
       expect(http.last.uri.queryParameters['isMissing'], 'false');
       expect(eps, hasLength(41));
       expect(eps.every((e) => !e.userData.played && e.userData.playbackPositionTicks == 0), isTrue);
     });
 
     test('nextEpisode crosses seasons and skips other copies of the same episode', () async {
-      http.on('GET', '/Shows/57d896451d17d2024129cf237759a491/Episodes', fixture: 'episodes');
-      final eps = await client.episodes('57d896451d17d2024129cf237759a491');
+      http.on('GET', '/Shows/2e5dd5c4fd13e23e38fe15dec5b36122/Episodes', fixture: 'episodes');
+      final eps = await client.episodes('2e5dd5c4fd13e23e38fe15dec5b36122');
       final s2e12 = eps.firstWhere((e) => e.episodeLabel == 'S2E12');
       final next = await client.nextEpisode(s2e12);
       expect(next!.episodeLabel, 'S3E1');
-      expect(next.id, 'eff01892797332814d4eece601b0353b');
+      expect(next.id, '8b44a5d19c939e8c263f7832e5bbb96e');
       // S3E1 exists twice (two files); the successor of either is S3E2.
-      expect(episodeAfter(eps, 'eff01892797332814d4eece601b0353b')!.episodeLabel, 'S3E2');
-      expect(episodeAfter(eps, 'b7d8f70f090f80fe783703b3a8e1fa38')!.episodeLabel, 'S3E2');
+      expect(episodeAfter(eps, '8b44a5d19c939e8c263f7832e5bbb96e')!.episodeLabel, 'S3E2');
+      expect(episodeAfter(eps, 'a92f22e3a12f18531c6719e1a0c4be41')!.episodeLabel, 'S3E2');
       expect(episodeAfter(eps, eps.last.id), isNull);
       expect(episodeAfter(eps, 'nope'), isNull);
     });
 
     test('adjacentEpisodes: previous mirrors next across seasons and copies', () async {
-      http.on('GET', '/Shows/57d896451d17d2024129cf237759a491/Episodes', fixture: 'episodes');
-      final eps = await client.episodes('57d896451d17d2024129cf237759a491');
+      http.on('GET', '/Shows/2e5dd5c4fd13e23e38fe15dec5b36122/Episodes', fixture: 'episodes');
+      final eps = await client.episodes('2e5dd5c4fd13e23e38fe15dec5b36122');
       final s3e2 = eps.firstWhere((e) => e.episodeLabel == 'S3E2');
       final around = await client.adjacentEpisodes(s3e2);
       // S3E1 exists twice: the predecessor is the copy right before S3E2.
@@ -298,8 +298,8 @@ void main() {
     // Shape from Jellyfin's MediaSegmentDto (the live 10.11 server answers
     // 200 with an empty list: no segment provider installed).
     test('parses and sorts the ranges by start', () async {
-      http.on('GET', '/MediaSegments/1c67aa9143ebcdcea7953aada4db543a', fixture: 'media_segments');
-      final s = await client.mediaSegments('1c67aa9143ebcdcea7953aada4db543a');
+      http.on('GET', '/MediaSegments/a43e1cfa5013da4ea9323c2ebdc22c3c', fixture: 'media_segments');
+      final s = await client.mediaSegments('a43e1cfa5013da4ea9323c2ebdc22c3c');
       expect(http.last.method, 'GET');
       expect(s.map((e) => e.type), [
         JellyfinSegmentType.intro,
@@ -308,7 +308,7 @@ void main() {
       ]);
       expect((s.first.start, s.first.end), (const Duration(seconds: 30), const Duration(minutes: 2)));
       expect(s[1].start, const Duration(minutes: 21, seconds: 30));
-      expect(s.first.itemId, '1c67aa9143ebcdcea7953aada4db543a');
+      expect(s.first.itemId, 'a43e1cfa5013da4ea9323c2ebdc22c3c');
     });
 
     test('empty list, and none on servers without the endpoint', () async {
@@ -328,8 +328,8 @@ void main() {
 
   group('playback', () {
     test('playbackInfo asks for direct play and parses the session', () async {
-      http.on('POST', '/Items/1c67aa9143ebcdcea7953aada4db543a/PlaybackInfo', fixture: 'playback_info');
-      final pi = await client.playbackInfo('1c67aa9143ebcdcea7953aada4db543a');
+      http.on('POST', '/Items/a43e1cfa5013da4ea9323c2ebdc22c3c/PlaybackInfo', fixture: 'playback_info');
+      final pi = await client.playbackInfo('a43e1cfa5013da4ea9323c2ebdc22c3c');
       expect(jsonDecode(http.last.body!), {
         'UserId': uid,
         'EnableDirectPlay': true,
@@ -338,7 +338,7 @@ void main() {
       });
       expect(pi.playSessionId, isNotEmpty);
       final src = pi.primarySource!;
-      expect(src.id, '1c67aa9143ebcdcea7953aada4db543a');
+      expect(src.id, 'a43e1cfa5013da4ea9323c2ebdc22c3c');
       expect(src.defaultAudioStreamIndex, 1);
       final eng = src.streamAt(3)!;
       expect(eng.type, JellyfinStreamType.subtitle);

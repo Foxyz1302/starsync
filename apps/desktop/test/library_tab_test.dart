@@ -12,7 +12,7 @@ import 'package:starsync/src/shell/library_link.dart';
 import 'package:starsync/src/shell/library_tab.dart';
 
 import 'jellyfin_accounts_test.dart'
-    show FakeJellyfin, arifuretaId, fixtureServerId, jellyfinFixture, linkedAccounts, season2Id;
+    show FakeJellyfin, lanternfallId, fixtureServerId, jellyfinFixture, linkedAccounts, season2Id;
 import 'jellyfin_browser_test.dart' show fixtureNow, settle;
 
 import 'test_graph.dart';
@@ -20,31 +20,31 @@ import 'test_graph.dart';
 /// This file's composition root (see test_graph.dart).
 final _graph = testGraph();
 
-const bsSeries = 'c7974a65e1b7bd43f26858744a7d3c11';
-const bsEpisode = '1c67aa9143ebcdcea7953aada4db543a';
-const bsSeason = 'ec0e23df54682dfd02a65fc4578c7e65';
-const s2e2 = '0ff60398733a6cf25bd18c86b21a234e';
+const bsSeries = '66d14ad0b34a4a6d92109a8f2f065259';
+const bsEpisode = 'a43e1cfa5013da4ea9323c2ebdc22c3c';
+const bsSeason = '5f495475ada7f05fecbfec2d30e34233';
+const s2e2 = '7d41e9954ee66669fd5135b93095ec00';
 
 JellyfinHttpResponse page(List<Object> items) =>
     JellyfinHttpResponse(200, jsonEncode({'Items': items, 'TotalRecordCount': items.length}));
 
-/// The fake server, plus: Arifureta in "Latest" (2 new), Black Summoner's
+/// The fake server, plus: Lanternfall in "Latest" (2 new), Copper Warden's
 /// series, season and episode, and watched-state calls.
 FakeJellyfin libraryFake() {
   final fake = FakeJellyfin();
-  final arifureta = jsonDecode(jellyfinFixture('series_detail')) as Map<String, dynamic>;
+  final lanternfall = jsonDecode(jellyfinFixture('series_detail')) as Map<String, dynamic>;
   // Added when it aired: not a re-release.
   fake.on('GET', '/Items/Latest', (_, _) => JellyfinHttpResponse(200, jsonEncode([
-        {...arifureta, 'ChildCount': 2, 'DateCreated': arifureta['PremiereDate']},
+        {...lanternfall, 'ChildCount': 2, 'DateCreated': lanternfall['PremiereDate']},
       ])));
   final episode = jsonDecode(jellyfinFixture('episode_detail')) as Map<String, dynamic>;
   fake.on('GET', '/Items/$bsSeries',
-      (_, _) => JellyfinHttpResponse(200, jsonEncode({'Id': bsSeries, 'Name': 'Black Summoner', 'Type': 'Series'})));
+      (_, _) => JellyfinHttpResponse(200, jsonEncode({'Id': bsSeries, 'Name': 'Copper Warden', 'Type': 'Series'})));
   fake.on('GET', '/Shows/$bsSeries/Seasons', (_, _) => page([
         {'Id': bsSeason, 'Name': 'Season 1', 'Type': 'Season', 'IndexNumber': 1, 'SeriesId': bsSeries},
       ]));
   fake.on('GET', '/Shows/$bsSeries/Episodes', (_, _) => page([episode]));
-  // Arifureta's episodes load on their own too (a pick restored by id).
+  // Lanternfall's episodes load on their own too (a pick restored by id).
   for (final e in (jsonDecode(jellyfinFixture('episodes')) as Map)['Items'] as List) {
     fake.on('GET', '/Items/${e['Id']}', (_, _) => JellyfinHttpResponse(200, jsonEncode(e)));
   }
@@ -143,7 +143,7 @@ Future<Harness> pumpLibrary(
   return h;
 }
 
-Finder arifuretaCard() => find.byKey(const ValueKey('card-$arifuretaId')).first;
+Finder lanternfallCard() => find.byKey(const ValueKey('card-$lanternfallId')).first;
 
 Future<void> doubleTap(WidgetTester tester, Finder f) async {
   await tester.tap(f);
@@ -155,7 +155,7 @@ Future<void> doubleTap(WidgetTester tester, Finder f) async {
 void main() {
   testWidgets('source switch fades through; library chips sit in the header', (tester) async {
     final h = await pumpLibrary(tester, const Size(1600, 1000));
-    expect(find.byKey(const ValueKey('library-df39dd8262146d0ff7d3c04498a4a6a5')), findsOneWidget);
+    expect(find.byKey(const ValueKey('library-8047582a00c2f6d3fedf63f4475bc929')), findsOneWidget);
     expect(find.text('Continue'), findsOneWidget);
 
     await tester.tap(find.text('Link'));
@@ -179,10 +179,10 @@ void main() {
     await tester.tap(find.text('Jellyfin'));
     await settle(tester, 10);
     // A chip opens its library; again goes back home.
-    await tester.tap(find.byKey(const ValueKey('library-df39dd8262146d0ff7d3c04498a4a6a5')));
+    await tester.tap(find.byKey(const ValueKey('library-8047582a00c2f6d3fedf63f4475bc929')));
     await settle(tester, 10);
     expect(find.text('218 items'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('library-df39dd8262146d0ff7d3c04498a4a6a5')));
+    await tester.tap(find.byKey(const ValueKey('library-8047582a00c2f6d3fedf63f4475bc929')));
     await settle(tester, 10);
     expect(find.text('Continue'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -191,14 +191,14 @@ void main() {
   testWidgets('select a card: the panel slides in; episodes pick what goes up', (tester) async {
     final h = await pumpLibrary(tester, const Size(1600, 1000));
     expect(find.byKey(const ValueKey('jf-details')), findsNothing);
-    await tester.tap(arifuretaCard());
+    await tester.tap(lanternfallCard());
     await settle(tester, 10);
     final panel = find.byKey(const ValueKey('jf-details'));
     expect(panel, findsOneWidget);
     // Docked at the right, 400 px.
     expect(tester.getSize(panel).width, detailsPanelWidth);
     expect(tester.getTopLeft(panel).dx, 1600 - detailsPanelWidth);
-    expect(h.controller.selected!.itemId, arifuretaId);
+    expect(h.controller.selected!.itemId, lanternfallId);
     // Next up is S2E4; the list is its season.
     expect(find.text('Put it up · S2E4'), findsOneWidget);
     expect(find.byKey(const ValueKey('details-episode-$s2e2')), findsOneWidget);
@@ -212,13 +212,13 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('details-put-up')));
     await settle(tester);
     final m = h.put.single as JellyfinMedia;
-    expect((m.serverId, m.itemId, m.title), (fixtureServerId, s2e2, 'Burning Light'));
+    expect((m.serverId, m.itemId, m.title), (fixtureServerId, s2e2, 'Ember Glow'));
     expect(m.subtitle, endsWith('S2E2'));
 
     // Another card: the panel's content cross-fades.
     await tester.tap(find.byKey(const ValueKey('card-$bsEpisode')));
     await tester.pump(const Duration(milliseconds: 60));
-    expect(find.text("Arifureta: From Commonplace to World's Strongest"), findsWidgets,
+    expect(find.text("Lanternfall: The Mapmaker's Long Road"), findsWidgets,
         reason: 'the old panel is still fading out');
     await settle(tester, 10);
     expect(find.text('Put it up · S2E2'), findsNothing);
@@ -234,10 +234,10 @@ void main() {
 
   testWidgets('double-click a card puts it up (a series: its next episode)', (tester) async {
     final h = await pumpLibrary(tester, const Size(1600, 1000));
-    await doubleTap(tester, arifuretaCard());
+    await doubleTap(tester, lanternfallCard());
     final m = h.put.single as JellyfinMedia;
-    expect(m.itemId, '616a2170b21c8b0641f5d73167d39840'); // S2E4
-    expect(h.controller.selected!.itemId, arifuretaId);
+    expect(m.itemId, '69daedd572ac0d1075a25488be3b09bf'); // S2E4
+    expect(h.controller.selected!.itemId, lanternfallId);
     await doubleTap(tester, find.byKey(const ValueKey('card-$bsEpisode')));
     expect((h.put.last as JellyfinMedia).itemId, bsEpisode);
     expect(tester.takeException(), isNull);
@@ -246,7 +246,7 @@ void main() {
   testWidgets('mark watched and remove from Continue reload the rows', (tester) async {
     final h = await pumpLibrary(tester, const Size(1600, 1000));
     final row = find.byKey(const ValueKey('row-continue'));
-    expect(find.descendant(of: row, matching: find.text('Black Summoner')), findsOneWidget);
+    expect(find.descendant(of: row, matching: find.text('Copper Warden')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('card-$bsEpisode')));
     await settle(tester, 10);
     expect(find.text('Put it up · S1E6'), findsOneWidget);
@@ -261,14 +261,14 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('details-removeFromContinue')));
     await settle(tester, 10);
     expect(h.accounts.continueDismissed(fixtureServerId), contains(bsSeries));
-    expect(find.descendant(of: row, matching: find.text('Black Summoner')), findsNothing);
-    expect(find.descendant(of: row, matching: find.text("JoJo's Bizarre Adventure")), findsOneWidget);
+    expect(find.descendant(of: row, matching: find.text('Copper Warden')), findsNothing);
+    expect(find.descendant(of: row, matching: find.text("Milo's Curious Voyage")), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('nobody else in the server (D9): buttons say Play and put up; a link goes direct, no relay modes', (tester) async {
     final h = await pumpLibrary(tester, const Size(1600, 1000), alone: true);
-    await tester.tap(arifuretaCard());
+    await tester.tap(lanternfallCard());
     await settle(tester, 10);
     final go = find.byKey(const ValueKey('details-put-up'));
     expect(find.descendant(of: go, matching: find.textContaining('Play')), findsOneWidget);
@@ -376,8 +376,8 @@ void main() {
         serverId: fixtureServerId,
         baseUrl: 'https://example.invalid',
         itemId: bsEpisode,
-        title: 'Rice and Thieves and Heroes',
-        subtitle: 'Black Summoner · S1E6');
+        title: 'Bread and Bandits and Knights',
+        subtitle: 'Copper Warden · S1E6');
     await accounts.rememberPick(pick);
     final c = MediaPickerController();
     addTearDown(c.dispose);
@@ -387,7 +387,7 @@ void main() {
     final h = Harness(c, accounts, FakeJellyfin());
     await pumpLibrary(tester, const Size(1600, 1000), reuse: h, alone: true);
     expect(find.byKey(const ValueKey('jf-details')), findsOneWidget);
-    expect(find.text('Black Summoner'), findsWidgets);
+    expect(find.text('Copper Warden'), findsWidgets);
 
     // Change video: the series of the episode playing, its season chosen
     // and the episode highlighted.
@@ -412,7 +412,7 @@ void main() {
         (tester) async {
       final h = await pumpLibrary(tester, size);
       expect(tester.takeException(), isNull);
-      await tester.tap(arifuretaCard());
+      await tester.tap(lanternfallCard());
       await settle(tester, 10);
       expect(tester.takeException(), isNull);
       final panel = find.byKey(const ValueKey('jf-details'));

@@ -21,7 +21,7 @@ JellyfinMediaStream sub(int i, String? lang, String? title, String codec,
         isHearingImpaired: hi);
 
 void main() {
-  // Black Summoner S1E6 -> S1E7 (captured): jpn+eng eac3 audio, 17 ass/srt subs.
+  // Copper Warden S1E6 -> S1E7 (captured): jpn+eng eac3 audio, 17 ass/srt subs.
   final eps = (jsonDecode(File('test/fixtures/jellyfin/bs_episodes.json').readAsStringSync())['Items'] as List)
       .map((e) => JellyfinItem.fromJson(e as Map<String, dynamic>))
       .toList();

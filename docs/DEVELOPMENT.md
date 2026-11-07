@@ -234,10 +234,10 @@ through the media pipeline against a delayed, rate-capped fake Jellyfin
 and link host: an episode, a direct link, a link passed on and a
 server-fetched one, each prepared and promoted; no mpv "error running
 command" or "file cache" lines; `WT_SWITCH_PRELOAD=0` for the cold path,
-`WT_SWITCH_DELAY_MS` / `WT_SWITCH_RATE_KBS` for the link). The sync,
-reload and end-of-file ones expect `~/Videos/chiyo.mp4`; the others
-generate media with ffmpeg into `WT_TEST_TMP` (default: system temp; all
-desktop tests that write files use it). Headless mpv (no video output
+`WT_SWITCH_DELAY_MS` / `WT_SWITCH_RATE_KBS` for the link). All of them
+generate their media with ffmpeg into `WT_TEST_TMP` (default: system
+temp; all desktop tests that write files use it); the sync, reload and
+end-of-file ones share a 13.8 s clip (`test/test_clip.dart`). Headless mpv (no video output
 attached) won't open video-only files, so test media needs an audio
 track. Tests always log media_kit "S/W rendering" because they have no
 display; that says nothing about the app. A headless player has no video
@@ -568,19 +568,14 @@ any other found on Desktop, Downloads, Documents, AppData, Program
 Files) and a 20 s test start with its exit code, zips them to the
 Desktop and copies the zip (Ctrl+V into Discord).
 
-Where the session logs are and how to pull them (apps upload every 10 s
-and on leaving, `POST /l/<sid>/<token>`, PROTOCOL.md "Diagnostics"; the
-server merges them into its session log):
-
-| Server | Folder |
-|---|---|
-| Stable dedicated server (VPS, port 6969) | `root@hysteria.foxyz.ru:/var/lib/watch-together/logs/` |
-| Dev dedicated server (VPS, port 6970) | `root@hysteria.foxyz.ru:/var/lib/starsync-dev/logs/` |
-| A member's own server (Invite) | that host's app logs folder (above) |
-
-`scp root@hysteria.foxyz.ru:/var/lib/watch-together/logs/session-$(date +%F).log .`
-pulls today's; `server-*.log` next to it is the server's own. Over HTTP,
-a member of that server can read it: `GET /l/<sid>/<token>?hours=N`
+Where the session logs are (apps upload every 10 s and on leaving,
+`POST /l/<sid>/<token>`, PROTOCOL.md "Diagnostics"; the server merges
+them into its session log): a dedicated server keeps them on its machine
+under its logs folder (`--log-dir`; ask the server's owner), a member's
+own server (Invite) in that host's app logs folder (above).
+`session-YYYY-MM-DD.log` is the day's; `server-*.log` next to it is the
+server's own. Over HTTP, a member of that server can read it:
+`GET /l/<sid>/<token>?hours=N`
 (gzip text; `sid` is `default` on a dedicated server; "Copy
 diagnostics" does this through `DiagShare.fetchSessionLog`).
 

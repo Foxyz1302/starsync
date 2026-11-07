@@ -13,10 +13,10 @@ import 'package:starsync/src/screens/home/media_picker.dart';
 String jellyfinFixture(String name) =>
     File('../../packages/core/test/fixtures/jellyfin/$name.json').readAsStringSync();
 
-const fixtureServerId = '2788af836cef7938ab4c41962afac55a';
-const fixtureUserId = 'd4d07ff620068c41c4782dec38e0b17e';
-const arifuretaId = '57d896451d17d2024129cf237759a491';
-const season2Id = '8f3ccbf3807ed37c58f1432c496a9dec';
+const fixtureServerId = 'a3c3646f1fc722c7a34e0e47e5450b05';
+const fixtureUserId = '95b50af4ac466551c3887fd2f9f3e785';
+const lanternfallId = '2e5dd5c4fd13e23e38fe15dec5b36122';
+const season2Id = '7321284310d804c4718144bd6a72c3f8';
 
 typedef FakeHandler = JellyfinHttpResponse Function(Uri uri, String? body);
 
@@ -30,16 +30,16 @@ class FakeJellyfin implements JellyfinHttp {
   bool offline = false;
   int meStatus = 200;
 
-  /// Finished episodes (`/Items?filters=IsPlayed&sortBy=DatePlayed`): JoJo
-  /// and Black Summoner watched on 2026-10-07, after Black Summoner's
+  /// Finished episodes (`/Items?filters=IsPlayed&sortBy=DatePlayed`): Milo
+  /// and Copper Warden watched on 2026-10-07, after Copper Warden's
   /// resume point (10-06), so its next-up episode is what continues.
   List<Object> recentlyPlayed = [
     {
-      'Id': 'jojo-played', 'Name': 'Played', 'Type': 'Episode', 'SeriesId': '757534d5ccc39274aa0cc7f1d9a38d7d',
+      'Id': 'milo-played', 'Name': 'Played', 'Type': 'Episode', 'SeriesId': '645ba801414bcb3e23e02cd6c3d73bfd',
       'UserData': {'Played': true, 'LastPlayedDate': '2026-10-07T21:00:00Z'},
     },
     {
-      'Id': 'bs-played', 'Name': 'Played', 'Type': 'Episode', 'SeriesId': 'c7974a65e1b7bd43f26858744a7d3c11',
+      'Id': 'bs-played', 'Name': 'Played', 'Type': 'Episode', 'SeriesId': '66d14ad0b34a4a6d92109a8f2f065259',
       'UserData': {'Played': true, 'LastPlayedDate': '2026-10-07T20:00:00Z'},
     },
   ];
@@ -65,7 +65,7 @@ class FakeJellyfin implements JellyfinHttp {
     on('GET', '/Shows/NextUp', (uri, _) {
       final series = uri.queryParameters['seriesId'];
       if (series == null) return JellyfinHttpResponse(200, jellyfinFixture('nextup'));
-      // Arifureta's next up: S2E4.
+      // Lanternfall's next up: S2E4.
       final eps = _items('episodes').where((e) => e['SeriesId'] == series).toList();
       return _page(eps.isEmpty ? const [] : [eps[3]]);
     });
@@ -74,18 +74,18 @@ class FakeJellyfin implements JellyfinHttp {
       final q = uri.queryParameters;
       if (q['filters'] == 'IsPlayed' && q['sortBy'] == 'DatePlayed') return _page(recentlyPlayed);
       if ((q['searchTerm'] ?? '').isNotEmpty) {
-        return q['searchTerm']!.toLowerCase().startsWith('ari')
+        return q['searchTerm']!.toLowerCase().startsWith('lan')
             ? JellyfinHttpResponse(200, jellyfinFixture('search'))
             : _page(const []);
       }
       return JellyfinHttpResponse(
           200, jellyfinFixture(q['includeItemTypes'] == 'Movie' ? 'movies_page' : 'series_page'));
     });
-    on('GET', '/Items/$arifuretaId', (_, _) => JellyfinHttpResponse(200, jellyfinFixture('series_detail')));
-    on('GET', '/Items/1c67aa9143ebcdcea7953aada4db543a',
+    on('GET', '/Items/$lanternfallId', (_, _) => JellyfinHttpResponse(200, jellyfinFixture('series_detail')));
+    on('GET', '/Items/a43e1cfa5013da4ea9323c2ebdc22c3c',
         (_, _) => JellyfinHttpResponse(200, jellyfinFixture('episode_detail')));
-    on('GET', '/Shows/$arifuretaId/Seasons', (_, _) => JellyfinHttpResponse(200, jellyfinFixture('seasons')));
-    on('GET', '/Shows/$arifuretaId/Episodes', (uri, _) {
+    on('GET', '/Shows/$lanternfallId/Seasons', (_, _) => JellyfinHttpResponse(200, jellyfinFixture('seasons')));
+    on('GET', '/Shows/$lanternfallId/Episodes', (uri, _) {
       final season = uri.queryParameters['seasonId'];
       return _page(_items('episodes').where((e) => season == null || e['SeasonId'] == season).toList());
     });
@@ -336,14 +336,14 @@ void main() {
           baseUrl: 'https://j.example',
           itemId: 'i',
           mediaSourceId: 'src',
-          title: 'Rice and Thieves and Heroes',
-          subtitle: 'Black Summoner · S1E6',
+          title: 'Bread and Bandits and Knights',
+          subtitle: 'Copper Warden · S1E6',
           runtime: Duration(minutes: 23));
       final back = JellyfinMedia.fromJson(jsonDecode(jsonEncode(m.toJson())))!;
       expect(back, m);
       expect(back.runtime, const Duration(minutes: 23));
-      expect(back.subtitle, 'Black Summoner · S1E6');
-      expect(m.label, 'Rice and Thieves and Heroes — Black Summoner · S1E6');
+      expect(back.subtitle, 'Copper Warden · S1E6');
+      expect(m.label, 'Bread and Bandits and Knights — Copper Warden · S1E6');
       expect(const FileMedia('/a/b/movie.mkv').label, 'movie.mkv');
       expect(JellyfinMedia.fromJson({'serverId': 1}), isNull);
     });
@@ -353,8 +353,8 @@ void main() {
       final ep = JellyfinItem.fromJson(jsonDecode(jellyfinFixture('episode_detail')) as Map<String, dynamic>);
       final m = pickFor(accounts.accounts.single, ep);
       expect(m.serverId, fixtureServerId);
-      expect(m.itemId, '1c67aa9143ebcdcea7953aada4db543a');
-      expect(m.subtitle, 'Black Summoner · S1E6');
+      expect(m.itemId, 'a43e1cfa5013da4ea9323c2ebdc22c3c');
+      expect(m.subtitle, 'Copper Warden · S1E6');
       expect(m.runtime, isNotNull);
     });
   });

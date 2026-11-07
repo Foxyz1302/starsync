@@ -6,7 +6,7 @@ import 'package:sync_relay_core/core.dart';
 import 'package:starsync/src/jellyfin/item_actions.dart';
 import 'package:starsync/src/jellyfin/series_page.dart' show EpisodeTile;
 
-import 'jellyfin_accounts_test.dart' show FakeJellyfin, arifuretaId, fixtureServerId, season2Id;
+import 'jellyfin_accounts_test.dart' show FakeJellyfin, lanternfallId, fixtureServerId, season2Id;
 import 'jellyfin_browser_test.dart' show settle;
 import 'library_tab_test.dart' show bsEpisode, pumpLibrary;
 
@@ -14,9 +14,9 @@ import 'library_tab_test.dart' show bsEpisode, pumpLibrary;
 // cards, tiles, rows and seasons and the details panel's buttons and ⋮
 // are the same, and the watched marks reach Jellyfin and every row.
 
-/// Black Summoner's resume point (its card shows the next-up episode).
-const bsResume = 'd66e875e181f74d80e838bddc76c6f23';
-const bsSeries = 'c7974a65e1b7bd43f26858744a7d3c11';
+/// Copper Warden's resume point (its card shows the next-up episode).
+const bsResume = '7519dde1027046c78339b41cb7d7eaf9';
+const bsSeries = '66d14ad0b34a4a6d92109a8f2f065259';
 
 /// The actions of the open menu, in order.
 List<JellyfinAction> menuActions() => [
@@ -122,17 +122,17 @@ void main() {
     expect(tester.widget<IconButton>(find.byKey(const ValueKey('details-markWatched'))).tooltip, 'Mark watched');
 
     // A show in Latest: its marks are the whole show's.
-    final show = await rightClickMenu(tester, card(arifuretaId));
+    final show = await rightClickMenu(tester, card(lanternfallId));
     expect(show, [
       JellyfinAction.putUp, JellyfinAction.addToQueue, JellyfinAction.playNext, JellyfinAction.markWatched,
       JellyfinAction.openShow, JellyfinAction.copyTitle, JellyfinAction.openInJellyfin,
     ]);
-    await tester.tap(card(arifuretaId));
+    await tester.tap(card(lanternfallId));
     await settle(tester, 10);
     expect(await panelMenu(tester), show);
     expect(tester.widget<IconButton>(find.byKey(const ValueKey('details-markWatched'))).tooltip, 'Mark show watched');
     // An episode row in the panel: the episode's list.
-    const s2e1 = '5cf1c471';
+    const s2e1 = '1b93ae3b';
     final row = find.byWidgetPredicate(
         (w) => w.key is ValueKey<String> && (w.key! as ValueKey<String>).value.startsWith('details-episode-$s2e1'));
     await tester.ensureVisible(row);
@@ -185,21 +185,21 @@ void main() {
     final h = await pumpLibrary(tester, const Size(1600, 1000));
     h.fake.on('POST', '/UserItems/$bsResume/UserData', (_, _) => const JellyfinHttpResponse(204, ''));
     final row = find.byKey(const ValueKey('row-continue'));
-    expect(find.descendant(of: row, matching: find.text('Black Summoner')), findsOneWidget);
+    expect(find.descendant(of: row, matching: find.text('Copper Warden')), findsOneWidget);
     await tester.tap(card(bsEpisode), buttons: kSecondaryButton);
     await settle(tester, 4);
     await pick(tester, JellyfinAction.removeFromContinue);
     expect(h.accounts.continueDismissed(fixtureServerId), contains(bsSeries));
     expect(h.fake.count('POST', '/UserItems/$bsResume/UserData'), 1, reason: "the show's resume point goes");
-    expect(find.descendant(of: row, matching: find.text('Black Summoner')), findsNothing);
-    expect(find.descendant(of: row, matching: find.text("JoJo's Bizarre Adventure")), findsOneWidget);
+    expect(find.descendant(of: row, matching: find.text('Copper Warden')), findsNothing);
+    expect(find.descendant(of: row, matching: find.text("Milo's Curious Voyage")), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('a whole show from its page asks first; a season from its chip does not', (tester) async {
     final h = await pumpLibrary(tester, const Size(1600, 1100));
-    answerMarks(h.fake, [arifuretaId, season2Id]);
-    await tester.tap(card(arifuretaId));
+    answerMarks(h.fake, [lanternfallId, season2Id]);
+    await tester.tap(card(lanternfallId));
     await settle(tester, 10);
     await tester.tap(find.byKey(const ValueKey('details-openShow')));
     await settle(tester, 10);
@@ -219,13 +219,13 @@ void main() {
     expect(find.textContaining('all 41 episodes'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await settle(tester, 4);
-    expect(h.fake.count('POST', '/UserPlayedItems/$arifuretaId'), 0);
+    expect(h.fake.count('POST', '/UserPlayedItems/$lanternfallId'), 0);
 
     await tester.tap(find.byKey(const ValueKey('series-markWatched')));
     await settle(tester, 4);
     await tester.tap(find.byKey(const ValueKey('jf-confirm-mark-ok')));
     await settle(tester, 10);
-    expect(h.fake.count('POST', '/UserPlayedItems/$arifuretaId'), 1);
+    expect(h.fake.count('POST', '/UserPlayedItems/$lanternfallId'), 1);
     expect(allWatched(), isTrue, reason: 'every episode of the show at once');
     expect(find.byKey(const ValueKey('series-markUnwatched')), findsOneWidget);
     expect(find.byKey(const ValueKey('details-markUnwatched')), findsOneWidget, reason: 'the panel too');
@@ -235,7 +235,7 @@ void main() {
     await settle(tester, 4);
     await tester.tap(find.byKey(const ValueKey('jf-confirm-mark-ok')));
     await settle(tester, 10);
-    expect(h.fake.count('DELETE', '/UserPlayedItems/$arifuretaId'), 1);
+    expect(h.fake.count('DELETE', '/UserPlayedItems/$lanternfallId'), 1);
     expect(allWatched(), isFalse);
 
     // A season: its chip's right-click, no question.

@@ -6,9 +6,10 @@ import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
 import 'package:starsync/src/session/session_coordinator.dart';
 
+import 'test_clip.dart';
+
 const _port = 18080;
 const _secret = 'e2e-secret';
-const _mediaPath = '/home/foxyz/Videos/chiyo.mp4';
 
 Future<void> _poll(
   FutureOr<bool> Function() cond,
@@ -36,11 +37,11 @@ void main() {
     timeout: const Timeout(Duration(minutes: 4)),
     () async {
       MediaKit.ensureInitialized();
-      final server = SyncServer(const AppConfig(
+      final server = SyncServer(AppConfig(
         port: _port,
         secret: _secret,
         name: 'server',
-        mediaPath: _mediaPath,
+        mediaPath: await testClip(),
       ));
       await server.start();
 

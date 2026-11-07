@@ -6,7 +6,7 @@ import 'package:sync_relay_core/core.dart';
 import 'package:sync_relay_server/server.dart';
 import 'package:starsync/src/session/session_coordinator.dart';
 
-const _mediaPath = '/home/foxyz/Videos/chiyo.mp4'; // 13.8 s
+import 'test_clip.dart';
 
 Future<void> _poll(
   FutureOr<bool> Function() cond,
@@ -27,8 +27,8 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
     () async {
       MediaKit.ensureInitialized();
-      final server = SyncServer(const AppConfig(
-          port: 0, secret: 'eof', name: 'eof', mediaPath: _mediaPath));
+      final server = SyncServer(AppConfig(
+          port: 0, secret: 'eof', name: 'eof', mediaPath: await testClip()));
       await server.start();
       final c = SessionCoordinator();
       try {
@@ -55,7 +55,7 @@ void main() {
             'end at ${c.playback.positionSecs.toStringAsFixed(2)}');
         expect(transports, isNot(contains('held')),
             reason: 'never held in the last seconds');
-        expect(c.serverState.peek()!.position, closeTo(13.77, 0.1));
+        expect(c.serverState.peek()!.position, closeTo(testClipSecs, 0.15));
         await _poll(() => !c.playback.player.state.playing, 'player stopped');
         expect(c.playback.positionSecs, greaterThan(12));
         expect(c.status.peek().line?.kind, StatusKind.finished);

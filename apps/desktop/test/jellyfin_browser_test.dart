@@ -15,7 +15,7 @@ import 'package:starsync/src/state/settings.dart';
 import 'test_graph.dart';
 
 import 'jellyfin_accounts_test.dart'
-    show FakeJellyfin, arifuretaId, fixtureServerId, linkedAccounts, season2Id;
+    show FakeJellyfin, lanternfallId, fixtureServerId, linkedAccounts, season2Id;
 
 /// This file's composition root (see test_graph.dart).
 final _graph = testGraph();
@@ -73,13 +73,13 @@ Future<(Picks, JellyfinAccounts, FakeJellyfin, BrowseController)> pumpBrowser(
   return (picks, accounts, fake, controller);
 }
 
-Future<void> openArifureta(WidgetTester tester) async {
-  await tester.enterText(find.byKey(const ValueKey('jf-search')), 'arifureta');
+Future<void> openLanternfall(WidgetTester tester) async {
+  await tester.enterText(find.byKey(const ValueKey('jf-search')), 'lanternfall');
   await settle(tester, 10);
   expect(find.byKey(const ValueKey('search-results')), findsOneWidget);
   // Series cards select; the series page opens from the details panel or
   // a season card, here straight through the controller.
-  await tester.tap(find.byKey(const ValueKey('card-$arifuretaId')));
+  await tester.tap(find.byKey(const ValueKey('card-$lanternfallId')));
   await settle(tester);
 }
 
@@ -93,18 +93,18 @@ void main() {
     expect(find.text('Latest in Shows'), findsOneWidget);
     expect(find.widgetWithText(ActionChip, 'Movies'), findsOneWidget);
     final row = find.byKey(const ValueKey('row-continue'));
-    // JoJo and Black Summoner were watched yesterday; Black Summoner's
+    // Milo and Copper Warden were watched yesterday; Copper Warden's
     // resume point is older than its last finished episode, so its next
-    // up shows. Bumpkin (62 days) and the never-dated series drop out.
-    expect(find.descendant(of: row, matching: find.text("JoJo's Bizarre Adventure")), findsOneWidget);
-    expect(find.descendant(of: row, matching: find.text('Black Summoner')), findsOneWidget);
+    // up shows. Orchard Keeper (62 days) and the never-dated series drop out.
+    expect(find.descendant(of: row, matching: find.text("Milo's Curious Voyage")), findsOneWidget);
+    expect(find.descendant(of: row, matching: find.text('Copper Warden')), findsOneWidget);
     expect(find.descendant(of: row, matching: find.textContaining('S1E6')), findsOneWidget);
-    expect(find.descendant(of: row, matching: find.text('From Old Country Bumpkin to Master Swordsman')),
+    expect(find.descendant(of: row, matching: find.text('The Quiet Orchard Keeper')),
         findsNothing);
-    final jojo = tester.getTopLeft(find.byKey(const ValueKey('card-0df6f8e7fdae3fb1b69607e59153703e')));
-    final bs = tester.getTopLeft(find.byKey(const ValueKey('card-1c67aa9143ebcdcea7953aada4db543a')));
-    expect(jojo.dx, lessThan(bs.dx));
-    expect(controller.continueKeys, {'757534d5ccc39274aa0cc7f1d9a38d7d', 'c7974a65e1b7bd43f26858744a7d3c11'});
+    final milo = tester.getTopLeft(find.byKey(const ValueKey('card-3fd19bfe4ae0d540d0fc4f4f071d2cc4')));
+    final bs = tester.getTopLeft(find.byKey(const ValueKey('card-a43e1cfa5013da4ea9323c2ebdc22c3c')));
+    expect(milo.dx, lessThan(bs.dx));
+    expect(controller.continueKeys, {'645ba801414bcb3e23e02cd6c3d73bfd', '66d14ad0b34a4a6d92109a8f2f065259'});
     // Latest asks for single items and groups them itself; grouped series
     // from the server say how many are new.
     final latest = fake.requests.lastWhere((r) => r.uri.path == '/Items/Latest').uri.queryParameters;
@@ -116,10 +116,10 @@ void main() {
   testWidgets('cards: click selects, double-click puts up; Show all opens newest first',
       (tester) async {
     final (picks, _, fake, controller) = await pumpBrowser(tester, const Size(1600, 1200));
-    final card = find.byKey(const ValueKey('card-1c67aa9143ebcdcea7953aada4db543a'));
+    final card = find.byKey(const ValueKey('card-a43e1cfa5013da4ea9323c2ebdc22c3c'));
     await tester.tap(card);
     await tester.pump();
-    expect(picks.selected.single.itemId, '1c67aa9143ebcdcea7953aada4db543a');
+    expect(picks.selected.single.itemId, 'a43e1cfa5013da4ea9323c2ebdc22c3c');
     expect(picks.putUp, isEmpty);
     // Selected: outline and check.
     expect(find.descendant(of: card, matching: find.byIcon(Icons.check)), findsOneWidget);
@@ -127,9 +127,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 60));
     await tester.tap(card);
     await tester.pump();
-    expect(picks.putUp.single.itemId, '1c67aa9143ebcdcea7953aada4db543a');
+    expect(picks.putUp.single.itemId, 'a43e1cfa5013da4ea9323c2ebdc22c3c');
 
-    await tester.tap(find.byKey(const ValueKey('show-all-df39dd8262146d0ff7d3c04498a4a6a5')));
+    await tester.tap(find.byKey(const ValueKey('show-all-8047582a00c2f6d3fedf63f4475bc929')));
     await settle(tester);
     final q = fake.requests.lastWhere((r) => r.uri.path == '/Items').uri.queryParameters;
     expect(q['sortBy'], startsWith('DateCreated'));
@@ -165,7 +165,7 @@ void main() {
     expect(find.text('Fresh Show'), findsWidgets);
     expect(find.text('S1E1'), findsWidgets);
     expect(find.text('Old Show'), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('latest-menu-df39dd8262146d0ff7d3c04498a4a6a5')));
+    await tester.tap(find.byKey(const ValueKey('latest-menu-8047582a00c2f6d3fedf63f4475bc929')));
     await settle(tester, 4);
     await tester.tap(find.byKey(const ValueKey('hide-rereleases')));
     await settle(tester, 4);
@@ -177,32 +177,32 @@ void main() {
   testWidgets('series page: smart next button and episodes select, double-click puts up',
       (tester) async {
     final (picks, _, _, controller) = await pumpBrowser(tester, const Size(1600, 1000));
-    await openArifureta(tester);
-    expect(picks.selected.last.itemId, arifuretaId);
-    controller.open(SeriesRoute(const JellyfinItem(id: arifuretaId, name: 'Arifureta', type: 'Series')));
+    await openLanternfall(tester);
+    expect(picks.selected.last.itemId, lanternfallId);
+    controller.open(SeriesRoute(const JellyfinItem(id: lanternfallId, name: 'Lanternfall', type: 'Series')));
     await settle(tester);
     // Opens on the season holding next up (S2E4).
     final s2 = tester.widget<ChoiceChip>(find.byKey(const ValueKey('season-$season2Id')));
     expect(s2.selected, isTrue);
-    expect(find.text('1. Irregular'), findsOneWidget);
+    expect(find.text('1. Outlier'), findsOneWidget);
     expect(find.textContaining('Next up: S2E4'), findsOneWidget);
 
     await tester.tap(find.widgetWithText(ChoiceChip, 'Season 3'));
     await settle(tester);
-    expect(find.text('1. Irregular'), findsNothing);
-    expect(find.text('1. Haulias Assemble'), findsWidgets);
+    expect(find.text('1. Outlier'), findsNothing);
+    expect(find.text('1. The Foxes Gather'), findsWidgets);
 
-    await tester.tap(find.text('2. Roar of Revolution').first);
+    await tester.tap(find.text('2. Drums of the Uprising').first);
     await tester.pump();
     final sel = picks.selected.last;
     expect(sel.serverId, fixtureServerId);
-    expect(sel.item!.name, 'Roar of Revolution');
+    expect(sel.item!.name, 'Drums of the Uprising');
     expect(picks.putUp, isEmpty);
-    await tester.tap(find.text('2. Roar of Revolution').first);
+    await tester.tap(find.text('2. Drums of the Uprising').first);
     await tester.pump(const Duration(milliseconds: 60));
-    await tester.tap(find.text('2. Roar of Revolution').first);
+    await tester.tap(find.text('2. Drums of the Uprising').first);
     await tester.pump();
-    expect(picks.putUp.single.item!.name, 'Roar of Revolution');
+    expect(picks.putUp.single.item!.name, 'Drums of the Uprising');
 
     // The smart button selects next up.
     await tester.tap(find.byKey(const ValueKey('series-next')));
@@ -216,20 +216,20 @@ void main() {
     final search = find.byKey(const ValueKey('jf-search'));
 
     // Focus a card, then arrow right moves to the next card.
-    final first = find.byKey(const ValueKey('card-0df6f8e7fdae3fb1b69607e59153703e'));
+    final first = find.byKey(const ValueKey('card-3fd19bfe4ae0d540d0fc4f4f071d2cc4'));
     Focus.of(tester.element(find.descendant(of: first, matching: find.byType(Column)).first))
         .requestFocus();
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
     final ink = FocusManager.instance.primaryFocus!.context!.findAncestorWidgetOfExactType<InkWell>()!;
-    expect((ink.key as ValueKey<String>).value, 'card-1c67aa9143ebcdcea7953aada4db543a');
+    expect((ink.key as ValueKey<String>).value, 'card-a43e1cfa5013da4ea9323c2ebdc22c3c');
 
     // "/" jumps to search.
     await tester.sendKeyEvent(LogicalKeyboardKey.slash, character: '/');
     await tester.pump();
     expect(tester.widget<TextField>(search).focusNode!.hasFocus, isTrue);
-    await tester.enterText(search, 'arifureta');
+    await tester.enterText(search, 'lanternfall');
     await settle(tester, 10);
     expect(find.byKey(const ValueKey('search-results')), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -238,7 +238,7 @@ void main() {
     expect(find.text('Continue'), findsOneWidget);
 
     // Into a series and back with Esc.
-    controller.open(SeriesRoute(const JellyfinItem(id: arifuretaId, name: 'Arifureta', type: 'Series')));
+    controller.open(SeriesRoute(const JellyfinItem(id: lanternfallId, name: 'Lanternfall', type: 'Series')));
     await settle(tester);
     expect(find.byKey(const ValueKey('series-next')), findsOneWidget);
     expect(find.byKey(const ValueKey('crumb-0')), findsOneWidget);
@@ -254,7 +254,7 @@ void main() {
     await tester.tap(find.widgetWithText(ActionChip, 'Shows'));
     await settle(tester);
     expect(find.text('218 items'), findsOneWidget);
-    expect(find.text('Alma-chan Wants to Be a Family!'), findsWidgets);
+    expect(find.text('Mira-chan Wants a Garden!'), findsWidgets);
     await tester.tap(find.byKey(const ValueKey('filter-unplayed')));
     await settle(tester);
     final q = fake.requests.lastWhere((r) => r.uri.path == '/Items').uri.queryParameters;
@@ -275,7 +275,7 @@ void main() {
       (tester) async {
     await pumpBrowser(tester, const Size(820, 700));
     expect(tester.takeException(), isNull);
-    final narrowCard = tester.getSize(find.byKey(const ValueKey('card-0df6f8e7fdae3fb1b69607e59153703e')));
+    final narrowCard = tester.getSize(find.byKey(const ValueKey('card-3fd19bfe4ae0d540d0fc4f4f071d2cc4')));
 
     await pumpBrowser(tester, const Size(3440, 1440));
     expect(tester.takeException(), isNull);
@@ -287,7 +287,7 @@ void main() {
     // A Latest row is an HScroll: a mouse drag moves it sideways.
     await setSize(tester, const Size(640, 1400));
     await settle(tester);
-    final row = find.byKey(const ValueKey('latest-06da8841d9ae960a2ef504238428c61c'));
+    final row = find.byKey(const ValueKey('latest-6ab4b24bc3b23421e6c86fe940a6a86f'));
     final list = find.descendant(of: row, matching: find.byType(Scrollable)).first;
     final before = tester.state<ScrollableState>(list).position.pixels;
     await tester.drag(list, const Offset(-300, 0), kind: PointerDeviceKind.mouse);

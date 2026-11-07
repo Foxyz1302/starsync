@@ -1,8 +1,8 @@
 import 'package:sync_relay_core/core.dart';
 import 'package:test/test.dart';
 
-const id = '1c67aa9143ebcdcea7953aada4db543a';
-const sid = '2788af836cef7938ab4c41962afac55a';
+const id = 'a43e1cfa5013da4ea9323c2ebdc22c3c';
+const sid = 'a3c3646f1fc722c7a34e0e47e5450b05';
 
 void main() {
   group('normalizeServerUrl', () {
@@ -51,7 +51,7 @@ void main() {
         'https://jelly.example.com/Videos/$id/stream?static=true&mediaSourceId=$id',
         'https://jelly.example.com/Videos/$id/stream.mkv',
         'https://jelly.example.com/Items/$id/Images/Primary?tag=x',
-        'https://jelly.example.com/Users/d4d07ff620068c41c4782dec38e0b17e/Items/$id',
+        'https://jelly.example.com/Users/95b50af4ac466551c3887fd2f9f3e785/Items/$id',
         'https://jelly.example.com/Items/$id',
       ]) {
         expect(parseJellyfinLink(url),
@@ -60,7 +60,7 @@ void main() {
     });
 
     test('dashed and upper-case GUIDs are normalised', () {
-      expect(parseJellyfinLink('https://j.example.com/Items/B18826BE-9940-70A7-9F9B-52BC0F66F052')!.itemId, id);
+      expect(parseJellyfinLink('https://j.example.com/Items/A43E1CFA-5013-DA4E-A932-3C2EBDC22C3C')!.itemId, id);
     });
 
     test('not Jellyfin', () {

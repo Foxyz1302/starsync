@@ -7,11 +7,11 @@ import 'package:starsync/src/platform/desktop/media_kit_host.dart';
 import 'package:starsync/src/session/session_coordinator.dart';
 import 'package:starsync/src/sync/state_diff.dart';
 
+import 'test_clip.dart';
+
 // "Reload video" through the media pipeline: a fresh player from the
 // host, the old one retired, the same media opened again and resynced,
 // the ready flag untouched; leaving releases every player the host made.
-
-const _mediaPath = '/home/foxyz/Videos/chiyo.mp4';
 
 Future<void> _poll(
   FutureOr<bool> Function() cond,
@@ -32,7 +32,7 @@ void main() {
     'leave releases every player',
     timeout: const Timeout(Duration(minutes: 2)),
     () async {
-      final server = SyncServer(const AppConfig(port: 0, secret: 'reload', name: 'reload', mediaPath: _mediaPath));
+      final server = SyncServer(AppConfig(port: 0, secret: 'reload', name: 'reload', mediaPath: await testClip()));
       await server.start();
       final host = MediaKitHost()..init();
       final c = SessionCoordinator(players: host);

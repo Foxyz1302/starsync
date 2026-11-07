@@ -25,16 +25,16 @@ import 'test_graph.dart';
 /// This file's composition root (see test_graph.dart).
 final _graph = testGraph();
 
-const episodeId = '1c67aa9143ebcdcea7953aada4db543a'; // Black Summoner S1E6
-const nextEpisodeId = 'baf73898ff81e215aa025c43d7344020'; // S1E7
-const seriesId = 'c7974a65e1b7bd43f26858744a7d3c11';
-const seasonId = 'ec0e23df54682dfd02a65fc4578c7e65';
-const playSessionId = '295aff86b56ea5abcb80ff2d784642b0';
+const episodeId = 'a43e1cfa5013da4ea9323c2ebdc22c3c'; // Copper Warden S1E6
+const nextEpisodeId = 'b725daf08252e66eabddd4af7f78eca1'; // S1E7
+const seriesId = '66d14ad0b34a4a6d92109a8f2f065259';
+const seasonId = '5f495475ada7f05fecbfec2d30e34233';
+const playSessionId = 'd0d0e6536c16d6c7cbab82b77e2b4caf';
 
 const episodeRef = JellyfinRef(
-    serverId: fixtureServerId, itemId: episodeId, title: 'Rice and Thieves and Heroes');
+    serverId: fixtureServerId, itemId: episodeId, title: 'Bread and Bandits and Knights');
 
-/// The fake plus playback: PlaybackInfo, the Black Summoner episodes and
+/// The fake plus playback: PlaybackInfo, the Copper Warden episodes and
 /// the three Sessions reports (recorded with their bodies).
 FakeJellyfin playbackFake() {
   final fake = FakeJellyfin();
@@ -140,13 +140,13 @@ void main() {
           serverId: fixtureServerId,
           baseUrl: 'https://example.invalid',
           itemId: episodeId,
-          title: 'Rice and Thieves and Heroes',
-          subtitle: 'Black Summoner · S1E6',
+          title: 'Bread and Bandits and Knights',
+          subtitle: 'Copper Warden · S1E6',
           runtime: Duration(minutes: 23));
       final media = putUpJellyfinMedia(accounts, pick);
       expect(media.url, isNull);
       expect(media.jellyfin!.itemId, episodeId);
-      expect(media.jellyfin!.subtitle, 'Black Summoner · S1E6');
+      expect(media.jellyfin!.subtitle, 'Copper Warden · S1E6');
       expect(media.jellyfin!.runtimeSecs, 23 * 60);
       expect(jsonEncode(SwapIntent(media: media).toJson()), isNot(contains('TEST_ACCESS_TOKEN')));
       expect(() => putUpJellyfinMedia(accounts, const JellyfinMedia(serverId: 'gone', baseUrl: 'x', itemId: 'i', title: 't')),
@@ -163,8 +163,8 @@ void main() {
       expect(media.url, isNull);
       expect(media.jellyfin!.serverId, fixtureServerId);
       expect(media.jellyfin!.itemId, episodeId);
-      expect(media.jellyfin!.title, 'Rice and Thieves and Heroes', reason: 'title via own account');
-      expect(media.name, 'Rice and Thieves and Heroes');
+      expect(media.jellyfin!.title, 'Bread and Bandits and Knights', reason: 'title via own account');
+      expect(media.name, 'Bread and Bandits and Knights');
       expect(jsonEncode(media.toJson()), isNot(contains('SOMEONES_TOKEN')));
       expect(fake.count('GET', '/System/Info/Public'), 1);
       // Never sent with the pasted token.
@@ -390,10 +390,10 @@ void main() {
       final around = await findAdjacentEpisodes(plan);
       expect(around.previous, isNull, reason: 'S1E6 is first in the fixture');
       expect(around.next!.item.id, nextEpisodeId);
-      expect(around.next!.label, 'S1E7 Battle with the Heroes');
+      expect(around.next!.label, 'S1E7 Duel with the Knights');
       final media = mediaForPick(around.next!.pick);
       expect(media.jellyfin!.itemId, nextEpisodeId);
-      expect(media.jellyfin!.subtitle, 'Black Summoner · S1E7');
+      expect(media.jellyfin!.subtitle, 'Copper Warden · S1E7');
     });
 
     test('member route: via server only for relay viewers of the current item', () {
@@ -475,7 +475,7 @@ void main() {
         const HomeRoute(),
         const LibraryRoute(
             JellyfinItem(id: 'lib1', name: 'Shows', type: 'CollectionFolder', collectionType: 'tvshows')),
-        SeriesRoute(const JellyfinItem(id: seriesId, name: 'Black Summoner', type: 'Series'),
+        SeriesRoute(const JellyfinItem(id: seriesId, name: 'Copper Warden', type: 'Series'),
             seasonId: seasonId),
       ];
       await accounts.saveBrowseLocation(fixtureServerId, encodeBrowseStack(stack));
@@ -491,7 +491,7 @@ void main() {
       final (accounts, _) = await linkedAccounts();
       await accounts.saveBrowseLocation(fixtureServerId, encodeBrowseStack([
         const HomeRoute(),
-        SeriesRoute(const JellyfinItem(id: arifuretaId, name: 'Arifureta', type: 'Series'),
+        SeriesRoute(const JellyfinItem(id: lanternfallId, name: 'Lanternfall', type: 'Series'),
             seasonId: season2Id),
       ]));
       await tester.pumpWidget(scoped(_graph, app(JellyfinBrowser(accounts: accounts, onSelect: (_) {}, onPutUp: (_) {}))));
@@ -508,10 +508,10 @@ void main() {
   group('session widgets', () {
     final next = EpisodeLink(
         const JellyfinItem(
-            id: nextEpisodeId, name: 'Battle with the Heroes', type: 'Episode',
+            id: nextEpisodeId, name: 'Duel with the Knights', type: 'Episode',
             parentIndexNumber: 1, indexNumber: 7),
         const JellyfinMedia(
-            serverId: fixtureServerId, baseUrl: 'b', itemId: nextEpisodeId, title: 'Battle with the Heroes'));
+            serverId: fixtureServerId, baseUrl: 'b', itemId: nextEpisodeId, title: 'Duel with the Knights'));
 
     testWidgets("end card: the server's countdown with Cancel, Play now; waiting for who puts it up",
         (tester) async {
@@ -520,7 +520,7 @@ void main() {
           id: 'q4',
           media: HelloMedia(name: 'ep7', size: 0, duration: 0, jellyfin: JellyfinRef(serverId: fixtureServerId, itemId: nextEpisodeId)),
           how: QueueHow.jellyfin,
-          title: 'Battle with the Heroes',
+          title: 'Duel with the Knights',
           sub: 'S1E7',
           by: 'm1',
           byName: 'Ann',
@@ -529,7 +529,7 @@ void main() {
       await tester.pumpWidget(scoped(_graph, app(UpNextCard(
           queue: queue, countdown: const UpNextCountdown(mediaId: 3, item: item, secondsLeft: 7)))));
       expect(find.text('Next in 7 s'), findsOneWidget);
-      expect(find.text('Battle with the Heroes'), findsOneWidget);
+      expect(find.text('Duel with the Knights'), findsOneWidget);
       expect(find.byKey(const ValueKey('up-next-cancel')), findsOneWidget);
       expect(find.byKey(const ValueKey('up-next-play-now')), findsOneWidget);
 
