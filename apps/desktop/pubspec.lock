@@ -846,14 +846,14 @@ packages:
       path: "../../packages/core"
       relative: true
     source: path
-    version: "1.4.0"
+    version: "2.0.1"
   sync_relay_server:
     dependency: "direct main"
     description:
       path: "../../packages/server"
       relative: true
     source: path
-    version: "1.4.0"
+    version: "2.0.1"
   synchronized:
     dependency: transitive
     description:
