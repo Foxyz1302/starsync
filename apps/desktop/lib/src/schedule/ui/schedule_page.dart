@@ -17,9 +17,9 @@ import 'schedule_actions.dart';
 import 'schedule_card.dart';
 
 // The Schedule tab: one column per day from last week's Monday to four
-// weeks out (AniList), each airing with what AnimeFlow has of it, and the
-// one thing to do about it (put it up, request it; right-click an
-// available one to queue it). Opens on the last schedule loaded for this
+// weeks out (AniList), each airing with what the linked Jellyfin has of it
+// (and AnimeFlow, when a server offered it), and the one thing to do about
+// it (put it up, request it; right-click an available one to queue it). Opens on the last schedule loaded for this
 // account (ScheduleRepository.kept, kept on disk too) while a fresh one
 // loads, then swaps it in where the board stands. Refreshes every minute
 // while visible; ETags keep that cheap. Episodes on Jellyfin show this
@@ -74,7 +74,7 @@ class SchedulePage extends StatefulWidget {
   static const refreshEvery = Duration(seconds: 60);
 
   /// "All airing" hides entries below this AniList popularity unless
-  /// "Niche too" is on (tracked ones always show).
+  /// "Niche too" is on (tracked or on Jellyfin ones always show).
   static const nicheBelow = 5000;
   static const sheetWidth = 360.0;
 
@@ -101,6 +101,9 @@ class _SchedulePageState extends State<SchedulePage> {
   bool _jumped = false;
 
   ScheduleFilter _filter = ScheduleFilter.jellyfin;
+
+  /// The user picked [_filter]; until then it follows the schedule.
+  bool _filterPicked = false;
   bool _compact = false;
   bool _niche = false;
   bool _sheet = false;
@@ -197,8 +200,13 @@ class _SchedulePageState extends State<SchedulePage> {
       _refreshing = refreshing;
       _keptAt = keptAt;
       _keptFailed = false;
-      // Without AnimeFlow nothing is "on Jellyfin": start on everything.
-      if (old == null && !snap.hasAnimeFlow) _filter = ScheduleFilter.all;
+      // Nothing followed (no AnimeFlow, no show on a linked Jellyfin):
+      // everything airing.
+      if (!_filterPicked) {
+        _filter = snap.hasAnimeFlow || snap.entries.any((e) => e.onJellyfin)
+            ? ScheduleFilter.jellyfin
+            : ScheduleFilter.all;
+      }
     });
     if (!_jumped && snap.entries.isNotEmpty) {
       _jumped = true;
@@ -265,7 +273,7 @@ class _SchedulePageState extends State<SchedulePage> {
 
   bool _shows(ScheduleEntry e) => switch (_filter) {
     ScheduleFilter.jellyfin => e.tracked || e.onJellyfin,
-    ScheduleFilter.all => _niche || e.tracked || e.airing.popularity >= SchedulePage.nicheBelow,
+    ScheduleFilter.all => _niche || e.tracked || e.onJellyfin || e.airing.popularity >= SchedulePage.nicheBelow,
   };
 
   static String _key(ScheduleEntry e) =>
@@ -478,7 +486,10 @@ class _SchedulePageState extends State<SchedulePage> {
               ButtonSegment(value: ScheduleFilter.all, icon: Icon(Icons.public), label: Text('All airing')),
             ],
             selected: {_filter},
-            onSelectionChanged: (s) => setState(() => _filter = s.first),
+            onSelectionChanged: (s) => setState(() {
+              _filter = s.first;
+              _filterPicked = true;
+            }),
           ),
           FilterChip(
             key: const ValueKey('schedule-compact'),
@@ -507,20 +518,24 @@ class _SchedulePageState extends State<SchedulePage> {
                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.refresh, size: 20),
           ),
-          Tooltip(
-            message: me == null ? (snap?.animeFlowError ?? 'AnimeFlow is not available') : '',
-            child: OutlinedButton.icon(
-              key: const ValueKey('schedule-requests'),
-              onPressed: me == null
-                  ? null
-                  : () => setState(() {
-                      _sheet = !_sheet;
-                      if (_sheet) _sheetBuilt = true;
-                    }),
-              icon: const Icon(Icons.inbox_outlined, size: 18),
-              label: Text(_owner ? 'Requests' : 'My requests'),
+          // AnimeFlow's, so only once a server offered one.
+          if (_flow?.configured ?? false)
+            Tooltip(
+              message: me == null
+                  ? (snap?.animeFlowError ?? 'Link the Jellyfin server AnimeFlow runs on to use requests')
+                  : '',
+              child: OutlinedButton.icon(
+                key: const ValueKey('schedule-requests'),
+                onPressed: me == null
+                    ? null
+                    : () => setState(() {
+                        _sheet = !_sheet;
+                        if (_sheet) _sheetBuilt = true;
+                      }),
+                icon: const Icon(Icons.inbox_outlined, size: 18),
+                label: Text(_owner ? 'Requests' : 'My requests'),
+              ),
             ),
-          ),
           if (_keptAt case final at?) _keptPill(at),
           if (stale != null)
             Pill(

@@ -29,6 +29,13 @@ class Airing {
   /// English title, else romaji.
   final String title;
   final String titleRomaji;
+  /// The Japanese title ('' when AniList has none).
+  final String titleNative;
+  /// Other names (translations, abbreviations), for matching only: not
+  /// kept by [toJson].
+  final List<String> synonyms;
+  /// The entry's MyAnimeList id, when AniList knows it.
+  final int? idMal;
   final int episode;
   /// UTC.
   final DateTime airingAt;
@@ -42,6 +49,9 @@ class Airing {
     required this.anilistId,
     required this.title,
     required this.titleRomaji,
+    this.titleNative = '',
+    this.synonyms = const [],
+    this.idMal,
     required this.episode,
     required this.airingAt,
     this.cover,
@@ -61,10 +71,18 @@ class Airing {
     final romaji = t['romaji'] is String ? t['romaji'] as String : '';
     final english = t['english'] is String ? t['english'] as String : '';
     final cov = m['coverImage'] is Map ? m['coverImage'] as Map : const {};
+    final syn = m['synonyms'];
     return Airing(
       anilistId: id,
       title: english.isNotEmpty ? english : (romaji.isNotEmpty ? romaji : '?'),
       titleRomaji: romaji,
+      titleNative: t['native'] is String ? t['native'] as String : '',
+      synonyms: [
+        if (syn is List)
+          for (final s in syn)
+            if (s is String && s.trim().isNotEmpty) s.trim(),
+      ],
+      idMal: m['idMal'] is int ? m['idMal'] as int : null,
       episode: ep,
       airingAt: DateTime.fromMillisecondsSinceEpoch(at * 1000, isUtc: true),
       cover: cov['large'] is String ? cov['large'] as String : null,
@@ -74,14 +92,23 @@ class Airing {
     );
   }
 
+  /// Every name it goes by (English, romaji, native, synonyms), for
+  /// matching.
+  List<String> get names => [
+        for (final t in {title, titleRomaji, titleNative, ...synonyms})
+          if (t.trim().isNotEmpty && t != '?') t,
+      ];
+
   /// This airing in AniList's row shape: [fromJson] reads it back (the
-  /// kept schedule, `schedule_store.dart`).
+  /// kept schedule, `schedule_store.dart`; without [synonyms], which only
+  /// matching needs).
   Map<String, Object?> toJson() => {
         'airingAt': airingAt.millisecondsSinceEpoch ~/ 1000,
         'episode': episode,
         'media': {
           'id': anilistId,
-          'title': {'romaji': titleRomaji, 'english': title},
+          'idMal': ?idMal,
+          'title': {'romaji': titleRomaji, 'english': title, if (titleNative.isNotEmpty) 'native': titleNative},
           'coverImage': {
             'large': ?cover,
             if (color case final c?) 'color': '#${(c.toARGB32() & 0xffffff).toRadixString(16).padLeft(6, '0')}',
@@ -368,7 +395,7 @@ class AniListClient implements AniListLookup {
   static const query = r'''
 query($from:Int,$to:Int,$page:Int){Page(page:$page,perPage:50){pageInfo{hasNextPage}
 airingSchedules(airingAt_greater:$from,airingAt_lesser:$to,sort:TIME){airingAt episode
-media{id title{romaji english} coverImage{large color} bannerImage isAdult popularity format}}}}''';
+media{id idMal title{romaji english native} synonyms coverImage{large color} bannerImage isAdult popularity format}}}}''';
 
   final _mem = <int, _Cached>{};
   final _inflight = <String, Future<AniListSchedule>>{};
@@ -572,7 +599,8 @@ query($id:Int){Media(id:$id,type:ANIME){id title{romaji english} coverImage{extr
 
   Future<File?> _file(int from) async {
     final dir = await _cacheDir();
-    return dir == null ? null : File('${dir.path}/anilist-schedule-$from.json');
+    // The number is the row format's: a new one never reads older rows.
+    return dir == null ? null : File('${dir.path}/anilist-schedule-2-$from.json');
   }
 
   Future<_Cached?> _readDisk(int from, int to) async {

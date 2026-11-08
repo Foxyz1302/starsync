@@ -11,7 +11,11 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ### Added
 
+- The Schedule finds the shows on your Jellyfin by itself, no AnimeFlow needed: their episodes say "on Jellyfin" (with your watched marks and Put it up) or "not on Jellyfin yet", and On Jellyfin lists them
+
 ### Changed
+
+- The Schedule only mentions AnimeFlow to people who use it: no AnimeFlow notes or Requests button otherwise
 
 ### Fixed
 

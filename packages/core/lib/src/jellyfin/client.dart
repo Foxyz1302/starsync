@@ -391,6 +391,19 @@ class JellyfinClient {
         totalRecordCount: page.totalRecordCount, startIndex: q.startIndex);
   }
 
+  /// Every series in the user's libraries, light: names (with
+  /// `OriginalTitle`), year and provider ids, no images or user data. One
+  /// request (the Schedule's series index).
+  Future<List<JellyfinItem>> allSeries() async =>
+      JellyfinItemPage.fromJson(_map(await _json('GET', '/Items', query: {
+        'userId': _uid,
+        'includeItemTypes': JellyfinItemType.series,
+        'recursive': 'true',
+        'fields': 'ProviderIds,OriginalTitle',
+        'enableImages': 'false',
+        'enableUserData': 'false',
+      }))).items;
+
   /// Search movies, series and episodes by name across all libraries.
   Future<List<JellyfinItem>> search(
     String term, {

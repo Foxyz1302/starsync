@@ -903,7 +903,8 @@ behind a `JellyfinHttp` interface (tests inject a fake). Plans:
 
 - `JellyfinClient`: one server + one user. Auth (Quick Connect, password,
   `/Users/Me` check, logout), browsing (views, Resume, NextUp, Latest, paged
-  `/Items` with `DateCreated`, search, seasons, episodes, recently played),
+  `/Items` with `DateCreated`, search, seasons, episodes, recently played,
+  every series light for the Schedule's matching: `allSeries`),
   image URLs (tag + maxWidth, no token
   needed), PlaybackInfo, stream URLs, MediaSegments (a 404 = none),
   Playing / Progress / Stopped reports, played / unplayed / resume position.
@@ -2481,16 +2482,48 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   Files has no relay notice; a put-up before your server is up waits for
   it. Schedule (`schedule/`) is a week of day columns built
   from AniList's airing schedule (`anilist.dart`: pages cached 10 min in
-  memory and 1 h on disk, stale data shown on 429 or failure) matched
-  against AnimeFlow (`animeflow.dart`, its app API at the address the
-  server offers, below, with the token of a linked Jellyfin account:
-  those under the same registrable domain first (`tokensFor`,
-  `registrableDomain`: `anime.example.org` takes an account on
-  `media.example.org`), then every other linked one, a token AnimeFlow
-  refuses (401) being skipped for that address, so a Jellyfin on another
-  domain is found too; `currentToken` is the one in use; `/library` marks shows on Jellyfin it doesn't track, through every AniList
-  entry of a season (`anilist_map`: a season AniList splits has several)) into a status per
-  episode (`schedule_model.dart`). AnimeFlow's `missing` (aired,
+  memory and 1 h on disk, stale data shown on 429 or failure; each row
+  also carries the MyAnimeList id, the native title and the synonyms, for
+  matching) with what the linked Jellyfin libraries have of it, matched
+  by the app itself (below), and, when a server offered one, AnimeFlow's
+  statuses (`animeflow.dart`, its app API at the address the server
+  offers, below, with the token of a linked Jellyfin account: those under
+  the same registrable domain first (`tokensFor`, `registrableDomain`:
+  `anime.example.org` takes an account on `media.example.org`), then
+  every other linked one, a token AnimeFlow refuses (401) being skipped
+  for that address, so a Jellyfin on another domain is found too;
+  `currentToken` is the one in use; `/library` marks shows on Jellyfin it
+  doesn't track, through every AniList entry of a season (`anilist_map`:
+  a season AniList splits has several)), merged into one status per
+  episode (`schedule_model.dart`).
+  **The app's own match** (`jellyfin_match.dart`) needs no AnimeFlow.
+  Each linked account's series are walked in one light request
+  (`JellyfinClient.allSeries`: names with `OriginalTitle`, year, provider
+  ids; `SeriesIndexCache`, accounts in order: AnimeFlow's, the default,
+  the rest; kept 30 min, a failed walk keeps the last one and is retried
+  after 5). An AniList entry is matched (`JellyfinSeriesMatcher`,
+  memoised per entry while the index stays) by a provider id (`AniList`,
+  else `MyAnimeList` against AniList's `idMal`: AniList's external links
+  name no TVDB, TMDB, IMDb or AniDB, so nothing else bridges), else by
+  name with the library matcher's `titleSimilarity` and `seasonMarker`:
+  the same normalized name (English, romaji, native or a synonym), or the
+  series' name starting the entry's main ones ("The Apothecary Diaries"
+  in "The Apothecary Diaries Season 3") in both of its names (`Name`,
+  `OriginalTitle`) or before a season word (`Season 3`, `2nd Season`,
+  `Part 2`, `第3期`); a series that started after the airing is never it,
+  and one name alone is a weak match. Where the entry sits in the series
+  (`placeRun`): each aired airing whose Japan day exactly one episode
+  premiered on votes for that season and offset, the most votes win (a
+  split cour's second part lands on its season with the first part's
+  count as offset); with no such day (servers send 1970 or nothing for
+  unknown dates) it is a guess: the entry's season word, else the latest
+  season, offset 0, and a guessed episode that premiered more than two
+  Japan days away is not it. A weak match is kept only once an air day
+  anchors it, and not when it lands on episodes a surer match claims (a
+  show's omake shorts airing the same day) (`matchDirect`). One status
+  per episode: AnimeFlow's row wins, then its `/library` run, then the
+  app's match, which also names the Jellyfin series of a tracked show
+  AnimeFlow gives none for. AnimeFlow's `missing` (aired,
   monitored, no release grabbed yet; AnimeFlow grabs it by itself once
   one appears), and its `upcoming` past the AniList air time, read
   "waiting for release" (with "searched N min ago" from the episode's
@@ -2504,20 +2537,27 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   before 05:00 JST also matches the day before), never as local days. An
   aired episode of an untracked show on Jellyfin reads "on Jellyfin" only
   when Jellyfin has it: the season plus AniList episode + the run's
-  offset, checked against the series' episodes seen by the linked
-  account (`jellyfinScheduleEpisodes`, one request per series memoised
-  3 min; `confirmOnJellyfin` is the pure step); absent reads "aired · not
-  on Jellyfin yet", unknown (no linked account, lookup failed) "aired",
-  neither with Put it up. The same lookup covers AnimeFlow's available
+  offset (AnimeFlow's `anilist_map` run, else the app's placement),
+  checked against the series' episodes seen by the linked account of its
+  server (`jellyfinScheduleEpisodes`, one request per series memoised
+  3 min; `confirmOnJellyfin` is the pure step); absent (or not placed)
+  reads "aired · not on Jellyfin yet", unknown (no linked account, lookup
+  failed) "aired", neither with Put it up. A show on no Jellyfin reads
+  "not in AnimeFlow" only when AnimeFlow answered, else "aired" once
+  aired. The same lookup covers AnimeFlow's available
   episodes (AnimeFlow's season and episode, else the one premiered that
   day) and gives every episode found this user's `UserData`: a watched
   one has the library cards' green check on a slightly dimmed cover, a
   started one a thin bar to its resume point. A stop report
   (`JellyfinAccounts.watched`) drops the memo and reloads the page. Put
-  it up resolves the Jellyfin episode (`resolveJellyfinEpisode`:
-  AnimeFlow's numbering, else the season and offset, else the air day)
+  it up resolves the Jellyfin episode on the entry's server
+  (`resolveJellyfinEpisode`: AnimeFlow's numbering, else the season and
+  offset, else the air day)
   and goes through the shell's put-up; right-click queues it the same
-  way. Requests and the owner's inbox are in `requests_sheet.dart`.
+  way. "On Jellyfin" (followed: tracked by AnimeFlow or on a linked
+  Jellyfin) is where the tab starts unless nothing is followed, then "All
+  airing", until the user picks one; "Niche too" never hides a followed
+  show. Requests and the owner's inbox are in `requests_sheet.dart`.
   **AnimeFlow's address** comes from the servers, never from the code: a
   server's config may name one (`animeFlow`, `--animeflow`), its
   `welcome.animeFlow` hands it to every member, and the app keeps the
@@ -2527,14 +2567,20 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   server and your server offers it on to whoever joins you. The clients
   read it on every call (`AnimeFlowClient.fromAccounts(address:)`; a new
   address drops their ETags and /me). None yet: no AnimeFlow at all
-  (`notConfigured`, no request made), the Schedule is AniList's with no
-  AnimeFlow pill and Requests greyed, and Settings has no AnimeFlow card.
+  (`notConfigured`, no request made): the Schedule is AniList's and the
+  linked Jellyfin's, with no AnimeFlow pill and no Requests button, and
+  Settings has no AnimeFlow card. An address but no linked account
+  AnimeFlow takes (none linked, `missing_token`; or every one refused and
+  none on its domain, `AnimeFlowClient.hasHomeAccount`: the user's own
+  Jellyfin, not AnimeFlow's) is the same for the board: no pill (the
+  greyed Requests button's tooltip says to link AnimeFlow's Jellyfin).
   The app keeps one `ScheduleRepository` for its run (`AppGraph.schedule`,
-  `scheduleRepositoryFor`), so the clients' caches (AniList's pages,
-  AnimeFlow's ETags and /me) last across visits, and it keeps the last
-  whole schedule (AniList fresh, AnimeFlow answered or not linked) per
-  account: the AnimeFlow address and the Jellyfin account its token comes
-  from (`scheduleKeyFor`), in memory and on disk in the caches folder
+  `scheduleRepositoryFor`), so the clients' caches (AniList's pages, the
+  series index, AnimeFlow's ETags and /me) last across visits, and it
+  keeps the last whole schedule (AniList fresh, AnimeFlow answered or not
+  there to speak of) per account: the AnimeFlow address and the Jellyfin
+  account the Schedule leans on (AnimeFlow's, else the default;
+  `scheduleKeyFor`), in memory and on disk in the caches folder
   (`schedule_store.dart`: the merged entries the page drew, nothing of
   the clients' own caches; read and written on an isolate). The tab opens
   on it at once (`kept`) with an "Updating…" pill while a fresh one loads,

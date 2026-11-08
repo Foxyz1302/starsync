@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starsync/src/schedule/anilist.dart';
 import 'package:starsync/src/schedule/animeflow.dart';
+import 'package:starsync/src/schedule/jellyfin_match.dart';
 import 'package:starsync/src/schedule/schedule_model.dart';
 import 'package:starsync/src/schedule/schedule_store.dart';
 
@@ -252,6 +253,110 @@ void main() {
       expect(out.every((e) => e.seriesId == 9), isTrue);
     });
 
+    group("the app's own match (no AnimeFlow needed)", () {
+      DirectMatch on(String id, {RunPlacement? at, SeriesMatchKind kind = SeriesMatchKind.title}) => DirectMatch(
+          JellyfinSeriesMatch(JellyfinSeriesInfo(serverId: 'mine', id: id, name: 'S'), kind), at);
+
+      test('without AnimeFlow: on Jellyfin, not there yet, watched; the rest just aired', () {
+        final matched = matchSchedule(
+          [
+            airing(10, 5, DateTime(2026, 10, 1, 18)), // S2E17: there, watched
+            airing(10, 6, DateTime(2026, 10, 8, 11)), // S2E18: not yet
+            airing(10, 7, DateTime(2026, 10, 15, 11)), // upcoming
+            airing(20, 1, DateTime(2026, 10, 6, 18)), // series known, not placed
+            airing(30, 1, DateTime(2026, 10, 6, 18)), // on no Jellyfin
+            airing(30, 2, DateTime(2026, 10, 13, 18)),
+          ],
+          schedule: const [],
+          direct: {10: on('jfA', at: const RunPlacement(2, 12, anchored: true)), 20: on('jfB')},
+          animeFlow: false,
+          now: now,
+        );
+        expect(matched.map((e) => e.status), [
+          ScheduleStatus.inLibrary,
+          ScheduleStatus.inLibrary,
+          ScheduleStatus.upcoming,
+          ScheduleStatus.inLibrary,
+          ScheduleStatus.aired,
+          ScheduleStatus.upcoming,
+        ]);
+        expect(matched.map((e) => e.jellyfinEpisode), [17, 18, 19, null, null, null]);
+        expect(matched.first.season, 2);
+        expect(matched.first.jellyfinServerId, 'mine');
+        expect(matched.first.jellyfinKey, 'mine|jfA');
+        expect(matched.take(4).every((e) => e.onJellyfin && !e.tracked), isTrue);
+        final out = confirmOnJellyfin(matched, {
+          'mine|jfA': const [JellyfinEpisodeRef(2, 17, watch: EpisodeWatch(played: true))],
+          'mine|jfB': const [JellyfinEpisodeRef(1, 1)],
+        });
+        expect(out.map((e) => e.status), [
+          ScheduleStatus.inLibrary,
+          ScheduleStatus.notOnJellyfin,
+          ScheduleStatus.upcoming,
+          ScheduleStatus.notOnJellyfin, // not placed: not known to be there
+          ScheduleStatus.aired,
+          ScheduleStatus.upcoming,
+        ]);
+        expect(out.first.watch, const EpisodeWatch(played: true));
+      });
+
+      test('a guessed number premiered weeks away is another episode', () {
+        final matched = matchSchedule(
+          [airing(10, 3, DateTime.utc(2026, 10, 1, 14, 30)), airing(11, 3, DateTime.utc(2026, 10, 1, 14, 30))],
+          schedule: const [],
+          direct: {10: on('jfA', at: const RunPlacement(1, 0)), 11: on('jfB', at: const RunPlacement(1, 0))},
+          animeFlow: false,
+          now: now,
+        );
+        expect(matched.every((e) => e.numberGuessed), isTrue);
+        final out = confirmOnJellyfin(matched, {
+          // Last season's S1E3, months ago.
+          'mine|jfA': [JellyfinEpisodeRef(1, 3, premiere: DateTime.utc(2026, 4, 15))],
+          // A day off (listings disagree): it.
+          'mine|jfB': [JellyfinEpisodeRef(1, 3, premiere: DateTime.utc(2026, 10, 2, 15))],
+        });
+        expect(out.map((e) => e.status), [ScheduleStatus.notOnJellyfin, ScheduleStatus.inLibrary]);
+        // Unknown (1970): it.
+        final unknown = confirmOnJellyfin(matched, {
+          'mine|jfA': [JellyfinEpisodeRef(1, 3, premiere: DateTime.utc(1970))],
+        });
+        expect(unknown.first.status, ScheduleStatus.inLibrary);
+      });
+
+      test("with AnimeFlow: one status per episode, AnimeFlow's when it has one", () {
+        final out = matchSchedule(
+          [
+            airing(100, 3, DateTime(2026, 10, 1, 18)), // AnimeFlow row
+            airing(200, 1, DateTime(2026, 10, 1, 18)), // AnimeFlow's /library
+            airing(300, 1, DateTime(2026, 10, 1, 18)), // tracked, no Jellyfin id: ours fills it
+            airing(400, 1, DateTime(2026, 10, 1, 18)), // only ours
+            airing(500, 1, DateTime(2026, 10, 1, 18)), // nowhere: AnimeFlow does not track it
+          ],
+          schedule: [item(100, 3, EpisodeStatus.downloading, progress: 0.5)],
+          series: [const AnimeFlowSeries(seriesId: 3, title: 'T', anilistId: 300)],
+          library: const [AnimeFlowLibraryItem(jellyfinSeriesId: 'jfLib', name: 'L', anilistIds: {4: 200})],
+          direct: {
+            100: on('jfOurs100'),
+            200: on('jfOurs200', at: const RunPlacement(1, 0, anchored: true)),
+            300: on('jfOurs300'),
+            400: on('jfOurs400', at: const RunPlacement(1, 0, anchored: true)),
+          },
+          now: now,
+        );
+        expect(out, hasLength(5));
+        expect(out.map((e) => e.status), [
+          ScheduleStatus.downloading,
+          ScheduleStatus.inLibrary,
+          ScheduleStatus.missing,
+          ScheduleStatus.inLibrary,
+          ScheduleStatus.notTracked,
+        ]);
+        expect(out.map((e) => e.jellyfinSeriesId), ['jf7', 'jfLib', 'jfOurs300', 'jfOurs400', null]);
+        expect(out.map((e) => e.jellyfinServerId), [null, null, 'mine', 'mine', null]);
+        expect(out[1].season, 4, reason: "AnimeFlow's run, not ours");
+      });
+    });
+
     test('progress only while downloading, reason only when failed', () {
       final out = matchSchedule(
         [airing(600, 1, DateTime(2026, 10, 1, 20))],
@@ -302,6 +407,7 @@ void main() {
           });
         }
         if (flowStatus != 200) {
+          if (flowStatus == 401) return json(res, {'detail': 'Invalid token', 'code': 'bad_token'}, status: 401);
           return json(res, {'detail': 'Jellyfin is down', 'code': 'jellyfin_unreachable'}, status: flowStatus);
         }
         switch (req.uri.path) {
@@ -355,10 +461,85 @@ void main() {
       expect(s.animeFlowError, contains('Jellyfin is down'));
       expect(s.me, isNull);
       expect(s.entries.map((e) => (e.airing.anilistId, e.status, e.tracked)), [
-        (100, ScheduleStatus.notTracked, false),
-        (901, ScheduleStatus.notTracked, false),
+        (100, ScheduleStatus.aired, false),
+        (901, ScheduleStatus.aired, false),
         (900, ScheduleStatus.upcoming, false),
       ]);
+    });
+
+    test('no account AnimeFlow takes (none linked, or only another Jellyfin): nothing said, kept', () async {
+      flowStatus = 401;
+      for (final c in [
+        AnimeFlowClient(baseUrl: '${server.url}/flow', now: () => now),
+        AnimeFlowClient(
+          baseUrl: '${server.url}/flow',
+          tokenCandidates: () async => ['their-own-jellyfin'],
+          homeAccount: () async => false,
+          now: () => now,
+        ),
+      ]) {
+        final r = ScheduleRepository(
+          aniList: AniListClient(url: '${server.url}/anilist', cacheDir: () async => cache, now: () => now),
+          animeFlow: c,
+          store: ScheduleStore(dir: () async => Directory('${cache.path}/kept')),
+          key: () async => 'k',
+          now: () => now,
+        );
+        final s = await r.load();
+        expect(s.animeFlowError, isNull);
+        expect(s.animeFlowException, isNull);
+        expect(s.entries.first.status, ScheduleStatus.aired, reason: 'not "not in AnimeFlow"');
+        expect(await r.kept(), isNotNull);
+      }
+      // AnimeFlow's own Jellyfin refuses: worth saying.
+      final home = ScheduleRepository(
+        aniList: AniListClient(url: '${server.url}/anilist', cacheDir: () async => cache, now: () => now),
+        animeFlow: AnimeFlowClient(
+          baseUrl: '${server.url}/flow',
+          tokenCandidates: () async => ['expired'],
+          homeAccount: () async => true,
+          now: () => now,
+        ),
+        now: () => now,
+      );
+      expect((await home.load()).animeFlowError, 'AnimeFlow: sign in to Jellyfin again');
+    });
+
+    test('without AnimeFlow, the linked Jellyfin: one walk, matched, placed, confirmed', () async {
+      var walks = 0;
+      final asked = <String>[];
+      final index = SeriesIndexCache(
+        servers: () async => ['mine'],
+        walk: (id) async {
+          walks++;
+          return [
+            const JellyfinSeriesInfo(serverId: 'mine', id: 'jf100', name: 'R100'),
+            const JellyfinSeriesInfo(serverId: 'mine', id: 'jf900', name: 'Other', providerIds: {'AniList': '900'}),
+          ];
+        },
+        now: () => now,
+      );
+      final r = ScheduleRepository(
+        aniList: AniListClient(url: '${server.url}/anilist', cacheDir: () async => cache, now: () => now),
+        jellyfinSeries: index.series,
+        jellyfinEpisodes: (serverId, id) async {
+          asked.add('$serverId|$id');
+          return id == 'jf100' ? [JellyfinEpisodeRef(1, 3, premiere: at, watch: const EpisodeWatch(played: true))] : null;
+        },
+        now: () => now,
+      );
+      final s = await r.load();
+      expect(s.animeFlowError, isNull);
+      expect(s.entries.map((e) => (e.airing.anilistId, e.status, e.jellyfinSeriesId)), [
+        (100, ScheduleStatus.inLibrary, 'jf100'),
+        (901, ScheduleStatus.aired, null),
+        (900, ScheduleStatus.upcoming, 'jf900'),
+      ]);
+      expect(s.entries.first.watch, const EpisodeWatch(played: true));
+      expect(s.entries.first.jellyfinServerId, 'mine');
+      expect(asked.toSet(), {'mine|jf100'}, reason: 'nothing aired of 900 yet');
+      await r.load();
+      expect(walks, 1, reason: 'the index is kept');
     });
 
     test('no AnimeFlow (none, or no address yet): AniList only, nothing to say', () async {

@@ -511,17 +511,23 @@ member while the source keeps up is their own connection.
 
 ### Schedule
 
-The week's airing anime from AniList, one column per day. When the server
-you joined offers AnimeFlow (a companion service that downloads new
-episodes into Jellyfin), Starsync keeps it from then on (Settings →
-Library & accounts shows it) and marks each episode with what the
-Jellyfin has of it: **on Jellyfin** (Put it up, right-click to queue),
+The week's airing anime from AniList, one column per day. With a
+Jellyfin linked (Settings → Library & accounts), Starsync finds the shows
+that are on it by itself and marks their episodes: **on Jellyfin** (Put
+it up, right-click to queue) or **aired · not on Jellyfin yet**. Episodes
+you watched on Jellyfin carry a check; one you started shows how far you
+got. **On Jellyfin** lists just those shows (and the ones AnimeFlow
+follows, below; the tab starts there when there are any), **All airing**
+everything popular, and **Niche too** the rest.
+
+When the server you joined offers AnimeFlow (a companion service that
+downloads new episodes into Jellyfin), Starsync keeps it from then on
+(Settings → Library & accounts shows it) and adds what AnimeFlow knows:
 **downloading**, **waiting for release** (with when AnimeFlow last
-searched), **release rejected** (the reason on hover), **failed**,
-**not monitored** (**Request** asks for it), or the time left until it
-airs. **Request series** asks for a show AnimeFlow does not follow.
-Episodes you watched on Jellyfin carry a check; one you started shows how
-far you got.
+searched), **release rejected** (the reason on hover), **failed**, **not
+monitored** (**Request** asks for it), or the time left until it airs.
+**Request series** asks for a show AnimeFlow does not follow, and
+**Requests** lists yours.
 
 ## The player
 

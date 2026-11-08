@@ -197,6 +197,9 @@ class JellyfinItem {
   /// Libraries only: "movies", "tvshows", "homevideos", ...
   final String? collectionType;
   final String? overview;
+  /// The title in its own language (a Japanese show's Japanese title);
+  /// needs `OriginalTitle` in `fields` ([JellyfinClient.allSeries]).
+  final String? originalTitle;
   final int? productionYear;
   final DateTime? premiereDate;
   /// When the item was added to the library (needs `DateCreated` in
@@ -250,6 +253,7 @@ class JellyfinItem {
     this.isFolder = false,
     this.collectionType,
     this.overview,
+    this.originalTitle,
     this.productionYear,
     this.premiereDate,
     this.dateCreated,
@@ -290,6 +294,7 @@ class JellyfinItem {
         isFolder: _bool(j['IsFolder']),
         collectionType: _str(j['CollectionType']),
         overview: _str(j['Overview']),
+        originalTitle: _str(j['OriginalTitle']),
         productionYear: _int(j['ProductionYear']),
         premiereDate: _date(j['PremiereDate']),
         dateCreated: _date(j['DateCreated']),
@@ -339,6 +344,7 @@ class JellyfinItem {
         isFolder: isFolder,
         collectionType: collectionType,
         overview: overview,
+        originalTitle: originalTitle,
         productionYear: productionYear,
         premiereDate: premiereDate,
         dateCreated: dateCreated,

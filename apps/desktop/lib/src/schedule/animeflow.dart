@@ -486,6 +486,7 @@ class AnimeFlowClient {
     this._token,
     this._tokenProvider,
     this._tokenCandidates,
+    this._homeAccount,
     HttpClient? http,
     Future<void> Function(Duration)? delay,
     DateTime Function()? now,
@@ -517,6 +518,10 @@ class AnimeFlowClient {
         await accounts.ensureLoaded(validate: false);
         return tokensFor(accounts.accounts, client.baseUrl);
       },
+      homeAccount: () async {
+        await accounts.ensureLoaded(validate: false);
+        return tokenFor(accounts.accounts, client.baseUrl) != null;
+      },
     );
   }
 
@@ -546,6 +551,9 @@ class AnimeFlowClient {
   /// (jelly.example.net next to anime.example.org) is still found.
   final Future<List<String>> Function()? _tokenCandidates;
   final _refused = <String>{};
+
+  /// A linked account is on AnimeFlow's domain ([hasHomeAccount]).
+  final Future<bool> Function()? _homeAccount;
   final HttpClient _http;
   final bool _ownsHttp;
   final Future<void> Function(Duration) _delay;
@@ -573,6 +581,11 @@ class AnimeFlowClient {
   /// [registrableDomain]).
   static String? tokenFor(Iterable<JellyfinAccount> accounts, String animeFlowBase) =>
       _sameDomain(accounts, animeFlowBase).firstOrNull;
+
+  /// A linked Jellyfin account is under AnimeFlow's registrable domain
+  /// ([tokenFor]): AnimeFlow's own Jellyfin is linked, so a refused token
+  /// is worth saying. Without accounts to look at (a fixed token), true.
+  Future<bool> hasHomeAccount() async => await _homeAccount?.call() ?? true;
 
   /// Every linked account's token: those under [animeFlowBase]'s
   /// registrable domain first ([tokenFor]), then the rest, in order.

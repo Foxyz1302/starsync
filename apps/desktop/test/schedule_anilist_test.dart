@@ -15,7 +15,9 @@ Map<String, Object?> airing(int id, int ep, int at,
       'episode': ep,
       'media': {
         'id': id,
-        'title': {'romaji': 'Romaji $id', 'english': english},
+        'idMal': id + 1000,
+        'title': {'romaji': 'Romaji $id', 'english': english, 'native': 'ネイティブ$id'},
+        'synonyms': ['Syn $id', ' ', 7],
         'coverImage': {'large': 'https://img/$id.jpg', 'color': color},
         'bannerImage': null,
         'isAdult': adult,
@@ -84,6 +86,9 @@ void main() {
     expect(a.cover, 'https://img/1.jpg');
     expect(a.color?.toARGB32(), 0xffe4a15d);
     expect(a.popularity, 10);
+    expect((a.titleNative, a.idMal), ('ネイティブ1', 1001));
+    expect(a.synonyms, ['Syn 1']);
+    expect(a.names, ['Show', 'Romaji 1', 'ネイティブ1', 'Syn 1']);
     expect(s.airings.last.title, 'Romaji 4'); // no English title
     expect(s.isStale, isFalse);
     c.close();

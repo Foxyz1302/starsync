@@ -32,7 +32,8 @@ bool keptScheduleIsOld(DateTime savedAt, DateTime now) {
 }
 
 /// Which schedule is whose: the AnimeFlow address and the Jellyfin
-/// account its token comes from (none: AniList alone).
+/// account the Schedule leans on (AnimeFlow's, else the default one;
+/// none: AniList alone).
 String scheduleKeyFor(String animeFlowBase, {String? serverId, String? userId}) =>
     '$animeFlowBase|${serverId ?? '-'}|${userId ?? '-'}';
 
@@ -144,6 +145,7 @@ Map<String, Object?> _entryToJson(ScheduleEntry e) => {
       'season': ?e.season,
       'jellyfinEpisode': ?e.jellyfinEpisode,
       'jellyfinSeriesId': ?e.jellyfinSeriesId,
+      'jellyfinServerId': ?e.jellyfinServerId,
       if (e.watch case final w?) 'watch': {'played': w.played, 'progress': w.progress},
     };
 
@@ -166,6 +168,7 @@ ScheduleEntry? _entryFromJson(Object? j) {
     season: integer(j['season']),
     jellyfinEpisode: integer(j['jellyfinEpisode']),
     jellyfinSeriesId: j['jellyfinSeriesId'] is String ? j['jellyfinSeriesId'] as String : null,
+    jellyfinServerId: j['jellyfinServerId'] is String ? j['jellyfinServerId'] as String : null,
     watch: w is Map
         ? EpisodeWatch(played: w['played'] == true, progress: (w['progress'] as num?)?.toDouble() ?? 0)
         : null,

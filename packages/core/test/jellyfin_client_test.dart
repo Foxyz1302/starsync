@@ -244,6 +244,31 @@ void main() {
       expect(eps.every((e) => !e.userData.played && e.userData.playbackPositionTicks == 0), isTrue);
     });
 
+    test('allSeries: one light request, names with the original title, provider ids', () async {
+      http.on('GET', '/Items',
+          body: jsonEncode({
+            'Items': [
+              {
+                'Id': 's1',
+                'Name': 'The Apothecary Diaries',
+                'OriginalTitle': '薬屋のひとりごと',
+                'Type': 'Series',
+                'ProductionYear': 2023,
+                'ProviderIds': {'Tvdb': '431162', 'Tmdb': '220542'},
+              },
+            ],
+            'TotalRecordCount': 1,
+          }));
+      final all = await client.allSeries();
+      final q = http.last.uri.queryParameters;
+      expect((q['includeItemTypes'], q['recursive'], q['enableImages'], q['enableUserData']),
+          ('Series', 'true', 'false', 'false'));
+      expect(q['fields'], 'ProviderIds,OriginalTitle');
+      expect((all.single.name, all.single.originalTitle, all.single.productionYear),
+          ('The Apothecary Diaries', '薬屋のひとりごと', 2023));
+      expect(all.single.providerId('tvdb'), 431162);
+    });
+
     test('nextEpisode crosses seasons and skips other copies of the same episode', () async {
       http.on('GET', '/Shows/2e5dd5c4fd13e23e38fe15dec5b36122/Episodes', fixture: 'episodes');
       final eps = await client.episodes('2e5dd5c4fd13e23e38fe15dec5b36122');

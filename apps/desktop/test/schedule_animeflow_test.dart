@@ -342,6 +342,23 @@ void main() {
         ['tok-a'], reason: 'pol\'s case: Jellyfin on another domain than AnimeFlow');
   });
 
+  test('hasHomeAccount: a linked account on AnimeFlow\'s domain', () async {
+    JellyfinAccounts linked(String url) => JellyfinAccounts(
+          store: MemoryJellyfinStore({
+            'accounts': jsonEncode([
+              {'serverId': 's', 'serverName': 'S', 'urls': [url], 'userId': 'u', 'userName': 'n', 'token': 't'},
+            ]),
+          }),
+          deviceName: 'Test',
+        );
+    const base = 'https://anime.example.org/api/app/v1';
+    expect(await AnimeFlowClient.fromAccounts(linked('https://media.example.org'), baseUrl: base).hasHomeAccount(),
+        isTrue);
+    expect(await AnimeFlowClient.fromAccounts(linked('https://jelly.other.net'), baseUrl: base).hasHomeAccount(),
+        isFalse);
+    expect(await AnimeFlowClient(baseUrl: base, token: 'fixed').hasHomeAccount(), isTrue);
+  });
+
   test('tokenFor picks the account under the same registrable domain', () {
     const base = 'https://anime.example.org/api/app/v1';
     JellyfinAccount acc(String id, String url) =>

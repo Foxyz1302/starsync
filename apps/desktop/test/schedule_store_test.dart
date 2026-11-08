@@ -13,6 +13,9 @@ final _airing = Airing(
   anilistId: 7,
   title: 'Frieren',
   titleRomaji: 'Sousou no Frieren',
+  titleNative: '葬送のフリーレン',
+  synonyms: const ['Frieren at the Funeral'],
+  idMal: 52991,
   episode: 5,
   airingAt: DateTime.utc(2026, 11, 6, 15, 30),
   cover: 'https://img/c.jpg',
@@ -33,6 +36,7 @@ final _snapshot = ScheduleSnapshot(
       season: 2,
       jellyfinEpisode: 5,
       jellyfinSeriesId: 'jf3',
+      jellyfinServerId: 'mine',
       watch: const EpisodeWatch(progress: 0.4),
     ),
     ScheduleEntry(
@@ -61,9 +65,12 @@ void main() {
     expect((a.anilistId, a.title, a.titleRomaji, a.episode, a.airingAt, a.cover, a.banner, a.color, a.popularity),
         (7, 'Frieren', 'Sousou no Frieren', 5, _airing.airingAt, 'https://img/c.jpg', 'https://img/b.jpg',
             const Color(0xff1a2b3c), 123456));
+    expect((a.titleNative, a.idMal), ('葬送のフリーレン', 52991));
+    expect(a.synonyms, isEmpty, reason: 'for matching only');
     final e = s.entries.first, m = s.entries.last;
     expect((e.status, e.tracked, e.seriesId, e.season, e.jellyfinEpisode, e.jellyfinSeriesId, e.watch),
         (ScheduleStatus.available, true, 3, 2, 5, 'jf3', const EpisodeWatch(progress: 0.4)));
+    expect((e.jellyfinServerId, m.jellyfinServerId), ('mine', null));
     expect((m.status, m.reason, m.lastSearchedAt, m.progress, m.tracked, m.watch),
         (ScheduleStatus.missing, 'release rejected', DateTime.utc(2026, 11, 7, 9), 0.25, false, null));
     // Another account's file, or another format: nothing.

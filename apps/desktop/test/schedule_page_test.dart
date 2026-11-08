@@ -54,6 +54,23 @@ class FakeJf implements JellyfinHttp {
     String? body,
   }) async {
     seen.add(uri);
+    if (uri.path.endsWith('/Items') && uri.queryParameters['includeItemTypes'] == 'Series') {
+      return JellyfinHttpResponse(
+        200,
+        jsonEncode({
+          'Items': [
+            {
+              'Id': 'jf7',
+              'Name': 'Avail Show',
+              'OriginalTitle': 'アベイル',
+              'Type': 'Series',
+              'ProviderIds': {'AniList': '111'},
+            },
+          ],
+          'TotalRecordCount': 1,
+        }),
+      );
+    }
     if (uri.path.endsWith('/Shows/jf7/Episodes')) {
       return JellyfinHttpResponse(
         200,
@@ -252,13 +269,15 @@ void main() {
     JellyfinAccounts? accounts,
     KeptSchedule? kept,
     Completer<void>? gate,
+    bool animeFlow = true,
   }) async {
     toasts.clear();
     putUp.clear();
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    final repo = FakeRepo(snap ?? snapshot, animeFlow: flow, keptSnap: kept, gate: gate);
+    final repo = FakeRepo(snap ?? snapshot,
+        animeFlow: animeFlow ? flow : AnimeFlowClient(address: () => ''), keptSnap: kept, gate: gate);
     await tester.pumpWidget(scoped(_graph, 
       MaterialApp(
         theme: ThemeData.dark(),
@@ -497,6 +516,64 @@ void main() {
     await done(tester);
   });
 
+  testWidgets('without AnimeFlow: on Jellyfin by its own match, put up from its server, no AnimeFlow words',
+      (tester) async {
+    final jf = FakeJf();
+    final accounts = JellyfinAccounts(
+      store: MemoryJellyfinStore({
+        'accounts': jsonEncode([
+          {'serverId': 'other', 'serverName': 'Friend', 'urls': ['http://friend.test'], 'userId': 'u2',
+            'userName': 'me', 'token': 'tok2'},
+          {'serverId': 'srv', 'serverName': 'Home', 'urls': ['http://jf.test'], 'userId': 'uid', 'userName': 'me',
+            'token': 'tok'},
+        ]),
+        'defaultServer': 'other',
+      }),
+      httpFactory: () => jf,
+      deviceName: 'Test',
+    );
+    final series = await tester.runAsync(() => jellyfinSeriesOf(accounts, 'srv'));
+    expect(series!.single.originalTitle, 'アベイル');
+    expect(series.single.serverId, 'srv');
+    await pumpPage(
+      tester,
+      animeFlow: false,
+      accounts: accounts,
+      snap: () => snapshot(
+        me: null,
+        list: [
+          ScheduleEntry(
+            airing: airing(111, 'Avail Show', 3, day(0, 9), popularity: 100),
+            status: ScheduleStatus.inLibrary,
+            season: 1,
+            jellyfinEpisode: 3,
+            jellyfinSeriesId: 'jf7',
+            jellyfinServerId: 'srv',
+            watch: const EpisodeWatch(progress: 0.25),
+          ),
+          ScheduleEntry(airing: airing(444, 'Popular Elsewhere', 1, day(0, 8)), status: ScheduleStatus.aired),
+        ],
+      ),
+    );
+    // Followed: the shows on Jellyfin.
+    expect(card(111, 3), findsOneWidget);
+    expect(card(444, 1), findsNothing);
+    expect(find.text('on Jellyfin'), findsOneWidget);
+    expect(find.byKey(const ValueKey('schedule-requests')), findsNothing);
+    expect(find.byKey(const ValueKey('schedule-animeflow')), findsNothing);
+    await tester.tap(find.text('All airing'));
+    await tester.pump();
+    expect(card(444, 1), findsOneWidget);
+    expect(card(111, 3), findsOneWidget, reason: 'on Jellyfin: never niche');
+    expect(find.text('aired'), findsOneWidget);
+    expect(find.textContaining('AnimeFlow'), findsNothing);
+    await tester.tap(find.text('Put it up'));
+    await io(tester);
+    expect(putUp.single.itemId, 'ep3');
+    expect(putUp.single.serverId, 'srv', reason: "the series' own server, not the default");
+    await done(tester);
+  });
+
   testWidgets('nobody else in the server (D9): the button says Play and works', (tester) async {
     await pumpPage(tester, alone: true);
     expect(find.text('Put it up'), findsNothing);
@@ -577,11 +654,11 @@ void main() {
       tester,
       snap: () => snapshot(
         me: null,
-        animeFlowError: 'Link the Jellyfin server to see AnimeFlow statuses',
+        animeFlowError: 'AnimeFlow: sign in to Jellyfin again',
         list: [for (final e in entries()) untrackedEntry(e.airing, now)],
       ),
     );
-    expect(find.text('Link the Jellyfin server to see AnimeFlow statuses'), findsOneWidget);
+    expect(find.text('AnimeFlow: sign in to Jellyfin again'), findsOneWidget);
     expect(card(444, 1), findsOneWidget); // switched to All airing
     expect(find.text('Request series'), findsNothing);
     final b = tester.widget<ButtonStyleButton>(find.byKey(const ValueKey('schedule-requests')));

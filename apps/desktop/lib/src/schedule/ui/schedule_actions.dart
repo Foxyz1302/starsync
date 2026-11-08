@@ -5,6 +5,7 @@ import '../../jellyfin/format.dart' show pickFor, progressOf;
 import '../../screens/home/picked_media.dart';
 import '../anilist.dart';
 import '../animeflow.dart';
+import '../jellyfin_match.dart';
 import '../schedule_model.dart';
 import '../schedule_store.dart';
 
@@ -108,43 +109,79 @@ JellyfinAccount? jellyfinAccountFor(JellyfinAccounts accounts, AnimeFlowClient? 
   return accounts.defaultAccount;
 }
 
-/// The Schedule's data for [accounts]: AniList, AnimeFlow at [address]
-/// (read on every load: the last one a server offered) with the token
-/// of the linked account on its domain, that account's Jellyfin episodes,
-/// and the last schedule kept per account and AnimeFlow address ([store]:
-/// on disk too). The app keeps one for its whole run (`AppGraph.schedule`),
-/// so the clients' own caches (AniList's pages, AnimeFlow's ETags and
-/// /me) last across visits of the tab.
+/// The Schedule's data for [accounts]: AniList, every linked library's
+/// series (walked once per account, kept half an hour: [SeriesIndexCache])
+/// and their episodes, AnimeFlow at [address] (read on every load: the
+/// last one a server offered) with the token of the linked account on its
+/// domain, and the last schedule kept per account and AnimeFlow address
+/// ([store]: on disk too). The app keeps one for its whole run
+/// (`AppGraph.schedule`), so the clients' own caches (AniList's pages,
+/// the series index, AnimeFlow's ETags and /me) last across visits of the
+/// tab.
 ScheduleRepository scheduleRepositoryFor(JellyfinAccounts accounts,
     {required String Function() address, ScheduleStore? store}) {
   final flow = AnimeFlowClient.fromAccounts(accounts, address: address);
+  final index = SeriesIndexCache(
+    servers: () async {
+      await accounts.ensureLoaded(validate: false);
+      final first = jellyfinAccountFor(accounts, flow);
+      return [
+        ?first?.serverId,
+        for (final a in accounts.accounts)
+          if (a.serverId != first?.serverId) a.serverId,
+      ];
+    },
+    walk: (serverId) => jellyfinSeriesOf(accounts, serverId),
+  );
   return ScheduleRepository(
     aniList: AniListClient(),
     animeFlow: flow,
-    jellyfinEpisodes: (id) => jellyfinScheduleEpisodes(accounts, flow, id),
+    jellyfinEpisodes: (serverId, id) => jellyfinScheduleEpisodes(accounts, flow, id, serverId: serverId),
+    jellyfinSeries: index.series,
     store: store,
     key: () async {
       await accounts.ensureLoaded(validate: false);
-      final token = flow.currentToken ?? AnimeFlowClient.tokensFor(accounts.accounts, flow.baseUrl).firstOrNull;
-      final a = accounts.accounts.where((a) => token != null && a.token == token).firstOrNull;
+      final a = jellyfinAccountFor(accounts, flow);
       return scheduleKeyFor(flow.baseUrl, serverId: a?.serverId, userId: a?.userId);
     },
   );
 }
 
+/// Every series in linked server [serverId]'s libraries, light (one
+/// request, [JellyfinClient.allSeries]); empty when it is not linked. A
+/// refused token marks the account expired.
+Future<List<JellyfinSeriesInfo>> jellyfinSeriesOf(JellyfinAccounts accounts, String serverId) async {
+  await accounts.ensureLoaded(validate: false);
+  final client = accounts.clientFor(serverId);
+  if (client == null) return const [];
+  try {
+    return [for (final i in await client.allSeries()) JellyfinSeriesInfo.fromItem(serverId, i)];
+  } on JellyfinException catch (e) {
+    if (e.isUnauthorized) accounts.markExpired(serverId);
+    rethrow;
+  }
+}
+
+/// The linked account a Schedule entry's series is on: its
+/// [ScheduleEntry.jellyfinServerId] (the app's own match), else the one
+/// AnimeFlow's ids belong to ([jellyfinAccountFor]).
+JellyfinAccount? _accountOf(JellyfinAccounts accounts, AnimeFlowClient? flow, String? serverId) =>
+    serverId != null ? accounts.account(serverId) : jellyfinAccountFor(accounts, flow);
+
 /// The episodes Jellyfin has of [jellyfinSeriesId] (numbers, premiere
-/// date, this user's watched state), seen by the account AnimeFlow's ids
-/// belong to ([jellyfinAccountFor]): the user's own; null without a
-/// linked account. One request per series, memoised a few minutes
-/// ([JellyfinAccounts.cached]; a stop report drops it,
-/// [JellyfinAccounts.watched]).
+/// date, this user's watched state), seen by the account of [serverId],
+/// else the one AnimeFlow's ids belong to ([jellyfinAccountFor]): the
+/// user's own; null without a linked account. One request per series,
+/// memoised a few minutes ([JellyfinAccounts.cached]; a stop report drops
+/// it, [JellyfinAccounts.watched]).
 Future<List<JellyfinEpisodeRef>?> jellyfinScheduleEpisodes(
   JellyfinAccounts accounts,
   AnimeFlowClient? flow,
-  String jellyfinSeriesId,
-) async {
+  String jellyfinSeriesId, {
+  String? serverId,
+}) async {
   await accounts.ensureLoaded(validate: false);
-  final account = jellyfinAccountFor(accounts, flow);
+  final account = _accountOf(accounts, flow, serverId);
   final client = account == null ? null : accounts.clientFor(account.serverId);
   if (account == null || client == null) return null;
   return accounts.cached(
@@ -169,7 +206,7 @@ Future<JellyfinMedia> resolveJellyfinEpisode(JellyfinAccounts accounts, AnimeFlo
   final seriesId = e.jellyfinSeriesId;
   if (seriesId == null) throw const ScheduleActionException('This series is not on Jellyfin yet');
   await accounts.ensureLoaded(validate: false);
-  final account = jellyfinAccountFor(accounts, flow);
+  final account = _accountOf(accounts, flow, e.jellyfinServerId);
   final client = account == null ? null : accounts.clientFor(account.serverId);
   if (account == null || client == null) {
     throw const ScheduleActionException('Link the Jellyfin server first (Settings)');
