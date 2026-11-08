@@ -212,6 +212,25 @@ core and app. Still open on the wire, frozen at the 1.3.0 release:
 
 ## Backlog
 
+Next (2.1.0 batch):
+- **A source that quits or restarts ends its relay** ("failed to open"
+  for whoever opens after; seen 2026-11-08 twice): the server ends a
+  relay at the source's `bye`, and the restarted app is a new member
+  that does not know it was the source. For a link, when the relay has
+  no source, every app opens the link itself instead of failing; the
+  member who put it up re-sources it when they come back. For a file or
+  a Jellyfin item only the source has, a plain message ("Pol's copy
+  stopped when he left; he can put it up again") instead of "failed to
+  open".
+- **A swap racing an open:** a viewer opening while the next swap lands
+  asked for the previous media's relay address (404 on `/r/…/26/1`
+  for media 27). The open should notice the media changed and use the
+  new one.
+- **Screenshots, frame by frame:** in the S overlay, ← / → step one frame
+  back or forward on the frozen picture (the kept hidden player seeks
+  exactly), with a small "−3 frames" label; Shift+← / → a few frames.
+  Picking a frame without pausing or stepping everyone. No slider.
+
 0. **After the move to the owner's media_kit fork** (the app is on it,
    DEVELOPMENT "Build"):
    - A Windows test run of a build: the crashes about once per 5–6 opens
