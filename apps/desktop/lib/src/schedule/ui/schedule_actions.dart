@@ -101,7 +101,7 @@ Future<({AnimeFlowSearchHit? match, List<AnimeFlowSearchHit> hits})> findOnAniDb
 /// AnimeFlow authenticates with, else the default.
 JellyfinAccount? jellyfinAccountFor(JellyfinAccounts accounts, AnimeFlowClient? flow) {
   if (flow != null) {
-    final token = AnimeFlowClient.tokenFor(accounts.accounts, flow.baseUrl);
+    final token = flow.currentToken ?? AnimeFlowClient.tokensFor(accounts.accounts, flow.baseUrl).firstOrNull;
     final a = accounts.accounts.where((a) => token != null && a.token == token).firstOrNull;
     if (a != null) return a;
   }
@@ -125,7 +125,7 @@ ScheduleRepository scheduleRepositoryFor(JellyfinAccounts accounts,
     store: store,
     key: () async {
       await accounts.ensureLoaded(validate: false);
-      final token = AnimeFlowClient.tokenFor(accounts.accounts, flow.baseUrl);
+      final token = flow.currentToken ?? AnimeFlowClient.tokensFor(accounts.accounts, flow.baseUrl).firstOrNull;
       final a = accounts.accounts.where((a) => token != null && a.token == token).firstOrNull;
       return scheduleKeyFor(flow.baseUrl, serverId: a?.serverId, userId: a?.userId);
     },

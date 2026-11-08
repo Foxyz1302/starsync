@@ -312,6 +312,36 @@ void main() {
         throwsA(isA<AnimeFlowException>().having((e) => e.code, 'code', AnimeFlowErrorCode.network)));
   });
 
+  test('a refused account token: the next linked account is tried, the working one kept', () async {
+    await serve({
+      'GET /me': (req, res) async => req.headers.value('x-emby-token') == 'good'
+          ? json(res, {'user_id': 'u1', 'name': 'Foxyz', 'scopes': ['view']})
+          : json(res, {'detail': 'Invalid token', 'code': 'invalid_token'}, status: 401),
+    });
+    final c = AnimeFlowClient(
+      baseUrl: '${server.url}/api/app/v1',
+      tokenCandidates: () async => ['other-jellyfin', 'good'],
+      delay: (d) async => delays.add(d),
+      now: () => now,
+    );
+    final me = await c.me();
+    expect(me.name, 'Foxyz');
+    expect(c.currentToken, 'good');
+    expect(server.seen.map((r) => r.headers.value('x-emby-token')), ['other-jellyfin', 'good']);
+    now = now.add(const Duration(seconds: 61));
+    await c.me();
+    expect(server.seen.last.headers.value('x-emby-token'), 'good', reason: 'the refused one is not tried again');
+  });
+
+  test('tokensFor: the same domain first, then every other linked account', () {
+    JellyfinAccount acc(String id, String url) =>
+        JellyfinAccount(serverId: id, serverName: id, urls: [url], userId: 'u', userName: 'n', token: 'tok-$id');
+    final accounts = [acc('a', 'https://jelly.example.net'), acc('b', 'https://media.example.org')];
+    expect(AnimeFlowClient.tokensFor(accounts, 'https://anime.example.org/api'), ['tok-b', 'tok-a']);
+    expect(AnimeFlowClient.tokensFor([acc('a', 'https://jelly.example.net')], 'https://anime.example.org/api'),
+        ['tok-a'], reason: 'pol\'s case: Jellyfin on another domain than AnimeFlow');
+  });
+
   test('tokenFor picks the account under the same registrable domain', () {
     const base = 'https://anime.example.org/api/app/v1';
     JellyfinAccount acc(String id, String url) =>

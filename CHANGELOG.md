@@ -15,6 +15,7 @@ cut into a release: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#changelog).
 
 ### Fixed
 
+- The Schedule's AnimeFlow statuses work again when Jellyfin and AnimeFlow are on different addresses: the app tries each linked Jellyfin login and keeps the one AnimeFlow accepts
 ## 2.0.0
 
 Starsync 2.0: BRB instead of the ready system, live streams together, screenshots, people cards, any colour, and Starsync is now open source.

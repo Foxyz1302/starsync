@@ -2483,9 +2483,12 @@ action's own icon (`AppMenuItem.icon`, the same as its button's).
   from AniList's airing schedule (`anilist.dart`: pages cached 10 min in
   memory and 1 h on disk, stale data shown on 429 or failure) matched
   against AnimeFlow (`animeflow.dart`, its app API at the address the
-  server offers, below, with the token of the Jellyfin account under the
-  same registrable domain, `tokenFor` and `registrableDomain`:
-  `anime.example.org` takes an account on `media.example.org`; `/library` marks shows on Jellyfin it doesn't track, through every AniList
+  server offers, below, with the token of a linked Jellyfin account:
+  those under the same registrable domain first (`tokensFor`,
+  `registrableDomain`: `anime.example.org` takes an account on
+  `media.example.org`), then every other linked one, a token AnimeFlow
+  refuses (401) being skipped for that address, so a Jellyfin on another
+  domain is found too; `currentToken` is the one in use; `/library` marks shows on Jellyfin it doesn't track, through every AniList
   entry of a season (`anilist_map`: a season AniList splits has several)) into a status per
   episode (`schedule_model.dart`). AnimeFlow's `missing` (aired,
   monitored, no release grabbed yet; AnimeFlow grabs it by itself once

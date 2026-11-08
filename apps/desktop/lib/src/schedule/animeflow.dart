@@ -485,6 +485,7 @@ class AnimeFlowClient {
     this._address,
     this._token,
     this._tokenProvider,
+    this._tokenCandidates,
     HttpClient? http,
     Future<void> Function(Duration)? delay,
     DateTime Function()? now,
@@ -512,9 +513,9 @@ class AnimeFlowClient {
       baseUrl: baseUrl,
       address: address,
       http: http,
-      tokenProvider: () async {
+      tokenCandidates: () async {
         await accounts.ensureLoaded(validate: false);
-        return tokenFor(accounts.accounts, client.baseUrl);
+        return tokensFor(accounts.accounts, client.baseUrl);
       },
     );
   }
@@ -538,6 +539,13 @@ class AnimeFlowClient {
   final String userAgent;
   final String? _token;
   final Future<String?> Function()? _tokenProvider;
+
+  /// The linked Jellyfin accounts' tokens, best guess first ([tokensFor]):
+  /// a token AnimeFlow refuses (401) is skipped for this address and the
+  /// next one is tried, so an account on another domain than AnimeFlow's
+  /// (jelly.example.net next to anime.example.org) is still found.
+  final Future<List<String>> Function()? _tokenCandidates;
+  final _refused = <String>{};
   final HttpClient _http;
   final bool _ownsHttp;
   final Future<void> Function(Duration) _delay;
@@ -552,6 +560,10 @@ class AnimeFlowClient {
 
   String? _lastToken;
   String? _lastBase;
+
+  /// The token calls go out with now (the linked account AnimeFlow last
+  /// accepted, or the best guess before any call); null before the first.
+  String? get currentToken => _token ?? _lastToken;
   final _etags = <String, _Etagged>{};
   ({DateTime at, AnimeFlowMe me})? _me;
 
@@ -559,9 +571,23 @@ class AnimeFlowClient {
   /// [animeFlowBase]'s registrable domain (anime.example.org ->
   /// example.org: jellyfin.example.org, example.org, ...;
   /// [registrableDomain]).
-  static String? tokenFor(Iterable<JellyfinAccount> accounts, String animeFlowBase) {
+  static String? tokenFor(Iterable<JellyfinAccount> accounts, String animeFlowBase) =>
+      _sameDomain(accounts, animeFlowBase).firstOrNull;
+
+  /// Every linked account's token: those under [animeFlowBase]'s
+  /// registrable domain first ([tokenFor]), then the rest, in order.
+  static List<String> tokensFor(Iterable<JellyfinAccount> accounts, String animeFlowBase) {
+    final same = _sameDomain(accounts, animeFlowBase).toList();
+    return [
+      ...same,
+      for (final a in accounts)
+        if (a.token.isNotEmpty && !same.contains(a.token)) a.token,
+    ];
+  }
+
+  static Iterable<String> _sameDomain(Iterable<JellyfinAccount> accounts, String animeFlowBase) sync* {
     final host = Uri.tryParse(animeFlowBase)?.host.toLowerCase() ?? '';
-    if (host.isEmpty) return null;
+    if (host.isEmpty) return;
     final domain = registrableDomain(host);
     bool matches(String url) {
       final h = Uri.tryParse(url)?.host.toLowerCase() ?? '';
@@ -569,9 +595,8 @@ class AnimeFlowClient {
     }
 
     for (final a in accounts) {
-      if (a.urls.any(matches)) return a.token;
+      if (a.token.isNotEmpty && a.urls.any(matches)) yield a.token;
     }
-    return null;
   }
 
   Future<String> _authToken() async {
@@ -584,8 +609,13 @@ class AnimeFlowClient {
       _lastBase = base;
       _etags.clear();
       _me = null;
+      _refused.clear();
     }
-    final t = _token ?? await _tokenProvider?.call();
+    var t = _token ?? await _tokenProvider?.call();
+    if (t == null && _token == null && _tokenCandidates != null) {
+      final all = await _tokenCandidates();
+      t = all.where((c) => !_refused.contains(c)).firstOrNull ?? all.firstOrNull;
+    }
     if (t == null || t.isEmpty) {
       throw const AnimeFlowException(
           401, AnimeFlowErrorCode.missingToken, 'No linked Jellyfin account for AnimeFlow');
@@ -626,6 +656,12 @@ class AnimeFlowClient {
         return j;
       }
       final err = _error(status, text);
+      if (status == 401 && _token == null && _tokenCandidates != null && !_refused.contains(token)) {
+        // This account's token is not AnimeFlow's: try the next linked one.
+        _refused.add(token);
+        final all = await _tokenCandidates();
+        if (all.any((c) => !_refused.contains(c))) return _call(method, path, query: query, body: body, etag: etag);
+      }
       if (err.isRateLimited && attempt < rateLimitRetries) {
         final wait = retryAfter != null ? Duration(seconds: retryAfter.clamp(1, 30)) : Duration(seconds: 1 << attempt);
         _log.info('AnimeFlow rate limited on $path, retrying in ${wait.inSeconds}s');
